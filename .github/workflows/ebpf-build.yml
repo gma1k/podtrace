@@ -1,0 +1,32 @@
+name: eBPF Build
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "bpf/**"
+      - "**/*.c"
+      - "Makefile"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "bpf/**"
+      - "**/*.c"
+      - "Makefile"
+
+jobs:
+  build-ebpf:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang llvm make libbpf-dev pkg-config
+
+      - name: Build eBPF programs
+        run: make -C bpf
