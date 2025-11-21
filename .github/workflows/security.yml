@@ -31,26 +31,22 @@ jobs:
         with:
           languages: ${{ matrix.language }}
 
-      - name: Install build tools
+      - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            clang \
-            llvm \
-            make \
-            libbpf-dev \
-            pkg-config
+          sudo apt-get install -y clang llvm libbpf-dev linux-headers-$(uname -r)
 
-      - name: Build Go code
+      - name: Build Go
         if: matrix.language == 'go'
         run: |
           go mod download
           go build ./...
 
-      - name: Build C/eBPF code
+      - name: Build eBPF C
         if: matrix.language == 'cpp'
         run: |
-          make -C bpf
+          echo "Compiling podtrace.bpf.c..."
+          clang -O2 -g -target bpf -c bpf/podtrace.bpf.c -o bpf/podtrace.bpf.o
 
-      - name: Perform CodeQL analysis
+      - name: Analyze
         uses: github/codeql-action/analyze@v3
