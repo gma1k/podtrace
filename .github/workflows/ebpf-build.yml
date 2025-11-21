@@ -25,14 +25,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang llvm libbpf-dev linux-headers-$(uname -r)
 
-      - name: Compile eBPF C programs
+      - name: Compile eBPF program
         run: |
-          echo "Compiling eBPF programs..."
-          for f in bpf/*.c; do
-            base=$(basename "$f" .c)
-            echo "clang -O2 -g -target bpf -c $f -o bpf/${base}.o"
-            clang -O2 -g -target bpf -c "$f" -o "bpf/${base}.o"
-          done
+          echo "Compiling podtrace.bpf.c..."
+          clang -O2 -g -target bpf -c bpf/podtrace.bpf.c -o bpf/podtrace.bpf.o
 
       - name: List output
         run: ls -l bpf/
