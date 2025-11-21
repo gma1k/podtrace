@@ -6,13 +6,11 @@ on:
     paths:
       - "bpf/**"
       - "**/*.c"
-      - "Makefile"
   pull_request:
     branches: ["main"]
     paths:
       - "bpf/**"
       - "**/*.c"
-      - "Makefile"
 
 jobs:
   build-ebpf:
@@ -22,11 +20,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Install dependencies
+      - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            clang llvm make libbpf-dev pkg-config
+          sudo apt-get install -y clang llvm libbpf-dev linux-headers-$(uname -r)
 
-      - name: Build eBPF programs
-        run: make -C bpf
+      - name: Compile eBPF C programs
+        run: |
+          echo "Compiling eBPF programs..."
+          for f in bpf/*.c; do
+            base=$(basename "$f" .c)
+            echo "clang -O2 -g -target bpf -c $f -o bpf/${base}.o"
+            clang -O2 -g -target bpf -c "$f" -o "bpf/${base}.o"
+          done
+
+      - name: List output
+        run: ls -l bpf/
