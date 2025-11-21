@@ -29,7 +29,7 @@ make deps
 # Build eBPF program and Go binary
 make build
 
-# Build and set capabilities (allows running without sudo)
+# Build and set capabilities
 make build-setup
 ```
 
