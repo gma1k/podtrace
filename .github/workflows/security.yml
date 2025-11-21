@@ -31,8 +31,26 @@ jobs:
         with:
           languages: ${{ matrix.language }}
 
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            llvm \
+            make \
+            libbpf-dev \
+            pkg-config
+
+      - name: Build Go code
+        if: matrix.language == 'go'
+        run: |
+          go mod download
+          go build ./...
+
+      - name: Build C/eBPF code
+        if: matrix.language == 'cpp'
+        run: |
+          make -C bpf
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v3
