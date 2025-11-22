@@ -64,4 +64,8 @@ jobs:
       - name: Check formatting (shfmt)
         run: |
           echo "Checking formatting with shfmt..."
-          shfmt -d .
+          shfmt -d . || {
+            echo "Formatting issues found. To fix, run: shfmt -w ."
+            echo "Or the workflow can auto-fix by running: shfmt -w ."
+            exit 1
+          }
