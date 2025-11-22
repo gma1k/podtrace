@@ -39,10 +39,7 @@ make build-setup
 ### Basic Usage
 
 ```bash
-# Trace a pod in real-time mode
-./bin/podtrace -n production my-pod
-
-# Generate a diagnostic report
+# Trace a pod in real-time and generate a diagnostic report
 ./bin/podtrace -n production my-pod --diagnose 10s
 ```
 
@@ -53,8 +50,8 @@ The diagnose mode generates a comprehensive report including:
 - **Summary Statistics**: Total events, events per second, collection period
 - **TCP Statistics**: RTT analysis, spikes detection, send/receive operations
 - **Connection Statistics**: Connection latency, failures, error breakdown, top targets
-- **File System Statistics**: Write and fsync operation latency, slow operations
 - **CPU Usage by Process**: CPU percentage per process
+- **File System Statistics**: Write and fsync operation latency, slow operations
 - **Process Activity**: Top active processes by event count
 - **Activity Timeline**: Event distribution over time
 - **Activity Bursts**: Detection of burst periods
