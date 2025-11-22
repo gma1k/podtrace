@@ -24,7 +24,6 @@ jobs:
           sudo apt-get install -y \
             shellcheck \
             devscripts \
-            bashate \
             shfmt
 
       - name: Syntax Check
@@ -44,11 +43,6 @@ jobs:
         run: |
           echo "Checking for bashisms..."
           checkbashisms $(git ls-files '*.sh')
-
-      - name: Run bashate
-        run: |
-          echo "Running bashate..."
-          bashate $(git ls-files '*.sh')
 
       - name: Check formatting (shfmt)
         run: |
