@@ -1,13 +1,13 @@
 module github.com/podtrace/podtrace
 
-go 1.23.0
+go 1.23
 
 require (
-	github.com/cilium/ebpf v0.11.0
-	github.com/spf13/cobra v1.8.0
-	golang.org/x/sys v0.31.0
-	k8s.io/apimachinery v0.29.0
-	k8s.io/client-go v0.29.0
+	github.com/cilium/ebpf v0.20.0
+	github.com/spf13/cobra v1.10.1
+	golang.org/x/sys v0.38.0
+	k8s.io/apimachinery v0.34.2
+	k8s.io/client-go v0.34.2
 )
 
 require (
