@@ -29,7 +29,7 @@ check_dependencies() {
         exit 1
     fi
 
-    if [ ! -f "${PROJECT_ROOT}/bin/podtrace" ]; then
+    if [[ ! -f "${PROJECT_ROOT}/bin/podtrace" ]]; then
         echo -e "${RED}Error: podtrace binary not found. Run 'make build' first.${NC}"
         exit 1
     fi
@@ -55,7 +55,12 @@ run_test() {
     echo "Running: sudo ${PROJECT_ROOT}/bin/podtrace -n ${NAMESPACE} ${pod_name} --diagnose ${duration}"
     echo ""
 
-    if sudo "${PROJECT_ROOT}/bin/podtrace" -n "${NAMESPACE}" "${pod_name}" --diagnose "${duration}" 2>&1 | head -30; then
+    local test_output
+    local test_exit_code
+    test_output=$(sudo "${PROJECT_ROOT}/bin/podtrace" -n "${NAMESPACE}" "${pod_name}" --diagnose "${duration}" 2>&1 | head -30)
+    test_exit_code=${PIPESTATUS[0]}
+    echo "${test_output}"
+    if [[ ${test_exit_code} -eq 0 ]]; then
         echo -e "${GREEN}✓ ${test_name} passed${NC}"
     else
         echo -e "${RED}✗ ${test_name} failed${NC}"

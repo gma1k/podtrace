@@ -7,12 +7,12 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 build_podtrace() {
     echo "Building podtrace..."
-    cd "$ROOT_DIR"
+    cd "${ROOT_DIR}"
 
     make clean
     make build
 
-    if [ ! -f "./bin/podtrace" ]; then
+    if [[ ! -f "./bin/podtrace" ]]; then
         echo "Error: Build failed - bin/podtrace not found"
         exit 1
     fi

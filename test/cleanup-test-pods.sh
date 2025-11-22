@@ -7,7 +7,7 @@ NAMESPACE="podtrace-test"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
+# YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
@@ -31,7 +31,7 @@ delete_resources() {
 wait_for_namespace_deletion() {
     echo ""
     echo "Waiting for namespace to be deleted..."
-    kubectl wait --for=delete namespace/${NAMESPACE} --timeout=60s 2>/dev/null || true
+    kubectl wait --for=delete namespace/"${NAMESPACE}" --timeout=60s 2>/dev/null || true
 }
 
 print_success() {

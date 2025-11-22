@@ -2,7 +2,7 @@
 
 set -e
 
-BPF_OBJ="$(make -pn | awk '/^BPF_OBJ/ {print $3}')"
+BPF_OBJ="$(make -pn | awk '/^BPF_OBJ/ {print $3}' || true)"
 
 print_header() {
     echo "Building podtrace..."
@@ -14,14 +14,14 @@ check_requirements() {
 }
 
 generate_vmlinux_if_missing() {
-    if [ -f "vmlinux.h" ]; then
+    if [[ -f "vmlinux.h" ]]; then
         return
     fi
 
     echo "Warning: vmlinux.h not found. Attempting to generate..."
     
     if command -v bpftool >/dev/null 2>&1; then
-        if [ -f "/sys/kernel/btf/vmlinux" ]; then
+        if [[ -f "/sys/kernel/btf/vmlinux" ]]; then
             echo "Generating vmlinux.h from BTF..."
             bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h
             echo "vmlinux.h generated"
@@ -40,7 +40,7 @@ generate_vmlinux_if_missing() {
 
 compile_ebpf() {
     echo "Compiling eBPF program..."
-    make "$(echo "$BPF_OBJ")" || {
+    make "${BPF_OBJ}" || {
         echo "Error: eBPF compilation failed. Make sure:"
         echo "1. You have clang installed"
         echo "2. vmlinux.h is available (see warnings above)"
