@@ -162,7 +162,9 @@ main() {
     print_header
     check_dependencies
     setup_test_environment
-    if ! wait_for_pods; then
+    wait_for_pods
+    wait_result=$?
+    if [[ ${wait_result} -ne 0 ]]; then
         exit 1
     fi
 
