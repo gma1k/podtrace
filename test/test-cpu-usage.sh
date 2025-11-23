@@ -29,7 +29,7 @@ check_dependencies() {
         exit 1
     fi
 
-    if [ ! -f "${PROJECT_ROOT}/bin/podtrace" ]; then
+    if [[ ! -f "${PROJECT_ROOT}/bin/podtrace" ]]; then
         echo -e "${RED}Error: podtrace binary not found. Run 'make build' first.${NC}"
         exit 1
     fi
@@ -45,8 +45,8 @@ wait_for_pods() {
     local max_attempts=30
     local attempt=0
     
-    while [ $attempt -lt $max_attempts ]; do
-        if kubectl get pods -n "${NAMESPACE}" -o jsonpath='{.items[*].status.phase}' | grep -q Running; then
+    while [[ "${attempt}" -lt "${max_attempts}" ]]; do
+        if kubectl get pods -n "${NAMESPACE}" -o jsonpath='{.items[*].status.phase}' | grep -q Running || true; then
             echo -e "${GREEN}Pods are ready${NC}"
             sleep 3  # Give pods a moment to start generating activity
             return 0
@@ -67,20 +67,20 @@ test_cpu_usage_display() {
     
     output=$(sudo "${PROJECT_ROOT}/bin/podtrace" -n "${NAMESPACE}" "${pod_name}" --diagnose "${duration}" 2>&1)
     
-    if echo "$output" | grep -q "CPU Usage per Process"; then
+    if echo "${output}" | grep -q "CPU Usage per Process"; then
         echo -e "${GREEN}✓ CPU Usage section found${NC}"
     else
         echo -e "${RED}✗ CPU Usage section NOT found${NC}"
         return 1
     fi
     
-    if echo "$output" | grep -qE "PID [0-9]+ \(.*\): [0-9]+\.[0-9]+% CPU"; then
+    if echo "${output}" | grep -qE "PID [0-9]+ \(.*\): [0-9]+\.[0-9]+% CPU"; then
         echo -e "${GREEN}✓ CPU usage entries found${NC}"
     else
         echo -e "${YELLOW}⚠ No CPU usage entries found (might be normal if no activity)${NC}"
     fi
     
-    if echo "$output" | grep -q "Total processes tracked:"; then
+    if echo "${output}" | grep -q "Total processes tracked:"; then
         echo -e "${GREEN}✓ Process count displayed${NC}"
     else
         echo -e "${YELLOW}⚠ Process count not displayed${NC}"
@@ -88,7 +88,7 @@ test_cpu_usage_display() {
     
     echo ""
     echo -e "${BLUE}CPU Usage section from output:${NC}"
-    echo "$output" | grep -A 15 "CPU Usage per Process" || echo "Section not found"
+    echo "${output}" | grep -A 15 "CPU Usage per Process" || echo "Section not found"
     echo ""
     
     return 0
@@ -100,9 +100,9 @@ test_multiple_processes() {
     output=$(sudo "${PROJECT_ROOT}/bin/podtrace" -n "${NAMESPACE}" "busybox-test" --diagnose "15s" 2>&1)
     
     # Count process entries
-    process_count=$(echo "$output" | grep -cE "PID [0-9]+ \(.*\): [0-9]+\.[0-9]+% CPU" || echo "0")
+    process_count=$(echo "${output}" | grep -cE "PID [0-9]+ \(.*\): [0-9]+\.[0-9]+% CPU" || echo "0")
     
-    if [ "$process_count" -gt "0" ]; then
+    if [[ "${process_count}" -gt "0" ]]; then
         echo -e "${GREEN}✓ Found ${process_count} process(es)${NC}"
     else
         echo -e "${YELLOW}⚠ No processes found (might be normal)${NC}"
@@ -117,23 +117,26 @@ test_cpu_percentage_validity() {
     output=$(sudo "${PROJECT_ROOT}/bin/podtrace" -n "${NAMESPACE}" "nginx-test" --diagnose "10s" 2>&1)
     
     # Extract CPU percentages
-    percentages=$(echo "$output" | grep -oE "[0-9]+\.[0-9]+% CPU" | grep -oE "[0-9]+\.[0-9]+" || echo "")
+    temp_percentages=$(echo "${output}" | grep -oE "[0-9]+\.[0-9]+% CPU" || true)
+    percentages=$(echo "${temp_percentages}" | grep -oE "[0-9]+\.[0-9]+" || echo "")
     
-    if [ -z "$percentages" ]; then
+    if [[ -z "${percentages}" ]]; then
         echo -e "${YELLOW}⚠ No CPU percentages found to validate${NC}"
         return 0
     fi
     
     invalid=0
-    for pct in $percentages; do
+    for pct in ${percentages}; do
         # Check if percentage is between 0 and 100
-        if (( $(echo "$pct < 0" | bc -l) )) || (( $(echo "$pct > 100" | bc -l) )); then
+        less_than_zero=$(echo "${pct} < 0" | bc -l || echo "0")
+        greater_than_hundred=$(echo "${pct} > 100" | bc -l || echo "0")
+        if (( less_than_zero )) || (( greater_than_hundred )); then
             echo -e "${RED}✗ Invalid CPU percentage: ${pct}%${NC}"
             invalid=$((invalid + 1))
         fi
     done
     
-    if [ $invalid -eq 0 ]; then
+    if [[ "${invalid}" -eq 0 ]]; then
         echo -e "${GREEN}✓ All CPU percentages are valid (0-100%)${NC}"
     else
         echo -e "${RED}✗ Found ${invalid} invalid CPU percentage(s)${NC}"
@@ -159,7 +162,9 @@ main() {
     print_header
     check_dependencies
     setup_test_environment
-    wait_for_pods || exit 1
+    if ! wait_for_pods; then
+        exit 1
+    fi
 
     echo -e "${YELLOW}[3/5] Running CPU usage tests...${NC}"
     echo ""
