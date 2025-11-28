@@ -13,10 +13,9 @@ import (
 
 // Diagnostician collects and analyzes events
 type Diagnostician struct {
-	events     []*events.Event
-	startTime  time.Time
-	endTime    time.Time
-	cgroupPath string
+	events    []*events.Event
+	startTime time.Time
+	endTime   time.Time
 }
 
 func NewDiagnostician() *Diagnostician {
@@ -122,19 +121,49 @@ func (d *Diagnostician) GenerateReport() string {
 
 	// File system statistics
 	writeEvents := d.filterEvents(events.EventWrite)
+	readEvents := d.filterEvents(events.EventRead)
 	fsyncEvents := d.filterEvents(events.EventFsync)
-	if len(writeEvents) > 0 || len(fsyncEvents) > 0 {
+	if len(writeEvents) > 0 || len(readEvents) > 0 || len(fsyncEvents) > 0 {
 		report += fmt.Sprintf("File System Statistics:\n")
 		report += fmt.Sprintf("  Write operations: %d (%.1f/sec)\n", len(writeEvents), float64(len(writeEvents))/duration.Seconds())
+		report += fmt.Sprintf("  Read operations: %d (%.1f/sec)\n", len(readEvents), float64(len(readEvents))/duration.Seconds())
 		report += fmt.Sprintf("  Fsync operations: %d (%.1f/sec)\n", len(fsyncEvents), float64(len(fsyncEvents))/duration.Seconds())
 
-		allFS := append(writeEvents, fsyncEvents...)
+		allFS := append(append(writeEvents, readEvents...), fsyncEvents...)
 		if len(allFS) > 0 {
 			avgLatency, maxLatency, slowOps, p50, p95, p99 := d.analyzeFS(allFS)
 			report += fmt.Sprintf("  Average latency: %.2fms\n", avgLatency)
 			report += fmt.Sprintf("  Max latency: %.2fms\n", maxLatency)
 			report += fmt.Sprintf("  Percentiles: P50=%.2fms, P95=%.2fms, P99=%.2fms\n", p50, p95, p99)
 			report += fmt.Sprintf("  Slow operations (>10ms): %d\n", slowOps)
+
+			// Top files by operation count
+			fileMap := make(map[string]int)
+			for _, e := range allFS {
+				if e.Target != "" && e.Target != "?" && e.Target != "unknown" && e.Target != "file" {
+					fileMap[e.Target]++
+				}
+			}
+			if len(fileMap) > 0 {
+				type fileCount struct {
+					file  string
+					count int
+				}
+				var fileCounts []fileCount
+				for file, count := range fileMap {
+					fileCounts = append(fileCounts, fileCount{file: file, count: count})
+				}
+				sort.Slice(fileCounts, func(i, j int) bool {
+					return fileCounts[i].count > fileCounts[j].count
+				})
+				report += fmt.Sprintf("  Top accessed files:\n")
+				for i, fc := range fileCounts {
+					if i >= 5 {
+						break
+					}
+					report += fmt.Sprintf("    - %s (%d operations)\n", fc.file, fc.count)
+				}
+			}
 		}
 		report += "\n"
 	}
@@ -161,7 +190,7 @@ func (d *Diagnostician) GenerateReport() string {
 	if len(issues) > 0 {
 		report += fmt.Sprintf("Potential Issues Detected:\n")
 		for _, issue := range issues {
-			report += fmt.Sprintf("  ⚠ %s\n", issue)
+			report += fmt.Sprintf("  %s\n", issue)
 		}
 		report += "\n"
 	}
@@ -275,7 +304,7 @@ func (d *Diagnostician) analyzeConnections(events []*events.Event) (avgLatency, 
 			errors++
 			errorBreakdown[e.Error]++
 		}
-		if e.Target != "" && e.Target != "?" && e.Target != "unknown" {
+		if e.Target != "" && e.Target != "?" && e.Target != "unknown" && e.Target != "file" {
 			targetMap[e.Target]++
 		}
 	}
@@ -390,27 +419,12 @@ func (d *Diagnostician) detectIssues() []string {
 		}
 	}
 
-	fsEvents := append(d.filterEvents(events.EventWrite), d.filterEvents(events.EventFsync)...)
-	if len(fsEvents) > 0 {
-		slowOps := 0
-		for _, e := range fsEvents {
-			if float64(e.LatencyNS)/1e6 > 10 {
-				slowOps++
-			}
-		}
-		slowRate := float64(slowOps) / float64(len(fsEvents)) * 100
-		if slowRate > 5 {
-			issues = append(issues, fmt.Sprintf("High slow filesystem operation rate: %.1f%% (%d/%d)", slowRate, slowOps, len(fsEvents)))
-		}
-	}
-
 	return issues
 }
 
 func (d *Diagnostician) generateApplicationTracing(duration time.Duration) string {
 	var report string
 
-	// Process Activity Analysis
 	pidActivity := d.analyzeProcessActivity()
 	if len(pidActivity) > 0 {
 		report += fmt.Sprintf("Process Activity:\n")
@@ -430,7 +444,6 @@ func (d *Diagnostician) generateApplicationTracing(duration time.Duration) strin
 		report += "\n"
 	}
 
-	// Timeline Analysis - activity distribution
 	timeline := d.analyzeTimeline(duration)
 	if len(timeline) > 0 {
 		report += fmt.Sprintf("Activity Timeline:\n")
@@ -442,7 +455,6 @@ func (d *Diagnostician) generateApplicationTracing(duration time.Duration) strin
 		report += "\n"
 	}
 
-	// Burst Detection
 	bursts := d.detectBursts(duration)
 	if len(bursts) > 0 {
 		report += fmt.Sprintf("Activity Bursts:\n")
@@ -457,7 +469,6 @@ func (d *Diagnostician) generateApplicationTracing(duration time.Duration) strin
 		report += "\n"
 	}
 
-	// Connection Pattern Analysis
 	connectEvents := d.filterEvents(events.EventConnect)
 	if len(connectEvents) > 0 {
 		pattern := d.analyzeConnectionPattern(connectEvents, duration)
@@ -473,7 +484,6 @@ func (d *Diagnostician) generateApplicationTracing(duration time.Duration) strin
 		report += "\n"
 	}
 
-	// Network I/O Pattern
 	tcpEvents := append(d.filterEvents(events.EventTCPSend), d.filterEvents(events.EventTCPRecv)...)
 	if len(tcpEvents) > 0 {
 		ioPattern := d.analyzeIOPattern(tcpEvents, duration)
@@ -769,7 +779,7 @@ func (d *Diagnostician) analyzeConnectionPattern(connectEvents []*events.Event, 
 
 	targetMap := make(map[string]bool)
 	for _, e := range connectEvents {
-		if e.Target != "" && e.Target != "?" && e.Target != "unknown" {
+		if e.Target != "" && e.Target != "?" && e.Target != "unknown" && e.Target != "file" {
 			targetMap[e.Target] = true
 		}
 	}

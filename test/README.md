@@ -44,3 +44,6 @@ Run all tests automatically:
 - `setup-test-pods.sh` - Script to create test environment
 - `cleanup-test-pods.sh` - Script to clean up test environment
 - `run-tests.sh` - Automated test runner
+- `quick-test.sh` - Quick test script
+- `test-debug.sh` - Debug test script
+- `test-cpu-usage.sh` - CPU usage test script
