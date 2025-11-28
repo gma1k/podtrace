@@ -16,10 +16,5 @@ func loadPodtrace() (*ebpf.CollectionSpec, error) {
 		}
 	}
 
-	if eventsMap, ok := spec.Maps["events"]; ok {
-		if eventsMap.Type == ebpf.RingBuf {
-		}
-	}
-
 	return spec, nil
 }

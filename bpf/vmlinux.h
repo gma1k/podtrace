@@ -55,36 +55,27 @@ struct pt_regs {
     unsigned long ss;
 };
 
-#define PT_REGS_PARM1(x) ((x)->di)
-#define PT_REGS_PARM2(x) ((x)->si)
-#define PT_REGS_PARM3(x) ((x)->dx)
-#define PT_REGS_PARM4(x) ((x)->cx)
-#define PT_REGS_PARM5(x) ((x)->r8)
-#define PT_REGS_PARM6(x) ((x)->r9)
-#define PT_REGS_RC(x) ((x)->ax)
-#define PT_REGS_SP(x) ((x)->sp)
-#define PT_REGS_IP(x) ((x)->ip)
-
-struct in_addr {
-    __be32 s_addr;
+struct path {
+    struct dentry *dentry;
+    struct vfsmount *mnt;
 };
 
-struct sockaddr_in {
-    __u16 sin_family;
-    __be16 sin_port;
-    struct in_addr sin_addr;
-};
-
-struct sockaddr {
-    __u16 sa_family;
-    char sa_data[14];
-};
-
-struct sock {};
 struct file {};
 struct dentry {};
 struct qstr {
     const char *name;
 };
 
+struct in_addr {
+    u32 s_addr;
+};
+
+struct sockaddr_in {
+    u16 sin_family;
+    u16 sin_port;
+    struct in_addr sin_addr;
+    char sin_zero[8];
+};
+
 #endif /* __VMLINUX_H__ */
+
