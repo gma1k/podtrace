@@ -134,6 +134,6 @@ A ready-to-use Grafana dashboard JSON is included in the repository at `podtrace
 
 - Paste the JSON or upload the .json file.
 
-Select or your Prometheus datasource as the datasource.
+- Select or your Prometheus datasource as the datasource.
 
-Import. The dashboard will display per-process and per-event-type metrics for RTT, latency, DNS, FS, and CPU block time.
+- Import. The dashboard will display per-process and per-event-type metrics for RTT, latency, DNS, FS, and CPU block time.
