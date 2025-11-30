@@ -25,3 +25,7 @@ Thumbs.db
 
 # Build artifacts
 *.a
+
+# Test coverage
+coverage.out
+*.coverprofile
