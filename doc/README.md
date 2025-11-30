@@ -1,6 +1,6 @@
 # Podtrace Documentation
 
-Welcome to the Podtrace documentation. This directory contains comprehensive guides for using, understanding, and developing with Podtrace.
+Welcome to the `podtrace` documentation. This directory contains comprehensive guides for using, understanding, and developing with `podtrace`.
 
 ## Documentation Index
 
