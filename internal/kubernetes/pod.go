@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -15,12 +16,10 @@ import (
 	"github.com/podtrace/podtrace/internal/validation"
 )
 
-// PodResolver resolves pod names to container IDs and cgroup paths
 type PodResolver struct {
 	clientset *kubernetes.Clientset
 }
 
-// NewPodResolver creates a new pod resolver
 func NewPodResolver() (*PodResolver, error) {
 	var config *rest.Config
 	var err error
@@ -66,8 +65,7 @@ func NewPodResolver() (*PodResolver, error) {
 	return &PodResolver{clientset: clientset}, nil
 }
 
-// ResolvePod resolves a pod name and namespace to container information
-func (r *PodResolver) ResolvePod(ctx context.Context, podName, namespace string) (*PodInfo, error) {
+func (r *PodResolver) ResolvePod(ctx context.Context, podName, namespace, containerName string) (*PodInfo, error) {
 	pod, err := r.clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod: %w", err)
@@ -77,7 +75,30 @@ func (r *PodResolver) ResolvePod(ctx context.Context, podName, namespace string)
 		return nil, fmt.Errorf("pod has no containers")
 	}
 
-	containerStatus := pod.Status.ContainerStatuses[0]
+	var containerStatus *corev1.ContainerStatus
+	var containerSpec *corev1.Container
+
+	if containerName != "" {
+		for i, status := range pod.Status.ContainerStatuses {
+			if status.Name == containerName {
+				containerStatus = &pod.Status.ContainerStatuses[i]
+				for j, spec := range pod.Spec.Containers {
+					if spec.Name == containerName {
+						containerSpec = &pod.Spec.Containers[j]
+						break
+					}
+				}
+				break
+			}
+		}
+		if containerStatus == nil {
+			return nil, fmt.Errorf("container %s not found in pod", containerName)
+		}
+	} else {
+		containerStatus = &pod.Status.ContainerStatuses[0]
+		containerSpec = &pod.Spec.Containers[0]
+	}
+
 	containerID := containerStatus.ContainerID
 
 	parts := strings.Split(containerID, "://")
@@ -100,7 +121,7 @@ func (r *PodResolver) ResolvePod(ctx context.Context, podName, namespace string)
 		Namespace:     namespace,
 		ContainerID:   shortID,
 		CgroupPath:    cgroupPath,
-		ContainerName: pod.Spec.Containers[0].Name,
+		ContainerName: containerSpec.Name,
 	}, nil
 }
 
@@ -112,7 +133,6 @@ type PodInfo struct {
 	ContainerName string
 }
 
-// findCgroupPath finds the cgroup path for a container ID
 func findCgroupPath(containerID string) (string, error) {
 	cgroupBase := "/sys/fs/cgroup"
 

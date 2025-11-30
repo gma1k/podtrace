@@ -2,47 +2,68 @@ package diagnose
 
 import (
 	"fmt"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
 
 func (d *Diagnostician) generateCPUUsageReport(duration time.Duration) string {
-
 	pidActivity := d.analyzeProcessActivity()
 	if len(pidActivity) == 0 {
-		return d.generateCPUUsageFromProc(duration)
-	}
-
-	totalActivity := 0
-	for _, info := range pidActivity {
-		totalActivity += info.count
-	}
-
-	if totalActivity == 0 {
 		return d.generateCPUUsageFromProc(duration)
 	}
 
 	var report string
 	report += fmt.Sprintf("CPU Usage by Process:\n")
 
-	totalDurationNS := uint64(duration.Nanoseconds())
+	durationSec := duration.Seconds()
 	totalCPUPercent := 0.0
 
-	sort.Slice(pidActivity, func(i, j int) bool {
-		return pidActivity[i].count > pidActivity[j].count
-	})
-
-	var podProcesses []pidInfo
-	var kernelProcesses []pidInfo
-
+	pidCPUTimes := make(map[uint32]cpuTimeInfo)
 	for _, info := range pidActivity {
-		if isKernelThread(info.pid, info.name) {
+		cpuTime := getProcessCPUTime(info.pid)
+		if cpuTime.totalNS > 0 {
+			cpuPercent := (float64(cpuTime.totalNS) / 1e9) / durationSec * 100.0
+			pidCPUTimes[info.pid] = cpuTimeInfo{
+				cpuPercent: cpuPercent,
+				cpuTimeSec: float64(cpuTime.totalNS) / 1e9,
+				name:       info.name,
+			}
+		}
+	}
+
+	type cpuUsageInfo struct {
+		pid        uint32
+		name       string
+		cpuPercent float64
+		cpuTimeSec float64
+	}
+
+	var podProcesses []cpuUsageInfo
+	var kernelProcesses []cpuUsageInfo
+
+	for pid, cpuInfo := range pidCPUTimes {
+		info := cpuUsageInfo{
+			pid:        pid,
+			name:       cpuInfo.name,
+			cpuPercent: cpuInfo.cpuPercent,
+			cpuTimeSec: cpuInfo.cpuTimeSec,
+		}
+		if isKernelThread(pid, cpuInfo.name) {
 			kernelProcesses = append(kernelProcesses, info)
 		} else {
 			podProcesses = append(podProcesses, info)
 		}
 	}
+
+	sort.Slice(podProcesses, func(i, j int) bool {
+		return podProcesses[i].cpuPercent > podProcesses[j].cpuPercent
+	})
+	sort.Slice(kernelProcesses, func(i, j int) bool {
+		return kernelProcesses[i].cpuPercent > kernelProcesses[j].cpuPercent
+	})
 
 	podCPUPercent := 0.0
 	if len(podProcesses) > 0 {
@@ -51,16 +72,9 @@ func (d *Diagnostician) generateCPUUsageReport(duration time.Duration) string {
 			if i >= 10 {
 				break
 			}
-
-			cpuTimeNS := uint64(float64(totalDurationNS) * info.percentage / 100.0)
-			cpuPercent := info.percentage
-			cpuTimeSec := float64(cpuTimeNS) / 1e9
-			durationSec := duration.Seconds()
-
 			report += fmt.Sprintf("    PID %d (%s):      %5.1f%% CPU (%.2fs / %.2fs)\n",
-				info.pid, info.name, cpuPercent, cpuTimeSec, durationSec)
-
-			podCPUPercent += cpuPercent
+				info.pid, info.name, info.cpuPercent, info.cpuTimeSec, durationSec)
+			podCPUPercent += info.cpuPercent
 		}
 		report += "\n"
 	}
@@ -72,16 +86,9 @@ func (d *Diagnostician) generateCPUUsageReport(duration time.Duration) string {
 			if i >= 5 {
 				break
 			}
-
-			cpuTimeNS := uint64(float64(totalDurationNS) * info.percentage / 100.0)
-			cpuPercent := info.percentage
-			cpuTimeSec := float64(cpuTimeNS) / 1e9
-			durationSec := duration.Seconds()
-
 			report += fmt.Sprintf("    PID %d (%s):      %5.1f%% CPU (%.2fs / %.2fs)\n",
-				info.pid, info.name, cpuPercent, cpuTimeSec, durationSec)
-
-			kernelCPUPercent += cpuPercent
+				info.pid, info.name, info.cpuPercent, info.cpuTimeSec, durationSec)
+			kernelCPUPercent += info.cpuPercent
 		}
 		if len(kernelProcesses) > 5 {
 			report += fmt.Sprintf("    ... and %d more system processes\n", len(kernelProcesses)-5)
@@ -93,11 +100,54 @@ func (d *Diagnostician) generateCPUUsageReport(duration time.Duration) string {
 	}
 
 	report += fmt.Sprintf("\n  Total CPU usage: %.1f%% (%.2fs / %.2fs)\n",
-		totalCPUPercent, totalCPUPercent*duration.Seconds()/100.0, duration.Seconds())
+		totalCPUPercent, totalCPUPercent*durationSec/100.0, durationSec)
 	report += fmt.Sprintf("  Idle time: %.1f%% (%.2fs / %.2fs)\n\n",
-		100.0-totalCPUPercent, (100.0-totalCPUPercent)*duration.Seconds()/100.0, duration.Seconds())
+		100.0-totalCPUPercent, (100.0-totalCPUPercent)*durationSec/100.0, durationSec)
 
 	return report
+}
+
+type cpuTimeInfo struct {
+	totalNS   uint64
+	cpuPercent float64
+	cpuTimeSec float64
+	name      string
+}
+
+func getProcessCPUTime(pid uint32) cpuTimeInfo {
+	statPath := fmt.Sprintf("/proc/%d/stat", pid)
+	data, err := os.ReadFile(statPath)
+	if err != nil {
+		return cpuTimeInfo{}
+	}
+
+	fields := strings.Fields(string(data))
+	if len(fields) < 14 {
+		return cpuTimeInfo{}
+	}
+
+	utime, _ := strconv.ParseUint(fields[13], 10, 64)
+	stime, _ := strconv.ParseUint(fields[14], 10, 64)
+
+	clockTicks := uint64(100)
+	if data, err := os.ReadFile("/proc/self/auxv"); err == nil {
+		for i := 0; i < len(data)-8; i += 16 {
+			key := uint64(data[i]) | uint64(data[i+1])<<8 | uint64(data[i+2])<<16 | uint64(data[i+3])<<24 |
+				uint64(data[i+4])<<32 | uint64(data[i+5])<<40 | uint64(data[i+6])<<48 | uint64(data[i+7])<<56
+			if key == 11 {
+				clockTicks = uint64(data[i+8]) | uint64(data[i+9])<<8 | uint64(data[i+10])<<16 | uint64(data[i+11])<<24 |
+					uint64(data[i+12])<<32 | uint64(data[i+13])<<40 | uint64(data[i+14])<<48 | uint64(data[i+15])<<56
+				break
+			}
+		}
+	}
+
+	if clockTicks == 0 {
+		clockTicks = 100
+	}
+
+	totalNS := (utime + stime) * (1e9 / clockTicks)
+	return cpuTimeInfo{totalNS: totalNS}
 }
 
 func isKernelThread(pid uint32, name string) bool {

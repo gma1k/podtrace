@@ -1,6 +1,7 @@
 package metricsexporter
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -55,7 +56,7 @@ var (
 			Name: "podtrace_fs_latency_seconds_gauge",
 			Help: "Latest file system operation latency per process.",
 		},
-		[]string{"type", "process_name"}, // type = write/fsync
+		[]string{"type", "process_name"},
 	)
 	fsHistogram = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -183,14 +184,21 @@ func ExportSchedSwitchMetric(e *events.Event) {
 }
 
 var (
-	limiter = rate.NewLimiter(rate.Every(time.Second/10), 20)
+	limiter        = rate.NewLimiter(rate.Every(time.Second/10), 20)
+	maxRequestSize = int64(1024 * 1024)
 )
 
 func securityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ContentLength > maxRequestSize {
+			http.Error(w, "Request too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestSize)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-XSS-Protection", "1; mode=block")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'")
 		next.ServeHTTP(w, r)
 	})
 }
@@ -205,7 +213,11 @@ func rateLimitMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func StartServer() {
+type Server struct {
+	server *http.Server
+}
+
+func StartServer() *Server {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", securityHeadersMiddleware(rateLimitMiddleware(promhttp.Handler())))
 
@@ -215,6 +227,8 @@ func StartServer() {
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
+
+	srv := &Server{server: server}
 
 	go func() {
 		defer func() {
@@ -226,4 +240,14 @@ func StartServer() {
 			fmt.Fprintf(os.Stderr, "Metrics server error: %v\n", err)
 		}
 	}()
+
+	return srv
+}
+
+func (s *Server) Shutdown() {
+	if s.server != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		s.server.Shutdown(ctx)
+	}
 }

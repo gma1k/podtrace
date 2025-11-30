@@ -7,10 +7,14 @@ import (
 )
 
 var (
-	podNameRegex     = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
-	namespaceRegex   = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
-	maxPodNameLength = 63
-	maxNamespaceLength = 253
+	podNameRegex           = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+	namespaceRegex         = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+	containerNameRegex     = regexp.MustCompile(`^[a-z0-9]([-a-z0-9_.]*[a-z0-9])?$`)
+	maxPodNameLength       = 63
+	maxNamespaceLength     = 253
+	maxContainerNameLength = 63
+	maxExportFormatLength  = 10
+	maxEventFilterLength   = 100
 )
 
 func ValidatePodName(name string) error {
@@ -39,6 +43,56 @@ func ValidateNamespace(name string) error {
 	return nil
 }
 
+func ValidateContainerName(name string) error {
+	if name == "" {
+		return nil
+	}
+	if len(name) > maxContainerNameLength {
+		return fmt.Errorf("container name exceeds maximum length of %d characters", maxContainerNameLength)
+	}
+	if !containerNameRegex.MatchString(name) {
+		return fmt.Errorf("container name must match RFC 1123 subdomain format (lowercase alphanumeric, hyphens, underscores, and dots)")
+	}
+	return nil
+}
+
+func ValidateExportFormat(format string) error {
+	if format == "" {
+		return nil
+	}
+	if len(format) > maxExportFormatLength {
+		return fmt.Errorf("export format exceeds maximum length of %d characters", maxExportFormatLength)
+	}
+	format = strings.ToLower(format)
+	if format != "json" && format != "csv" {
+		return fmt.Errorf("export format must be 'json' or 'csv'")
+	}
+	return nil
+}
+
+func ValidateEventFilter(filter string) error {
+	if filter == "" {
+		return nil
+	}
+	if len(filter) > maxEventFilterLength {
+		return fmt.Errorf("event filter exceeds maximum length of %d characters", maxEventFilterLength)
+	}
+	validFilters := map[string]bool{
+		"dns": true,
+		"net": true,
+		"fs":  true,
+		"cpu": true,
+	}
+	filters := strings.Split(strings.ToLower(filter), ",")
+	for _, f := range filters {
+		f = strings.TrimSpace(f)
+		if f != "" && !validFilters[f] {
+			return fmt.Errorf("invalid event filter: %s (valid: dns, net, fs, cpu)", f)
+		}
+	}
+	return nil
+}
+
 func ValidatePID(pid uint32) bool {
 	return pid > 0 && pid < 4194304
 }
@@ -46,6 +100,7 @@ func ValidatePID(pid uint32) bool {
 func SanitizeProcessName(name string) string {
 	name = strings.TrimSpace(name)
 	var result strings.Builder
+	result.Grow(len(name))
 	for _, r := range name {
 		if r >= 32 && r < 127 && r != '%' {
 			result.WriteRune(r)
@@ -64,4 +119,12 @@ func ValidateContainerID(containerID string) bool {
 		return false
 	}
 	return containerIDRegex.MatchString(containerID)
+}
+
+func SanitizeCSVField(field string) string {
+	if strings.ContainsAny(field, ",\"\n\r") {
+		field = strings.ReplaceAll(field, "\"", "\"\"")
+		return "\"" + field + "\""
+	}
+	return field
 }
