@@ -10,6 +10,10 @@ A simple but powerful eBPF-based diagnostic tool for Kubernetes applications.
 
 `podtrace` attaches eBPF programs to a single Kubernetes pod's container and prints high-level, human-readable events that help diagnose application issues.
 
+## Documentation
+
+`podtrace` documentation is available in the [`doc/`](doc/) directory. See the [documentation index](doc/README.md) for all available guides.
+
 ## Features
 
 - **Network Connection Monitoring**: Tracks TCP IPv4/IPv6 connection latency and errors
@@ -102,12 +106,14 @@ http://localhost:3000/metrics
 ## Prometheus Scrape Configuration
 
 In your Prometheus scrape job, set <PODTRACE_HOST> to the address of the pod or host running podtrace.
+
 ```bash
 scrape_configs:
   - job_name: 'podtrace'
     static_configs:
       - targets: ['<PODTRACE_HOST>:3000']
 ```
+
 ## Available Metrics
 All metrics are exported per process and per event type:
 | Metric                                   | Description                                     |
@@ -131,9 +137,6 @@ A ready-to-use Grafana dashboard JSON is included in the repository at `podtrace
 ## Steps to use:
 
 - Open Grafana and go to Dashboards → New → Import.
-
 - Paste the JSON or upload the .json file.
-
 - Select or your Prometheus datasource as the datasource.
-
 - Import. The dashboard will display per-process and per-event-type metrics for RTT, latency, DNS, FS, and CPU block time.

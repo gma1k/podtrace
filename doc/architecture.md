@@ -1,0 +1,140 @@
+# Architecture
+
+## Overview
+
+Podtrace is an eBPF-based diagnostic tool for Kubernetes applications. It uses kernel-level tracing to monitor application behavior without requiring code instrumentation or application restarts.
+
+## System Architecture
+
+```
+┌───────────────────────────────────────────────────────────── ┐
+│                    Kubernetes Cluster                        │
+│                                                              │
+│  ┌──────────────┐         ┌──────────────────────────┐       │
+│  │   Podtrace   │────────▶│   Target Pod Container  │       │
+│  │   (User)     │         │                          │       │
+│  └──────┬───────┘         └──────────────────────────┘       │
+│         │                                                    │
+│         │ eBPF Programs                                      │
+│         ▼                                                    │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │              Linux Kernel                            │    │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐            │    │
+│  │  │ Kprobes  │  │Uprobes   │  │Tracepoint│            │    │
+│  │  └────┬─────┘  └────┬─────┘  └────┬─────┘            │    │
+│  │       │             │             │                  │    │
+│  │       └─────────────┴─────────────┘                  │    │
+│  │                      │                               │    │
+│  │              ┌───────▼────────┐                      │    │
+│  │              │  Ring Buffer   │                      │    │
+│  │              └───────┬────────┘                      │    │
+│  └──────────────────────┼────────────────────────────── ┘    │
+│                         │                                    │
+└─────────────────────────┼────────────────────────────────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │   Event Processing    │
+              │  - Event Parser       │
+              │  - Cgroup Filter      │
+              │  - Process Resolver   │
+              └───────────┬───────────┘
+                          │
+        ┌─────────────────┴─────────────────┐
+        │                                   │
+        ▼                                   ▼
+┌───────────────┐                    ┌───────────────┐
+│  Real-time    │                    │   Metrics     │
+│  Diagnostics  │                    │   Exporter    │
+│  (CLI Output) │                    │               │
+└───────────────┘                    └───────────────┘
+```
+
+## Components
+
+### 1. eBPF Programs (`bpf/podtrace.bpf.c`)
+
+The eBPF programs run in the kernel and trace system calls and kernel events:
+
+- **Kprobes**: Attach to kernel functions
+  - `tcp_v4_connect` / `tcp_v6_connect` - Network connections
+  - `tcp_sendmsg` / `tcp_recvmsg` - TCP send/receive
+  - `vfs_read` / `vfs_write` / `vfs_fsync` - File system operations
+
+- **Uprobes**: Attach to user-space functions
+  - `getaddrinfo` (libc) - DNS lookups
+
+- **Tracepoints**: Kernel events
+  - `sched_switch` - CPU scheduling events
+
+### 2. Event Collection (`internal/ebpf/`)
+
+- **Tracer**: Manages eBPF program lifecycle
+  - Loads and attaches eBPF programs
+  - Reads events from ring buffer
+  - Filters events by cgroup
+
+- **Loader**: Loads compiled eBPF object file
+
+### 3. Kubernetes Integration (`internal/kubernetes/`)
+
+- **PodResolver**: Resolves pod names to container information
+  - Queries Kubernetes API
+  - Extracts container ID
+  - Finds cgroup path
+
+### 4. Event Processing (`internal/events/`)
+
+- **Event Types**: DNS, Connect, TCP Send/Recv, File System, CPU
+- **Event Formatting**: Human-readable event messages
+
+### 5. Diagnostics (`internal/diagnose/`)
+
+- **Diagnostician**: Analyzes collected events
+  - Generates comprehensive reports
+  - Calculates statistics (latency, percentiles, error rates)
+  - Detects performance issues
+  - Tracks process activity and CPU usage
+
+### 6. Metrics Export (`internal/metricsexporter/`)
+
+- **Prometheus Exporter**: Exposes metrics via HTTP
+  - RTT and latency histograms
+  - DNS query latencies
+  - File system operation latencies
+  - CPU block times
+
+### 7. Validation (`internal/validation/`)
+
+- Input validation for pod names, namespaces, PIDs, container IDs
+- Process name sanitization
+
+## Data Flow
+
+1. **Kernel Events**: System calls trigger eBPF programs
+2. **Event Capture**: eBPF programs record event data and timestamps
+3. **Ring Buffer**: Events are written to a ring buffer map
+4. **User Space Reading**: Go application reads from ring buffer
+5. **Cgroup Filtering**: Events are filtered to match target pod's cgroup
+6. **Event Processing**: Events are parsed and enriched with process names
+7. **Output**: Events are sent to:
+   - Real-time diagnostic display (CLI)
+   - Metrics exporter (Prometheus)
+
+## Cgroup Filtering
+
+Podtrace uses cgroup-based filtering to isolate events to the target pod:
+
+1. Resolve pod's container ID from Kubernetes API
+2. Find cgroup path in `/sys/fs/cgroup`
+3. For each event, check if the process PID belongs to the target cgroup
+4. Only process events from matching processes
+
+## Security Considerations
+
+- Requires elevated privileges (CAP_SYS_ADMIN or root)
+- Can be run with capabilities instead of full root
+- Validates all inputs (pod names, PIDs, container IDs)
+- Sanitizes process names to prevent injection
+- Rate limiting on metrics endpoint
+- Security headers on HTTP responses
