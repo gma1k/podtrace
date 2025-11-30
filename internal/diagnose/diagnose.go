@@ -1,11 +1,12 @@
 package diagnose
 
 import (
+	"encoding/csv"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/podtrace/podtrace/internal/events"
@@ -14,15 +15,31 @@ import (
 
 // Diagnostician collects and analyzes events
 type Diagnostician struct {
-	events    []*events.Event
-	startTime time.Time
-	endTime   time.Time
+	events             []*events.Event
+	startTime          time.Time
+	endTime            time.Time
+	errorRateThreshold float64
+	rttSpikeThreshold  float64
+	fsSlowThreshold    float64
 }
 
 func NewDiagnostician() *Diagnostician {
 	return &Diagnostician{
-		events:    make([]*events.Event, 0),
-		startTime: time.Now(),
+		events:             make([]*events.Event, 0),
+		startTime:          time.Now(),
+		errorRateThreshold: 10.0,
+		rttSpikeThreshold:  100.0,
+		fsSlowThreshold:    10.0,
+	}
+}
+
+func NewDiagnosticianWithThresholds(errorRate, rttSpike, fsSlow float64) *Diagnostician {
+	return &Diagnostician{
+		events:             make([]*events.Event, 0),
+		startTime:          time.Now(),
+		errorRateThreshold: errorRate,
+		rttSpikeThreshold:  rttSpike,
+		fsSlowThreshold:    fsSlow,
 	}
 }
 
@@ -137,7 +154,8 @@ func (d *Diagnostician) GenerateReport() string {
 			report += fmt.Sprintf("  Average latency: %.2fms\n", avgLatency)
 			report += fmt.Sprintf("  Max latency: %.2fms\n", maxLatency)
 			report += fmt.Sprintf("  Percentiles: P50=%.2fms, P95=%.2fms, P99=%.2fms\n", p50, p95, p99)
-			report += fmt.Sprintf("  Slow operations (>10ms): %d\n", slowOps)
+			thresholdMs := d.fsSlowThreshold
+			report += fmt.Sprintf("  Slow operations (>%.1fms): %d\n", thresholdMs, slowOps)
 
 			// Top files by operation count
 			fileMap := make(map[string]int)
@@ -186,6 +204,8 @@ func (d *Diagnostician) GenerateReport() string {
 	report += d.generateCPUUsageReport(duration)
 
 	report += d.generateApplicationTracing(duration)
+
+	report += d.generateConnectionCorrelation()
 
 	// Issues summary
 	issues := d.detectIssues()
@@ -342,7 +362,7 @@ func (d *Diagnostician) analyzeFS(events []*events.Event) (avgLatency, maxLatenc
 		if latencyMs > maxLatency {
 			maxLatency = latencyMs
 		}
-		if latencyMs > 10 {
+		if latencyMs > d.fsSlowThreshold {
 			slowOps++
 		}
 	}
@@ -402,8 +422,8 @@ func (d *Diagnostician) detectIssues() []string {
 			}
 		}
 		errorRate := float64(errors) / float64(len(connectEvents)) * 100
-		if errorRate > 10 {
-			issues = append(issues, fmt.Sprintf("High connection failure rate: %.1f%% (%d/%d)", errorRate, errors, len(connectEvents)))
+		if errorRate > d.errorRateThreshold {
+			issues = append(issues, fmt.Sprintf("High connection failure rate: %.1f%% (%d/%d) (threshold: %.1f%%)", errorRate, errors, len(connectEvents), d.errorRateThreshold))
 		}
 	}
 
@@ -411,13 +431,13 @@ func (d *Diagnostician) detectIssues() []string {
 	if len(tcpEvents) > 0 {
 		spikes := 0
 		for _, e := range tcpEvents {
-			if float64(e.LatencyNS)/1e6 > 100 {
+			if float64(e.LatencyNS)/1e6 > d.rttSpikeThreshold {
 				spikes++
 			}
 		}
 		spikeRate := float64(spikes) / float64(len(tcpEvents)) * 100
 		if spikeRate > 5 {
-			issues = append(issues, fmt.Sprintf("High TCP RTT spike rate: %.1f%% (%d/%d)", spikeRate, spikes, len(tcpEvents)))
+			issues = append(issues, fmt.Sprintf("High TCP RTT spike rate: %.1f%% (%d/%d) (threshold: %.1fms)", spikeRate, spikes, len(tcpEvents), d.rttSpikeThreshold))
 		}
 	}
 
@@ -572,22 +592,15 @@ func (d *Diagnostician) analyzeProcessActivity() []pidInfo {
 	return pidInfos
 }
 
-const maxProcessCacheSize = 1000
-
-var processNameCache = make(map[uint32]string)
-var processNameCacheMutex = &sync.Mutex{}
-
 func getProcessName(pid uint32) string {
+	name := getProcessNameFromProc(pid)
+	return validation.SanitizeProcessName(name)
+}
+
+func getProcessNameFromProc(pid uint32) string {
 	if !validation.ValidatePID(pid) {
 		return ""
 	}
-
-	processNameCacheMutex.Lock()
-	if name, ok := processNameCache[pid]; ok {
-		processNameCacheMutex.Unlock()
-		return name
-	}
-	processNameCacheMutex.Unlock()
 
 	name := ""
 
@@ -648,17 +661,7 @@ func getProcessName(pid uint32) string {
 		}
 	}
 
-	processNameCacheMutex.Lock()
-	if len(processNameCache) >= maxProcessCacheSize {
-		for k := range processNameCache {
-			delete(processNameCache, k)
-			break
-		}
-	}
-	processNameCache[pid] = name
-	processNameCacheMutex.Unlock()
-
-	return validation.SanitizeProcessName(name)
+	return name
 }
 
 func (d *Diagnostician) analyzeTimeline(duration time.Duration) []timelineBucket {
@@ -848,4 +851,161 @@ func (d *Diagnostician) analyzeIOPattern(tcpEvents []*events.Event, duration tim
 		avgThroughput:  avgThroughput,
 		peakThroughput: peakThroughput,
 	}
+}
+
+type ExportData struct {
+	Summary         map[string]interface{}   `json:"summary"`
+	DNS             map[string]interface{}   `json:"dns,omitempty"`
+	TCP             map[string]interface{}   `json:"tcp,omitempty"`
+	Connections     map[string]interface{}   `json:"connections,omitempty"`
+	FileSystem      map[string]interface{}   `json:"filesystem,omitempty"`
+	CPU             map[string]interface{}   `json:"cpu,omitempty"`
+	ProcessActivity []map[string]interface{} `json:"process_activity,omitempty"`
+	PotentialIssues []string                 `json:"potential_issues,omitempty"`
+}
+
+func (d *Diagnostician) ExportJSON() ExportData {
+	duration := d.endTime.Sub(d.startTime)
+	eventsPerSec := float64(len(d.events)) / duration.Seconds()
+
+	data := ExportData{
+		Summary: map[string]interface{}{
+			"total_events":      len(d.events),
+			"events_per_second": eventsPerSec,
+			"start_time":        d.startTime.Format(time.RFC3339),
+			"end_time":          d.endTime.Format(time.RFC3339),
+			"duration_seconds":  duration.Seconds(),
+		},
+	}
+
+	dnsEvents := d.filterEvents(events.EventDNS)
+	if len(dnsEvents) > 0 {
+		avgLatency, maxLatency, errors, p50, p95, p99, topTargets := d.analyzeDNS(dnsEvents)
+		data.DNS = map[string]interface{}{
+			"total_lookups":   len(dnsEvents),
+			"rate_per_second": float64(len(dnsEvents)) / duration.Seconds(),
+			"avg_latency_ms":  avgLatency,
+			"max_latency_ms":  maxLatency,
+			"p50_ms":          p50,
+			"p95_ms":          p95,
+			"p99_ms":          p99,
+			"errors":          errors,
+			"error_rate":      float64(errors) * 100 / float64(len(dnsEvents)),
+			"top_targets":     topTargets,
+		}
+	}
+
+	tcpSendEvents := d.filterEvents(events.EventTCPSend)
+	tcpRecvEvents := d.filterEvents(events.EventTCPRecv)
+	if len(tcpSendEvents) > 0 || len(tcpRecvEvents) > 0 {
+		allTCP := append(tcpSendEvents, tcpRecvEvents...)
+		avgRTT, maxRTT, spikes, p50, p95, p99, errors := d.analyzeTCP(allTCP)
+		data.TCP = map[string]interface{}{
+			"send_operations":    len(tcpSendEvents),
+			"receive_operations": len(tcpRecvEvents),
+			"avg_rtt_ms":         avgRTT,
+			"max_rtt_ms":         maxRTT,
+			"p50_ms":             p50,
+			"p95_ms":             p95,
+			"p99_ms":             p99,
+			"rtt_spikes":         spikes,
+			"errors":             errors,
+			"error_rate":         float64(errors) * 100 / float64(len(allTCP)),
+		}
+	}
+
+	connectEvents := d.filterEvents(events.EventConnect)
+	if len(connectEvents) > 0 {
+		avgLatency, maxLatency, errors, p50, p95, p99, topTargets, errorBreakdown := d.analyzeConnections(connectEvents)
+		data.Connections = map[string]interface{}{
+			"total_connections": len(connectEvents),
+			"rate_per_second":   float64(len(connectEvents)) / duration.Seconds(),
+			"avg_latency_ms":    avgLatency,
+			"max_latency_ms":    maxLatency,
+			"p50_ms":            p50,
+			"p95_ms":            p95,
+			"p99_ms":            p99,
+			"failed":            errors,
+			"failure_rate":      float64(errors) * 100 / float64(len(connectEvents)),
+			"error_breakdown":   errorBreakdown,
+			"top_targets":       topTargets,
+		}
+	}
+
+	writeEvents := d.filterEvents(events.EventWrite)
+	readEvents := d.filterEvents(events.EventRead)
+	fsyncEvents := d.filterEvents(events.EventFsync)
+	if len(writeEvents) > 0 || len(readEvents) > 0 || len(fsyncEvents) > 0 {
+		allFS := append(append(writeEvents, readEvents...), fsyncEvents...)
+		avgLatency, maxLatency, slowOps, p50, p95, p99 := d.analyzeFS(allFS)
+		data.FileSystem = map[string]interface{}{
+			"write_operations": len(writeEvents),
+			"read_operations":  len(readEvents),
+			"fsync_operations": len(fsyncEvents),
+			"avg_latency_ms":   avgLatency,
+			"max_latency_ms":   maxLatency,
+			"p50_ms":           p50,
+			"p95_ms":           p95,
+			"p99_ms":           p99,
+			"slow_operations":  slowOps,
+		}
+	}
+
+	schedEvents := d.filterEvents(events.EventSchedSwitch)
+	if len(schedEvents) > 0 {
+		avgBlock, maxBlock, p50, p95, p99 := d.analyzeCPU(schedEvents)
+		data.CPU = map[string]interface{}{
+			"thread_switches":   len(schedEvents),
+			"avg_block_time_ms": avgBlock,
+			"max_block_time_ms": maxBlock,
+			"p50_ms":            p50,
+			"p95_ms":            p95,
+			"p99_ms":            p99,
+		}
+	}
+
+	pidActivity := d.analyzeProcessActivity()
+	for _, info := range pidActivity {
+		data.ProcessActivity = append(data.ProcessActivity, map[string]interface{}{
+			"pid":         info.pid,
+			"name":        info.name,
+			"event_count": info.count,
+			"percentage":  info.percentage,
+		})
+	}
+
+	issues := d.detectIssues()
+	data.PotentialIssues = issues
+
+	return data
+}
+
+func (d *Diagnostician) ExportCSV(w io.Writer) error {
+	writer := csv.NewWriter(w)
+	defer writer.Flush()
+
+	header := []string{"timestamp", "pid", "process_name", "type", "latency_ms", "error", "target"}
+	if err := writer.Write(header); err != nil {
+		return err
+	}
+
+	for _, event := range d.events {
+		if event == nil {
+			continue
+		}
+		record := []string{
+			fmt.Sprintf("%d", event.Timestamp),
+			fmt.Sprintf("%d", event.PID),
+			validation.SanitizeCSVField(event.ProcessName),
+			validation.SanitizeCSVField(event.TypeString()),
+			fmt.Sprintf("%.2f", float64(event.LatencyNS)/1e6),
+			fmt.Sprintf("%d", event.Error),
+			validation.SanitizeCSVField(event.Target),
+		}
+		if err := writer.Write(record); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

@@ -57,6 +57,13 @@ struct {
 	__type(value, char[MAX_STRING_LEN]);
 } dns_targets SEC(".maps");
 
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u64);
+	__type(value, char[MAX_STRING_LEN]);
+} socket_conns SEC(".maps");
+
 static inline u64 get_key(u32 pid, u32 tid) {
 	return ((u64)pid << 32) | tid;
 }
@@ -101,32 +108,73 @@ static inline void format_ip_port(u32 ip, u16 port, char *buf) {
 static inline void format_ipv6_port(const u8 *ipv6, u16 port, char *buf) {
 	u16 p = port;
 	u32 idx = 0;
+	u16 segments[8];
 	
 	for (int i = 0; i < 8; i++) {
-		u16 segment = (ipv6[i*2] << 8) | ipv6[i*2 + 1];
-		if (segment == 0 && i > 0 && i < 7) {
-			if (idx < MAX_STRING_LEN - 10) {
-				buf[idx++] = ':';
+		segments[i] = (ipv6[i*2] << 8) | ipv6[i*2 + 1];
+	}
+	
+	int zero_start = -1;
+	int zero_len = 0;
+	int best_zero_start = -1;
+	int best_zero_len = 0;
+	
+	for (int i = 0; i < 8; i++) {
+		if (segments[i] == 0) {
+			if (zero_start == -1) {
+				zero_start = i;
+				zero_len = 1;
+			} else {
+				zero_len++;
 			}
 		} else {
-			if (i > 0 && idx < MAX_STRING_LEN - 10) {
+			if (zero_len > best_zero_len) {
+				best_zero_start = zero_start;
+				best_zero_len = zero_len;
+			}
+			zero_start = -1;
+			zero_len = 0;
+		}
+	}
+	if (zero_len > best_zero_len) {
+		best_zero_start = zero_start;
+		best_zero_len = zero_len;
+	}
+	
+	if (best_zero_len < 2) {
+		best_zero_start = -1;
+		best_zero_len = 0;
+	}
+	
+	for (int i = 0; i < 8; i++) {
+		if (i == best_zero_start) {
+			if (idx == 0) {
 				buf[idx++] = ':';
 			}
-			u8 high = (segment >> 12) & 0xF;
-			u8 low = (segment >> 8) & 0xF;
-			u8 high2 = (segment >> 4) & 0xF;
-			u8 low2 = segment & 0xF;
-			
-			if (high > 0 || i == 0) {
-				if (idx < MAX_STRING_LEN - 10) {
-					buf[idx++] = high < 10 ? '0' + high : 'a' + (high - 10);
-				}
-			}
+			buf[idx++] = ':';
+			i += best_zero_len - 1;
+			continue;
+		}
+		
+		if (i > 0 && idx < MAX_STRING_LEN - 10) {
+			buf[idx++] = ':';
+		}
+		
+		u16 seg = segments[i];
+		u8 d1 = (seg >> 12) & 0xF;
+		u8 d2 = (seg >> 8) & 0xF;
+		u8 d3 = (seg >> 4) & 0xF;
+		u8 d4 = seg & 0xF;
+		
+		if (d1 > 0 || i == 0) {
 			if (idx < MAX_STRING_LEN - 10) {
-				buf[idx++] = low < 10 ? '0' + low : 'a' + (low - 10);
-				buf[idx++] = high2 < 10 ? '0' + high2 : 'a' + (high2 - 10);
-				buf[idx++] = low2 < 10 ? '0' + low2 : 'a' + (low2 - 10);
+				buf[idx++] = d1 < 10 ? '0' + d1 : 'a' + (d1 - 10);
 			}
+		}
+		if (idx < MAX_STRING_LEN - 10) {
+			buf[idx++] = d2 < 10 ? '0' + d2 : 'a' + (d2 - 10);
+			buf[idx++] = d3 < 10 ? '0' + d3 : 'a' + (d3 - 10);
+			buf[idx++] = d4 < 10 ? '0' + d4 : 'a' + (d4 - 10);
 		}
 	}
 	
@@ -193,7 +241,7 @@ int kretprobe_tcp_v6_connect(struct pt_regs *ctx) {
 	void *uaddr = (void *)PT_REGS_PARM2(ctx);
 	if (uaddr) {
 		bpf_probe_read_user(&addr, sizeof(addr), uaddr);
-		if (addr.sin6_family == 10) { // AF_INET6
+		if (addr.sin6_family == 10) {
 			u16 port = __builtin_bswap16(addr.sin6_port);
 			format_ipv6_port(addr.sin6_addr, port, e.target);
 		} else {
@@ -230,7 +278,7 @@ int kretprobe_tcp_connect(struct pt_regs *ctx) {
 	void *uaddr = (void *)PT_REGS_PARM2(ctx);
 	if (uaddr) {
 		bpf_probe_read_user(&addr, sizeof(addr), uaddr);
-		if (addr.sin_family == 2) { // AF_INET
+		if (addr.sin_family == 2) {
 			u16 port = __builtin_bswap16(addr.sin_port);
 			u32 ip_be;
 			bpf_probe_read_user(&ip_be, sizeof(ip_be), &addr.sin_addr.s_addr);
@@ -276,7 +324,14 @@ int kretprobe_tcp_sendmsg(struct pt_regs *ctx) {
 	e.type = EVENT_TCP_SEND;
 	e.latency_ns = calc_latency(*start_ts);
 	e.error = PT_REGS_RC(ctx);
-	e.target[0] = '\0';
+	
+	char *conn_ptr = bpf_map_lookup_elem(&socket_conns, &key);
+	if (conn_ptr) {
+		bpf_probe_read_kernel_str(e.target, sizeof(e.target), conn_ptr);
+		bpf_map_delete_elem(&socket_conns, &key);
+	} else {
+		e.target[0] = '\0';
+	}
 	
 	bpf_ringbuf_output(&events, &e, sizeof(e), 0);
 	bpf_map_delete_elem(&start_times, &key);
@@ -311,7 +366,14 @@ int kretprobe_tcp_recvmsg(struct pt_regs *ctx) {
 	e.type = EVENT_TCP_RECV;
 	e.latency_ns = calc_latency(*start_ts);
 	e.error = PT_REGS_RC(ctx);
-	e.target[0] = '\0';
+	
+	char *conn_ptr = bpf_map_lookup_elem(&socket_conns, &key);
+	if (conn_ptr) {
+		bpf_probe_read_kernel_str(e.target, sizeof(e.target), conn_ptr);
+		bpf_map_delete_elem(&socket_conns, &key);
+	} else {
+		e.target[0] = '\0';
+	}
 	
 	bpf_ringbuf_output(&events, &e, sizeof(e), 0);
 	bpf_map_delete_elem(&start_times, &key);
@@ -325,6 +387,7 @@ int kprobe_vfs_write(struct pt_regs *ctx) {
 	u64 key = get_key(pid, tid);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
+	
 	return 0;
 }
 
@@ -362,6 +425,7 @@ int kretprobe_vfs_read(struct pt_regs *ctx) {
 	e.latency_ns = latency;
 	e.error = PT_REGS_RC(ctx);
 	e.target[0] = '\0';
+	
 	bpf_ringbuf_output(&events, &e, sizeof(e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
@@ -391,6 +455,7 @@ int kretprobe_vfs_write(struct pt_regs *ctx) {
 	e.latency_ns = latency;
 	e.error = PT_REGS_RC(ctx);
 	e.target[0] = '\0';
+	
 	bpf_ringbuf_output(&events, &e, sizeof(e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
@@ -461,7 +526,7 @@ int tracepoint_sched_switch(void *ctx) {
 		
 		if (block_start) {
 			u64 block_time = calc_latency(*block_start);
-			if (block_time > 1000000) { // Only track blocks > 1ms
+			if (block_time > 1000000) {
 				struct event e = {};
 				e.timestamp = timestamp;
 				e.pid = prev_pid;

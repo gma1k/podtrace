@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -21,13 +22,15 @@ import (
 )
 
 type Tracer struct {
-	collection *ebpf.Collection
-	links      []link.Link
-	reader     *ringbuf.Reader
-	cgroupPath string
+	collection  *ebpf.Collection
+	links       []link.Link
+	reader      *ringbuf.Reader
+	cgroupPath  string
+	pidCache    map[uint32]bool
+	pidCacheMu  sync.RWMutex
+	containerID string
 }
 
-// NewTracer creates a new eBPF tracer
 func NewTracer() (*Tracer, error) {
 	if err := unix.Prctl(unix.PR_SET_DUMPABLE, 1, 0, 0, 0); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to set dumpable flag: %v\n", err)
@@ -86,16 +89,24 @@ func NewTracer() (*Tracer, error) {
 		collection: coll,
 		links:      links,
 		reader:     rd,
+		pidCache:   make(map[uint32]bool),
 	}, nil
 }
 
-// AttachToCgroup stores the cgroup path for userspace filtering
 func (t *Tracer) AttachToCgroup(cgroupPath string) error {
 	t.cgroupPath = cgroupPath
 	return nil
 }
 
-// isPIDInCgroup checks if a PID belongs to the target cgroup
+func (t *Tracer) SetContainerID(containerID string) error {
+	t.containerID = containerID
+	dnsLinks := attachDNSProbes(t.collection, containerID)
+	if len(dnsLinks) > 0 {
+		t.links = append(t.links, dnsLinks...)
+	}
+	return nil
+}
+
 func (t *Tracer) isPIDInCgroup(pid uint32) bool {
 	if t.cgroupPath == "" {
 		return true
@@ -105,37 +116,73 @@ func (t *Tracer) isPIDInCgroup(pid uint32) bool {
 		return false
 	}
 
+	t.pidCacheMu.RLock()
+	if cached, ok := t.pidCache[pid]; ok {
+		t.pidCacheMu.RUnlock()
+		return cached
+	}
+	t.pidCacheMu.RUnlock()
+
 	cgroupFile := fmt.Sprintf("/proc/%d/cgroup", pid)
+	if len(cgroupFile) > 64 {
+		return false
+	}
 	data, err := os.ReadFile(cgroupFile)
 	if err != nil {
+		t.pidCacheMu.Lock()
+		t.pidCache[pid] = false
+		if len(t.pidCache) > 10000 {
+			for k := range t.pidCache {
+				delete(t.pidCache, k)
+				break
+			}
+		}
+		t.pidCacheMu.Unlock()
 		return false
 	}
 
 	cgroupContent := strings.TrimSpace(string(data))
 	pidCgroupPath := extractCgroupPathFromProc(cgroupContent)
 	if pidCgroupPath == "" {
+		t.pidCacheMu.Lock()
+		t.pidCache[pid] = false
+		if len(t.pidCache) > 10000 {
+			for k := range t.pidCache {
+				delete(t.pidCache, k)
+				break
+			}
+		}
+		t.pidCacheMu.Unlock()
 		return false
 	}
 
 	normalizedTarget := normalizeCgroupPath(t.cgroupPath)
 	normalizedPID := normalizeCgroupPath(pidCgroupPath)
 
+	result := false
 	if normalizedPID == normalizedTarget {
-		return true
+		result = true
+	} else if strings.HasPrefix(normalizedPID, normalizedTarget+"/") {
+		result = true
+	} else if strings.HasPrefix(normalizedTarget, normalizedPID+"/") {
+		result = true
 	}
 
-	if strings.HasPrefix(normalizedPID, normalizedTarget+"/") {
-		return true
+	t.pidCacheMu.Lock()
+	if len(t.pidCache) >= 10000 {
+		for k := range t.pidCache {
+			delete(t.pidCache, k)
+			if len(t.pidCache) < 9000 {
+				break
+			}
+		}
 	}
+	t.pidCache[pid] = result
+	t.pidCacheMu.Unlock()
 
-	if strings.HasPrefix(normalizedTarget, normalizedPID+"/") {
-		return true
-	}
-
-	return false
+	return result
 }
 
-// normalizeCgroupPath normalizes a cgroup path for comparison
 func normalizeCgroupPath(path string) string {
 	path = strings.TrimPrefix(path, "/sys/fs/cgroup")
 	if !strings.HasPrefix(path, "/") {
@@ -145,7 +192,6 @@ func normalizeCgroupPath(path string) string {
 	return path
 }
 
-// extractCgroupPathFromProc extracts the cgroup path from /proc/<pid>/cgroup content
 func extractCgroupPathFromProc(cgroupContent string) string {
 	if strings.HasPrefix(cgroupContent, "0::") {
 		return strings.TrimPrefix(cgroupContent, "0::")
@@ -165,8 +211,10 @@ func extractCgroupPathFromProc(cgroupContent string) string {
 	return ""
 }
 
-// Start begins collecting events and sends them to the event channel
 func (t *Tracer) Start(eventChan chan<- *events.Event) error {
+	var errorCount int
+	var lastErrorLog time.Time
+	var errorCountMu sync.Mutex
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -179,7 +227,23 @@ func (t *Tracer) Start(eventChan chan<- *events.Event) error {
 				if err.Error() != "" && strings.Contains(err.Error(), "closed") {
 					return
 				}
-				fmt.Fprintf(os.Stderr, "Error reading ring buffer: %v\n", err)
+				errorCountMu.Lock()
+				errorCount++
+				now := time.Now()
+				shouldLog := now.Sub(lastErrorLog) > 5*time.Second
+				count := errorCount
+				if shouldLog {
+					errorCount = 0
+					lastErrorLog = now
+				}
+				errorCountMu.Unlock()
+				if shouldLog {
+					if count > 100 {
+						fmt.Fprintf(os.Stderr, "Warning: High ring buffer error rate: %d errors in last period. Events may be dropped.\n", count)
+					} else {
+						fmt.Fprintf(os.Stderr, "Error reading ring buffer: %v\n", err)
+					}
+				}
 				continue
 			}
 
@@ -189,7 +253,11 @@ func (t *Tracer) Start(eventChan chan<- *events.Event) error {
 				event.ProcessName = validation.SanitizeProcessName(event.ProcessName)
 
 				if t.isPIDInCgroup(event.PID) {
-					eventChan <- event
+					select {
+					case eventChan <- event:
+					default:
+						fmt.Fprintf(os.Stderr, "Warning: Event channel full, dropping event\n")
+					}
 				}
 			}
 		}
@@ -198,7 +266,6 @@ func (t *Tracer) Start(eventChan chan<- *events.Event) error {
 	return nil
 }
 
-// Stop the tracer and cleans up resources
 func (t *Tracer) Stop() error {
 	if t.reader != nil {
 		t.reader.Close()
@@ -245,7 +312,6 @@ func parseEvent(data []byte) *events.Event {
 	}
 }
 
-// attachProbes attaches all kprobes to the kernel
 func attachProbes(coll *ebpf.Collection) ([]link.Link, error) {
 	var links []link.Link
 
@@ -302,7 +368,12 @@ func attachProbes(coll *ebpf.Collection) ([]link.Link, error) {
 		}
 	}
 
-	libcPath := findLibcPath()
+	return links, nil
+}
+
+func attachDNSProbes(coll *ebpf.Collection, containerID string) []link.Link {
+	var links []link.Link
+	libcPath := findLibcPath(containerID)
 	if libcPath != "" {
 		uprobe, err := link.OpenExecutable(libcPath)
 		if err == nil {
@@ -328,11 +399,10 @@ func attachProbes(coll *ebpf.Collection) ([]link.Link, error) {
 	} else {
 		fmt.Fprintf(os.Stderr, "Note: DNS tracking unavailable (libc path not found)\n")
 	}
-
-	return links, nil
+	return links
 }
 
-func findLibcPath() string {
+func findLibcPath(containerID string) string {
 	libcPaths := []string{
 		"/lib/x86_64-linux-gnu/libc.so.6",
 		"/lib64/libc.so.6",
@@ -340,6 +410,8 @@ func findLibcPath() string {
 		"/usr/lib/x86_64-linux-gnu/libc.so.6",
 		"/usr/lib64/libc.so.6",
 		"/usr/lib/libc.so.6",
+		"/lib/aarch64-linux-gnu/libc.so.6",
+		"/usr/lib/aarch64-linux-gnu/libc.so.6",
 	}
 
 	for _, path := range libcPaths {
@@ -348,69 +420,44 @@ func findLibcPath() string {
 		}
 	}
 
+	if containerID != "" {
+		containerPaths := findLibcInContainer(containerID)
+		for _, path := range containerPaths {
+			if info, err := os.Stat(path); err == nil && !info.IsDir() {
+				return path
+			}
+		}
+	}
+
 	return ""
 }
 
-const maxProcessCacheSize = 1000
-
-var processNameCache = make(map[uint32]string)
-var processNameCacheMutex = &sync.Mutex{}
-
-func getProcessNameQuick(pid uint32) string {
-	if !validation.ValidatePID(pid) {
-		return ""
-	}
-
-	processNameCacheMutex.Lock()
-	if name, ok := processNameCache[pid]; ok {
-		processNameCacheMutex.Unlock()
-		return name
-	}
-	processNameCacheMutex.Unlock()
-
-	name := ""
-
-	cmdlinePath := fmt.Sprintf("/proc/%d/cmdline", pid)
-	if cmdline, err := os.ReadFile(cmdlinePath); err == nil {
-		parts := strings.Split(string(cmdline), "\x00")
-		if len(parts) > 0 && parts[0] != "" {
-			name = parts[0]
-			if idx := strings.LastIndex(name, "/"); idx >= 0 {
-				name = name[idx+1:]
-			}
+func findLibcInContainer(containerID string) []string {
+	var paths []string
+	containerRoot := fmt.Sprintf("/var/lib/docker/containers/%s/rootfs", containerID)
+	if _, err := os.Stat(containerRoot); err == nil {
+		libcPaths := []string{
+			containerRoot + "/lib/x86_64-linux-gnu/libc.so.6",
+			containerRoot + "/lib64/libc.so.6",
+			containerRoot + "/lib/libc.so.6",
+			containerRoot + "/usr/lib/x86_64-linux-gnu/libc.so.6",
+			containerRoot + "/usr/lib64/libc.so.6",
+			containerRoot + "/usr/lib/libc.so.6",
 		}
+		paths = append(paths, libcPaths...)
 	}
 
-	if name == "" {
-		statPath := fmt.Sprintf("/proc/%d/stat", pid)
-		if data, err := os.ReadFile(statPath); err == nil {
-			statStr := string(data)
-			start := strings.Index(statStr, "(")
-			end := strings.LastIndex(statStr, ")")
-			if start >= 0 && end > start {
-				name = statStr[start+1 : end]
-			}
-		}
+	procPaths := []string{
+		"/proc/1/root/lib/x86_64-linux-gnu/libc.so.6",
+		"/proc/1/root/lib64/libc.so.6",
+		"/proc/1/root/lib/libc.so.6",
+		"/proc/1/root/usr/lib/x86_64-linux-gnu/libc.so.6",
+		"/proc/1/root/usr/lib64/libc.so.6",
+		"/proc/1/root/usr/lib/libc.so.6",
 	}
+	paths = append(paths, procPaths...)
 
-	if name == "" {
-		commPath := fmt.Sprintf("/proc/%d/comm", pid)
-		if data, err := os.ReadFile(commPath); err == nil {
-			name = strings.TrimSpace(string(data))
-		}
-	}
-
-	processNameCacheMutex.Lock()
-	if len(processNameCache) >= maxProcessCacheSize {
-		for k := range processNameCache {
-			delete(processNameCache, k)
-			break
-		}
-	}
-	processNameCache[pid] = name
-	processNameCacheMutex.Unlock()
-
-	return name
+	return paths
 }
 
 func WaitForInterrupt() {
