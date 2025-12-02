@@ -154,6 +154,7 @@ The dashboard includes:
 - **Connection Latency**: TCP connection latencies
 - **DNS Latency**: DNS lookup latencies
 - **File System Latency**: FS operation latencies
+- **I/O Bandwidth**: Network and filesystem throughput metrics
 - **CPU Block Time**: Thread blocking durations
 - **Per-Process Metrics**: Breakdown by process name
 
@@ -193,6 +194,46 @@ sum(rate(podtrace_fs_latency_seconds_count[5m])) by (type, process_name)
 histogram_quantile(0.99,
   rate(podtrace_cpu_block_seconds_histogram_bucket[5m])
 )
+```
+
+### I/O Bandwidth Metrics
+
+**`podtrace_network_bytes_total`** (Counter)
+- Description: Total bytes transferred over network (TCP/UDP send/receive)
+- Labels: `type`, `process_name`, `direction` (send or recv)
+- Use with `rate()` to get bytes/second
+
+**`podtrace_filesystem_bytes_total`** (Counter)
+- Description: Total bytes transferred via filesystem operations (read/write)
+- Labels: `type`, `process_name`, `operation` (read or write)
+- Use with `rate()` to get bytes/second
+
+### I/O Bandwidth Query Examples
+
+#### Network Throughput (bytes/second)
+
+```promql
+# Total network throughput
+sum(rate(podtrace_network_bytes_total[5m])) by (direction)
+
+# Network throughput by process
+sum(rate(podtrace_network_bytes_total[5m])) by (process_name, direction)
+
+# TCP send throughput
+sum(rate(podtrace_network_bytes_total{direction="send"}[5m])) by (process_name)
+```
+
+#### Filesystem Throughput (bytes/second)
+
+```promql
+# Total filesystem throughput
+sum(rate(podtrace_filesystem_bytes_total[5m])) by (operation)
+
+# Filesystem throughput by process
+sum(rate(podtrace_filesystem_bytes_total[5m])) by (process_name, operation)
+
+# Write throughput
+sum(rate(podtrace_filesystem_bytes_total{operation="write"}[5m])) by (process_name)
 ```
 
 ## Security

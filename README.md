@@ -25,6 +25,7 @@ A simple but powerful eBPF-based diagnostic tool for Kubernetes applications. Pr
 
 ### File System Monitoring
 - **File Operations**: Tracks read, write, and fsync operations with latency analysis
+- **File Path Tracking**: Captures full file paths for filesystem operations (optional, requires kernel 5.6+ with `bpf_d_path` support)
 - **I/O Bandwidth**: Monitors bytes transferred for file read/write operations
 - **Throughput Analysis**: Calculates average throughput and peak transfer rates
 
@@ -149,6 +150,8 @@ All metrics are exported per process and per event type:
 | `podtrace_dns_latency_seconds_histogram` | Distribution of DNS query latencies             |
 | `podtrace_fs_latency_seconds_gauge`      | Latest file system operation latency            |
 | `podtrace_fs_latency_seconds_histogram`  | Distribution of file system operation latencies |
+| `podtrace_network_bytes_total`           | Total bytes transferred over network (TCP/UDP)  |
+| `podtrace_filesystem_bytes_total`       | Total bytes transferred via filesystem ops      |
 | `podtrace_cpu_block_seconds_gauge`       | Latest CPU block time                           |
 | `podtrace_cpu_block_seconds_histogram`   | Distribution of CPU block times                 |
 

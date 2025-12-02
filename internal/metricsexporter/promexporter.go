@@ -97,6 +97,22 @@ var (
 		},
 		[]string{"type", "process_name"},
 	)
+
+	networkBytesCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "podtrace_network_bytes_total",
+			Help: "Total bytes transferred over network (TCP/UDP send/receive). Use rate() to get bytes/second.",
+		},
+		[]string{"type", "process_name", "direction"},
+	)
+
+	filesystemBytesCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "podtrace_filesystem_bytes_total",
+			Help: "Total bytes transferred via filesystem operations (read/write). Use rate() to get bytes/second.",
+		},
+		[]string{"type", "process_name", "operation"},
+	)
 )
 
 func init() {
@@ -111,6 +127,8 @@ func init() {
 	prometheus.MustRegister(dnsGauge)
 	prometheus.MustRegister(fsGauge)
 	prometheus.MustRegister(cpuGauge)
+	prometheus.MustRegister(networkBytesCounter)
+	prometheus.MustRegister(filesystemBytesCounter)
 }
 
 func HandleEvents(ch <-chan *events.Event) {
@@ -129,18 +147,31 @@ func HandleEvents(ch <-chan *events.Event) {
 
 		case events.EventTCPSend:
 			ExportRTTMetric(e)
+			ExportNetworkBandwidthMetric(e, "send")
 
 		case events.EventTCPRecv:
 			ExportRTTMetric(e)
+			ExportNetworkBandwidthMetric(e, "recv")
 
 		case events.EventDNS:
 			ExportDNSMetric(e)
 
 		case events.EventWrite:
 			ExportFileSystemMetric(e)
+			ExportFilesystemBandwidthMetric(e, "write")
+
+		case events.EventRead:
+			ExportFileSystemMetric(e)
+			ExportFilesystemBandwidthMetric(e, "read")
 
 		case events.EventFsync:
 			ExportFileSystemMetric(e)
+
+		case events.EventUDPSend:
+			ExportNetworkBandwidthMetric(e, "send")
+
+		case events.EventUDPRecv:
+			ExportNetworkBandwidthMetric(e, "recv")
 
 		case events.EventSchedSwitch:
 			ExportSchedSwitchMetric(e)
@@ -181,6 +212,18 @@ func ExportSchedSwitchMetric(e *events.Event) {
 	cpuGauge.WithLabelValues(e.TypeString(), e.ProcessName).Set(blockSec)
 	cpuHistogram.WithLabelValues(e.TypeString(), e.ProcessName).Observe(blockSec)
 
+}
+
+func ExportNetworkBandwidthMetric(e *events.Event, direction string) {
+	if e.Bytes > 0 {
+		networkBytesCounter.WithLabelValues(e.TypeString(), e.ProcessName, direction).Add(float64(e.Bytes))
+	}
+}
+
+func ExportFilesystemBandwidthMetric(e *events.Event, operation string) {
+	if e.Bytes > 0 {
+		filesystemBytesCounter.WithLabelValues(e.TypeString(), e.ProcessName, operation).Add(float64(e.Bytes))
+	}
 }
 
 var (

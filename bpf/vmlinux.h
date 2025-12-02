@@ -60,8 +60,12 @@ struct path {
     struct vfsmount *mnt;
 };
 
-struct file {};
+struct file {
+    struct path f_path;
+};
+
 struct dentry {};
+struct vfsmount {};
 struct qstr {
     const char *name;
 };
