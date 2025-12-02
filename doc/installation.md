@@ -62,6 +62,20 @@ This will:
 - Compile the eBPF program (`bpf/podtrace.bpf.c`) to `bpf/podtrace.bpf.o`
 - Build the Go binary to `bin/podtrace`
 
+**Optional: Enable File Path Tracking**
+
+File path tracking is disabled by default because it requires the `bpf_d_path` helper function (kernel 5.6+). If your kernel supports it, you can enable it:
+
+```bash
+make ENABLE_FILE_PATH_TRACKING=1
+
+# Or set it permanently in Makefile
+# Change: ENABLE_FILE_PATH_TRACKING ?= 0
+# To:     ENABLE_FILE_PATH_TRACKING ?= 1
+```
+
+**Note**: If you enable file path tracking but your kernel doesn't support `bpf_d_path`, podtrace will fail to load with an error about "unknown func bpf_d_path". In this case, rebuild with `ENABLE_FILE_PATH_TRACKING=0` (the default).
+
 ### 4. Set Capabilities (Optional)
 
 To run without `sudo`, set the required capabilities:
@@ -121,6 +135,11 @@ You should see usage information.
 - This is a warning, not an error
 - DNS tracking requires libc to be found
 - The tool will work without DNS tracking
+
+**Error: "unknown func bpf_d_path"**
+- This occurs when file path tracking is enabled but the kernel doesn't support `bpf_d_path`
+- Rebuild with `ENABLE_FILE_PATH_TRACKING=0` (the default)
+- File path tracking requires kernel 5.6+ with `bpf_d_path` helper support
 
 ## Running in Kubernetes
 

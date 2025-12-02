@@ -88,7 +88,8 @@ The diagnose report includes:
 - Read, write, and fsync operation counts
 - Operation latencies (avg, max, percentiles)
 - Slow operations (>10ms)
-- Top accessed files
+- Top accessed files (if file path tracking is enabled)
+- I/O bandwidth metrics (total bytes, average bytes, throughput)
 
 ### CPU Statistics
 - Thread switch count
@@ -144,8 +145,9 @@ Look for:
 
 Check:
 - File System Statistics for slow operations
-- Top accessed files
+- Top accessed files (if file path tracking is enabled)
 - Read/write latency percentiles
+- I/O bandwidth and throughput metrics
 
 ### Monitor CPU Scheduling
 
@@ -184,6 +186,7 @@ Review:
 
 - Only traces the first container in a pod
 - Requires kernel 5.8+ with BTF support
+- File path tracking requires kernel 5.6+ with `bpf_d_path` support (disabled by default)
 - DNS tracking may be unavailable if libc path cannot be determined
 - CPU scheduling tracking requires tracepoint permissions
 

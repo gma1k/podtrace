@@ -5,6 +5,42 @@
 #include "events.h"
 #include "helpers.h"
 
+#ifndef ENABLE_FILE_PATH_TRACKING
+#define ENABLE_FILE_PATH_TRACKING 1
+#endif
+
+#if ENABLE_FILE_PATH_TRACKING
+static inline int extract_file_path(struct file *file, char *path_buf, u32 buf_size) {
+	if (!file) {
+		return -1;
+	}
+	
+	struct path f_path = BPF_CORE_READ(file, f_path);
+	
+	long ret = bpf_d_path(&f_path, path_buf, buf_size);
+	if (ret < 0) {
+		return -1;
+	}
+	
+	if (ret >= buf_size) {
+		path_buf[buf_size - 1] = '\0';
+	} else if (ret > 0) {
+		path_buf[ret] = '\0';
+	} else {
+		path_buf[0] = '\0';
+	}
+	
+	return 0;
+}
+#else
+static inline int extract_file_path(struct file *file, char *path_buf, u32 buf_size) {
+	(void)file;
+	(void)path_buf;
+	(void)buf_size;
+	return -1;
+}
+#endif
+
 SEC("kprobe/vfs_write")
 int kprobe_vfs_write(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
@@ -12,6 +48,15 @@ int kprobe_vfs_write(struct pt_regs *ctx) {
 	u64 key = get_key(pid, tid);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
+	
+	struct file *file = (struct file *)PT_REGS_PARM1(ctx);
+	if (file) {
+		char path_buf[MAX_STRING_LEN] = {};
+		if (extract_file_path(file, path_buf, sizeof(path_buf)) == 0) {
+			bpf_map_update_elem(&file_paths, &key, path_buf, BPF_ANY);
+		}
+	}
+	
 	return 0;
 }
 
@@ -22,6 +67,15 @@ int kprobe_vfs_read(struct pt_regs *ctx) {
 	u64 key = get_key(pid, tid);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
+	
+	struct file *file = (struct file *)PT_REGS_PARM1(ctx);
+	if (file) {
+		char path_buf[MAX_STRING_LEN] = {};
+		if (extract_file_path(file, path_buf, sizeof(path_buf)) == 0) {
+			bpf_map_update_elem(&file_paths, &key, path_buf, BPF_ANY);
+		}
+	}
+	
 	return 0;
 }
 
@@ -122,6 +176,15 @@ int kprobe_vfs_fsync(struct pt_regs *ctx) {
 	u64 key = get_key(pid, tid);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
+	
+	struct file *file = (struct file *)PT_REGS_PARM1(ctx);
+	if (file) {
+		char path_buf[MAX_STRING_LEN] = {};
+		if (extract_file_path(file, path_buf, sizeof(path_buf)) == 0) {
+			bpf_map_update_elem(&file_paths, &key, path_buf, BPF_ANY);
+		}
+	}
+	
 	return 0;
 }
 
