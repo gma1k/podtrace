@@ -5,8 +5,12 @@ import (
 	"os"
 	"strings"
 	"sync"
+
 	"github.com/podtrace/podtrace/internal/validation"
 )
+
+var readFile = os.ReadFile
+var procBase = "/proc"
 
 type CgroupFilter struct {
 	cgroupPath string
@@ -40,11 +44,11 @@ func (f *CgroupFilter) IsPIDInCgroup(pid uint32) bool {
 	}
 	f.pidCacheMu.RUnlock()
 
-	cgroupFile := fmt.Sprintf("/proc/%d/cgroup", pid)
+	cgroupFile := fmt.Sprintf("%s/%d/cgroup", procBase, pid)
 	if len(cgroupFile) > 64 {
 		return false
 	}
-	data, err := os.ReadFile(cgroupFile)
+	data, err := readFile(cgroupFile)
 	if err != nil {
 		f.pidCacheMu.Lock()
 		f.pidCache[pid] = false
