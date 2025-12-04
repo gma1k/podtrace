@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"testing"
+	"unsafe"
 
 	"github.com/podtrace/podtrace/internal/events"
 )
@@ -151,7 +153,6 @@ func TestParseEvent_TargetTruncation(t *testing.T) {
 
 func TestParseEvent_NullTerminatedStrings(t *testing.T) {
 	var raw rawEvent
-	// Test with trailing nulls (which get trimmed)
 	copy(raw.Target[:], []byte("test\x00\x00\x00"))
 	copy(raw.Details[:], []byte("details\x00\x00"))
 
@@ -170,6 +171,20 @@ func TestParseEvent_NullTerminatedStrings(t *testing.T) {
 	}
 	if event.Details != "details" {
 		t.Errorf("Expected details 'details', got '%s'", event.Details)
+	}
+}
+
+func TestParseEvent_BinaryReadError(t *testing.T) {
+	orig := binaryRead
+	t.Cleanup(func() { binaryRead = orig })
+
+	binaryRead = func(r io.Reader, order binary.ByteOrder, data interface{}) error {
+		return fmt.Errorf("forced error")
+	}
+
+	data := make([]byte, int(unsafe.Sizeof(rawEvent{})))
+	if ev := ParseEvent(data); ev != nil {
+		t.Fatalf("expected nil event on binary read error, got %#v", ev)
 	}
 }
 

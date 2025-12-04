@@ -8,6 +8,8 @@ import (
 	"github.com/podtrace/podtrace/internal/events"
 )
 
+var binaryRead = binary.Read
+
 type rawEvent struct {
 	Timestamp uint64
 	PID       uint32
@@ -30,7 +32,7 @@ func ParseEvent(data []byte) *events.Event {
 	}
 
 	var e rawEvent
-	if err := binary.Read(bytes.NewReader(data), binary.LittleEndian, &e); err != nil {
+	if err := binaryRead(bytes.NewReader(data), binary.LittleEndian, &e); err != nil {
 		return nil
 	}
 

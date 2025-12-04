@@ -1,6 +1,7 @@
 package filter
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -163,5 +164,165 @@ func BenchmarkExtractCgroupPathFromProc(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = ExtractCgroupPathFromProc(content)
+	}
+}
+
+func TestCgroupFilter_LongCgroupFilePath(t *testing.T) {
+	origProcBase := procBase
+	t.Cleanup(func() { procBase = origProcBase })
+
+	procBase = "/this/is/a/very/long/path/that/makes/the/proc/file/name/exceed/sixtyfour/characters"
+
+	filter := NewCgroupFilter()
+	filter.SetCgroupPath("/sys/fs/cgroup/kubepods/test")
+
+	if filter.IsPIDInCgroup(1234) {
+		t.Fatalf("expected false when cgroup file path length exceeds limit")
+	}
+}
+
+func TestCgroupFilter_ReadFileErrorCachingAndEviction(t *testing.T) {
+	origReadFile := readFile
+	origProcBase := procBase
+	t.Cleanup(func() {
+		readFile = origReadFile
+		procBase = origProcBase
+	})
+
+	procBase = "/proc"
+	readFile = func(path string) ([]byte, error) {
+		return nil, fmt.Errorf("forced error")
+	}
+
+	filter := NewCgroupFilter()
+	filter.SetCgroupPath("/sys/fs/cgroup/kubepods/test")
+
+	for i := uint32(1); i <= 10005; i++ {
+		_ = filter.IsPIDInCgroup(i)
+	}
+
+	if len(filter.pidCache) == 0 {
+		t.Fatalf("expected pid cache to be populated")
+	}
+}
+
+func TestCgroupFilter_RelationshipsAndSuccessCache(t *testing.T) {
+	origReadFile := readFile
+	origProcBase := procBase
+	t.Cleanup(func() {
+		readFile = origReadFile
+		procBase = origProcBase
+	})
+
+	procBase = "/proc"
+
+	type tc struct {
+		name        string
+		targetPath  string
+		procContent string
+		expect      bool
+	}
+
+	cases := []tc{
+		{
+			name:        "exact match",
+			targetPath:  "/sys/fs/cgroup/kubepods/pod1",
+			procContent: "0::/kubepods/pod1",
+			expect:      true,
+		},
+		{
+			name:        "pid under target",
+			targetPath:  "/sys/fs/cgroup/kubepods/pod1",
+			procContent: "0::/kubepods/pod1/container1",
+			expect:      true,
+		},
+		{
+			name:        "target under pid",
+			targetPath:  "/sys/fs/cgroup/kubepods/pod1/container1",
+			procContent: "0::/kubepods/pod1",
+			expect:      true,
+		},
+		{
+			name:        "unrelated paths",
+			targetPath:  "/sys/fs/cgroup/kubepods/pod1",
+			procContent: "0::/otherpod",
+			expect:      false,
+		},
+	}
+
+	for pid := uint32(1000); pid < 1004; pid++ {
+	}
+
+	for i, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			readFile = func(path string) ([]byte, error) {
+				return []byte(c.procContent), nil
+			}
+
+			filter := NewCgroupFilter()
+			filter.SetCgroupPath(c.targetPath)
+
+			pid := uint32(2000 + i)
+
+			got := filter.IsPIDInCgroup(pid)
+			if got != c.expect {
+				t.Fatalf("expected %v, got %v", c.expect, got)
+			}
+
+			gotCached := filter.IsPIDInCgroup(pid)
+			if gotCached != c.expect {
+				t.Fatalf("cached path: expected %v, got %v", c.expect, gotCached)
+			}
+		})
+	}
+}
+
+func TestCgroupFilter_SuccessEvictionPath(t *testing.T) {
+	origReadFile := readFile
+	origProcBase := procBase
+	t.Cleanup(func() {
+		readFile = origReadFile
+		procBase = origProcBase
+	})
+
+	procBase = "/proc"
+	readFile = func(path string) ([]byte, error) {
+		return []byte("0::/kubepods/pod1"), nil
+	}
+
+	filter := NewCgroupFilter()
+	filter.SetCgroupPath("/sys/fs/cgroup/kubepods/pod1")
+
+	for i := uint32(1); i <= 11000; i++ {
+		_ = filter.IsPIDInCgroup(i)
+	}
+
+	if len(filter.pidCache) == 0 || len(filter.pidCache) >= 11000 {
+		t.Fatalf("expected pid cache to be populated and eviction to have occurred, got size %d", len(filter.pidCache))
+	}
+}
+
+func TestCgroupFilter_EmptyCgroupPathFromProc(t *testing.T) {
+	origReadFile := readFile
+	origProcBase := procBase
+	t.Cleanup(func() {
+		readFile = origReadFile
+		procBase = origProcBase
+	})
+
+	procBase = "/proc"
+	readFile = func(path string) ([]byte, error) {
+		return []byte("invalid"), nil
+	}
+
+	filter := NewCgroupFilter()
+	filter.SetCgroupPath("/sys/fs/cgroup/kubepods/test")
+
+	for i := uint32(1); i <= 10005; i++ {
+		_ = filter.IsPIDInCgroup(i)
+	}
+
+	if len(filter.pidCache) == 0 {
+		t.Fatalf("expected pid cache to be populated for empty cgroup path case")
 	}
 }

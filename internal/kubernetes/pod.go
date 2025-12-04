@@ -17,6 +17,8 @@ import (
 	"github.com/podtrace/podtrace/internal/validation"
 )
 
+var cgroupBase = "/sys/fs/cgroup"
+
 type PodResolver struct {
 	clientset *kubernetes.Clientset
 }
@@ -135,8 +137,6 @@ type PodInfo struct {
 }
 
 func findCgroupPath(containerID string) (string, error) {
-	cgroupBase := "/sys/fs/cgroup"
-
 	paths := []string{
 		filepath.Join(cgroupBase, "kubepods.slice"),
 		filepath.Join(cgroupBase, "system.slice"),

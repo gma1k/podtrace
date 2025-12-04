@@ -29,3 +29,4 @@ Thumbs.db
 # Test coverage
 coverage.out
 *.coverprofile
+*.out
