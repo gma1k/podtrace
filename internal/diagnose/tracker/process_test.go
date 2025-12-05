@@ -98,9 +98,9 @@ func TestGetProcessNameFromProc_FromStat(t *testing.T) {
 
 	pid := uint32(1234)
 	statPath := fmt.Sprintf("%s/%d/stat", dir, pid)
-	os.MkdirAll(fmt.Sprintf("%s/%d", dir, pid), 0755)
+	_ = os.MkdirAll(fmt.Sprintf("%s/%d", dir, pid), 0755)
 	statContent := "1234 (test-process) S 1 1234 1234 0 -1 4194304"
-	os.WriteFile(statPath, []byte(statContent), 0644)
+	_ = os.WriteFile(statPath, []byte(statContent), 0644)
 
 	config.SetProcBasePath(dir)
 	result := getProcessNameFromProc(pid)
@@ -116,8 +116,8 @@ func TestGetProcessNameFromProc_FromComm(t *testing.T) {
 
 	pid := uint32(1234)
 	commPath := fmt.Sprintf("%s/%d/comm", dir, pid)
-	os.MkdirAll(fmt.Sprintf("%s/%d", dir, pid), 0755)
-	os.WriteFile(commPath, []byte("test-process\n"), 0644)
+	_ = os.MkdirAll(fmt.Sprintf("%s/%d", dir, pid), 0755)
+	_ = os.WriteFile(commPath, []byte("test-process\n"), 0644)
 
 	config.SetProcBasePath(dir)
 	result := getProcessNameFromProc(pid)
@@ -133,9 +133,9 @@ func TestGetProcessNameFromProc_FromCmdline(t *testing.T) {
 
 	pid := uint32(1234)
 	cmdlinePath := fmt.Sprintf("%s/%d/cmdline", dir, pid)
-	os.MkdirAll(fmt.Sprintf("%s/%d", dir, pid), 0755)
+	_ = os.MkdirAll(fmt.Sprintf("%s/%d", dir, pid), 0755)
 	cmdlineContent := []byte("/usr/bin/test-process\x00arg1\x00arg2")
-	os.WriteFile(cmdlinePath, cmdlineContent, 0644)
+	_ = os.WriteFile(cmdlinePath, cmdlineContent, 0644)
 
 	config.SetProcBasePath(dir)
 	result := getProcessNameFromProc(pid)
@@ -151,9 +151,9 @@ func TestGetProcessNameFromProc_FromCmdlineNoSlash(t *testing.T) {
 
 	pid := uint32(1234)
 	cmdlinePath := fmt.Sprintf("%s/%d/cmdline", dir, pid)
-	os.MkdirAll(fmt.Sprintf("%s/%d", dir, pid), 0755)
+	_ = os.MkdirAll(fmt.Sprintf("%s/%d", dir, pid), 0755)
 	cmdlineContent := []byte("test-process\x00arg1")
-	os.WriteFile(cmdlinePath, cmdlineContent, 0644)
+	_ = os.WriteFile(cmdlinePath, cmdlineContent, 0644)
 
 	config.SetProcBasePath(dir)
 	result := getProcessNameFromProc(pid)
@@ -203,9 +203,9 @@ func TestGetProcessNameFromProc_FromStatus(t *testing.T) {
 
 	pid := uint32(1234)
 	statusPath := fmt.Sprintf("%s/%d/status", dir, pid)
-	os.MkdirAll(fmt.Sprintf("%s/%d", dir, pid), 0755)
+	_ = os.MkdirAll(fmt.Sprintf("%s/%d", dir, pid), 0755)
 	statusContent := "Name:\ttest-process\nState:\tS\n"
-	os.WriteFile(statusPath, []byte(statusContent), 0644)
+	_ = os.WriteFile(statusPath, []byte(statusContent), 0644)
 
 	config.SetProcBasePath(dir)
 	result := getProcessNameFromProc(pid)
@@ -221,8 +221,8 @@ func TestGetProcessNameFromProc_StatError(t *testing.T) {
 
 	pid := uint32(1234)
 	commPath := fmt.Sprintf("%s/%d/comm", dir, pid)
-	os.MkdirAll(fmt.Sprintf("%s/%d", dir, pid), 0755)
-	os.WriteFile(commPath, []byte("test-process\n"), 0644)
+	_ = os.MkdirAll(fmt.Sprintf("%s/%d", dir, pid), 0755)
+	_ = os.WriteFile(commPath, []byte("test-process\n"), 0644)
 
 	config.SetProcBasePath(dir)
 	result := getProcessNameFromProc(pid)
@@ -239,9 +239,9 @@ func TestGetProcessNameFromProc_StatInvalidFormat(t *testing.T) {
 	pid := uint32(1234)
 	statPath := fmt.Sprintf("%s/%d/stat", dir, pid)
 	commPath := fmt.Sprintf("%s/%d/comm", dir, pid)
-	os.MkdirAll(fmt.Sprintf("%s/%d", dir, pid), 0755)
-	os.WriteFile(statPath, []byte("invalid format"), 0644)
-	os.WriteFile(commPath, []byte("test-process\n"), 0644)
+	_ = os.MkdirAll(fmt.Sprintf("%s/%d", dir, pid), 0755)
+	_ = os.WriteFile(statPath, []byte("invalid format"), 0644)
+	_ = os.WriteFile(commPath, []byte("test-process\n"), 0644)
 
 	config.SetProcBasePath(dir)
 	result := getProcessNameFromProc(pid)
@@ -258,9 +258,9 @@ func TestGetProcessNameFromProc_StatNoParentheses(t *testing.T) {
 	pid := uint32(1234)
 	statPath := fmt.Sprintf("%s/%d/stat", dir, pid)
 	commPath := fmt.Sprintf("%s/%d/comm", dir, pid)
-	os.MkdirAll(fmt.Sprintf("%s/%d", dir, pid), 0755)
-	os.WriteFile(statPath, []byte("1234 test-process S 1"), 0644)
-	os.WriteFile(commPath, []byte("test-process\n"), 0644)
+	_ = os.MkdirAll(fmt.Sprintf("%s/%d", dir, pid), 0755)
+	_ = os.WriteFile(statPath, []byte("1234 test-process S 1"), 0644)
+	_ = os.WriteFile(commPath, []byte("test-process\n"), 0644)
 
 	config.SetProcBasePath(dir)
 	result := getProcessNameFromProc(pid)
@@ -295,9 +295,9 @@ func TestGetProcessNameFromProc_StatusInvalidFormat(t *testing.T) {
 
 	pid := uint32(1234)
 	statusPath := fmt.Sprintf("%s/%d/status", dir, pid)
-	os.MkdirAll(fmt.Sprintf("%s/%d", dir, pid), 0755)
+	_ = os.MkdirAll(fmt.Sprintf("%s/%d", dir, pid), 0755)
 	statusContent := "Name:\nState:\tS\n"
-	os.WriteFile(statusPath, []byte(statusContent), 0644)
+	_ = os.WriteFile(statusPath, []byte(statusContent), 0644)
 
 	config.SetProcBasePath(dir)
 	result := getProcessNameFromProc(pid)
