@@ -682,7 +682,7 @@ func (d *Diagnostician) generateApplicationTracing(duration time.Duration) strin
 	tcpEvents := append(d.filterEvents(events.EventTCPSend), d.filterEvents(events.EventTCPRecv)...)
 	if len(tcpEvents) > 0 {
 		ioPattern := profiling.AnalyzeIOPattern(tcpEvents, d.startTime, duration)
-		report += fmt.Sprintf("Network I/O Pattern:\n")
+		report += "Network I/O Pattern:\n"
 		report += fmt.Sprintf("  Send/Receive ratio: %.2f:1\n", ioPattern.SendRecvRatio)
 		report += fmt.Sprintf("  Average throughput: %.1f ops/sec\n", ioPattern.AvgThroughput)
 		if ioPattern.PeakThroughput > 0 {
