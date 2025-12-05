@@ -81,11 +81,11 @@ func TestFindCgroupPath_ShortID(t *testing.T) {
 	defer func() { config.SetCgroupBasePath(orig) }()
 
 	kubepodsSlice := filepath.Join(dir, "kubepods.slice")
-	os.MkdirAll(kubepodsSlice, 0755)
+	_ = os.MkdirAll(kubepodsSlice, 0755)
 
 	containerID := "abcdef123456"
 	targetDir := filepath.Join(kubepodsSlice, "pod_"+containerID[:12])
-	os.MkdirAll(targetDir, 0755)
+	_ = os.MkdirAll(targetDir, 0755)
 
 	path, err := findCgroupPath(containerID)
 	if err != nil {
@@ -104,11 +104,11 @@ func TestFindCgroupPath_SystemSlice(t *testing.T) {
 	defer func() { config.SetCgroupBasePath(orig) }()
 
 	systemSlice := filepath.Join(dir, "system.slice")
-	os.MkdirAll(systemSlice, 0755)
+	_ = os.MkdirAll(systemSlice, 0755)
 
 	containerID := "test123"
 	targetDir := filepath.Join(systemSlice, "docker-"+containerID+".scope")
-	os.MkdirAll(targetDir, 0755)
+	_ = os.MkdirAll(targetDir, 0755)
 
 	path, err := findCgroupPath(containerID)
 	if err != nil {
@@ -127,11 +127,11 @@ func TestFindCgroupPath_UserSlice(t *testing.T) {
 	defer func() { config.SetCgroupBasePath(orig) }()
 
 	userSlice := filepath.Join(dir, "user.slice")
-	os.MkdirAll(userSlice, 0755)
+	_ = os.MkdirAll(userSlice, 0755)
 
 	containerID := "test456"
 	targetDir := filepath.Join(userSlice, "user-1000.slice", "docker-"+containerID+".scope")
-	os.MkdirAll(targetDir, 0755)
+	_ = os.MkdirAll(targetDir, 0755)
 
 	path, err := findCgroupPath(containerID)
 	if err != nil {

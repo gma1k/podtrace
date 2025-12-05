@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"os"
 	"testing"
@@ -33,7 +34,7 @@ func TestRunNormalMode_WithEvents(t *testing.T) {
 		eventChan <- &events.Event{Type: events.EventDNS, LatencyNS: 5000000, Target: "example.com"}
 		time.Sleep(50 * time.Millisecond)
 		proc, _ := os.FindProcess(os.Getpid())
-		proc.Signal(os.Interrupt)
+		_ = proc.Signal(os.Interrupt)
 	}()
 
 	go func() {
@@ -41,11 +42,11 @@ func TestRunNormalMode_WithEvents(t *testing.T) {
 		r, w, _ := os.Pipe()
 		os.Stdout = w
 
-		err := runNormalMode(eventChan)
+		err := runNormalMode(context.Background(), eventChan)
 
 		w.Close()
 		os.Stdout = originalStdout
-		io.Copy(io.Discard, r)
+		_, _ = io.Copy(io.Discard, r)
 
 		done <- err
 	}()
@@ -88,14 +89,14 @@ func TestRunNormalMode_Interrupt(t *testing.T) {
 		go func() {
 			time.Sleep(100 * time.Millisecond)
 			proc, _ := os.FindProcess(os.Getpid())
-			proc.Signal(os.Interrupt)
+			_ = proc.Signal(os.Interrupt)
 		}()
 
-		err := runNormalMode(eventChan)
+		err := runNormalMode(context.Background(), eventChan)
 
 		w.Close()
 		os.Stdout = originalStdout
-		io.Copy(io.Discard, r)
+		_, _ = io.Copy(io.Discard, r)
 
 		done <- err
 	}()
@@ -138,14 +139,14 @@ func TestRunNormalMode_TickerBeforeInterrupt(t *testing.T) {
 		go func() {
 			time.Sleep(300 * time.Millisecond)
 			proc, _ := os.FindProcess(os.Getpid())
-			proc.Signal(os.Interrupt)
+			_ = proc.Signal(os.Interrupt)
 		}()
 
-		err := runNormalMode(eventChan)
+		err := runNormalMode(context.Background(), eventChan)
 
 		w.Close()
 		os.Stdout = originalStdout
-		io.Copy(io.Discard, r)
+		_, _ = io.Copy(io.Discard, r)
 
 		done <- err
 	}()
@@ -188,14 +189,14 @@ func TestRunNormalMode_HasPrintedReport(t *testing.T) {
 		go func() {
 			time.Sleep(200 * time.Millisecond)
 			proc, _ := os.FindProcess(os.Getpid())
-			proc.Signal(os.Interrupt)
+			_ = proc.Signal(os.Interrupt)
 		}()
 
-		err := runNormalMode(eventChan)
+		err := runNormalMode(context.Background(), eventChan)
 
 		w.Close()
 		os.Stdout = originalStdout
-		io.Copy(io.Discard, r)
+		_, _ = io.Copy(io.Discard, r)
 
 		done <- err
 	}()
@@ -238,14 +239,14 @@ func TestRunNormalMode_NoEvents(t *testing.T) {
 		go func() {
 			time.Sleep(50 * time.Millisecond)
 			proc, _ := os.FindProcess(os.Getpid())
-			proc.Signal(os.Interrupt)
+			_ = proc.Signal(os.Interrupt)
 		}()
 
-		err := runNormalMode(eventChan)
+		err := runNormalMode(context.Background(), eventChan)
 
 		w.Close()
 		os.Stdout = originalStdout
-		io.Copy(io.Discard, r)
+		_, _ = io.Copy(io.Discard, r)
 
 		done <- err
 	}()
@@ -289,14 +290,14 @@ func TestRunNormalMode_WithTicker(t *testing.T) {
 			eventChan <- &events.Event{Type: events.EventDNS, LatencyNS: 5000000, Target: "example.com"}
 			time.Sleep(50 * time.Millisecond)
 			proc, _ := os.FindProcess(os.Getpid())
-			proc.Signal(os.Interrupt)
+			_ = proc.Signal(os.Interrupt)
 		}()
 
-		err := runNormalMode(eventChan)
+		err := runNormalMode(context.Background(), eventChan)
 
 		w.Close()
 		os.Stdout = originalStdout
-		io.Copy(io.Discard, r)
+		_, _ = io.Copy(io.Discard, r)
 
 		done <- err
 	}()
@@ -336,10 +337,10 @@ func TestRunDiagnoseMode_Timeout(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := runDiagnoseMode(eventChan, "100ms", "/test/cgroup")
+	err := runDiagnoseMode(context.Background(), eventChan, "100ms", "/test/cgroup")
 	w.Close()
 	os.Stdout = originalStdout
-	io.Copy(io.Discard, r)
+	_, _ = io.Copy(io.Discard, r)
 
 	if err != nil {
 		t.Errorf("runDiagnoseMode returned error: %v", err)
@@ -371,10 +372,10 @@ func TestRunDiagnoseMode_WithExport(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := runDiagnoseMode(eventChan, "100ms", "/test/cgroup")
+	err := runDiagnoseMode(context.Background(), eventChan, "100ms", "/test/cgroup")
 	w.Close()
 	os.Stdout = originalStdout
-	io.Copy(io.Discard, r)
+	_, _ = io.Copy(io.Discard, r)
 
 	if err != nil {
 		t.Errorf("runDiagnoseMode returned error: %v", err)
@@ -388,10 +389,10 @@ func TestRunDiagnoseMode_InvalidDuration(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := runDiagnoseMode(eventChan, "invalid", "/test/cgroup")
+	err := runDiagnoseMode(context.Background(), eventChan, "invalid", "/test/cgroup")
 	w.Close()
 	os.Stdout = originalStdout
-	io.Copy(io.Discard, r)
+	_, _ = io.Copy(io.Discard, r)
 
 	if err == nil {
 		t.Error("Expected error for invalid duration")
@@ -423,10 +424,10 @@ func TestRunDiagnoseMode_WithExportFormat(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := runDiagnoseMode(eventChan, "100ms", "/test/cgroup")
+	err := runDiagnoseMode(context.Background(), eventChan, "100ms", "/test/cgroup")
 	w.Close()
 	os.Stdout = originalStdout
-	io.Copy(io.Discard, r)
+	_, _ = io.Copy(io.Discard, r)
 
 	if err != nil {
 		t.Errorf("runDiagnoseMode returned error: %v", err)
@@ -458,10 +459,10 @@ func TestRunDiagnoseMode_WithExportFormatCSV(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := runDiagnoseMode(eventChan, "100ms", "/test/cgroup")
+	err := runDiagnoseMode(context.Background(), eventChan, "100ms", "/test/cgroup")
 	w.Close()
 	os.Stdout = originalStdout
-	io.Copy(io.Discard, r)
+	_, _ = io.Copy(io.Discard, r)
 
 	if err != nil {
 		t.Errorf("runDiagnoseMode returned error: %v", err)
@@ -499,14 +500,14 @@ func TestRunDiagnoseMode_Interrupt(t *testing.T) {
 		go func() {
 			time.Sleep(50 * time.Millisecond)
 			proc, _ := os.FindProcess(os.Getpid())
-			proc.Signal(os.Interrupt)
+			_ = proc.Signal(os.Interrupt)
 		}()
 
-		err := runDiagnoseMode(eventChan, "10s", "/test/cgroup")
+		err := runDiagnoseMode(context.Background(), eventChan, "10s", "/test/cgroup")
 
 		w.Close()
 		os.Stdout = originalStdout
-		io.Copy(io.Discard, r)
+		_, _ = io.Copy(io.Discard, r)
 
 		done <- err
 	}()
@@ -552,14 +553,14 @@ func TestRunDiagnoseMode_InterruptWithExport(t *testing.T) {
 		go func() {
 			time.Sleep(50 * time.Millisecond)
 			proc, _ := os.FindProcess(os.Getpid())
-			proc.Signal(os.Interrupt)
+			_ = proc.Signal(os.Interrupt)
 		}()
 
-		err := runDiagnoseMode(eventChan, "10s", "/test/cgroup")
+		err := runDiagnoseMode(context.Background(), eventChan, "10s", "/test/cgroup")
 
 		w.Close()
 		os.Stdout = originalStdout
-		io.Copy(io.Discard, r)
+		_, _ = io.Copy(io.Discard, r)
 
 		done <- err
 	}()

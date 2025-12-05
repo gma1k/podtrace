@@ -1,6 +1,7 @@
 package ebpf
 
 import (
+	"context"
 	"os"
 	"testing"
 	"time"
@@ -67,7 +68,7 @@ func TestWaitForInterrupt(t *testing.T) {
 	go func() {
 		time.Sleep(10 * time.Millisecond)
 		proc, _ := os.FindProcess(os.Getpid())
-		proc.Signal(os.Interrupt)
+		_ = proc.Signal(os.Interrupt)
 		done <- true
 	}()
 
@@ -96,7 +97,7 @@ func TestTracer_Start_ErrorHandling(t *testing.T) {
 		}
 	}()
 
-	err := tracer.Start(eventChan)
+	err := tracer.Start(context.Background(), eventChan)
 	if err == nil {
 		t.Log("Start returned without error (expected when collection is nil)")
 	}
@@ -198,7 +199,7 @@ func TestWaitForInterrupt_SIGTERM(t *testing.T) {
 	go func() {
 		time.Sleep(10 * time.Millisecond)
 		proc, _ := os.FindProcess(os.Getpid())
-		proc.Signal(os.Interrupt)
+		_ = proc.Signal(os.Interrupt)
 		done <- true
 	}()
 
@@ -223,7 +224,7 @@ func TestNewTracer_ErrorPaths(t *testing.T) {
 	tracer, err := NewTracer()
 	if err == nil {
 		if tracer != nil {
-			tracer.Stop()
+			_ = tracer.Stop()
 		}
 		t.Log("NewTracer returned error as expected for non-existent BPF object")
 	}
@@ -243,7 +244,7 @@ func TestTracer_Start_WithNilReader(t *testing.T) {
 		}
 	}()
 
-	err := tracer.Start(eventChan)
+	err := tracer.Start(context.Background(), eventChan)
 	if err != nil {
 		t.Logf("Start returned error as expected for nil reader: %v", err)
 	}
@@ -264,7 +265,7 @@ func TestTracer_Start_WithNilCollection(t *testing.T) {
 		}
 	}()
 
-	err := tracer.Start(eventChan)
+	err := tracer.Start(context.Background(), eventChan)
 	if err != nil {
 		t.Logf("Start returned error as expected for nil collection: %v", err)
 	}
@@ -294,20 +295,20 @@ func TestTracer_Start_WithRealEBPF(t *testing.T) {
 		t.Skipf("Skipping test - eBPF not available: %v", err)
 		return
 	}
-	defer tracer.Stop()
+	defer func() { _ = tracer.Stop() }()
 
 	eventChan := make(chan *events.Event, config.EventChannelBufferSize)
 
-	err = tracer.Start(eventChan)
+	err = tracer.Start(context.Background(), eventChan)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
 
-	tracer.AttachToCgroup("")
+	_ = tracer.AttachToCgroup("")
 
 	time.Sleep(100 * time.Millisecond)
 
-	tracer.Stop()
+	_ = tracer.Stop()
 
 	close(eventChan)
 
@@ -355,7 +356,7 @@ func TestTracer_Start_ErrorPaths(t *testing.T) {
 				}
 			}()
 
-			err := tt.tracer.Start(eventChan)
+			err := tt.tracer.Start(context.Background(), eventChan)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Start() error = %v, wantErr %v", err, tt.wantErr)
 			}

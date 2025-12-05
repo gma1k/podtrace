@@ -202,41 +202,48 @@ func HandleEvents(ch <-chan *events.Event) {
 		if e == nil {
 			continue
 		}
-		switch e.Type {
-		case events.EventConnect:
-			ExportTCPMetric(e)
+		HandleEvent(e)
+	}
+}
 
-		case events.EventTCPSend:
-			ExportRTTMetric(e)
-			ExportNetworkBandwidthMetric(e, "send")
+func HandleEvent(e *events.Event) {
+	if e == nil {
+		return
+	}
+	switch e.Type {
+	case events.EventConnect:
+		ExportTCPMetric(e)
 
-		case events.EventTCPRecv:
-			ExportRTTMetric(e)
-			ExportNetworkBandwidthMetric(e, "recv")
+	case events.EventTCPSend:
+		ExportRTTMetric(e)
+		ExportNetworkBandwidthMetric(e, "send")
 
-		case events.EventDNS:
-			ExportDNSMetric(e)
+	case events.EventTCPRecv:
+		ExportRTTMetric(e)
+		ExportNetworkBandwidthMetric(e, "recv")
 
-		case events.EventWrite:
-			ExportFileSystemMetric(e)
-			ExportFilesystemBandwidthMetric(e, "write")
+	case events.EventDNS:
+		ExportDNSMetric(e)
 
-		case events.EventRead:
-			ExportFileSystemMetric(e)
-			ExportFilesystemBandwidthMetric(e, "read")
+	case events.EventWrite:
+		ExportFileSystemMetric(e)
+		ExportFilesystemBandwidthMetric(e, "write")
 
-		case events.EventFsync:
-			ExportFileSystemMetric(e)
+	case events.EventRead:
+		ExportFileSystemMetric(e)
+		ExportFilesystemBandwidthMetric(e, "read")
 
-		case events.EventUDPSend:
-			ExportNetworkBandwidthMetric(e, "send")
+	case events.EventFsync:
+		ExportFileSystemMetric(e)
 
-		case events.EventUDPRecv:
-			ExportNetworkBandwidthMetric(e, "recv")
+	case events.EventUDPSend:
+		ExportNetworkBandwidthMetric(e, "send")
 
-		case events.EventSchedSwitch:
-			ExportSchedSwitchMetric(e)
-		}
+	case events.EventUDPRecv:
+		ExportNetworkBandwidthMetric(e, "recv")
+
+	case events.EventSchedSwitch:
+		ExportSchedSwitchMetric(e)
 	}
 }
 
@@ -393,6 +400,6 @@ func (s *Server) Shutdown() {
 	if s.server != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), config.DefaultMetricsShutdownTimeout)
 		defer cancel()
-		s.server.Shutdown(ctx)
+		_ = s.server.Shutdown(ctx)
 	}
 }
