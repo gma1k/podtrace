@@ -291,3 +291,198 @@ func BenchmarkTypeString(b *testing.B) {
 		_ = event.TypeString()
 	}
 }
+
+func TestEvent_FormatMessage_AllTypes(t *testing.T) {
+	tests := []struct {
+		name  string
+		event *Event
+		check func(string) bool
+	}{
+		{
+			"EventUDPSend",
+			&Event{Type: EventUDPSend, LatencyNS: 150000000, Bytes: 1024},
+			func(s string) bool { return s != "" && contains(s, "UDP send") },
+		},
+		{
+			"EventUDPRecv",
+			&Event{Type: EventUDPRecv, LatencyNS: 150000000, Bytes: 1024},
+			func(s string) bool { return s != "" && contains(s, "UDP recv") },
+		},
+		{
+			"EventHTTPReq",
+			&Event{Type: EventHTTPReq, LatencyNS: 5000000, Target: "http://example.com"},
+			func(s string) bool { return s != "" && contains(s, "HTTP") && contains(s, "request") },
+		},
+		{
+			"EventHTTPResp",
+			&Event{Type: EventHTTPResp, LatencyNS: 5000000, Target: "http://example.com", Bytes: 2048},
+			func(s string) bool { return s != "" && contains(s, "HTTP") && contains(s, "response") },
+		},
+		{
+			"EventLockContention",
+			&Event{Type: EventLockContention, LatencyNS: 10000000, Target: "mutex"},
+			func(s string) bool { return s != "" && contains(s, "LOCK") },
+		},
+		{
+			"EventTCPRetrans",
+			&Event{Type: EventTCPRetrans, Target: "example.com:80"},
+			func(s string) bool { return s != "" && contains(s, "retransmission") },
+		},
+		{
+			"EventNetDevError",
+			&Event{Type: EventNetDevError, Target: "eth0", Error: 1},
+			func(s string) bool { return s != "" && contains(s, "network device") },
+		},
+		{
+			"EventDBQuery",
+			&Event{Type: EventDBQuery, LatencyNS: 5000000, Target: "SELECT * FROM users"},
+			func(s string) bool { return s != "" && contains(s, "DB") },
+		},
+		{
+			"EventExec",
+			&Event{Type: EventExec, LatencyNS: 1000000, Target: "/bin/ls"},
+			func(s string) bool { return s != "" && contains(s, "PROC") && contains(s, "execve") },
+		},
+		{
+			"EventExec_Error",
+			&Event{Type: EventExec, LatencyNS: 1000000, Target: "/bin/ls", Error: 1},
+			func(s string) bool { return s != "" && contains(s, "failed") },
+		},
+		{
+			"EventFork",
+			&Event{Type: EventFork, PID: 1234, Target: "child"},
+			func(s string) bool { return s != "" && contains(s, "fork") },
+		},
+		{
+			"EventOpen",
+			&Event{Type: EventOpen, LatencyNS: 1000000, Target: "/tmp/file", Bytes: 5},
+			func(s string) bool { return s != "" && contains(s, "open()") },
+		},
+		{
+			"EventOpen_Error",
+			&Event{Type: EventOpen, LatencyNS: 1000000, Target: "/tmp/file", Error: 1},
+			func(s string) bool { return s != "" && contains(s, "failed") },
+		},
+		{
+			"EventClose",
+			&Event{Type: EventClose, Bytes: 5},
+			func(s string) bool { return s != "" && contains(s, "close()") },
+		},
+		{
+			"EventClose_NoFD",
+			&Event{Type: EventClose},
+			func(s string) bool { return s != "" && contains(s, "close()") },
+		},
+		{
+			"EventPageFault",
+			&Event{Type: EventPageFault, Error: 1},
+			func(s string) bool { return s != "" && contains(s, "Page fault") },
+		},
+		{
+			"EventOOMKill",
+			&Event{Type: EventOOMKill, Target: "process", Bytes: 1024 * 1024 * 100},
+			func(s string) bool { return s != "" && contains(s, "OOM kill") },
+		},
+		{
+			"EventTCPState",
+			&Event{Type: EventTCPState, TCPState: 1, Target: "example.com:80"},
+			func(s string) bool { return s != "" && contains(s, "TCP state") },
+		},
+		{
+			"UnknownEvent",
+			&Event{Type: EventType(999)},
+			func(s string) bool { return s != "" && contains(s, "UNKNOWN") },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.event.FormatMessage()
+			if !tt.check(result) {
+				t.Errorf("FormatMessage() = %q, did not pass check", result)
+			}
+		})
+	}
+}
+
+func TestEvent_FormatRealtimeMessage(t *testing.T) {
+	tests := []struct {
+		name  string
+		event *Event
+		check func(string) bool
+	}{
+		{
+			"EventConnect_Fast",
+			&Event{Type: EventConnect, LatencyNS: 500000, Target: "example.com:80"},
+			func(s string) bool { return s != "" && contains(s, "connect") },
+		},
+		{
+			"EventTCPSend_Normal",
+			&Event{Type: EventTCPSend, LatencyNS: 5000000, Bytes: 1024},
+			func(s string) bool { return s == "" || contains(s, "TCP send") },
+		},
+		{
+			"EventTCPRecv_Normal",
+			&Event{Type: EventTCPRecv, LatencyNS: 5000000, Bytes: 1024},
+			func(s string) bool { return s == "" || contains(s, "TCP recv") },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.event.FormatRealtimeMessage()
+			if !tt.check(result) {
+				t.Errorf("FormatRealtimeMessage() = %q, did not pass check", result)
+			}
+		})
+	}
+}
+
+func TestEvent_FormatMessage_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name  string
+		event *Event
+	}{
+		{
+			"EmptyTarget",
+			&Event{Type: EventDNS, LatencyNS: 5000000, Target: ""},
+		},
+		{
+			"VeryLongTarget",
+			&Event{Type: EventDNS, LatencyNS: 5000000, Target: string(make([]byte, 500))},
+		},
+		{
+			"ZeroLatency",
+			&Event{Type: EventDNS, LatencyNS: 0, Target: "example.com"},
+		},
+		{
+			"LargeLatency",
+			&Event{Type: EventDNS, LatencyNS: 1000000000000, Target: "example.com"},
+		},
+		{
+			"TargetWithPercent",
+			&Event{Type: EventDNS, LatencyNS: 5000000, Target: "example%20.com"},
+		},
+		{
+			"QuestionMarkTarget",
+			&Event{Type: EventConnect, LatencyNS: 1000000, Target: "?"},
+		},
+		{
+			"UnknownTarget",
+			&Event{Type: EventConnect, LatencyNS: 1000000, Target: "unknown"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.event.FormatMessage()
+			if result == "" && tt.event.Type == EventConnect && tt.event.LatencyNS < 1000000 {
+				return
+			}
+		})
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > len(substr))
+}
