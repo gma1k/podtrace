@@ -340,7 +340,7 @@ func TestRunDiagnoseMode_Timeout(t *testing.T) {
 	err := runDiagnoseMode(context.Background(), eventChan, "100ms", "/test/cgroup")
 	w.Close()
 	os.Stdout = originalStdout
-	io.Copy(io.Discard, r)
+	_, _ = io.Copy(io.Discard, r)
 
 	if err != nil {
 		t.Errorf("runDiagnoseMode returned error: %v", err)
@@ -375,7 +375,7 @@ func TestRunDiagnoseMode_WithExport(t *testing.T) {
 	err := runDiagnoseMode(context.Background(), eventChan, "100ms", "/test/cgroup")
 	w.Close()
 	os.Stdout = originalStdout
-	io.Copy(io.Discard, r)
+	_, _ = io.Copy(io.Discard, r)
 
 	if err != nil {
 		t.Errorf("runDiagnoseMode returned error: %v", err)
@@ -392,7 +392,7 @@ func TestRunDiagnoseMode_InvalidDuration(t *testing.T) {
 	err := runDiagnoseMode(context.Background(), eventChan, "invalid", "/test/cgroup")
 	w.Close()
 	os.Stdout = originalStdout
-	io.Copy(io.Discard, r)
+	_, _ = io.Copy(io.Discard, r)
 
 	if err == nil {
 		t.Error("Expected error for invalid duration")
@@ -427,7 +427,7 @@ func TestRunDiagnoseMode_WithExportFormat(t *testing.T) {
 	err := runDiagnoseMode(context.Background(), eventChan, "100ms", "/test/cgroup")
 	w.Close()
 	os.Stdout = originalStdout
-	io.Copy(io.Discard, r)
+	_, _ = io.Copy(io.Discard, r)
 
 	if err != nil {
 		t.Errorf("runDiagnoseMode returned error: %v", err)
@@ -462,7 +462,7 @@ func TestRunDiagnoseMode_WithExportFormatCSV(t *testing.T) {
 	err := runDiagnoseMode(context.Background(), eventChan, "100ms", "/test/cgroup")
 	w.Close()
 	os.Stdout = originalStdout
-	io.Copy(io.Discard, r)
+	_, _ = io.Copy(io.Discard, r)
 
 	if err != nil {
 		t.Errorf("runDiagnoseMode returned error: %v", err)

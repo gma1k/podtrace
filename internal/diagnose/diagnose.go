@@ -512,7 +512,7 @@ func (d *Diagnostician) generateMemorySection(duration time.Duration) string {
 			errorCounts[e.Error]++
 		}
 		if len(errorCounts) > 0 {
-			report += fmt.Sprintf("  Page fault error codes:\n")
+			report += "  Page fault error codes:\n"
 			for errCode, count := range errorCounts {
 				report += fmt.Sprintf("    - Error %d: %d occurrences\n", errCode, count)
 			}
@@ -529,7 +529,7 @@ func (d *Diagnostician) generateMemorySection(duration time.Duration) string {
 			if len(oomKillEvents) > 0 {
 				report += fmt.Sprintf("  Average memory per kill: %s\n", analyzer.FormatBytes(totalMem/uint64(len(oomKillEvents))))
 			}
-			report += fmt.Sprintf("  Killed processes:\n")
+			report += "  Killed processes:\n"
 			for i, e := range oomKillEvents {
 				if i >= config.MaxOOMKillsDisplay {
 					break
@@ -554,7 +554,7 @@ func (d *Diagnostician) generateIssuesSection() string {
 	}
 
 	var report string
-	report += fmt.Sprintf("Potential Issues Detected:\n")
+	report += "Potential Issues Detected:\n"
 	for _, issue := range issues {
 		report += fmt.Sprintf("  %s\n", issue)
 	}
