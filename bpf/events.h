@@ -29,6 +29,8 @@ enum event_type {
 	EVENT_FORK,
 	EVENT_OPEN,
 	EVENT_CLOSE,
+	EVENT_TLS_HANDSHAKE,
+	EVENT_TLS_ERROR,
 };
 
 struct event {

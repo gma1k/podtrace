@@ -1429,3 +1429,59 @@ func TestFindLibcViaLdSoConf_WithMusl(t *testing.T) {
 		}
 	}
 }
+
+func TestAttachTLSProbes(t *testing.T) {
+	coll := &ebpf.Collection{
+		Programs: make(map[string]*ebpf.Program),
+	}
+
+	tests := []struct {
+		name        string
+		containerID string
+	}{
+		{"empty container ID", ""},
+		{"non-empty container ID", "test-container"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			links := AttachTLSProbes(coll, tt.containerID)
+			if links != nil {
+				t.Logf("AttachTLSProbes returned %d links", len(links))
+			}
+		})
+	}
+}
+
+func TestFindTLSLibs(t *testing.T) {
+	tests := []struct {
+		name        string
+		containerID string
+	}{
+		{"empty container ID", ""},
+		{"non-empty container ID", "test-container"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			paths := findTLSLibs(tt.containerID)
+			if paths == nil {
+				t.Error("findTLSLibs should return non-nil slice")
+			}
+		})
+	}
+}
+
+func TestAttachTLSProbes_NoPrograms(t *testing.T) {
+	coll := &ebpf.Collection{
+		Programs: make(map[string]*ebpf.Program),
+	}
+
+	links := AttachTLSProbes(coll, "")
+	if links == nil {
+		t.Error("AttachTLSProbes should return non-nil slice")
+	}
+	if len(links) != 0 {
+		t.Logf("AttachTLSProbes returned %d links (expected 0 when no programs)", len(links))
+	}
+}

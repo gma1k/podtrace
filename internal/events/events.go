@@ -48,6 +48,8 @@ const (
 	EventFork
 	EventOpen
 	EventClose
+	EventTLSHandshake
+	EventTLSError
 )
 
 type Event struct {
@@ -99,6 +101,8 @@ func (e *Event) TypeString() string {
 		return "DB"
 	case EventExec, EventFork, EventOpen, EventClose:
 		return "PROC"
+	case EventTLSHandshake, EventTLSError:
+		return "TLS"
 	default:
 		return "UNKNOWN"
 	}
@@ -315,6 +319,15 @@ func (e *Event) FormatMessage() string {
 		}
 		return "[FS] close()"
 
+	case EventTLSHandshake:
+		if e.Error != 0 {
+			return fmt.Sprintf("[TLS] handshake failed: error %d (%.2fms)", e.Error, latencyMs)
+		}
+		return fmt.Sprintf("[TLS] handshake completed (%.2fms)", latencyMs)
+
+	case EventTLSError:
+		return fmt.Sprintf("[TLS] error: %d", e.Error)
+
 	default:
 		return fmt.Sprintf("[UNKNOWN] event type %d", e.Type)
 	}
@@ -504,6 +517,15 @@ func (e *Event) FormatRealtimeMessage() string {
 			return fmt.Sprintf("[FS] close() fd=%d", fd)
 		}
 		return "[FS] close()"
+
+	case EventTLSHandshake:
+		if e.Error != 0 {
+			return fmt.Sprintf("[TLS] handshake failed: error %d (%.2fms)", e.Error, latencyMs)
+		}
+		return fmt.Sprintf("[TLS] handshake completed (%.2fms)", latencyMs)
+
+	case EventTLSError:
+		return fmt.Sprintf("[TLS] error: %d", e.Error)
 
 	default:
 		return fmt.Sprintf("[UNKNOWN] event type %d", e.Type)

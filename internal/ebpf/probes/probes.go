@@ -755,3 +755,375 @@ func FindLibcInContainer(containerID string) []string {
 
 	return paths
 }
+
+func findTLSLibsViaProcessMaps(pid uint32, libPatterns []string) []string {
+	var paths []string
+	mapsPath := fmt.Sprintf("%s/%d/maps", config.ProcBasePath, pid)
+	data, err := os.ReadFile(mapsPath)
+	if err != nil {
+		return paths
+	}
+
+	for _, line := range strings.Split(string(data), "\n") {
+		for _, pattern := range libPatterns {
+			if strings.Contains(line, pattern) {
+				parts := strings.Fields(line)
+				if len(parts) >= 6 {
+					path := parts[5]
+					if info, err := os.Stat(path); err == nil && !info.IsDir() {
+						paths = append(paths, path)
+					}
+				}
+			}
+		}
+	}
+	return paths
+}
+
+func findTLSLibsInContainer(containerID string, libPatterns []string) []string {
+	var paths []string
+
+	if pid := findContainerProcess(containerID); pid > 0 {
+		if foundPaths := findTLSLibsViaProcessMaps(pid, libPatterns); len(foundPaths) > 0 {
+			paths = append(paths, foundPaths...)
+		}
+	}
+
+	rootfsPaths := []string{
+		config.GetDockerContainerRootfs(containerID),
+	}
+
+	if matches, err := filepath.Glob(config.GetContainerdOverlayPattern()); err == nil {
+		for _, match := range matches {
+			if strings.Contains(match, containerID) || filepath.Base(filepath.Dir(match)) == containerID {
+				rootfsPaths = append(rootfsPaths, match)
+			}
+		}
+	}
+
+	if matches, err := filepath.Glob(config.GetContainerdNativePattern()); err == nil {
+		for _, match := range matches {
+			if strings.Contains(match, containerID) || filepath.Base(filepath.Dir(match)) == containerID {
+				rootfsPaths = append(rootfsPaths, match)
+			}
+		}
+	}
+
+	libPatternsLower := make([]string, len(libPatterns))
+	for i, p := range libPatterns {
+		libPatternsLower[i] = strings.ToLower(p)
+	}
+
+	for _, rootfs := range rootfsPaths {
+		if _, err := os.Stat(rootfs); err == nil {
+			archPaths := getArchitectureDBPaths(libPatterns)
+			for _, basePath := range archPaths {
+				path := filepath.Join(rootfs, strings.TrimPrefix(basePath, "/"))
+				if info, err := os.Stat(path); err == nil && !info.IsDir() {
+					paths = append(paths, path)
+				}
+			}
+			if err := filepath.Walk(rootfs, func(path string, info os.FileInfo, err error) error {
+				if err != nil || info.IsDir() {
+					return nil
+				}
+				baseName := strings.ToLower(filepath.Base(path))
+				for _, pattern := range libPatternsLower {
+					if strings.Contains(baseName, pattern) {
+						paths = append(paths, path)
+						return nil
+					}
+				}
+				return nil
+			}); err != nil {
+				continue
+			}
+		}
+	}
+
+	return paths
+}
+
+func findTLSLibsViaLdconfig(libPatterns []string) []string {
+	var paths []string
+	cmd := exec.Command("ldconfig", "-p")
+	output, err := cmd.Output()
+	if err != nil {
+		return paths
+	}
+
+	libPatternsLower := make([]string, len(libPatterns))
+	for i, p := range libPatterns {
+		libPatternsLower[i] = strings.ToLower(p)
+	}
+
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		lineLower := strings.ToLower(line)
+		for _, pattern := range libPatternsLower {
+			if strings.Contains(lineLower, pattern) {
+				parts := strings.Fields(line)
+				for i, part := range parts {
+					if part == "=>" && i+1 < len(parts) {
+						path := strings.TrimSpace(parts[i+1])
+						if info, err := os.Stat(path); err == nil && !info.IsDir() {
+							paths = append(paths, path)
+						}
+					}
+				}
+			}
+		}
+	}
+	return paths
+}
+
+func findTLSLibsViaLdSoConf(libPatterns []string) []string {
+	var paths []string
+	searchPaths := config.GetDefaultLibSearchPaths()
+
+	if data, err := os.ReadFile(config.GetLdSoConfPath()); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "#") {
+				searchPaths = append(searchPaths, line)
+			}
+		}
+	}
+
+	if matches, err := filepath.Glob(config.GetLdSoConfDPattern()); err == nil {
+		for _, confFile := range matches {
+			if data, err := os.ReadFile(confFile); err == nil {
+				for _, line := range strings.Split(string(data), "\n") {
+					line = strings.TrimSpace(line)
+					if line != "" && !strings.HasPrefix(line, "#") {
+						searchPaths = append(searchPaths, line)
+					}
+				}
+			}
+		}
+	}
+
+	libPatternsLower := make([]string, len(libPatterns))
+	for i, p := range libPatterns {
+		libPatternsLower[i] = strings.ToLower(p)
+	}
+
+	for _, searchPath := range searchPaths {
+		err := filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() {
+				return nil
+			}
+			baseName := strings.ToLower(filepath.Base(path))
+			for _, pattern := range libPatternsLower {
+				if strings.Contains(baseName, pattern) {
+					paths = append(paths, path)
+					return nil
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			continue
+		}
+	}
+	return paths
+}
+
+func findTLSLibs(containerID string) []string {
+	var paths []string
+	seen := make(map[string]bool)
+
+	libPatterns := []string{"libssl", "libgnutls", "libnss", "libmbedtls", "libmbedx509", "ssl"}
+
+	if containerID != "" {
+		containerPaths := findTLSLibsInContainer(containerID, libPatterns)
+		for _, path := range containerPaths {
+			if !seen[path] {
+				paths = append(paths, path)
+				seen[path] = true
+			}
+		}
+	}
+
+	ldconfigPaths := findTLSLibsViaLdconfig(libPatterns)
+	for _, path := range ldconfigPaths {
+		if !seen[path] {
+			paths = append(paths, path)
+			seen[path] = true
+		}
+	}
+
+	ldSoConfPaths := findTLSLibsViaLdSoConf(libPatterns)
+	for _, path := range ldSoConfPaths {
+		if !seen[path] {
+			paths = append(paths, path)
+			seen[path] = true
+		}
+	}
+
+	archPaths := getArchitectureTLSPaths(libPatterns)
+	for _, path := range archPaths {
+		if !seen[path] {
+			if info, err := os.Stat(path); err == nil && !info.IsDir() {
+				paths = append(paths, path)
+				seen[path] = true
+			}
+		}
+	}
+
+	commonLibPaths := []string{
+		"/usr/lib64",
+		"/usr/lib",
+		"/lib64",
+		"/lib",
+		"/usr/local/lib64",
+		"/usr/local/lib",
+	}
+
+	for _, libPath := range commonLibPaths {
+		if _, err := os.Stat(libPath); err != nil {
+			continue
+		}
+		err := filepath.Walk(libPath, func(walkPath string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() {
+				return nil
+			}
+			baseName := strings.ToLower(filepath.Base(walkPath))
+			for _, pattern := range libPatterns {
+				if strings.Contains(baseName, strings.ToLower(pattern)) {
+					if !seen[walkPath] {
+						paths = append(paths, walkPath)
+						seen[walkPath] = true
+					}
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			continue
+		}
+	}
+
+	return paths
+}
+
+func getArchitectureTLSPaths(libPatterns []string) []string {
+	var paths []string
+	arch := runtime.GOARCH
+
+	archSuffixes := map[string][]string{
+		"amd64":   {"x86_64-linux-gnu", "x86_64"},
+		"arm64":   {"aarch64-linux-gnu", "aarch64"},
+		"riscv64": {"riscv64-linux-gnu", "riscv64"},
+		"ppc64le": {"powerpc64le-linux-gnu", "ppc64le"},
+		"s390x":   {"s390x-linux-gnu", "s390x"},
+		"arm":     {"arm-linux-gnueabihf", "arm-linux-gnueabi"},
+		"386":     {"i386-linux-gnu", "i686-linux-gnu"},
+		"mips":    {"mips-linux-gnu", "mipsel-linux-gnu"},
+		"mips64":  {"mips64-linux-gnuabi64", "mips64el-linux-gnuabi64"},
+	}
+
+	if suffixes, ok := archSuffixes[arch]; ok {
+		for _, suffix := range suffixes {
+			basePaths := []string{
+				fmt.Sprintf("/usr/lib/%s", suffix),
+				fmt.Sprintf("/lib/%s", suffix),
+			}
+			for _, basePath := range basePaths {
+				if _, err := os.Stat(basePath); err == nil {
+					for _, pattern := range libPatterns {
+						err := filepath.Walk(basePath, func(walkPath string, info os.FileInfo, err error) error {
+							if err != nil || info.IsDir() {
+								return nil
+							}
+							baseName := strings.ToLower(filepath.Base(walkPath))
+							if strings.Contains(baseName, strings.ToLower(pattern)) {
+								paths = append(paths, walkPath)
+							}
+							return nil
+						})
+						if err != nil {
+							continue
+						}
+					}
+				}
+			}
+		}
+	}
+
+	commonPaths := []string{
+		"/usr/lib64",
+		"/usr/lib",
+		"/lib64",
+		"/lib",
+	}
+
+	for _, basePath := range commonPaths {
+		if _, err := os.Stat(basePath); err == nil {
+			for _, pattern := range libPatterns {
+				err := filepath.Walk(basePath, func(walkPath string, info os.FileInfo, err error) error {
+					if err != nil || info.IsDir() {
+						return nil
+					}
+					baseName := strings.ToLower(filepath.Base(walkPath))
+					if strings.Contains(baseName, strings.ToLower(pattern)) {
+						paths = append(paths, walkPath)
+					}
+					return nil
+				})
+				if err != nil {
+					continue
+				}
+			}
+		}
+	}
+
+	return paths
+}
+
+func AttachTLSProbes(coll *ebpf.Collection, containerID string) []link.Link {
+	var links []link.Link
+
+	tlsLibPaths := findTLSLibs(containerID)
+	tlsSymbols := map[string][]string{
+		"SSL_connect":           {"uprobe_SSL_connect", "uretprobe_SSL_connect"},
+		"SSL_accept":            {"uprobe_SSL_accept", "uretprobe_SSL_accept"},
+		"SSL_do_handshake":      {"uprobe_SSL_do_handshake", "uretprobe_SSL_do_handshake"},
+		"gnutls_handshake":      {"uprobe_gnutls_handshake", "uretprobe_gnutls_handshake"},
+		"mbedtls_ssl_handshake": {"uprobe_mbedtls_ssl_handshake", "uretprobe_mbedtls_ssl_handshake"},
+	}
+
+	for _, libPath := range tlsLibPaths {
+		info, err := os.Stat(libPath)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		exe, err := link.OpenExecutable(libPath)
+		if err != nil {
+			continue
+		}
+
+		for symbol, progNames := range tlsSymbols {
+			if len(progNames) < 2 {
+				continue
+			}
+			uprobeProg := coll.Programs[progNames[0]]
+			uretprobeProg := coll.Programs[progNames[1]]
+
+			if uprobeProg != nil {
+				l, err := exe.Uprobe(symbol, uprobeProg, nil)
+				if err == nil {
+					links = append(links, l)
+				}
+			}
+			if uretprobeProg != nil {
+				l, err := exe.Uretprobe(symbol, uretprobeProg, nil)
+				if err == nil {
+					links = append(links, l)
+				}
+			}
+		}
+	}
+
+	return links
+}

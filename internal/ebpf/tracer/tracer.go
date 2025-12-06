@@ -132,6 +132,10 @@ func (t *Tracer) SetContainerID(containerID string) error {
 	if len(dbLinks) > 0 {
 		t.links = append(t.links, dbLinks...)
 	}
+	tlsLinks := probes.AttachTLSProbes(t.collection, containerID)
+	if len(tlsLinks) > 0 {
+		t.links = append(t.links, tlsLinks...)
+	}
 	return nil
 }
 

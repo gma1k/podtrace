@@ -167,6 +167,31 @@ var (
 		},
 		[]string{"event_type", "error_code"},
 	)
+
+	tlsGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "podtrace_tls_handshake_latency_latest_seconds",
+			Help: "Latest TLS handshake latency per process.",
+		},
+		[]string{"type", "process_name", "namespace"},
+	)
+
+	tlsHistogram = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "podtrace_tls_handshake_latency_seconds",
+			Help:    "Distribution of TLS handshake latencies per process.",
+			Buckets: prometheus.ExponentialBuckets(0.0001, 2, 20),
+		},
+		[]string{"type", "process_name", "namespace"},
+	)
+
+	tlsHandshakesCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "podtrace_tls_handshakes_total",
+			Help: "Total number of TLS handshakes.",
+		},
+		[]string{"type", "process_name", "namespace"},
+	)
 )
 
 func init() {
@@ -190,6 +215,9 @@ func init() {
 	prometheus.MustRegister(pidCacheMissesCounter)
 	prometheus.MustRegister(eventProcessingLatencyHistogram)
 	prometheus.MustRegister(errorRateCounter)
+	prometheus.MustRegister(tlsGauge)
+	prometheus.MustRegister(tlsHistogram)
+	prometheus.MustRegister(tlsHandshakesCounter)
 }
 
 func HandleEvents(ch <-chan *events.Event) {
@@ -252,6 +280,9 @@ func HandleEventWithContext(e *events.Event, k8sContext map[string]interface{}) 
 
 	case events.EventSchedSwitch:
 		ExportSchedSwitchMetricWithContext(e, namespace)
+
+	case events.EventTLSHandshake:
+		ExportTLSMetricWithContext(e, namespace)
 	}
 }
 
@@ -443,4 +474,15 @@ func (s *Server) Shutdown() {
 		defer cancel()
 		_ = s.server.Shutdown(ctx)
 	}
+}
+
+func ExportTLSMetric(e *events.Event) {
+	ExportTLSMetricWithContext(e, "")
+}
+
+func ExportTLSMetricWithContext(e *events.Event, namespace string) {
+	latencySec := float64(e.LatencyNS) / 1e9
+	tlsGauge.WithLabelValues(e.TypeString(), e.ProcessName, namespace).Set(latencySec)
+	tlsHistogram.WithLabelValues(e.TypeString(), e.ProcessName, namespace).Observe(latencySec)
+	tlsHandshakesCounter.WithLabelValues(e.TypeString(), e.ProcessName, namespace).Inc()
 }
