@@ -1420,3 +1420,45 @@ func TestEvent_FormatRealtimeMessage_TCPStateEmptyTarget(t *testing.T) {
 		t.Errorf("Expected 'unknown' as default target, got %q", result)
 	}
 }
+
+func TestEventTLSHandshake(t *testing.T) {
+	e := &Event{
+		Type:      EventTLSHandshake,
+		LatencyNS: 100000000,
+		Error:     0,
+	}
+
+	if e.TypeString() != "TLS" {
+		t.Errorf("Expected TypeString() to return 'TLS', got %q", e.TypeString())
+	}
+
+	msg := e.FormatMessage()
+	if msg == "" {
+		t.Error("Expected non-empty message for TLS handshake event")
+	}
+	if !strings.Contains(msg, "[TLS]") {
+		t.Errorf("Expected message to contain '[TLS]', got %q", msg)
+	}
+}
+
+func TestEventTLSError(t *testing.T) {
+	e := &Event{
+		Type:  EventTLSError,
+		Error: -1,
+	}
+
+	if e.TypeString() != "TLS" {
+		t.Errorf("Expected TypeString() to return 'TLS', got %q", e.TypeString())
+	}
+
+	msg := e.FormatMessage()
+	if msg == "" {
+		t.Error("Expected non-empty message for TLS error event")
+	}
+	if !strings.Contains(msg, "[TLS]") {
+		t.Errorf("Expected message to contain '[TLS]', got %q", msg)
+	}
+	if !strings.Contains(msg, "error") {
+		t.Errorf("Expected message to contain 'error', got %q", msg)
+	}
+}

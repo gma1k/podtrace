@@ -752,3 +752,197 @@ int uretprobe_mysql_real_query(struct pt_regs *ctx) {
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
+SEC("uprobe/SSL_connect")
+int uprobe_SSL_connect(struct pt_regs *ctx) {
+	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 tid = (u32)bpf_get_current_pid_tgid();
+	u64 key = get_key(pid, tid);
+	u64 ts = bpf_ktime_get_ns();
+	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
+	return 0;
+}
+
+SEC("uretprobe/SSL_connect")
+int uretprobe_SSL_connect(struct pt_regs *ctx) {
+	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 tid = (u32)bpf_get_current_pid_tgid();
+	u64 key = get_key(pid, tid);
+	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
+	if (!start_ts) {
+		return 0;
+	}
+	struct event *e = get_event_buf();
+	if (!e) {
+		bpf_map_delete_elem(&start_times, &key);
+		return 0;
+	}
+	e->timestamp = bpf_ktime_get_ns();
+	e->pid = pid;
+	e->type = EVENT_TLS_HANDSHAKE;
+	e->latency_ns = calc_latency(*start_ts);
+	long ret = PT_REGS_RC(ctx);
+	e->error = ret <= 0 ? ret : 0;
+	e->bytes = 0;
+	e->tcp_state = 0;
+	e->target[0] = '\0';
+	capture_user_stack(ctx, pid, tid, e);
+	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	bpf_map_delete_elem(&start_times, &key);
+	return 0;
+}
+
+SEC("uprobe/SSL_accept")
+int uprobe_SSL_accept(struct pt_regs *ctx) {
+	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 tid = (u32)bpf_get_current_pid_tgid();
+	u64 key = get_key(pid, tid);
+	u64 ts = bpf_ktime_get_ns();
+	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
+	return 0;
+}
+
+SEC("uretprobe/SSL_accept")
+int uretprobe_SSL_accept(struct pt_regs *ctx) {
+	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 tid = (u32)bpf_get_current_pid_tgid();
+	u64 key = get_key(pid, tid);
+	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
+	if (!start_ts) {
+		return 0;
+	}
+	struct event *e = get_event_buf();
+	if (!e) {
+		bpf_map_delete_elem(&start_times, &key);
+		return 0;
+	}
+	e->timestamp = bpf_ktime_get_ns();
+	e->pid = pid;
+	e->type = EVENT_TLS_HANDSHAKE;
+	e->latency_ns = calc_latency(*start_ts);
+	long ret = PT_REGS_RC(ctx);
+	e->error = ret <= 0 ? ret : 0;
+	e->bytes = 0;
+	e->tcp_state = 0;
+	e->target[0] = '\0';
+	capture_user_stack(ctx, pid, tid, e);
+	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	bpf_map_delete_elem(&start_times, &key);
+	return 0;
+}
+
+SEC("uprobe/SSL_do_handshake")
+int uprobe_SSL_do_handshake(struct pt_regs *ctx) {
+	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 tid = (u32)bpf_get_current_pid_tgid();
+	u64 key = get_key(pid, tid);
+	u64 ts = bpf_ktime_get_ns();
+	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
+	return 0;
+}
+
+SEC("uretprobe/SSL_do_handshake")
+int uretprobe_SSL_do_handshake(struct pt_regs *ctx) {
+	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 tid = (u32)bpf_get_current_pid_tgid();
+	u64 key = get_key(pid, tid);
+	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
+	if (!start_ts) {
+		return 0;
+	}
+	struct event *e = get_event_buf();
+	if (!e) {
+		bpf_map_delete_elem(&start_times, &key);
+		return 0;
+	}
+	e->timestamp = bpf_ktime_get_ns();
+	e->pid = pid;
+	e->type = EVENT_TLS_HANDSHAKE;
+	e->latency_ns = calc_latency(*start_ts);
+	long ret = PT_REGS_RC(ctx);
+	e->error = ret <= 0 ? ret : 0;
+	e->bytes = 0;
+	e->tcp_state = 0;
+	e->target[0] = '\0';
+	capture_user_stack(ctx, pid, tid, e);
+	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	bpf_map_delete_elem(&start_times, &key);
+	return 0;
+}
+
+SEC("uprobe/gnutls_handshake")
+int uprobe_gnutls_handshake(struct pt_regs *ctx) {
+	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 tid = (u32)bpf_get_current_pid_tgid();
+	u64 key = get_key(pid, tid);
+	u64 ts = bpf_ktime_get_ns();
+	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
+	return 0;
+}
+
+SEC("uretprobe/gnutls_handshake")
+int uretprobe_gnutls_handshake(struct pt_regs *ctx) {
+	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 tid = (u32)bpf_get_current_pid_tgid();
+	u64 key = get_key(pid, tid);
+	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
+	if (!start_ts) {
+		return 0;
+	}
+	struct event *e = get_event_buf();
+	if (!e) {
+		bpf_map_delete_elem(&start_times, &key);
+		return 0;
+	}
+	e->timestamp = bpf_ktime_get_ns();
+	e->pid = pid;
+	e->type = EVENT_TLS_HANDSHAKE;
+	e->latency_ns = calc_latency(*start_ts);
+	long ret = PT_REGS_RC(ctx);
+	e->error = ret < 0 ? ret : 0;
+	e->bytes = 0;
+	e->tcp_state = 0;
+	e->target[0] = '\0';
+	capture_user_stack(ctx, pid, tid, e);
+	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	bpf_map_delete_elem(&start_times, &key);
+	return 0;
+}
+
+SEC("uprobe/mbedtls_ssl_handshake")
+int uprobe_mbedtls_ssl_handshake(struct pt_regs *ctx) {
+	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 tid = (u32)bpf_get_current_pid_tgid();
+	u64 key = get_key(pid, tid);
+	u64 ts = bpf_ktime_get_ns();
+	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
+	return 0;
+}
+
+SEC("uretprobe/mbedtls_ssl_handshake")
+int uretprobe_mbedtls_ssl_handshake(struct pt_regs *ctx) {
+	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 tid = (u32)bpf_get_current_pid_tgid();
+	u64 key = get_key(pid, tid);
+	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
+	if (!start_ts) {
+		return 0;
+	}
+	struct event *e = get_event_buf();
+	if (!e) {
+		bpf_map_delete_elem(&start_times, &key);
+		return 0;
+	}
+	e->timestamp = bpf_ktime_get_ns();
+	e->pid = pid;
+	e->type = EVENT_TLS_HANDSHAKE;
+	e->latency_ns = calc_latency(*start_ts);
+	long ret = PT_REGS_RC(ctx);
+	e->error = ret < 0 ? ret : 0;
+	e->bytes = 0;
+	e->tcp_state = 0;
+	e->target[0] = '\0';
+	capture_user_stack(ctx, pid, tid, e);
+	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	bpf_map_delete_elem(&start_times, &key);
+	return 0;
+}
