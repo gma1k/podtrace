@@ -48,7 +48,8 @@ A simple but powerful eBPF-based diagnostic tool for Kubernetes applications. Pr
 - **Lock Contention Tracking**: Monitors futex and pthread mutex waits with timing and hot lock identification
 - **Syscall Tracing**: Tracks process lifecycle via execve, fork/clone, open/openat, and close syscalls with file descriptor leak detection
 - **Network Reliability**: Monitors TCP retransmissions and network device errors for network quality diagnostics
-- **Database Query Tracing**: Tracks PostgreSQL and MySQL query execution patterns and latency (query patterns sanitized for security)
+- **Database Query Tracing**: Tracks PostgreSQL and MySQL query execution patterns and latency
+- **Error Correlation with Root Cause Analysis**: Correlates errors with operations and Kubernetes context
 
 ### Diagnostics
 - **Diagnose Mode**: Collects events for a specified duration and generates a comprehensive summary report
