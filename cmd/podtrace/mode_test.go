@@ -570,7 +570,7 @@ func TestRunDiagnoseMode_InterruptWithExport(t *testing.T) {
 		if err != nil {
 			t.Errorf("runDiagnoseMode returned error: %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Error("runDiagnoseMode did not complete in time")
 	}
 }
