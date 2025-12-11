@@ -21,7 +21,7 @@ check_binary_exists() {
 }
 
 check_root() {
-	if [[ $EUID -ne 0 ]]; then
+	if [[ ${EUID} -ne 0 ]]; then
 		echo "Error: This script must be run as root (use sudo)" >&2
 		exit 1
 	fi
