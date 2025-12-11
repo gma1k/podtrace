@@ -264,11 +264,22 @@ func AttachDBProbes(coll *ebpf.Collection, containerID string) []link.Link {
 	return links
 }
 
+type dbProbeConfig struct {
+	name           string
+	libPatterns    []string
+	acquireSymbols []string
+	releaseSymbol  string
+	exhaustSymbol  string
+	acquireProg    string
+	releaseProg    string
+	exhaustProg    string
+	exhaustRetProg string
+}
+
 func AttachPoolProbes(coll *ebpf.Collection, containerID string) []link.Link {
 	var links []link.Link
 
-	var sqlitePaths []string
-
+	var binaryPaths []string
 	if pid := findContainerProcess(containerID); pid > 0 {
 		logger.Debug("Found container process", zap.Uint32("pid", pid), zap.String("containerID", containerID))
 
@@ -281,7 +292,7 @@ func AttachPoolProbes(coll *ebpf.Collection, containerID string) []link.Link {
 		}
 
 		if binaryPath != "" {
-			sqlitePaths = append([]string{binaryPath}, sqlitePaths...)
+			binaryPaths = append(binaryPaths, binaryPath)
 			logger.Debug("Found Go binary for pool monitoring", zap.String("path", binaryPath), zap.Uint32("pid", pid))
 		} else {
 			logger.Debug("Go binary not found for process", zap.Uint32("pid", pid))
@@ -290,70 +301,117 @@ func AttachPoolProbes(coll *ebpf.Collection, containerID string) []link.Link {
 		logger.Debug("Container process not found", zap.String("containerID", containerID))
 	}
 
-	libPaths := findDBLibs(containerID, []string{"libsqlite3.so.0", "libsqlite3.so", "sqlite3.so"})
-	sqlitePaths = append(sqlitePaths, libPaths...)
-
-	if len(sqlitePaths) == 0 {
-		logger.Debug("No SQLite libraries or binaries found for pool monitoring", zap.String("containerID", containerID))
-		return links
+	dbConfigs := []dbProbeConfig{
+		{
+			name:           "sqlite",
+			libPatterns:    []string{"libsqlite3.so.0", "libsqlite3.so", "sqlite3.so"},
+			acquireSymbols: []string{"sqlite3_prepare_v2", "sqlite3_prepare", "sqlite3_prepare16", "sqlite3_prepare16_v2"},
+			releaseSymbol:  "sqlite3_finalize",
+			exhaustSymbol:  "sqlite3_step",
+			acquireProg:    "uprobe_sqlite3_prepare_v2",
+			releaseProg:    "uretprobe_sqlite3_finalize",
+			exhaustProg:    "uprobe_sqlite3_step",
+			exhaustRetProg: "uretprobe_sqlite3_step",
+		},
+		{
+			name:           "postgresql",
+			libPatterns:    []string{"libpq.so.5", "libpq.so"},
+			acquireSymbols: []string{"PQconnectStart"},
+			releaseSymbol:  "PQfinish",
+			exhaustSymbol:  "PQexec",
+			acquireProg:    "uprobe_PQconnectStart",
+			releaseProg:    "uretprobe_PQfinish",
+			exhaustProg:    "uprobe_PQexec_pool",
+			exhaustRetProg: "",
+		},
+		{
+			name:           "mysql",
+			libPatterns:    []string{"libmysqlclient.so.21", "libmysqlclient.so"},
+			acquireSymbols: []string{"mysql_real_connect"},
+			releaseSymbol:  "mysql_close",
+			exhaustSymbol:  "mysql_real_query",
+			acquireProg:    "uprobe_mysql_real_connect",
+			releaseProg:    "uretprobe_mysql_close",
+			exhaustProg:    "uprobe_mysql_real_query_pool",
+			exhaustRetProg: "",
+		},
 	}
 
-	for _, path := range sqlitePaths {
-		logger.Debug("Attaching pool probes", zap.String("path", path))
-		info, err := os.Stat(path)
-		if err != nil || info.IsDir() {
-			continue
-		}
-		exe, err := link.OpenExecutable(path)
-		if err != nil {
-			logger.Debug("Failed to open executable for pool probes", zap.String("path", path), zap.Error(err))
+	for _, dbConfig := range dbConfigs {
+		var dbPaths []string
+		dbPaths = append(dbPaths, binaryPaths...)
+		libPaths := findDBLibs(containerID, dbConfig.libPatterns)
+		dbPaths = append(dbPaths, libPaths...)
+
+		if len(dbPaths) == 0 {
+			logger.Debug("No libraries found for database", zap.String("database", dbConfig.name), zap.String("containerID", containerID))
 			continue
 		}
 
-		symbols := []string{"sqlite3_prepare_v2", "sqlite3_prepare", "sqlite3_prepare16", "sqlite3_prepare16_v2"}
-		for _, symbol := range symbols {
-			if prog := coll.Programs["uprobe_sqlite3_prepare_v2"]; prog != nil {
-				l, err := exe.Uprobe(symbol, prog, nil)
-				if err == nil {
-					links = append(links, l)
-					logger.Debug("Attached pool acquire probe", zap.String("symbol", symbol), zap.String("path", path))
-					break
+		for _, path := range dbPaths {
+			logger.Debug("Attaching pool probes", zap.String("database", dbConfig.name), zap.String("path", path))
+			info, err := os.Stat(path)
+			if err != nil || info.IsDir() {
+				continue
+			}
+			exe, err := link.OpenExecutable(path)
+			if err != nil {
+				logger.Debug("Failed to open executable for pool probes", zap.String("database", dbConfig.name), zap.String("path", path), zap.Error(err))
+				continue
+			}
+
+			for _, symbol := range dbConfig.acquireSymbols {
+				if prog := coll.Programs[dbConfig.acquireProg]; prog != nil {
+					l, err := exe.Uprobe(symbol, prog, nil)
+					if err == nil {
+						links = append(links, l)
+						logger.Debug("Attached pool acquire probe", zap.String("database", dbConfig.name), zap.String("symbol", symbol), zap.String("path", path))
+						break
+					}
+				}
+			}
+
+			if dbConfig.releaseProg != "" && dbConfig.releaseSymbol != "" {
+				if prog := coll.Programs[dbConfig.releaseProg]; prog != nil {
+					l, err := exe.Uretprobe(dbConfig.releaseSymbol, prog, nil)
+					if err == nil {
+						links = append(links, l)
+						logger.Debug("Attached pool release probe", zap.String("database", dbConfig.name), zap.String("path", path))
+					} else if !strings.Contains(err.Error(), fmt.Sprintf("symbol %s not found", dbConfig.releaseSymbol)) {
+						logger.Debug("Pool release probe unavailable", zap.String("database", dbConfig.name), zap.String("path", path), zap.Error(err))
+					}
+				}
+			}
+
+			if dbConfig.exhaustProg != "" && dbConfig.exhaustSymbol != "" {
+				if prog := coll.Programs[dbConfig.exhaustProg]; prog != nil {
+					l, err := exe.Uprobe(dbConfig.exhaustSymbol, prog, nil)
+					if err == nil {
+						links = append(links, l)
+						logger.Debug("Attached pool exhaustion probe", zap.String("database", dbConfig.name), zap.String("path", path))
+					} else if !strings.Contains(err.Error(), fmt.Sprintf("symbol %s not found", dbConfig.exhaustSymbol)) {
+						logger.Debug("Pool exhaustion probe unavailable", zap.String("database", dbConfig.name), zap.String("path", path), zap.Error(err))
+					}
+				}
+			}
+
+			if dbConfig.exhaustRetProg != "" && dbConfig.exhaustSymbol != "" {
+				if prog := coll.Programs[dbConfig.exhaustRetProg]; prog != nil {
+					l, err := exe.Uretprobe(dbConfig.exhaustSymbol, prog, nil)
+					if err == nil {
+						links = append(links, l)
+					} else if !strings.Contains(err.Error(), fmt.Sprintf("symbol %s not found", dbConfig.exhaustSymbol)) {
+						logger.Debug("Pool exhaustion retprobe unavailable", zap.String("database", dbConfig.name), zap.String("path", path), zap.Error(err))
+					}
 				}
 			}
 		}
+	}
 
-		if prog := coll.Programs["uretprobe_sqlite3_finalize"]; prog != nil {
-			l, err := exe.Uretprobe("sqlite3_finalize", prog, nil)
-			if err == nil {
-				links = append(links, l)
-				logger.Debug("Attached pool release probe", zap.String("path", path))
-			} else if !strings.Contains(err.Error(), "symbol sqlite3_finalize not found") {
-				logger.Debug("SQLite finalize uretprobe unavailable", zap.String("path", path), zap.Error(err))
-			}
-		}
-
-		if prog := coll.Programs["uprobe_sqlite3_step"]; prog != nil {
-			l, err := exe.Uprobe("sqlite3_step", prog, nil)
-			if err == nil {
-				links = append(links, l)
-				logger.Debug("Attached pool exhaustion probe (step)", zap.String("path", path))
-			} else if !strings.Contains(err.Error(), "symbol sqlite3_step not found") {
-				logger.Debug("SQLite step uprobe unavailable", zap.String("path", path), zap.Error(err))
-			}
-		}
-
-		if prog := coll.Programs["uretprobe_sqlite3_step"]; prog != nil {
-			l, err := exe.Uretprobe("sqlite3_step", prog, nil)
-			if err == nil {
-				links = append(links, l)
-			} else if !strings.Contains(err.Error(), "symbol sqlite3_step not found") {
-				logger.Debug("SQLite step uretprobe unavailable", zap.String("path", path), zap.Error(err))
-			}
-		}
-
-		if len(links) > 0 {
-			logger.Debug("Pool monitoring probes attached", zap.String("path", path), zap.Int("links", len(links)))
-		}
+	if len(links) > 0 {
+		logger.Debug("Pool monitoring probes attached", zap.Int("total_links", len(links)), zap.String("containerID", containerID))
+	} else {
+		logger.Debug("No pool monitoring probes attached", zap.String("containerID", containerID))
 	}
 
 	return links
