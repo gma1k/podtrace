@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -29,7 +30,8 @@ func NewWebhookSender(webhookURL string, timeout time.Duration) (*WebhookSender,
 	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
 		return nil, fmt.Errorf("webhook URL must use http or https scheme")
 	}
-	if !strings.HasPrefix(parsedURL.Host, "localhost") && !strings.HasPrefix(parsedURL.Host, "127.0.0.1") {
+	host := strings.ToLower(parsedURL.Hostname())
+	if host != "localhost" && host != "127.0.0.1" && host != "::1" {
 		if parsedURL.Scheme == "http" {
 			return nil, fmt.Errorf("non-localhost URLs must use https")
 		}
@@ -73,7 +75,8 @@ func (w *WebhookSender) Send(ctx context.Context, alert *Alert) error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "podtrace/1.0")
+	userAgent := getVersion()
+	req.Header.Set("User-Agent", userAgent)
 	resp, err := w.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
@@ -93,3 +96,10 @@ func (w *WebhookSender) Name() string {
 	return "webhook"
 }
 
+func getVersion() string {
+	version := os.Getenv("PODTRACE_VERSION")
+	if version == "" {
+		version = "unknown"
+	}
+	return "podtrace/" + version
+}

@@ -680,13 +680,7 @@ func findGoBinaryInContainer(containerID string, pid uint32) string {
 		}
 	}
 
-	commonPaths := []string{
-		"/app/pool-test-app",
-		"/app/main",
-		"/app/app",
-		"/usr/local/bin/app",
-		"/bin/app",
-	}
+	commonPaths := config.GetCommonBinarySearchPaths()
 
 	for _, relPath := range commonPaths {
 		hostPath := filepath.Join(procRootPath, strings.TrimPrefix(relPath, "/"))
@@ -696,8 +690,9 @@ func findGoBinaryInContainer(containerID string, pid uint32) string {
 		}
 	}
 
-	rootfsPaths := []string{
-		config.GetDockerContainerRootfs(containerID),
+	rootfsPaths := []string{}
+	if dockerRootfs, err := config.GetDockerContainerRootfs(containerID); err == nil {
+		rootfsPaths = append(rootfsPaths, dockerRootfs)
 	}
 
 	if matches, err := filepath.Glob(config.GetContainerdOverlayPattern()); err == nil {
@@ -716,9 +711,10 @@ func findGoBinaryInContainer(containerID string, pid uint32) string {
 		}
 	}
 
+	commonPathsForRootfs := config.GetCommonBinarySearchPaths()
 	for _, rootfs := range rootfsPaths {
 		if _, err := os.Stat(rootfs); err == nil {
-			for _, relPath := range commonPaths {
+			for _, relPath := range commonPathsForRootfs {
 				path := filepath.Join(rootfs, strings.TrimPrefix(relPath, "/"))
 				if info, err := os.Stat(path); err == nil && !info.IsDir() {
 					logger.Debug("Found binary via container rootfs", zap.String("rootfs", rootfs), zap.String("path", path))
@@ -746,8 +742,9 @@ func findLibcInContainer(containerID string) string {
 		}
 	}
 
-	rootfsPaths := []string{
-		config.GetDockerContainerRootfs(containerID),
+	rootfsPaths := []string{}
+	if dockerRootfs, err := config.GetDockerContainerRootfs(containerID); err == nil {
+		rootfsPaths = append(rootfsPaths, dockerRootfs)
 	}
 
 	if matches, err := filepath.Glob(config.GetContainerdOverlayPattern()); err == nil {
@@ -971,8 +968,9 @@ func findDBLibsInContainer(containerID string, libNames []string) []string {
 		}
 	}
 
-	rootfsPaths := []string{
-		config.GetDockerContainerRootfs(containerID),
+	rootfsPaths := []string{}
+	if dockerRootfs, err := config.GetDockerContainerRootfs(containerID); err == nil {
+		rootfsPaths = append(rootfsPaths, dockerRootfs)
 	}
 
 	if matches, err := filepath.Glob(config.GetContainerdOverlayPattern()); err == nil {
@@ -1058,8 +1056,11 @@ func findDBLibs(containerID string, libNames []string) []string {
 }
 
 func FindLibcInContainer(containerID string) []string {
-	var paths []string
-	containerRoot := config.GetDockerContainerRootfs(containerID)
+	paths := []string{}
+	containerRoot, err := config.GetDockerContainerRootfs(containerID)
+	if err != nil {
+		return paths
+	}
 	if _, err := os.Stat(containerRoot); err == nil {
 		libcPaths := getArchitecturePaths()
 		for _, libcPath := range libcPaths {
@@ -1108,8 +1109,9 @@ func findTLSLibsInContainer(containerID string, libPatterns []string) []string {
 		}
 	}
 
-	rootfsPaths := []string{
-		config.GetDockerContainerRootfs(containerID),
+	rootfsPaths := []string{}
+	if dockerRootfs, err := config.GetDockerContainerRootfs(containerID); err == nil {
+		rootfsPaths = append(rootfsPaths, dockerRootfs)
 	}
 
 	if matches, err := filepath.Glob(config.GetContainerdOverlayPattern()); err == nil {

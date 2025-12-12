@@ -8,6 +8,41 @@
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
 
+#ifndef PODTRACE_VMLINUX_FROM_BTF
+struct pt_regs {
+	long unsigned int r15;
+	long unsigned int r14;
+	long unsigned int r13;
+	long unsigned int r12;
+	long unsigned int bp;
+	long unsigned int bx;
+	long unsigned int r11;
+	long unsigned int r10;
+	long unsigned int r9;
+	long unsigned int r8;
+	long unsigned int ax;
+	long unsigned int cx;
+	long unsigned int dx;
+	long unsigned int si;
+	long unsigned int di;
+	long unsigned int orig_ax;
+	long unsigned int ip;
+	long unsigned int cs;
+	long unsigned int flags;
+	long unsigned int sp;
+	long unsigned int ss;
+};
+
+struct sockaddr_in {
+	u16 sin_family;
+	u16 sin_port;
+	struct {
+		u32 s_addr;
+	} sin_addr;
+	u8 sin_zero[8];
+};
+#endif
+
 #define MAX_STRING_LEN 128
 #define MAX_STACK_DEPTH 64
 

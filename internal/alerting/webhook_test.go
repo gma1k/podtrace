@@ -39,6 +39,21 @@ func TestNewWebhookSender(t *testing.T) {
 			url:     "http://example.com/webhook",
 			wantErr: true,
 		},
+		{
+			name:    "http localhost.evil.com",
+			url:     "http://localhost.evil.com/webhook",
+			wantErr: true,
+		},
+		{
+			name:    "http 127.0.0.1",
+			url:     "http://127.0.0.1:8080/webhook",
+			wantErr: false,
+		},
+		{
+			name:    "http ::1",
+			url:     "http://[::1]:8080/webhook",
+			wantErr: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -313,6 +313,96 @@ func TestValidateFSThreshold(t *testing.T) {
 	}
 }
 
+func TestValidatePath(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		basePath string
+		wantErr  bool
+	}{
+		{
+			name:     "valid path within base",
+			path:     "/base/subdir/file",
+			basePath: "/base",
+			wantErr:  false,
+		},
+		{
+			name:     "path with traversal",
+			path:     "/base/../etc/passwd",
+			basePath: "/base",
+			wantErr:  true,
+		},
+		{
+			name:     "path outside base",
+			path:     "/etc/passwd",
+			basePath: "/base",
+			wantErr:  true,
+		},
+		{
+			name:     "empty path",
+			path:     "",
+			basePath: "/base",
+			wantErr:  true,
+		},
+		{
+			name:     "exact base path",
+			path:     "/base",
+			basePath: "/base",
+			wantErr:  false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidatePath(tt.path, tt.basePath)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidatePath() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateContainerPath(t *testing.T) {
+	tests := []struct {
+		name        string
+		path        string
+		containerID string
+		wantErr     bool
+	}{
+		{
+			name:        "valid path",
+			path:        "file.txt",
+			containerID: "abc123def456",
+			wantErr:     false,
+		},
+		{
+			name:        "path with traversal",
+			path:        "../etc/passwd",
+			containerID: "abc123def456",
+			wantErr:     true,
+		},
+		{
+			name:        "path with slash",
+			path:        "/etc/passwd",
+			containerID: "abc123def456",
+			wantErr:     true,
+		},
+		{
+			name:        "invalid container ID",
+			path:        "file.txt",
+			containerID: "../etc",
+			wantErr:     true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateContainerPath(tt.path, tt.containerID)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateContainerPath() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateDiagnoseDuration(t *testing.T) {
 	tests := []struct {
 		name    string

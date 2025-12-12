@@ -124,7 +124,7 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	} else if alertManager != nil {
 		alerting.SetGlobalManager(alertManager)
 		defer func() {
-			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), config.ShutdownTimeout)
 			defer shutdownCancel()
 			_ = alertManager.Shutdown(shutdownCtx)
 		}()
@@ -146,7 +146,7 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 			logger.Warn("Failed to start tracing manager", zap.Error(err))
 		} else {
 			defer func() {
-				shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), config.ShutdownTimeout)
 				defer shutdownCancel()
 				_ = tracingManager.Shutdown(shutdownCtx)
 			}()
@@ -424,9 +424,9 @@ func runDiagnoseMode(ctx context.Context, eventChan <-chan *events.Event, durati
 		diagnostician = diagnose.NewDiagnosticianWithThresholds(errorRateThreshold, rttSpikeThreshold, fsSlowThreshold)
 	}
 	timeout := time.After(duration)
-	batchTicker := time.NewTicker(10 * time.Millisecond)
+	batchTicker := time.NewTicker(config.BatchProcessingInterval)
 	defer batchTicker.Stop()
-	eventBatch := make([]*events.Event, 0, 100)
+	eventBatch := make([]*events.Event, 0, config.EventBatchSize)
 
 	for {
 		select {
@@ -440,7 +440,7 @@ func runDiagnoseMode(ctx context.Context, eventChan <-chan *events.Event, durati
 			return ctx.Err()
 		case event := <-eventChan:
 			eventBatch = append(eventBatch, event)
-			if len(eventBatch) >= 100 {
+			if len(eventBatch) >= config.EventBatchSize {
 				for _, e := range eventBatch {
 					var k8sCtx map[string]interface{}
 					if enricher != nil {
