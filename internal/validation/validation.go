@@ -2,11 +2,12 @@ package validation
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/config"
+	config "github.com/podtrace/podtrace/internal/config"
 )
 
 var (
@@ -113,7 +114,7 @@ func SanitizeProcessName(name string) string {
 	return result.String()
 }
 
-var 	containerIDRegex = regexp.MustCompile(`^[a-f0-9]{64}$|^[a-f0-9]{12,}$`)
+var containerIDRegex = regexp.MustCompile(`^[a-f0-9]{64}$|^[a-f0-9]{12,}$`)
 
 func ValidateContainerID(containerID string) bool {
 	if len(containerID) == 0 || len(containerID) > config.MaxContainerIDLength {
@@ -160,6 +161,31 @@ func ValidateDiagnoseDuration(duration time.Duration) error {
 	}
 	if duration > config.MaxDiagnoseDuration {
 		return fmt.Errorf("duration cannot exceed %v", config.MaxDiagnoseDuration)
+	}
+	return nil
+}
+
+func ValidatePath(path string, basePath string) error {
+	if path == "" {
+		return fmt.Errorf("path cannot be empty")
+	}
+	cleanPath := filepath.Clean(path)
+	cleanBase := filepath.Clean(basePath)
+	if !strings.HasPrefix(cleanPath, cleanBase) {
+		return fmt.Errorf("path %s is outside base path %s", cleanPath, cleanBase)
+	}
+	if strings.Contains(cleanPath, "..") {
+		return fmt.Errorf("path contains traversal sequence")
+	}
+	return nil
+}
+
+func ValidateContainerPath(path string, containerID string) error {
+	if !ValidateContainerID(containerID) {
+		return fmt.Errorf("invalid container ID")
+	}
+	if strings.Contains(path, "..") || strings.Contains(path, "/") {
+		return fmt.Errorf("path contains invalid characters")
 	}
 	return nil
 }

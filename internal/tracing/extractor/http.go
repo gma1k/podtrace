@@ -7,6 +7,12 @@ import (
 	"github.com/podtrace/podtrace/internal/tracing/context"
 )
 
+const (
+	MaxHeaderNameLength  = 256
+	MaxHeaderValueLength = 4096
+	MaxHeaderCount       = 100
+)
+
 type HTTPExtractor struct {
 	extractW3C    bool
 	extractB3     bool
@@ -26,8 +32,18 @@ func (e *HTTPExtractor) ExtractFromHeaders(headers map[string]string) *context.T
 		return nil
 	}
 
+	if len(headers) > MaxHeaderCount {
+		return nil
+	}
+
 	normalized := make(map[string]string, len(headers))
 	for k, v := range headers {
+		if len(k) > MaxHeaderNameLength || len(v) > MaxHeaderValueLength {
+			continue
+		}
+		if strings.ContainsAny(k, "\r\n") || strings.ContainsAny(v, "\r\n") {
+			continue
+		}
 		normalized[strings.ToLower(k)] = v
 	}
 
@@ -70,10 +86,18 @@ func (e *HTTPExtractor) ExtractFromHTTPRequest(req *http.Request) *context.Trace
 		return nil
 	}
 
+	if len(req.Header) > MaxHeaderCount {
+		return nil
+	}
+
 	headers := make(map[string]string)
 	for k, v := range req.Header {
 		if len(v) > 0 {
-			headers[k] = v[0]
+			headerValue := v[0]
+			if len(k) > MaxHeaderNameLength || len(headerValue) > MaxHeaderValueLength {
+				continue
+			}
+			headers[k] = headerValue
 		}
 	}
 
@@ -85,10 +109,18 @@ func (e *HTTPExtractor) ExtractFromHTTPResponse(resp *http.Response) *context.Tr
 		return nil
 	}
 
+	if len(resp.Header) > MaxHeaderCount {
+		return nil
+	}
+
 	headers := make(map[string]string)
 	for k, v := range resp.Header {
 		if len(v) > 0 {
-			headers[k] = v[0]
+			headerValue := v[0]
+			if len(k) > MaxHeaderNameLength || len(headerValue) > MaxHeaderValueLength {
+				continue
+			}
+			headers[k] = headerValue
 		}
 	}
 
@@ -112,6 +144,9 @@ func parseRawHeaders(raw string) map[string]string {
 		if line == "" {
 			continue
 		}
+		if len(headers) >= MaxHeaderCount {
+			break
+		}
 		idx := strings.Index(line, ":")
 		if idx <= 0 {
 			continue
@@ -119,6 +154,9 @@ func parseRawHeaders(raw string) map[string]string {
 		key := strings.TrimSpace(line[:idx])
 		value := strings.TrimSpace(line[idx+1:])
 		if key != "" && value != "" {
+			if len(key) > MaxHeaderNameLength || len(value) > MaxHeaderValueLength {
+				continue
+			}
 			headers[key] = value
 		}
 	}

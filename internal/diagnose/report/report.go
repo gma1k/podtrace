@@ -213,7 +213,7 @@ func analyzeUDPEvents(allUDP []*events.Event) ([]float64, float64, int, uint64, 
 		if e.Error < 0 {
 			errors++
 		}
-		if e.Bytes > 0 && e.Bytes < config.MaxBytesForBandwidth {
+		if e.Bytes > 0 && e.Bytes < uint64(config.MaxBytesForBandwidth) {
 			totalBytes += e.Bytes
 			if e.Bytes > peakBytes {
 				peakBytes = e.Bytes
@@ -273,7 +273,7 @@ func analyzeHTTPEvents(allHTTP []*events.Event) ([]float64, float64, uint64) {
 		latencyMs := float64(e.LatencyNS) / float64(config.NSPerMS)
 		latencies = append(latencies, latencyMs)
 		totalLatency += latencyMs
-		if e.Bytes > 0 && e.Bytes < config.MaxBytesForBandwidth {
+		if e.Bytes > 0 && e.Bytes < uint64(config.MaxBytesForBandwidth) {
 			totalBytes += e.Bytes
 		}
 	}

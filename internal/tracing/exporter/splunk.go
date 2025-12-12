@@ -35,7 +35,7 @@ func NewSplunkExporter(endpoint, token string, sampleRate float64) (*SplunkExpor
 	return &SplunkExporter{
 		endpoint:   endpoint,
 		token:      token,
-		client:     &http.Client{Timeout: 10 * time.Second},
+		client:     &http.Client{Timeout: config.TracingExporterTimeout},
 		enabled:    true,
 		sampleRate: sampleRate,
 	}, nil

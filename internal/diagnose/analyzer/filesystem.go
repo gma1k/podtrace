@@ -24,7 +24,7 @@ func AnalyzeFS(events []*events.Event, fsSlowThreshold float64) (avgLatency, max
 		if latencyMs > fsSlowThreshold {
 			slowOps++
 		}
-		if e.Bytes > 0 && e.Bytes < config.MaxBytesForBandwidth {
+		if e.Bytes > 0 && e.Bytes < uint64(config.MaxBytesForBandwidth) {
 			totalBytes += e.Bytes
 		}
 	}

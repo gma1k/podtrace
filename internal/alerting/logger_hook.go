@@ -1,24 +1,35 @@
 package alerting
 
 import (
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
-var globalManager *Manager
+var (
+	globalManager *Manager
+	managerMu     sync.RWMutex
+)
 
 func SetGlobalManager(manager *Manager) {
+	managerMu.Lock()
+	defer managerMu.Unlock()
 	globalManager = manager
 }
 
 func GetGlobalManager() *Manager {
+	managerMu.RLock()
+	defer managerMu.RUnlock()
 	return globalManager
 }
 
 func CreateAlertFromLog(level zapcore.Level, msg string, fields []zap.Field, podName, namespace string) *Alert {
-	if globalManager == nil || !globalManager.IsEnabled() {
+	managerMu.RLock()
+	manager := globalManager
+	managerMu.RUnlock()
+	if manager == nil || !manager.IsEnabled() {
 		return nil
 	}
 	var severity AlertSeverity

@@ -88,7 +88,7 @@ func GenerateStackTraceSectionWithContext(d Diagnostician, ctx context.Context) 
 		if len(e.Stack) == 0 {
 			continue
 		}
-		if e.LatencyNS < config.MinLatencyForStackNS && e.Type != events.EventLockContention && e.Type != events.EventDBQuery {
+		if e.LatencyNS < uint64(config.MinLatencyForStackNS) && e.Type != events.EventLockContention && e.Type != events.EventDBQuery {
 			continue
 		}
 		processed++

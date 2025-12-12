@@ -273,8 +273,11 @@ func TestGetDockerContainerRootfs(t *testing.T) {
 	defer func() { DockerBasePath = original }()
 
 	DockerBasePath = "/test/docker"
-	containerID := "abc123"
-	result := GetDockerContainerRootfs(containerID)
+	containerID := "abc123def456"
+	result, err := GetDockerContainerRootfs(containerID)
+	if err != nil {
+		t.Fatalf("GetDockerContainerRootfs() error = %v", err)
+	}
 	expected := filepath.Join("/test/docker", containerID, "rootfs")
 	if result != expected {
 		t.Errorf("Expected %q, got %q", expected, result)

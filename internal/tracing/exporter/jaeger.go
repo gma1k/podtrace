@@ -53,7 +53,7 @@ func NewJaegerExporter(endpoint string, sampleRate float64) (*JaegerExporter, er
 
 	return &JaegerExporter{
 		endpoint:   endpoint,
-		client:     &http.Client{Timeout: 10 * time.Second},
+		client:     &http.Client{Timeout: config.TracingExporterTimeout},
 		enabled:    true,
 		sampleRate: sampleRate,
 	}, nil

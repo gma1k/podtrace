@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/events"
 )
 
@@ -99,8 +100,7 @@ func (ce *ContextEnricher) EnrichEvent(ctx context.Context, event *events.Event)
 }
 
 func (ce *ContextEnricher) enrichNetworkTarget(ctx context.Context, enriched *EnrichedEvent, ip string, port int) {
-	timeout := time.Duration(getIntEnvOrDefault("PODTRACE_K8S_API_TIMEOUT_MS", 100)) * time.Millisecond
-	enrichCtx, cancel := context.WithTimeout(ctx, timeout)
+	enrichCtx, cancel := context.WithTimeout(ctx, config.K8sAPITimeout)
 	defer cancel()
 
 	serviceInfo := ce.serviceResolver.ResolveService(enrichCtx, ip, port)

@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/podtrace/podtrace/internal/alerting"
+	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/internal/logger"
 	"github.com/podtrace/podtrace/internal/metricsexporter"
@@ -68,7 +69,7 @@ func NewResourceMonitor(cgroupPath string, limitsMap, alertsMap *ebpf.Map, event
 		alertsMap:     alertsMap,
 		eventChan:     eventChan,
 		limits:        make(map[uint32]*ResourceLimit),
-		checkInterval: 5 * time.Second,
+		checkInterval: config.ResourceMonitorInterval,
 		stopCh:        make(chan struct{}),
 		namespace:     namespace,
 	}
