@@ -8,8 +8,7 @@
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
 
-#ifndef __PT_REGS_DEFINED
-#define __PT_REGS_DEFINED
+#ifndef PODTRACE_VMLINUX_FROM_BTF
 struct pt_regs {
 	long unsigned int r15;
 	long unsigned int r14;
@@ -33,7 +32,6 @@ struct pt_regs {
 	long unsigned int sp;
 	long unsigned int ss;
 };
-#endif
 
 struct sockaddr_in {
 	u16 sin_family;
@@ -43,6 +41,7 @@ struct sockaddr_in {
 	} sin_addr;
 	u8 sin_zero[8];
 };
+#endif
 
 #define MAX_STRING_LEN 128
 #define MAX_STACK_DEPTH 64
