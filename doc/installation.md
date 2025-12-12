@@ -124,13 +124,14 @@ You should see usage information.
 
 **File Path Resolution Issues:**
 - If paths show as `ino:DEV/INO` instead of actual paths, this means inode extraction returned 0
-- This is expected if `vmlinux.h` is incomplete or missing
+- This can happen if using the placeholder `vmlinux.h` instead of a full version generated from BTF
 - To enable full path resolution, generate a complete `vmlinux.h`:
   ```bash
   bpftool btf dump file /sys/kernel/btf/vmlinux format c > bpf/vmlinux.h
   make build
   ```
 - Path tracking still works via `open()` events even without inode extraction
+- **Note:** The repository includes a minimal placeholder `vmlinux.h` for basic compilation. For full CO-RE support, generate it from BTF as shown above.
 
 ## Running in Kubernetes
 

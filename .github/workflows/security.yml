@@ -41,7 +41,18 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm libbpf-dev linux-headers-$(uname -r)
+          sudo apt-get install -y clang llvm libbpf-dev linux-headers-$(uname -r) bpftool
+
+      - name: Generate vmlinux.h from BTF
+        if: matrix.language == 'cpp'
+        run: |
+          echo "Generating vmlinux.h from BTF..."
+          if [ -f /sys/kernel/btf/vmlinux ]; then
+            bpftool btf dump file /sys/kernel/btf/vmlinux format c > bpf/vmlinux.h
+            echo "vmlinux.h generated successfully"
+          else
+            echo "Warning: /sys/kernel/btf/vmlinux not found, using placeholder vmlinux.h"
+          fi
 
       - name: Build Go
         if: matrix.language == 'go'

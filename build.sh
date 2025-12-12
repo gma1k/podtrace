@@ -20,27 +20,37 @@ check_requirements() {
 }
 
 generate_vmlinux_if_missing() {
-	if [[ -f "vmlinux.h" ]]; then
-		return
+	if [[ -f "bpf/vmlinux.h" ]]; then
+		# If file is small (< 50KB), it's likely a placeholder - try to generate full version
+		local file_size=$(stat -f%z "bpf/vmlinux.h" 2>/dev/null || stat -c%s "bpf/vmlinux.h" 2>/dev/null || echo 0)
+		if [[ $file_size -lt 51200 ]]; then
+			echo "Found placeholder vmlinux.h. Attempting to generate full version from BTF..."
+		else
+			echo "Found vmlinux.h (full version, $((file_size / 1024))KB)"
+			return
+		fi
 	fi
 
-	echo "Warning: vmlinux.h not found. Attempting to generate..."
+	echo "Warning: Full vmlinux.h not found. Attempting to generate from BTF..."
 
 	if command -v bpftool >/dev/null 2>&1; then
 		if [[ -f "/sys/kernel/btf/vmlinux" ]]; then
 			echo "Generating vmlinux.h from BTF..."
-			bpftool btf dump file /sys/kernel/btf/vmlinux format c >vmlinux.h
-			echo "vmlinux.h generated"
+			bpftool btf dump file /sys/kernel/btf/vmlinux format c > bpf/vmlinux.h
+			echo "vmlinux.h generated successfully"
 		else
-			echo "Warning: /sys/kernel/btf/vmlinux not found. You may need to install kernel headers."
-			echo "On Debian/Ubuntu: sudo apt-get install linux-headers-\$(uname -r)"
+			echo "Warning: /sys/kernel/btf/vmlinux not found."
+			echo "Using placeholder vmlinux.h (CO-RE features may be limited)."
+			echo "To enable full CO-RE support, install kernel headers:"
+			echo "  On Debian/Ubuntu: sudo apt-get install linux-headers-\$(uname -r)"
 		fi
 	else
-		echo "Warning: bpftool not found. Install it to generate vmlinux.h automatically."
-		echo "On Debian/Ubuntu: sudo apt-get install linux-tools-common linux-tools-generic"
+		echo "Warning: bpftool not found. Using placeholder vmlinux.h (CO-RE features may be limited)."
+		echo "To generate full vmlinux.h, install bpftool:"
+		echo "  On Debian/Ubuntu: sudo apt-get install linux-tools-common linux-tools-generic"
 		echo ""
-		echo "Alternatively, you can:"
-		echo "Install kernel headers: sudo apt-get install linux-headers-\$(uname -r)"
+		echo "Alternatively, install kernel headers:"
+		echo "  sudo apt-get install linux-headers-\$(uname -r)"
 	fi
 }
 
@@ -49,8 +59,9 @@ compile_ebpf() {
 	make "${BPF_OBJ}" || {
 		echo "Error: eBPF compilation failed. Make sure:"
 		echo "1. You have clang installed"
-		echo "2. vmlinux.h is available (see warnings above)"
+		echo "2. vmlinux.h is available (placeholder is included, but full version recommended)"
 		echo "3. You're running on a supported kernel (5.8+)"
+		echo "4. For full CO-RE support, generate vmlinux.h from BTF (see warnings above)"
 		exit 1
 	}
 }
