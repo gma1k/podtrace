@@ -4,33 +4,57 @@
 #define PODTRACE_COMMON_H
 
 #include "vmlinux.h"
+
+#ifndef __u8
+typedef unsigned char __u8;
+typedef signed char __s8;
+typedef unsigned short __u16;
+typedef short __s16;
+typedef unsigned int __u32;
+typedef int __s32;
+typedef unsigned long long __u64;
+typedef long long __s64;
+typedef __u16 __be16;
+typedef __u32 __be32;
+typedef __u64 __be64;
+typedef __u32 __wsum;
+typedef __s8 s8;
+typedef __u8 u8;
+typedef __s16 s16;
+typedef __u16 u16;
+typedef __s32 s32;
+typedef __u32 u32;
+typedef __s64 s64;
+typedef __u64 u64;
+#endif
+
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
 
 #ifndef PODTRACE_VMLINUX_FROM_BTF
 struct pt_regs {
-	long unsigned int r15;
-	long unsigned int r14;
-	long unsigned int r13;
-	long unsigned int r12;
-	long unsigned int bp;
-	long unsigned int bx;
-	long unsigned int r11;
-	long unsigned int r10;
-	long unsigned int r9;
-	long unsigned int r8;
-	long unsigned int ax;
-	long unsigned int cx;
-	long unsigned int dx;
-	long unsigned int si;
-	long unsigned int di;
-	long unsigned int orig_ax;
-	long unsigned int ip;
-	long unsigned int cs;
-	long unsigned int flags;
-	long unsigned int sp;
-	long unsigned int ss;
+	unsigned long r15;
+	unsigned long r14;
+	unsigned long r13;
+	unsigned long r12;
+	unsigned long rbp;
+	unsigned long rbx;
+	unsigned long r11;
+	unsigned long r10;
+	unsigned long r9;
+	unsigned long r8;
+	unsigned long rax;
+	unsigned long rcx;
+	unsigned long rdx;
+	unsigned long rsi;
+	unsigned long rdi;
+	unsigned long orig_ax;
+	unsigned long ip;
+	unsigned long cs;
+	unsigned long flags;
+	unsigned long sp;
+	unsigned long ss;
 };
 
 struct sockaddr_in {

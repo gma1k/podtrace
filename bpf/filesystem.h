@@ -6,17 +6,18 @@
 #include "common.h"
 #include "maps.h"
 
-static inline int get_path_str_from_file(struct file *file, char *out_buf, u32 buf_size)
+#define PT_FILE_OFFSET_F_PATH  8
+#define PT_PATH_OFFSET_DENTRY  8
+
+static inline int get_path_str_from_file(void *file, char *out_buf, u32 buf_size)
 {
     if (file == NULL || out_buf == NULL || buf_size < 2)
         return 0;
 
-    struct path path;
-    bpf_core_read(&path, sizeof(path), &file->f_path);
-    
-    struct dentry *dentry;
-    bpf_core_read(&dentry, sizeof(dentry), &path.dentry);
-    if (dentry == NULL)
+    u64 dentry_ptr = 0;
+    bpf_probe_read_kernel(&dentry_ptr, sizeof(dentry_ptr),
+                         (void *)file + PT_FILE_OFFSET_F_PATH + PT_PATH_OFFSET_DENTRY);
+    if (dentry_ptr == 0)
         return 0;
 
     out_buf[0] = '\0';

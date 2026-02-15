@@ -251,6 +251,7 @@ Review:
 - Verify the pod is running and active
 - Check that the application is making system calls
 - Ensure cgroup path was found correctly
+- **When running as a DaemonSet/container:** Podtrace must see the **host’s** cgroup and process filesystems and (for CRI) the container runtime socket. Otherwise resolution or event filtering uses the container’s own `/sys/fs/cgroup` and `/proc`, so either resolution fails or every event is filtered out. See [Running as a DaemonSet](#running-as-a-daemonset) in the installation doc and set `PODTRACE_CGROUP_BASE`, `PODTRACE_PROC_BASE`, and (if using CRI) `PODTRACE_CRI_ENDPOINT` to the host mount points.
 
 **High CPU usage:**
 - This is normal for high-event-rate applications
