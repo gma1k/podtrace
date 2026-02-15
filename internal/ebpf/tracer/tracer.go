@@ -333,6 +333,7 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 						zap.String("cgroup_path", t.cgroupPath),
 						zap.Duration("elapsed", elapsed),
 						zap.Int("links_attached", len(t.links)))
+					logger.Warn("If running in a container (e.g. DaemonSet), ensure host /sys/fs/cgroup and /proc are mounted and PODTRACE_CGROUP_BASE / PODTRACE_PROC_BASE point at them; see installation doc 'Running as a DaemonSet'")
 				} else if eventsCollected == 0 && eventsParsed > 0 && elapsed > 10*time.Second {
 					logger.Warn("Events parsed but none collected - filtering may be too strict",
 						zap.Int64("events_parsed", eventsParsed),
@@ -341,6 +342,11 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 						zap.String("cgroup_path", t.cgroupPath),
 						zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter),
 						zap.Duration("elapsed", elapsed))
+					if t.useUserspaceCgroupFilter {
+						logger.Warn("Running in a container (e.g. DaemonSet)? Set PODTRACE_CGROUP_BASE and PODTRACE_PROC_BASE to the host's cgroup and proc mount paths so the target pod's cgroup is visible and filtering can match events",
+							zap.String("cgroup_base", config.CgroupBasePath),
+							zap.String("proc_base", config.ProcBasePath))
+					}
 				}
 			}
 		}

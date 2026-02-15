@@ -48,8 +48,11 @@ jobs:
         run: |
           echo "Generating vmlinux.h from BTF..."
           if [ -f /sys/kernel/btf/vmlinux ]; then
-            bpftool btf dump file /sys/kernel/btf/vmlinux format c > bpf/vmlinux.h
-            echo "vmlinux.h generated successfully"
+            if bpftool btf dump file /sys/kernel/btf/vmlinux format c > bpf/vmlinux.h 2>/dev/null; then
+              echo "vmlinux.h generated successfully"
+            else
+              echo "Warning: bpftool failed or not available for this kernel, using placeholder vmlinux.h"
+            fi
           else
             echo "Warning: /sys/kernel/btf/vmlinux not found, using placeholder vmlinux.h"
           fi
@@ -64,21 +67,15 @@ jobs:
         if: matrix.language == 'cpp'
         run: |
           echo "Compiling podtrace.bpf.c..."
-          if [ -f /sys/kernel/btf/vmlinux ]; then
-            clang -O2 -g \
-              -target bpf \
-              -D__TARGET_ARCH_x86 \
-              -DPODTRACE_VMLINUX_FROM_BTF \
-              -I./bpf \
-              -c bpf/podtrace.bpf.c \
-              -o bpf/podtrace.bpf.o
+          if [ -f bpf/vmlinux.h ] && [ -s bpf/vmlinux.h ]; then
+            VMLINUX_SIZE=$(stat -c%s bpf/vmlinux.h 2>/dev/null || echo 0)
+            if [ "$VMLINUX_SIZE" -gt 50000 ]; then
+              clang -O2 -g -target bpf -D__TARGET_ARCH_x86 -DPODTRACE_VMLINUX_FROM_BTF -I./bpf -c bpf/podtrace.bpf.c -o bpf/podtrace.bpf.o
+            else
+              clang -O2 -g -target bpf -D__TARGET_ARCH_x86 -I./bpf -c bpf/podtrace.bpf.c -o bpf/podtrace.bpf.o
+            fi
           else
-            clang -O2 -g \
-              -target bpf \
-              -D__TARGET_ARCH_x86 \
-              -I./bpf \
-              -c bpf/podtrace.bpf.c \
-              -o bpf/podtrace.bpf.o
+            clang -O2 -g -target bpf -D__TARGET_ARCH_x86 -I./bpf -c bpf/podtrace.bpf.c -o bpf/podtrace.bpf.o
           fi
 
       - name: Analyze

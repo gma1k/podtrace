@@ -51,6 +51,42 @@ func TestFindCgroupPath_Found(t *testing.T) {
 	}
 }
 
+func TestFindCgroupPath_SystemdDriver(t *testing.T) {
+	dir := t.TempDir()
+
+	orig := config.CgroupBasePath
+	config.SetCgroupBasePath(dir)
+	defer func() { config.SetCgroupBasePath(orig) }()
+
+	// Simulate cgroup v1 with systemd hierarchy: .../systemd/kubepods.slice/...
+	systemdRoot := filepath.Join(dir, "systemd")
+	kubepodsSlice := filepath.Join(systemdRoot, "kubepods.slice")
+	if err := os.MkdirAll(kubepodsSlice, 0o755); err != nil {
+		t.Fatalf("failed to create systemd/kubepods.slice: %v", err)
+	}
+	containerID := "abcdef1234567890"
+	shortID := containerID
+	if len(containerID) >= 12 {
+		shortID = containerID[:12]
+	}
+	targetDir := filepath.Join(kubepodsSlice, "pod_"+shortID)
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("failed to create target dir: %v", err)
+	}
+	// cgroup v1 may not have cgroup.procs in every hierarchy; findCgroupPathV1 just matches path.
+	// For v2 we'd need cgroup.procs. This test uses v1 layout (no cgroup.controllers at root).
+	path, err := findCgroupPath(containerID)
+	if err != nil {
+		t.Fatalf("expected to find cgroup path under systemd/, got err=%v", err)
+	}
+	if path == "" {
+		t.Fatal("expected non-empty cgroup path under systemd/")
+	}
+	if !strings.Contains(path, "systemd") || (!strings.Contains(path, containerID) && !strings.Contains(path, shortID)) {
+		t.Errorf("expected path to contain systemd and container id, got %q", path)
+	}
+}
+
 func TestPodResolver_ResolvePod_NoContainers(t *testing.T) {
 	resolver := &PodResolver{clientset: nil}
 

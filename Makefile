@@ -29,7 +29,8 @@ else
   BPF_ARCH_DEFINE = -D__TARGET_ARCH_x86
 endif
 
-BPF_CFLAGS = -O2 -g -target bpf $(BPF_ARCH_DEFINE) -mcpu=$(BPF_MCPU)
+LIBBPF_INCLUDE ?= /usr/include
+BPF_CFLAGS = -O2 -g -target bpf $(BPF_ARCH_DEFINE) -mcpu=$(BPF_MCPU) -I$(LIBBPF_INCLUDE)
 
 all: check-go build
 
