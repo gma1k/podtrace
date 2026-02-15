@@ -28,6 +28,16 @@ typedef __s64 s64;
 typedef __u64 u64;
 #endif
 
+#ifdef PODTRACE_VMLINUX_FROM_BTF
+struct dentry;
+struct path {
+	struct dentry *dentry;
+};
+struct file {
+	struct path f_path;
+};
+#endif
+
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
