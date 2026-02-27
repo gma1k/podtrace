@@ -305,6 +305,25 @@ func resolveCgroupPathCRI(ctx context.Context, containerID string) (string, erro
 	}
 
 	cg := info.CgroupsPath
+	roots := cgroupRootCandidates()
+
+	// If CRI returned an absolute filesystem path (e.g. CRI-O on OpenShift may
+	// return /sys/fs/cgroup/kubepods.slice/... directly), check it first, then
+	// strip the cgroup base so the relative path is used in the searches below.
+	if strings.HasPrefix(cg, "/") {
+		if _, err := os.Stat(cg); err == nil {
+			if cg != config.CgroupBasePath {
+				return cg, nil
+			}
+		}
+		for _, root := range roots {
+			if strings.HasPrefix(cg, root+"/") {
+				cg = strings.TrimPrefix(cg, root)
+				break
+			}
+		}
+	}
+
 	if !strings.HasPrefix(cg, "/") {
 		cg = "/" + cg
 	}
@@ -313,7 +332,8 @@ func resolveCgroupPathCRI(ctx context.Context, containerID string) (string, erro
 	}
 	trimmed := strings.TrimPrefix(cg, "/")
 
-	for _, root := range cgroupRootCandidates() {
+	// Direct lookup: <root>/<trimmed>
+	for _, root := range roots {
 		fullPath := filepath.Join(root, trimmed)
 		if fullPath == root {
 			continue
@@ -322,11 +342,20 @@ func resolveCgroupPathCRI(ctx context.Context, containerID string) (string, erro
 			return fullPath, nil
 		}
 	}
-	if _, err := os.Stat(cg); err == nil {
-		if cg != config.CgroupBasePath && cg != filepath.Join(config.CgroupBasePath, "systemd") {
-			return cg, nil
+
+	// Systemd parent slice expansion: CRI-O on cgroupv2+systemd (OpenShift 4.14+)
+	// returns a path relative to the kubepods.slice scope, not the cgroup root.
+	// e.g. CRI-O returns:  kubepods-besteffort.slice/kubepods-besteffort-pod<uid>.slice/crio-<id>.scope
+	// actual path is:      /sys/fs/cgroup/kubepods.slice/kubepods-besteffort.slice/...
+	for _, parent := range []string{"kubepods.slice", "kubepods"} {
+		for _, root := range roots {
+			fullPath := filepath.Join(root, parent, trimmed)
+			if _, err := os.Stat(fullPath); err == nil {
+				return fullPath, nil
+			}
 		}
 	}
+
 	return "", errors.New("podtrace: CRI cgroup path not found on filesystem")
 }
 
