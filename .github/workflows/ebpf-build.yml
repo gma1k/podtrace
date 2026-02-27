@@ -59,8 +59,11 @@ jobs:
         run: |
           if [ -f /sys/kernel/btf/vmlinux ] && command -v bpftool &>/dev/null; then
             echo "Generating bpf/vmlinux.h from kernel BTF (arch=${{ matrix.bpf_arch }})..."
-            bpftool btf dump file /sys/kernel/btf/vmlinux format c > bpf/vmlinux.h
-            echo "vmlinux.h generated: $(wc -l < bpf/vmlinux.h) lines"
+            if bpftool btf dump file /sys/kernel/btf/vmlinux format c > bpf/vmlinux.h 2>/dev/null; then
+              echo "vmlinux.h generated: $(wc -l < bpf/vmlinux.h) lines"
+            else
+              echo "bpftool failed — using placeholder bpf/vmlinux.h"
+            fi
           else
             echo "bpftool or BTF unavailable — using placeholder bpf/vmlinux.h"
           fi

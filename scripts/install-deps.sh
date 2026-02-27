@@ -145,11 +145,14 @@ install_go_if_needed() {
 	local arch
 	arch=$(uname -m)
 	case "${arch}" in
-		x86_64)  arch_tag="amd64" ;;
-		aarch64) arch_tag="arm64" ;;
-		ppc64le) arch_tag="ppc64le" ;;
-		s390x)   arch_tag="s390x" ;;
-		*)       echo "Warning: unsupported arch ${arch}, install Go manually from https://go.dev/dl/"; return ;;
+	x86_64) arch_tag="amd64" ;;
+	aarch64) arch_tag="arm64" ;;
+	ppc64le) arch_tag="ppc64le" ;;
+	s390x) arch_tag="s390x" ;;
+	*)
+		echo "Warning: unsupported arch ${arch}, install Go manually from https://go.dev/dl/"
+		return
+		;;
 	esac
 
 	local tarball="go${required}.linux-${arch_tag}.tar.gz"
@@ -209,26 +212,26 @@ main() {
 	distro=$(detect_distro)
 
 	case "${distro}" in
-		debian|ubuntu|linuxmint|pop)
-			install_debian_ubuntu
-			;;
-		rhel|centos|almalinux|rocky|ol)
-			install_rhel_centos
-			;;
-		fedora)
-			install_fedora
-			;;
-		alpine)
-			install_alpine
-			;;
-		*)
-			echo "Unsupported distro: '${distro}'"
-			echo ""
-			echo "Manual install — required packages:"
-			echo "  clang, llvm, libbpf-dev (or libbpf-devel), linux-headers, bpftool, Go 1.24+"
-			echo "  See https://github.com/podtrace/podtrace for details."
-			exit 1
-			;;
+	debian | ubuntu | linuxmint | pop)
+		install_debian_ubuntu
+		;;
+	rhel | centos | almalinux | rocky | ol)
+		install_rhel_centos
+		;;
+	fedora)
+		install_fedora
+		;;
+	alpine)
+		install_alpine
+		;;
+	*)
+		echo "Unsupported distro: '${distro}'"
+		echo ""
+		echo "Manual install — required packages:"
+		echo "  clang, llvm, libbpf-dev (or libbpf-devel), linux-headers, bpftool, Go 1.24+"
+		echo "  See https://github.com/podtrace/podtrace for details."
+		exit 1
+		;;
 	esac
 
 	echo ""
