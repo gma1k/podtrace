@@ -53,7 +53,7 @@ func CheckRequirements() error {
 				"Upgrade the kernel or use a node image with a supported kernel.\n"+
 				"  GKE/AKS/EKS: use a node pool with kernel 5.8+ (default since 2021).\n"+
 				"  RHEL: enable the 5.14+ kernel via RHEL 9 or enable the latest UEK on OL8.\n"+
-				"  Talos: ensure Talos ≥ v1.3 which ships kernel 6.1+.",
+				"  Talos: ensure Talos ≥ v1.3 which ships kernel 6.1+",
 			minKernelMajor, minKernelMinor, kv)
 	}
 

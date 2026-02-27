@@ -5,8 +5,22 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/podtrace/podtrace/internal/config"
 )
+
+// alertLog is a package-level zap logger for the alerting package.
+// It cannot use internal/logger because logger imports alerting (cycle).
+var alertLog *zap.Logger
+
+func init() {
+	if l, err := zap.NewProduction(); err == nil {
+		alertLog = l
+	} else {
+		alertLog = zap.NewNop()
+	}
+}
 
 type Manager struct {
 	senders       []Sender
@@ -33,6 +47,8 @@ func NewManager() (*Manager, error) {
 	if config.AlertWebhookURL != "" {
 		webhookSender, err := NewWebhookSender(config.AlertWebhookURL, config.AlertHTTPTimeout)
 		if err != nil {
+			alertLog.Warn("Failed to create webhook alert sender — alerts will not be delivered via webhook",
+				zap.Error(err), zap.String("url", config.AlertWebhookURL))
 		} else {
 			retrySender := NewRetrySender(webhookSender, config.AlertMaxRetries, config.DefaultAlertRetryBackoffBase)
 			manager.senders = append(manager.senders, retrySender)
@@ -41,6 +57,8 @@ func NewManager() (*Manager, error) {
 	if config.AlertSlackWebhookURL != "" {
 		slackSender, err := NewSlackSender(config.AlertSlackWebhookURL, config.AlertSlackChannel, config.AlertHTTPTimeout)
 		if err != nil {
+			alertLog.Warn("Failed to create Slack alert sender — alerts will not be delivered via Slack",
+				zap.Error(err))
 		} else {
 			retrySender := NewRetrySender(slackSender, config.AlertMaxRetries, config.DefaultAlertRetryBackoffBase)
 			manager.senders = append(manager.senders, retrySender)
@@ -52,6 +70,8 @@ func NewManager() (*Manager, error) {
 		if splunkEndpoint != "" && splunkToken != "" {
 			splunkSender, err := NewSplunkAlertSender(splunkEndpoint, splunkToken, config.AlertHTTPTimeout)
 			if err != nil {
+				alertLog.Warn("Failed to create Splunk alert sender — alerts will not be delivered via Splunk",
+					zap.Error(err), zap.String("endpoint", splunkEndpoint))
 			} else {
 				retrySender := NewRetrySender(splunkSender, config.AlertMaxRetries, config.DefaultAlertRetryBackoffBase)
 				manager.senders = append(manager.senders, retrySender)

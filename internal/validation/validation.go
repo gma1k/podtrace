@@ -184,7 +184,13 @@ func ValidateContainerPath(path string, containerID string) error {
 	if !ValidateContainerID(containerID) {
 		return fmt.Errorf("invalid container ID")
 	}
-	if strings.Contains(path, "..") || strings.Contains(path, "/") {
+	if strings.ContainsRune(path, 0) {
+		return fmt.Errorf("path contains null byte")
+	}
+	// filepath.Clean resolves ".." sequences before checking, preventing
+	// traversal attacks like "foo/../../etc/passwd" from bypassing the check.
+	clean := filepath.Clean(path)
+	if strings.Contains(clean, "..") || strings.ContainsRune(clean, '/') {
 		return fmt.Errorf("path contains invalid characters")
 	}
 	return nil

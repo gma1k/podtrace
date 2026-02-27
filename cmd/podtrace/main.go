@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -290,7 +291,9 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
-					logger.Error("Panic in metrics event handler", zap.Any("panic", r))
+					logger.Error("Panic in metrics event handler",
+						zap.Any("panic", r),
+						zap.ByteString("stack", debug.Stack()))
 				}
 			}()
 			for {
@@ -325,7 +328,9 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
-					logger.Error("Panic in tracing event handler", zap.Any("panic", r))
+					logger.Error("Panic in tracing event handler",
+						zap.Any("panic", r),
+						zap.ByteString("stack", debug.Stack()))
 				}
 			}()
 			for {
@@ -360,6 +365,21 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	if eventFilter != "" {
 		filteredChan = make(chan *events.Event, config.EventChannelBufferSize)
 		go filterEvents(ctx, enrichedChan, filteredChan, eventFilter)
+	}
+
+	if enableMetrics {
+		go func() {
+			ticker := time.NewTicker(5 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					metricsexporter.RecordChannelDepths(len(eventChan), len(filteredChan))
+				}
+			}
+		}()
 	}
 
 	if err := tracer.Start(ctx, eventChan); err != nil {

@@ -30,7 +30,7 @@ jobs:
         if: matrix.language == 'go'
         uses: actions/setup-go@v4
         with:
-          go-version-file: go.mod
+          go-version: stable
           cache: true
 
       - name: Initialize CodeQL
@@ -56,6 +56,38 @@ jobs:
           else
             echo "Warning: /sys/kernel/btf/vmlinux not found, using placeholder vmlinux.h"
           fi
+
+      - name: Run gosec security scanner
+        if: matrix.language == 'go'
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          gosec -fmt sarif -out gosec-results.sarif -exclude-dir=test ./... || true
+          # Normalize SARIF: gosec may emit relationships as plain strings instead
+          # of objects, which fails GitHub's SARIF schema validation.
+          python3 - <<'EOF'
+          import json, sys
+          try:
+              with open("gosec-results.sarif") as f:
+                  sarif = json.load(f)
+              for run in sarif.get("runs", []):
+                  for rule in run.get("tool", {}).get("driver", {}).get("rules", []):
+                      rels = rule.get("relationships", [])
+                      rule["relationships"] = [
+                          r if isinstance(r, dict) else {"target": {"id": str(r), "toolComponent": {"name": "gosec"}}}
+                          for r in rels
+                      ]
+              with open("gosec-results.sarif", "w") as f:
+                  json.dump(sarif, f)
+          except Exception as e:
+              print(f"SARIF normalization warning: {e}", file=sys.stderr)
+          EOF
+
+      - name: Upload gosec SARIF results
+        if: matrix.language == 'go'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: gosec-results.sarif
+          category: gosec
 
       - name: Build Go
         if: matrix.language == 'go'
