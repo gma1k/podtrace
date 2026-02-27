@@ -79,7 +79,7 @@ func AttachProbes(coll *ebpf.Collection) ([]link.Link, error) {
 					"  • Check for BPF denials: dmesg | grep -i bpf\n"+
 					"  • Kernel 5.8+ required (current: %s)\n"+
 					"  • On GKE Autopilot / AWS Fargate kprobes are not allowed; use a standard node pool.\n"+
-					"  • On OpenShift ensure the pod SCC allows CAP_BPF and CAP_SYS_ADMIN.",
+					"  • On OpenShift ensure the pod SCC allows CAP_BPF and CAP_SYS_ADMIN",
 				NewProbeAttachError(progName, err), progName, symbol, symbol, kernelVersionString())
 		}
 		links = append(links, l)
