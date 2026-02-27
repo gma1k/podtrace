@@ -37,15 +37,25 @@ func (r *Resolver) Endpoint() string {
 }
 
 func DefaultCandidateEndpoints() []string {
-	allowPodman := os.Getenv("PODTRACE_CRI_ALLOW_PODMAN") == "1"
 	endpoints := []string{
+		// Standard containerd (Debian, Ubuntu, GKE, AKS, EKS AL2023, Talos)
 		"unix:///run/containerd/containerd.sock",
 		"unix:///var/run/containerd/containerd.sock",
+		// CRI-O (OpenShift, Fedora, RHEL)
 		"unix:///run/crio/crio.sock",
 		"unix:///var/run/crio/crio.sock",
+		// k3s / RKE2 (Rancher)
 		"unix:///run/k3s/containerd/containerd.sock",
+		"unix:///var/run/k3s/containerd/containerd.sock",
+		// MicroK8s
+		"unix:///var/snap/microk8s/common/run/containerd.sock",
+		// AWS Bottlerocket — containerd socket exposed through the host container
+		"unix:///run/dockershim.sock",
+		// Minikube / Kind with Docker driver
+		"unix:///var/run/docker.sock",
 	}
-	if allowPodman {
+
+	if os.Getenv("PODTRACE_CRI_ALLOW_PODMAN") == "1" {
 		endpoints = append(endpoints,
 			"unix:///run/podman/podman.sock",
 			"unix:///var/run/podman/podman.sock",
@@ -160,29 +170,55 @@ func (r *Resolver) ResolveContainer(ctx context.Context, containerID string) (*C
 
 	info := &ContainerInfo{Endpoint: r.endpoint}
 
+	// cgroupFieldPaths is the ordered list of dot-separated JSON paths searched
+	// for the container's cgroup path in CRI info responses.
+	// Extend at runtime via PODTRACE_CRI_CGROUP_FIELDS (comma-separated paths).
+	cgroupFieldPaths := []string{
+		// containerd standard fields
+		"cgroupsPath",
+		"cgroups_path",
+		"cgroupPath",
+		"cgroup_path",
+		// containerd runtime spec (nested object)
+		"runtimeSpec.linux.cgroupsPath",
+		"runtime_spec.linux.cgroupsPath",
+		// CRI-O: may nest under "info" or "status"
+		"info.cgroupsPath",
+		"info.cgroupPath",
+		"status.cgroupsPath",
+		// cgroup v1 multi-hierarchy
+		"cgroup_paths.cgroupfs",
+		"cgroup_paths.systemd",
+	}
+	if extra := os.Getenv("PODTRACE_CRI_CGROUP_FIELDS"); extra != "" {
+		for _, f := range strings.Split(extra, ",") {
+			if f = strings.TrimSpace(f); f != "" {
+				cgroupFieldPaths = append(cgroupFieldPaths, f)
+			}
+		}
+	}
+
+	pidFieldPaths := []string{"pid", "Pid", "processPid", "process_pid"}
+
 	for _, v := range resp.Info {
 		if v == "" {
 			continue
 		}
-		var obj any
-		if json.Unmarshal([]byte(v), &obj) == nil {
-			if info.PID == 0 {
-				if pid, ok := findJSONInt(obj, []string{"pid", "Pid", "processPid", "process_pid"}); ok && pid > 0 {
-					info.PID = uint32(pid)
-				}
+		// tryParseJSON handles direct JSON objects and double-encoded JSON strings
+		// (some runtimes encode the info value as a JSON string within the map).
+		obj := tryParseJSON(v)
+		if obj == nil {
+			continue
+		}
+
+		if info.PID == 0 {
+			if pid, ok := findJSONInt(obj, pidFieldPaths); ok && pid > 0 {
+				info.PID = uint32(pid)
 			}
-			if info.CgroupsPath == "" {
-				if cg, ok := findJSONString(obj, []string{
-					"cgroupsPath", "cgroups_path", "cgroupPath", "cgroup_path",
-					"runtimeSpec.linux.cgroupsPath",
-					"runtime_spec.linux.cgroupsPath",
-					"info.cgroupsPath",
-					"info.cgroupPath",
-					"cgroup_paths.cgroupfs",
-					"cgroup_paths.systemd",
-				}); ok && cg != "" {
-					info.CgroupsPath = cg
-				}
+		}
+		if info.CgroupsPath == "" {
+			if cg, ok := findJSONString(obj, cgroupFieldPaths); ok && cg != "" {
+				info.CgroupsPath = cg
 			}
 		}
 	}

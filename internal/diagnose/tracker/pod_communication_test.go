@@ -113,3 +113,50 @@ func containsMiddle(s, substr string) bool {
 	return false
 }
 
+
+// TestFormatBytes exercises all branches of formatBytes.
+func TestFormatBytes(t *testing.T) {
+	cases := []struct {
+		input uint64
+		want  string
+	}{
+		{0, "0 B"},
+		{500, "500 B"},
+		{1023, "1023 B"},
+		{1024, "1.00 KB"},
+		{2048, "2.00 KB"},
+		{1024 * 1024, "1.00 MB"},
+		{5 * 1024 * 1024, "5.00 MB"},
+		{1024 * 1024 * 1024, "1.00 GB"},
+		{3 * 1024 * 1024 * 1024, "3.00 GB"},
+	}
+	for _, tc := range cases {
+		got := formatBytes(tc.input)
+		if got != tc.want {
+			t.Errorf("formatBytes(%d) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
+// TestGetKey exercises all branches of getKey.
+func TestGetKey(t *testing.T) {
+	pct := NewPodCommunicationTracker("source-pod", "default")
+
+	// targetService set → use service key
+	got := pct.getKey("", "my-svc", "default")
+	if got == "" {
+		t.Error("expected non-empty key when targetService is set")
+	}
+
+	// targetPod set → use pod key
+	got = pct.getKey("target-pod", "", "default")
+	if got == "" {
+		t.Error("expected non-empty key when targetPod is set")
+	}
+
+	// both empty → empty key
+	got = pct.getKey("", "", "")
+	if got != "" {
+		t.Errorf("expected empty key when both target and service are empty, got %q", got)
+	}
+}

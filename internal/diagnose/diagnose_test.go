@@ -1342,3 +1342,75 @@ func TestGenerateConnectionSection_ZeroDuration(t *testing.T) {
 		t.Error("Expected connection section even with zero duration")
 	}
 }
+
+// ---- Error constructor tests ----
+
+func TestNewReportGenerationError(t *testing.T) {
+	err := fmt.Errorf("inner error")
+	de := NewReportGenerationError(err)
+	if de == nil {
+		t.Fatal("expected non-nil DiagnoseError")
+	}
+	if de.Code != ErrCodeReportGenerationFailed {
+		t.Errorf("unexpected code: %v", de.Code)
+	}
+	if de.Err != err {
+		t.Errorf("expected wrapped error, got %v", de.Err)
+	}
+	if de.Error() == "" {
+		t.Error("Error() must return non-empty string")
+	}
+}
+
+func TestNewStackResolveError(t *testing.T) {
+	inner := fmt.Errorf("sym error")
+	de := NewStackResolveError(1234, 0xdeadbeef, inner)
+	if de == nil || de.Code != ErrCodeStackResolveFailed {
+		t.Fatal("unexpected NewStackResolveError result")
+	}
+	if de.Unwrap() != inner {
+		t.Error("Unwrap() should return original error")
+	}
+}
+
+func TestNewAddr2lineError(t *testing.T) {
+	de := NewAddr2lineError("/bin/app", 0x1000, fmt.Errorf("exit 1"))
+	if de == nil || de.Code != ErrCodeAddr2lineFailed {
+		t.Fatal("unexpected NewAddr2lineError result")
+	}
+}
+
+func TestNewNoEventsError(t *testing.T) {
+	de := NewNoEventsError()
+	if de == nil || de.Code != ErrCodeNoEvents {
+		t.Fatal("unexpected NewNoEventsError result")
+	}
+	if de.Error() == "" {
+		t.Error("Error() must return non-empty string")
+	}
+}
+
+// ---- K8s diagnostician constructors ----
+
+func TestNewDiagnosticianWithK8s(t *testing.T) {
+	d := NewDiagnosticianWithK8s("mypod", "mynamespace")
+	if d == nil {
+		t.Fatal("expected non-nil Diagnostician")
+	}
+	if d.sourcePod != "mypod" || d.sourceNamespace != "mynamespace" {
+		t.Errorf("unexpected sourcePod/ns: %q/%q", d.sourcePod, d.sourceNamespace)
+	}
+	if d.podCommTracker == nil {
+		t.Error("expected non-nil podCommTracker")
+	}
+}
+
+func TestNewDiagnosticianWithK8sAndThresholds(t *testing.T) {
+	d := NewDiagnosticianWithK8sAndThresholds("pod1", "ns1", 0.05, 100, 50)
+	if d == nil {
+		t.Fatal("expected non-nil Diagnostician")
+	}
+	if d.sourcePod != "pod1" || d.sourceNamespace != "ns1" {
+		t.Errorf("unexpected sourcePod/ns: %q/%q", d.sourcePod, d.sourceNamespace)
+	}
+}

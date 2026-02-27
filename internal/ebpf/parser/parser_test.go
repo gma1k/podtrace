@@ -317,6 +317,120 @@ func TestPutEvent_EventReuse(t *testing.T) {
 	}
 }
 
+func TestParseEvent_ValidEventV3_WithComm(t *testing.T) {
+	// rawEventV3 includes CgroupID + Comm fields beyond V2.
+	type rawEventV3 struct {
+		Timestamp uint64
+		PID       uint32
+		Type      uint32
+		LatencyNS uint64
+		Error     int32
+		_         uint32
+		Bytes     uint64
+		TCPState  uint32
+		_         uint32
+		StackKey  uint64
+		CgroupID  uint64
+		Comm      [16]byte
+		Target    [128]byte
+		Details   [128]byte
+	}
+
+	var raw rawEventV3
+	raw.Timestamp = 9999
+	raw.PID = 42
+	raw.Type = uint32(events.EventTCPSend)
+	raw.LatencyNS = 1000
+	raw.CgroupID = 0xdeadbeef
+	copy(raw.Comm[:], "myprocess\x00")
+	copy(raw.Target[:], "10.0.0.1:80")
+	copy(raw.Details[:], "v3-detail")
+
+	var buf bytes.Buffer
+	if err := binary.Write(&buf, binary.LittleEndian, raw); err != nil {
+		t.Fatalf("binary.Write: %v", err)
+	}
+
+	event := ParseEvent(buf.Bytes())
+	if event == nil {
+		t.Fatal("ParseEvent returned nil for V3 event")
+	}
+	if event.CgroupID != raw.CgroupID {
+		t.Errorf("CgroupID: got %d, want %d", event.CgroupID, raw.CgroupID)
+	}
+	if event.ProcessName != "myprocess" {
+		t.Errorf("ProcessName: got %q, want %q", event.ProcessName, "myprocess")
+	}
+	if event.Target != "10.0.0.1:80" {
+		t.Errorf("Target: got %q, want %q", event.Target, "10.0.0.1:80")
+	}
+}
+
+func TestParseEvent_BinaryReadError_V2Path(t *testing.T) {
+	orig := binaryRead
+	t.Cleanup(func() { binaryRead = orig })
+
+	// Count calls: error only on second call (V2 branch) — but since we use exact V2 size,
+	// only V2 branch runs and its binaryRead is the first call.
+	callCount := 0
+	binaryRead = func(r io.Reader, order binary.ByteOrder, data interface{}) error {
+		callCount++
+		return fmt.Errorf("forced V2 error")
+	}
+
+	// Create V2-sized data.
+	type rawEventV2 struct {
+		Timestamp uint64
+		PID       uint32
+		Type      uint32
+		LatencyNS uint64
+		Error     int32
+		_         uint32
+		Bytes     uint64
+		TCPState  uint32
+		_         uint32
+		StackKey  uint64
+		CgroupID  uint64
+		Target    [128]byte
+		Details   [128]byte
+	}
+	data := make([]byte, int(unsafe.Sizeof(rawEventV2{})))
+	if ev := ParseEvent(data); ev != nil {
+		t.Fatalf("expected nil event on V2 binary read error")
+	}
+}
+
+func TestParseEvent_BinaryReadError_V3Path(t *testing.T) {
+	orig := binaryRead
+	t.Cleanup(func() { binaryRead = orig })
+
+	binaryRead = func(r io.Reader, order binary.ByteOrder, data interface{}) error {
+		return fmt.Errorf("forced V3 error")
+	}
+
+	// Create V3-sized data.
+	type rawEventV3 struct {
+		Timestamp uint64
+		PID       uint32
+		Type      uint32
+		LatencyNS uint64
+		Error     int32
+		_         uint32
+		Bytes     uint64
+		TCPState  uint32
+		_         uint32
+		StackKey  uint64
+		CgroupID  uint64
+		Comm      [16]byte
+		Target    [128]byte
+		Details   [128]byte
+	}
+	data := make([]byte, int(unsafe.Sizeof(rawEventV3{})))
+	if ev := ParseEvent(data); ev != nil {
+		t.Fatalf("expected nil event on V3 binary read error")
+	}
+}
+
 func BenchmarkParseEvent(b *testing.B) {
 	var raw rawEvent
 	raw.Timestamp = 1234567890

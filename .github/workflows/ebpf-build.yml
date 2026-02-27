@@ -24,7 +24,18 @@ on:
       
 jobs:
   build-ebpf:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            goarch: amd64
+            bpf_arch: x86
+          - runner: ubuntu-24.04-arm
+            goarch: arm64
+            bpf_arch: arm64
+
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - name: Checkout
@@ -39,49 +50,48 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm libbpf-dev linux-headers-$(uname -r) linux-tools-$(uname -r) || sudo apt-get install -y clang llvm libbpf-dev linux-headers-$(uname -r) linux-tools-generic
+          sudo apt-get install -y clang llvm libbpf-dev \
+            linux-headers-$(uname -r) linux-tools-$(uname -r) \
+            || sudo apt-get install -y clang llvm libbpf-dev \
+            linux-headers-generic linux-tools-generic
 
       - name: Generate vmlinux.h from BTF
         run: |
-          echo "Generating vmlinux.h from BTF..."
-          if [ -f /sys/kernel/btf/vmlinux ]; then
+          if [ -f /sys/kernel/btf/vmlinux ] && command -v bpftool &>/dev/null; then
+            echo "Generating bpf/vmlinux.h from kernel BTF (arch=${{ matrix.bpf_arch }})..."
             if bpftool btf dump file /sys/kernel/btf/vmlinux format c > bpf/vmlinux.h 2>/dev/null; then
-              echo "vmlinux.h generated successfully"
+              echo "vmlinux.h generated: $(wc -l < bpf/vmlinux.h) lines"
             else
-              echo "Warning: bpftool failed or not available for this kernel, using placeholder vmlinux.h"
+              echo "bpftool failed — using placeholder bpf/vmlinux.h"
             fi
           else
-            echo "Warning: /sys/kernel/btf/vmlinux not found, using placeholder vmlinux.h"
+            echo "bpftool or BTF unavailable — using placeholder bpf/vmlinux.h"
           fi
 
       - name: Install Go dependencies
-        run: |
-          echo "Installing Go dependencies..."
-          GOTOOLCHAIN=auto go mod download
-          GOTOOLCHAIN=auto go mod verify
+        run: GOTOOLCHAIN=auto go mod download && GOTOOLCHAIN=auto go mod verify
 
       - name: Compile eBPF program
         run: |
-          echo "Compiling podtrace.bpf.c..."
-          if [ -f bpf/vmlinux.h ] && [ -s bpf/vmlinux.h ]; then
-            VMLINUX_SIZE=$(stat -c%s bpf/vmlinux.h 2>/dev/null || echo 0)
-            if [ "$VMLINUX_SIZE" -gt 50000 ]; then
-              clang -O2 -g -target bpf -D__TARGET_ARCH_x86 -DPODTRACE_VMLINUX_FROM_BTF -I./bpf -c bpf/podtrace.bpf.c -o bpf/podtrace.bpf.o
-            else
-              clang -O2 -g -target bpf -D__TARGET_ARCH_x86 -I./bpf -c bpf/podtrace.bpf.c -o bpf/podtrace.bpf.o
-            fi
+          VMLINUX_SIZE=$(stat -c%s bpf/vmlinux.h 2>/dev/null || echo 0)
+          if [ "$VMLINUX_SIZE" -gt 50000 ]; then
+            VMLINUX_FLAG="-DPODTRACE_VMLINUX_FROM_BTF"
           else
-            clang -O2 -g -target bpf -D__TARGET_ARCH_x86 -I./bpf -c bpf/podtrace.bpf.c -o bpf/podtrace.bpf.o
+            VMLINUX_FLAG=""
           fi
+          clang -O2 -g -target bpf \
+            -D__TARGET_ARCH_${{ matrix.bpf_arch }} \
+            ${VMLINUX_FLAG} \
+            -I./bpf -c bpf/podtrace.bpf.c -o bpf/podtrace.bpf.o
+          echo "eBPF object compiled for arch=${{ matrix.bpf_arch }}"
 
       - name: Build Go binary
-        run: |
-          echo "Building Go binary..."
-          GOTOOLCHAIN=auto go build -o bin/podtrace ./cmd/podtrace
+        run: GOTOOLCHAIN=auto GOARCH=${{ matrix.goarch }} go build -o bin/podtrace ./cmd/podtrace
 
       - name: List outputs
         run: |
-          echo "eBPF object:"
-          ls -l bpf/ || true
-          echo "Go binary:"
-          ls -l bin/ || true
+          echo "=== eBPF object (arch=${{ matrix.bpf_arch }}) ==="
+          ls -lh bpf/podtrace.bpf.o
+          echo "=== Go binary (goarch=${{ matrix.goarch }}) ==="
+          ls -lh bin/podtrace
+          file bin/podtrace

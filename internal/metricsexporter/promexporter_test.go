@@ -358,3 +358,56 @@ func TestHandleEventWithContext_ResourceLimit(t *testing.T) {
 
 	HandleEventWithContext(event, k8sContext)
 }
+
+func TestExportTLSMetric(t *testing.T) {
+	event := &events.Event{
+		Type:        events.EventTLSHandshake,
+		LatencyNS:   5000000,
+		ProcessName: "nginx",
+	}
+	ExportTLSMetric(event)
+}
+
+func TestExportTLSMetricWithContext(t *testing.T) {
+	event := &events.Event{
+		Type:        events.EventTLSError,
+		LatencyNS:   1000000,
+		ProcessName: "go-server",
+	}
+	ExportTLSMetricWithContext(event, "production")
+}
+
+func TestExportPoolAcquireMetricWithContext(t *testing.T) {
+	event := &events.Event{
+		Type:        events.EventPoolAcquire,
+		Target:      "db-pool",
+		ProcessName: "app",
+		LatencyNS:   200000,
+	}
+	ExportPoolAcquireMetricWithContext(event, "default")
+}
+
+func TestExportPoolAcquireMetricWithContext_DefaultPoolID(t *testing.T) {
+	event := &events.Event{
+		Type:   events.EventPoolAcquire,
+		Target: "", // empty → "default" pool ID
+	}
+	ExportPoolAcquireMetricWithContext(event, "ns")
+}
+
+func TestExportPoolReleaseMetricWithContext(t *testing.T) {
+	event := &events.Event{
+		Type:   events.EventPoolRelease,
+		Target: "redis-pool",
+	}
+	ExportPoolReleaseMetricWithContext(event, "")
+}
+
+func TestExportPoolExhaustedMetricWithContext(t *testing.T) {
+	event := &events.Event{
+		Type:      events.EventPoolExhausted,
+		Target:    "conn-pool",
+		LatencyNS: 50000000,
+	}
+	ExportPoolExhaustedMetricWithContext(event, "prod")
+}

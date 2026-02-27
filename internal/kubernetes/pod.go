@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,6 +19,13 @@ import (
 	"github.com/podtrace/podtrace/internal/logger"
 	"github.com/podtrace/podtrace/internal/validation"
 	"go.uber.org/zap"
+)
+
+// kubeletCgroupParent caches the value of kubelet's --cgroup-root or
+// --cgroup-parent flag, detected once from /proc/<kubelet-pid>/cmdline.
+var (
+	kubeletCgroupParent     string
+	kubeletCgroupParentOnce sync.Once
 )
 
 type PodResolver struct {
@@ -167,18 +175,115 @@ func (r *PodResolver) ResolvePod(ctx context.Context, podName, namespace, contai
 	}, nil
 }
 
-// cgroupRootCandidates returns base paths to try when resolving cgroup paths.
-// When kubelet uses --cgroup-driver=systemd (e.g. Ubuntu/Debian), container cgroups
-// live under /sys/fs/cgroup/systemd/ (cgroup v1). The first candidate is the default
-// base; the second is the systemd hierarchy so both cgroupfs and systemd drivers work.
+// cgroupRootCandidates returns base paths to search when resolving cgroup paths.
+// It covers:
+//   - The configured cgroup base (default /sys/fs/cgroup)
+//   - The systemd sub-hierarchy (cgroup v1 with systemd driver)
+//   - A custom cgroup-root/cgroup-parent set via kubelet flags (GKE, AKS, EKS)
 func cgroupRootCandidates() []string {
 	base := config.CgroupBasePath
+	seen := map[string]bool{base: true}
 	candidates := []string{base}
-	systemdRoot := filepath.Join(base, "systemd")
-	if _, err := os.Stat(systemdRoot); err == nil {
-		candidates = append(candidates, systemdRoot)
+
+	// cgroup v1 systemd hierarchy.
+	if systemdRoot := filepath.Join(base, "systemd"); dirExists(systemdRoot) {
+		if !seen[systemdRoot] {
+			seen[systemdRoot] = true
+			candidates = append(candidates, systemdRoot)
+		}
 	}
+
+	// Kubelet --cgroup-root / --cgroup-parent (GKE, AKS, EKS, custom clusters).
+	if kcp := detectKubeletCgroupParent(); kcp != "" {
+		// kcp may be a relative path like "kubepods" or absolute.
+		var full string
+		if filepath.IsAbs(kcp) {
+			full = kcp
+		} else {
+			full = filepath.Join(base, kcp)
+		}
+		if dirExists(full) && !seen[full] {
+			seen[full] = true
+			candidates = append(candidates, full)
+		}
+	}
+
 	return candidates
+}
+
+// detectKubeletCgroupParent finds the value of --cgroup-root or --cgroup-parent
+// from the running kubelet process's command line. The result is cached.
+func detectKubeletCgroupParent() string {
+	kubeletCgroupParentOnce.Do(func() {
+		kubeletCgroupParent = readKubeletCgroupFlag()
+	})
+	return kubeletCgroupParent
+}
+
+// readKubeletCgroupFlag reads /proc and finds the kubelet cmdline.
+func readKubeletCgroupFlag() string {
+	procPath := config.ProcBasePath
+	entries, err := os.ReadDir(procPath)
+	if err != nil {
+		return ""
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pid := entry.Name()
+		if pid == "" || pid[0] < '1' || pid[0] > '9' {
+			continue
+		}
+
+		commPath := filepath.Join(procPath, pid, "comm")
+		comm, err := os.ReadFile(commPath)
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(string(comm)) != "kubelet" {
+			continue
+		}
+
+		cmdlinePath := filepath.Join(procPath, pid, "cmdline")
+		data, err := os.ReadFile(cmdlinePath)
+		if err != nil {
+			continue
+		}
+
+		// cmdline is NUL-separated.
+		args := strings.Split(string(data), "\x00")
+		for i, arg := range args {
+			for _, flag := range []string{"--cgroup-root", "--cgroup-parent"} {
+				if arg == flag && i+1 < len(args) {
+					v := strings.TrimSpace(args[i+1])
+					if v != "" {
+						logger.Debug("Detected kubelet cgroup flag",
+							zap.String("flag", flag), zap.String("value", v))
+						return v
+					}
+				}
+				if strings.HasPrefix(arg, flag+"=") {
+					v := strings.TrimPrefix(arg, flag+"=")
+					v = strings.TrimSpace(v)
+					if v != "" {
+						logger.Debug("Detected kubelet cgroup flag",
+							zap.String("flag", flag), zap.String("value", v))
+						return v
+					}
+				}
+			}
+		}
+		// Found kubelet but no relevant flag — stop searching.
+		break
+	}
+	return ""
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 func resolveCgroupPathCRI(ctx context.Context, containerID string) (string, error) {

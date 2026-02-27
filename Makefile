@@ -53,7 +53,31 @@ check-go:
 		exit 1; \
 	fi
 
-$(BPF_OBJ): bpf/podtrace.bpf.c bpf/*.h bpf/network.c bpf/filesystem.c bpf/cpu.c bpf/memory.c
+# Regenerate vmlinux.h from the running kernel's BTF when bpftool is available.
+# This gives CO-RE-correct type definitions and avoids register-name mismatches
+# between the kernel BTF (short names: ax/si/di) and user-space ptrace.h headers.
+# When vmlinux.h is generated from BTF, pass -DPODTRACE_VMLINUX_FROM_BTF so that
+# common.h skips its placeholder struct definitions (pt_regs, sockaddr_in).
+VMLINUX_BTF  = /sys/kernel/btf/vmlinux
+HAVE_BPFTOOL := $(shell command -v bpftool 2>/dev/null)
+HAVE_BTF     := $(shell test -r $(VMLINUX_BTF) && echo yes)
+
+ifneq ($(HAVE_BPFTOOL),)
+  ifeq ($(HAVE_BTF),yes)
+    USE_BTF_VMLINUX := yes
+    BPF_CFLAGS += -DPODTRACE_VMLINUX_FROM_BTF
+  endif
+endif
+
+bpf/vmlinux.h: $(if $(USE_BTF_VMLINUX),$(VMLINUX_BTF),)
+ifdef USE_BTF_VMLINUX
+	@echo "Regenerating bpf/vmlinux.h from kernel BTF..."
+	bpftool btf dump file $(VMLINUX_BTF) format c > bpf/vmlinux.h
+else
+	@[ -f bpf/vmlinux.h ] || (echo "Error: bpf/vmlinux.h missing and bpftool unavailable"; exit 1)
+endif
+
+$(BPF_OBJ): bpf/vmlinux.h bpf/podtrace.bpf.c bpf/*.h bpf/network.c bpf/filesystem.c bpf/cpu.c bpf/memory.c
 	@mkdir -p $(dir $(BPF_OBJ))
 	$(CLANG) $(BPF_CFLAGS) -Ibpf -I. -c bpf/podtrace.bpf.c -o $(BPF_OBJ)
 

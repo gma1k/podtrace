@@ -1,11 +1,16 @@
 package logger
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+
+	"github.com/podtrace/podtrace/internal/alerting"
+	"github.com/podtrace/podtrace/internal/config"
 )
 
 func TestLogger(t *testing.T) {
@@ -55,6 +60,44 @@ func TestLogFunctions(t *testing.T) {
 
 func TestSync(t *testing.T) {
 	Sync()
+}
+
+// TestWarnAndError_WithAlertingManager exercises the alerting branch in Warn and Error.
+// It spins up a dummy HTTP server as the webhook endpoint so the manager has a real sender.
+func TestWarnAndError_WithAlertingManager(t *testing.T) {
+	// Dummy HTTP server that accepts any POST.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	// Temporarily configure alerting.
+	origEnabled := config.AlertingEnabled
+	origWebhookURL := config.AlertWebhookURL
+	origMinSev := config.GetAlertMinSeverity()
+	t.Cleanup(func() {
+		config.AlertingEnabled = origEnabled
+		config.AlertWebhookURL = origWebhookURL
+		_ = os.Setenv("PODTRACE_ALERT_MIN_SEVERITY", origMinSev)
+		alerting.SetGlobalManager(nil)
+	})
+
+	config.AlertingEnabled = true
+	config.AlertWebhookURL = srv.URL
+	_ = os.Setenv("PODTRACE_ALERT_MIN_SEVERITY", "warning")
+
+	manager, err := alerting.NewManager()
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	if !manager.IsEnabled() {
+		t.Skip("manager disabled (no senders configured) — skipping alerting path test")
+	}
+	alerting.SetGlobalManager(manager)
+
+	// These calls now go through the manager != nil branch.
+	Warn("test warn with manager", zap.String("ctx", "test"))
+	Error("test error with manager", zap.String("ctx", "test"))
 }
 
 func TestParseLogLevel(t *testing.T) {
