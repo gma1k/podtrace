@@ -1,6 +1,6 @@
 module github.com/podtrace/podtrace
 
-go 1.24.0
+go 1.24.13
 
 require (
 	github.com/cilium/ebpf v0.20.0
