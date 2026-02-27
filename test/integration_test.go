@@ -4,10 +4,13 @@
 package test
 
 import (
+	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/podtrace/podtrace/internal/cri"
 	"github.com/podtrace/podtrace/internal/diagnose"
 	"github.com/podtrace/podtrace/internal/events"
 )
@@ -128,6 +131,49 @@ func TestDiagnostician_Performance(t *testing.T) {
 
 	if reportDuration > 5*time.Second {
 		t.Errorf("Generating report took too long: %v", reportDuration)
+	}
+}
+
+// TestCRIResolver_ConnectToSocket verifies that the CRI resolver can connect to
+// a real CRI socket on the host. The test is skipped when no socket is available,
+// so it is safe to run in any environment.
+func TestCRIResolver_ConnectToSocket(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping CRI integration test in short mode")
+	}
+
+	// Prefer an explicitly configured endpoint.
+	endpoint := os.Getenv("PODTRACE_CRI_ENDPOINT")
+	if endpoint == "" {
+		// Pick the first candidate socket that actually exists.
+		for _, ep := range cri.DefaultCandidateEndpoints() {
+			path := strings.TrimPrefix(ep, "unix://")
+			if _, err := os.Stat(path); err == nil {
+				endpoint = ep
+				break
+			}
+		}
+	}
+	if endpoint == "" {
+		t.Skip("No CRI socket found; skipping CRI integration test")
+	}
+
+	resolver, err := cri.NewResolverWithEndpoint(endpoint)
+	if err != nil {
+		t.Skipf("Could not connect to CRI endpoint %q: %v", endpoint, err)
+	}
+	defer resolver.Close()
+
+	if got := resolver.Endpoint(); got != endpoint {
+		t.Errorf("Endpoint() = %q, want %q", got, endpoint)
+	}
+
+	// ResolveContainer with an empty ID must return a well-typed error, not panic.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err = resolver.ResolveContainer(ctx, "")
+	if err == nil {
+		t.Error("expected error for empty container ID, got nil")
 	}
 }
 

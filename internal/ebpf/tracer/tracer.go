@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -355,7 +356,9 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				logger.Error("Panic in event reader", zap.Any("panic", r))
+				logger.Error("Panic in event reader",
+					zap.Any("panic", r),
+					zap.ByteString("stack", debug.Stack()))
 			}
 		}()
 		for {

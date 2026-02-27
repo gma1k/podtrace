@@ -57,6 +57,19 @@ jobs:
             echo "Warning: /sys/kernel/btf/vmlinux not found, using placeholder vmlinux.h"
           fi
 
+      - name: Run gosec security scanner
+        if: matrix.language == 'go'
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          gosec -fmt sarif -out gosec-results.sarif -exclude-dir=test ./... || true
+
+      - name: Upload gosec SARIF results
+        if: matrix.language == 'go'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: gosec-results.sarif
+          category: gosec
+
       - name: Build Go
         if: matrix.language == 'go'
         run: |
