@@ -33,22 +33,25 @@ typedef __u64 u64;
 #include <bpf/bpf_core_read.h>
 
 #ifndef PODTRACE_VMLINUX_FROM_BTF
+/* Field names match kernel BTF (bpftool btf dump) and the __VMLINUX_H__ path
+ * in bpf_tracing.h, which expects short register names without the 'r' prefix.
+ * User-space ptrace.h uses rax/rdi/rsi, but kernel BTF uses ax/di/si. */
 struct pt_regs {
 	unsigned long r15;
 	unsigned long r14;
 	unsigned long r13;
 	unsigned long r12;
-	unsigned long rbp;
-	unsigned long rbx;
+	unsigned long bp;
+	unsigned long bx;
 	unsigned long r11;
 	unsigned long r10;
 	unsigned long r9;
 	unsigned long r8;
-	unsigned long rax;
-	unsigned long rcx;
-	unsigned long rdx;
-	unsigned long rsi;
-	unsigned long rdi;
+	unsigned long ax;
+	unsigned long cx;
+	unsigned long dx;
+	unsigned long si;
+	unsigned long di;
 	unsigned long orig_ax;
 	unsigned long ip;
 	unsigned long cs;

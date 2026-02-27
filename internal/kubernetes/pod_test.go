@@ -1280,20 +1280,179 @@ func TestFindCgroupPathV2_WalkError(t *testing.T) {
 
 func TestFindCgroupPathV2_NoCgroupProcs(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	origCgroupBase := config.CgroupBasePath
 	config.SetCgroupBasePath(tmpDir)
 	defer func() { config.SetCgroupBasePath(origCgroupBase) }()
-	
+
 	containerID := "test123"
 	kubepodsPath := filepath.Join(tmpDir, "kubepods", "pod_"+containerID)
 	if err := os.MkdirAll(kubepodsPath, 0755); err != nil {
 		t.Fatalf("failed to create kubepods path: %v", err)
 	}
-	
+
 	_, err := findCgroupPathV2(containerID)
 	if err != nil {
 		t.Logf("findCgroupPathV2 returned error (expected when no cgroup.procs): %v", err)
+	}
+}
+
+// ---- readKubeletCgroupFlag tests ----
+
+// buildFakeProc creates a minimal fake /proc directory with a kubelet process.
+// cmdlineArgs is the NUL-separated argument list content.
+func buildFakeProc(t *testing.T, comm, cmdlineArgs string) string {
+	t.Helper()
+	dir := t.TempDir()
+	pidDir := filepath.Join(dir, "1234")
+	if err := os.MkdirAll(pidDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pidDir, "comm"), []byte(comm+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pidDir, "cmdline"), []byte(cmdlineArgs), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestReadKubeletCgroupFlag_SeparateArg(t *testing.T) {
+	// --cgroup-root /mycgrouproot  (flag and value as separate NUL-separated args)
+	args := "kubelet\x00--cgroup-root\x00/mycgrouproot\x00"
+	dir := buildFakeProc(t, "kubelet", args)
+
+	origProc := config.ProcBasePath
+	config.SetProcBasePath(dir)
+	defer func() { config.SetProcBasePath(origProc) }()
+
+	got := readKubeletCgroupFlag()
+	if got != "/mycgrouproot" {
+		t.Errorf("readKubeletCgroupFlag()=%q, want %q", got, "/mycgrouproot")
+	}
+}
+
+func TestReadKubeletCgroupFlag_EqualSign(t *testing.T) {
+	// --cgroup-parent=/kubepods  (flag=value syntax)
+	args := "kubelet\x00--other-flag=foo\x00--cgroup-parent=/kubepods\x00"
+	dir := buildFakeProc(t, "kubelet", args)
+
+	origProc := config.ProcBasePath
+	config.SetProcBasePath(dir)
+	defer func() { config.SetProcBasePath(origProc) }()
+
+	got := readKubeletCgroupFlag()
+	if got != "/kubepods" {
+		t.Errorf("readKubeletCgroupFlag()=%q, want %q", got, "/kubepods")
+	}
+}
+
+func TestReadKubeletCgroupFlag_NoKubelet(t *testing.T) {
+	// Process is not kubelet — should return empty.
+	args := "dockerd\x00--flag\x00"
+	dir := buildFakeProc(t, "dockerd", args)
+
+	origProc := config.ProcBasePath
+	config.SetProcBasePath(dir)
+	defer func() { config.SetProcBasePath(origProc) }()
+
+	got := readKubeletCgroupFlag()
+	if got != "" {
+		t.Errorf("readKubeletCgroupFlag()=%q, want empty for non-kubelet process", got)
+	}
+}
+
+func TestReadKubeletCgroupFlag_NoFlag(t *testing.T) {
+	// kubelet process exists but has no --cgroup-root or --cgroup-parent.
+	args := "kubelet\x00--kubeconfig=/etc/kubernetes/kubelet.conf\x00"
+	dir := buildFakeProc(t, "kubelet", args)
+
+	origProc := config.ProcBasePath
+	config.SetProcBasePath(dir)
+	defer func() { config.SetProcBasePath(origProc) }()
+
+	got := readKubeletCgroupFlag()
+	if got != "" {
+		t.Errorf("readKubeletCgroupFlag()=%q, want empty when flag absent", got)
+	}
+}
+
+func TestReadKubeletCgroupFlag_EmptyProcDir(t *testing.T) {
+	dir := t.TempDir()
+	origProc := config.ProcBasePath
+	config.SetProcBasePath(dir)
+	defer func() { config.SetProcBasePath(origProc) }()
+
+	got := readKubeletCgroupFlag()
+	if got != "" {
+		t.Errorf("readKubeletCgroupFlag()=%q, want empty for empty proc dir", got)
+	}
+}
+
+func TestDirExists(t *testing.T) {
+	dir := t.TempDir()
+	if !dirExists(dir) {
+		t.Errorf("dirExists(%q)=false, want true for existing dir", dir)
+	}
+	if dirExists(filepath.Join(dir, "nonexistent")) {
+		t.Error("dirExists should return false for nonexistent path")
+	}
+	// File is not a dir.
+	f := filepath.Join(dir, "file.txt")
+	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if dirExists(f) {
+		t.Error("dirExists should return false for regular file")
+	}
+}
+
+func TestCgroupRootCandidates_BaseOnly(t *testing.T) {
+	dir := t.TempDir()
+	origCgroup := config.CgroupBasePath
+	config.SetCgroupBasePath(dir)
+	defer func() { config.SetCgroupBasePath(origCgroup) }()
+
+	// No systemd subdir, no kubelet flag.
+	origProc := config.ProcBasePath
+	config.SetProcBasePath(t.TempDir())
+	defer func() { config.SetProcBasePath(origProc) }()
+
+	candidates := cgroupRootCandidates()
+	if len(candidates) == 0 {
+		t.Fatal("expected at least one candidate")
+	}
+	if candidates[0] != dir {
+		t.Errorf("first candidate should be base path %q, got %q", dir, candidates[0])
+	}
+}
+
+func TestCgroupRootCandidates_WithSystemd(t *testing.T) {
+	dir := t.TempDir()
+	// Create a systemd subdir.
+	systemdDir := filepath.Join(dir, "systemd")
+	if err := os.Mkdir(systemdDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	origCgroup := config.CgroupBasePath
+	config.SetCgroupBasePath(dir)
+	defer func() { config.SetCgroupBasePath(origCgroup) }()
+
+	origProc := config.ProcBasePath
+	config.SetProcBasePath(t.TempDir())
+	defer func() { config.SetProcBasePath(origProc) }()
+
+	candidates := cgroupRootCandidates()
+	found := false
+	for _, c := range candidates {
+		if c == systemdDir {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected systemd dir %q in candidates %v", systemdDir, candidates)
 	}
 }
 

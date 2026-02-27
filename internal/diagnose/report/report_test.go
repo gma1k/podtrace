@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/podtrace/podtrace/internal/diagnose/analyzer"
+	"github.com/podtrace/podtrace/internal/diagnose/tracker"
 	"github.com/podtrace/podtrace/internal/events"
 )
 
@@ -496,6 +498,206 @@ func TestGenerateResourceSection_EmergencyLevel(t *testing.T) {
 	result := GenerateResourceSection(d)
 	if !strings.Contains(result, "EMERGENCY") {
 		t.Error("Expected EMERGENCY status in resource section")
+	}
+}
+
+// ---- GenerateCgroupScopeSection tests ----
+
+func TestGenerateCgroupScopeSection_Empty(t *testing.T) {
+	d := &mockDiagnostician{}
+	if got := GenerateCgroupScopeSection(d); got != "" {
+		t.Errorf("expected empty string for no events, got %q", got)
+	}
+}
+
+func TestGenerateCgroupScopeSection_AllZero(t *testing.T) {
+	d := &mockDiagnostician{
+		events: []*events.Event{
+			{CgroupID: 0},
+			{CgroupID: 0},
+		},
+	}
+	got := GenerateCgroupScopeSection(d)
+	if !strings.Contains(got, "Cgroup Scope") {
+		t.Error("expected 'Cgroup Scope' header")
+	}
+	if !strings.Contains(got, "cgroup_id=0") {
+		t.Error("expected cgroup_id=0 report")
+	}
+	if !strings.Contains(got, "all events have cgroup_id=0") {
+		t.Error("expected warning about all events having cgroup_id=0")
+	}
+}
+
+func TestGenerateCgroupScopeSection_MultipleIDs(t *testing.T) {
+	d := &mockDiagnostician{
+		events: []*events.Event{
+			{CgroupID: 1},
+			{CgroupID: 2},
+			{CgroupID: 1},
+			nil, // nil events should be skipped
+		},
+	}
+	got := GenerateCgroupScopeSection(d)
+	if !strings.Contains(got, "Distinct non-zero cgroup_ids: 2") {
+		t.Errorf("expected 2 distinct cgroup IDs, got: %q", got)
+	}
+	if !strings.Contains(got, "multiple cgroup_ids seen") {
+		t.Error("expected warning about multiple cgroup IDs")
+	}
+}
+
+func TestGenerateCgroupScopeSection_SingleNonZero(t *testing.T) {
+	d := &mockDiagnostician{
+		events: []*events.Event{
+			{CgroupID: 42},
+			{CgroupID: 42},
+			{CgroupID: 42},
+			{CgroupID: 42},
+		},
+	}
+	got := GenerateCgroupScopeSection(d)
+	if strings.Contains(got, "multiple cgroup_ids") {
+		t.Error("should not warn about multiple cgroup IDs for single ID")
+	}
+	if !strings.Contains(got, "Top cgroup_ids") {
+		t.Error("expected 'Top cgroup_ids' section")
+	}
+}
+
+// ---- contains helper test ----
+
+func TestContains(t *testing.T) {
+	if !contains("CRITICAL error detected", "CRITICAL") {
+		t.Error("expected contains=true for 'CRITICAL'")
+	}
+	if contains("all OK", "CRITICAL") {
+		t.Error("expected contains=false for absent substring")
+	}
+}
+
+// ---- determinePoolHealth tests ----
+
+func TestDeterminePoolHealth_OK(t *testing.T) {
+	stats := analyzer.PoolStats{
+		ReuseRate:       0.9,
+		MaxWaitTime:     100 * time.Millisecond,
+		ExhaustedCount:  0,
+		TotalAcquires:   100,
+	}
+	got := determinePoolHealth(stats)
+	if got != "OK - Pool operating normally" {
+		t.Errorf("expected OK, got %q", got)
+	}
+}
+
+func TestDeterminePoolHealth_CriticalExhaustion(t *testing.T) {
+	stats := analyzer.PoolStats{
+		ExhaustedCount: 20,
+		TotalAcquires:  100,
+		ReuseRate:      0.9,
+	}
+	got := determinePoolHealth(stats)
+	if !strings.Contains(got, "CRITICAL") {
+		t.Errorf("expected CRITICAL for >10%% exhaustion, got %q", got)
+	}
+}
+
+func TestDeterminePoolHealth_WarningExhaustion(t *testing.T) {
+	stats := analyzer.PoolStats{
+		ExhaustedCount: 7,
+		TotalAcquires:  100,
+		ReuseRate:      0.9,
+	}
+	got := determinePoolHealth(stats)
+	if !strings.Contains(got, "WARNING") {
+		t.Errorf("expected WARNING for 5-10%% exhaustion, got %q", got)
+	}
+}
+
+func TestDeterminePoolHealth_LowReuseRate(t *testing.T) {
+	stats := analyzer.PoolStats{
+		ExhaustedCount: 0,
+		ReuseRate:      0.3,
+	}
+	got := determinePoolHealth(stats)
+	if !strings.Contains(got, "WARNING") || !strings.Contains(got, "reuse rate") {
+		t.Errorf("expected WARNING for low reuse rate, got %q", got)
+	}
+}
+
+func TestDeterminePoolHealth_HighWaitTime(t *testing.T) {
+	stats := analyzer.PoolStats{
+		ExhaustedCount: 0,
+		ReuseRate:      0.9,
+		MaxWaitTime:    2000 * time.Millisecond,
+	}
+	got := determinePoolHealth(stats)
+	if !strings.Contains(got, "WARNING") || !strings.Contains(got, "wait times") {
+		t.Errorf("expected WARNING for high wait times, got %q", got)
+	}
+}
+
+// ---- determinePoolHealthFromSummary tests ----
+
+func TestDeterminePoolHealthFromSummary_OK(t *testing.T) {
+	s := tracker.PoolSummary{
+		ReuseRate:      0.9,
+		MaxWaitTime:    50 * time.Millisecond,
+		ExhaustedCount: 0,
+	}
+	got := determinePoolHealthFromSummary(s)
+	if got != "OK - Pool operating normally" {
+		t.Errorf("expected OK, got %q", got)
+	}
+}
+
+func TestDeterminePoolHealthFromSummary_Critical(t *testing.T) {
+	s := tracker.PoolSummary{
+		ExhaustedCount: 15,
+		AcquireCount:   100,
+		ReuseRate:      0.9,
+	}
+	got := determinePoolHealthFromSummary(s)
+	if !strings.Contains(got, "CRITICAL") {
+		t.Errorf("expected CRITICAL, got %q", got)
+	}
+}
+
+func TestDeterminePoolHealthFromSummary_LowReuse(t *testing.T) {
+	s := tracker.PoolSummary{
+		ExhaustedCount: 0,
+		ReuseRate:      0.2,
+	}
+	got := determinePoolHealthFromSummary(s)
+	if !strings.Contains(got, "WARNING") {
+		t.Errorf("expected WARNING for low reuse, got %q", got)
+	}
+}
+
+// ---- GeneratePoolSection tests ----
+
+func TestGeneratePoolSection_Empty(t *testing.T) {
+	d := &mockDiagnostician{}
+	if got := GeneratePoolSection(d, time.Second); got != "" {
+		t.Errorf("expected empty string for no pool events, got %q", got)
+	}
+}
+
+func TestGeneratePoolSection_WithEvents(t *testing.T) {
+	d := &mockDiagnostician{
+		events: []*events.Event{
+			{Type: events.EventPoolAcquire},
+			{Type: events.EventPoolAcquire},
+			{Type: events.EventPoolRelease},
+		},
+	}
+	got := GeneratePoolSection(d, time.Second)
+	if !strings.Contains(got, "Connection Pool") {
+		t.Errorf("expected 'Connection Pool' header, got %q", got)
+	}
+	if !strings.Contains(got, "Total acquires: 2") {
+		t.Errorf("expected 'Total acquires: 2', got %q", got)
 	}
 }
 

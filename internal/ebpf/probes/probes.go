@@ -16,57 +16,99 @@ import (
 	"github.com/podtrace/podtrace/internal/logger"
 )
 
+// mandatoryProbes must all attach successfully; failure returns an actionable error.
+var mandatoryProbes = map[string]string{
+	"kprobe_tcp_connect":       "tcp_v4_connect",
+	"kretprobe_tcp_connect":    "tcp_v4_connect",
+	"kprobe_tcp_v6_connect":    "tcp_v6_connect",
+	"kretprobe_tcp_v6_connect": "tcp_v6_connect",
+	"kprobe_tcp_sendmsg":       "tcp_sendmsg",
+	"kretprobe_tcp_sendmsg":    "tcp_sendmsg",
+	"kprobe_tcp_recvmsg":       "tcp_recvmsg",
+	"kretprobe_tcp_recvmsg":    "tcp_recvmsg",
+	"kprobe_vfs_write":         "vfs_write",
+	"kretprobe_vfs_write":      "vfs_write",
+	"kprobe_vfs_read":          "vfs_read",
+	"kretprobe_vfs_read":       "vfs_read",
+}
+
+// optionalProbes are attached when available; failure is logged but does not abort.
+// Kernel symbol names can change across versions (e.g. do_futex renamed in 5.16+),
+// so these degrade gracefully.
+var optionalProbes = map[string]string{
+	"kprobe_udp_sendmsg":       "udp_sendmsg",
+	"kretprobe_udp_sendmsg":    "udp_sendmsg",
+	"kprobe_udp_recvmsg":       "udp_recvmsg",
+	"kretprobe_udp_recvmsg":    "udp_recvmsg",
+	"kprobe_vfs_fsync":         "vfs_fsync",
+	"kretprobe_vfs_fsync":      "vfs_fsync",
+	"kprobe_do_futex":          "do_futex",
+	"kretprobe_do_futex":       "do_futex",
+	"kprobe_do_sys_openat2":    "do_sys_openat2",
+	"kretprobe_do_sys_openat2": "do_sys_openat2",
+}
+
+func attachKprobe(progName, symbol string, prog *ebpf.Program) (link.Link, error) {
+	if strings.HasPrefix(progName, "kretprobe_") {
+		return link.Kretprobe(symbol, prog, nil)
+	}
+	return link.Kprobe(symbol, prog, nil)
+}
+
 func AttachProbes(coll *ebpf.Collection) ([]link.Link, error) {
 	var links []link.Link
 
-	probes := map[string]string{
-		"kprobe_tcp_connect":       "tcp_v4_connect",
-		"kretprobe_tcp_connect":    "tcp_v4_connect",
-		"kprobe_tcp_v6_connect":    "tcp_v6_connect",
-		"kretprobe_tcp_v6_connect": "tcp_v6_connect",
-		"kprobe_tcp_sendmsg":       "tcp_sendmsg",
-		"kretprobe_tcp_sendmsg":    "tcp_sendmsg",
-		"kprobe_tcp_recvmsg":       "tcp_recvmsg",
-		"kretprobe_tcp_recvmsg":    "tcp_recvmsg",
-		"kprobe_udp_sendmsg":       "udp_sendmsg",
-		"kretprobe_udp_sendmsg":    "udp_sendmsg",
-		"kprobe_udp_recvmsg":       "udp_recvmsg",
-		"kretprobe_udp_recvmsg":    "udp_recvmsg",
-		"kprobe_vfs_write":         "vfs_write",
-		"kretprobe_vfs_write":      "vfs_write",
-		"kprobe_vfs_read":          "vfs_read",
-		"kretprobe_vfs_read":       "vfs_read",
-		"kprobe_vfs_fsync":         "vfs_fsync",
-		"kretprobe_vfs_fsync":      "vfs_fsync",
-		"kprobe_do_futex":          "do_futex",
-		"kretprobe_do_futex":       "do_futex",
-		"kprobe_do_sys_openat2":    "do_sys_openat2",
-		"kretprobe_do_sys_openat2": "do_sys_openat2",
+	// --- Mandatory kprobes: all must attach or we return an error. ---
+	for progName, symbol := range mandatoryProbes {
+		prog := coll.Programs[progName]
+		if prog == nil {
+			logger.Debug("Mandatory probe program not found in collection, skipping",
+				zap.String("prog", progName))
+			continue
+		}
+
+		l, err := attachKprobe(progName, symbol, prog)
+		if err != nil {
+			for _, existing := range links {
+				_ = existing.Close()
+			}
+			return nil, fmt.Errorf(
+				"%w\n\n"+
+					"Hint: mandatory kprobe %q could not attach to kernel symbol %q.\n"+
+					"  • Verify symbol exists: grep -w %q /proc/kallsyms\n"+
+					"  • Check for BPF denials: dmesg | grep -i bpf\n"+
+					"  • Kernel 5.8+ required (current: %s)\n"+
+					"  • On GKE Autopilot / AWS Fargate kprobes are not allowed; use a standard node pool.\n"+
+					"  • On OpenShift ensure the pod SCC allows CAP_BPF and CAP_SYS_ADMIN.",
+				NewProbeAttachError(progName, err), progName, symbol, symbol, kernelVersionString())
+		}
+		links = append(links, l)
+		logger.Debug("Mandatory probe attached", zap.String("prog", progName), zap.String("symbol", symbol))
 	}
 
-	for progName, symbol := range probes {
+	var skippedOptional []string
+
+	// --- Optional kprobes: log failures but continue. ---
+	for progName, symbol := range optionalProbes {
 		prog := coll.Programs[progName]
 		if prog == nil {
 			continue
 		}
 
-		var l link.Link
-		var err error
-
-		if strings.HasPrefix(progName, "kretprobe_") {
-			l, err = link.Kretprobe(symbol, prog, nil)
-		} else {
-			l, err = link.Kprobe(symbol, prog, nil)
-		}
-
+		l, err := attachKprobe(progName, symbol, prog)
 		if err != nil {
-			for _, existingLink := range links {
-				_ = existingLink.Close()
-			}
-			return nil, NewProbeAttachError(progName, err)
+			skippedOptional = append(skippedOptional, fmt.Sprintf("%s->%s", progName, symbol))
+			logger.Debug("Optional probe unavailable (skipping)",
+				zap.String("prog", progName), zap.String("symbol", symbol), zap.Error(err))
+			continue
 		}
-
 		links = append(links, l)
+		logger.Debug("Optional probe attached", zap.String("prog", progName), zap.String("symbol", symbol))
+	}
+
+	if len(skippedOptional) > 0 {
+		logger.Info("Some optional probes unavailable (non-critical features degraded)",
+			zap.Strings("skipped", skippedOptional))
 	}
 
 	if tracepointProg := coll.Programs["tracepoint_sched_switch"]; tracepointProg != nil {
@@ -1663,4 +1705,19 @@ func AttachTLSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint3
 	}
 
 	return links
+}
+
+// kernelVersionString returns the running kernel version for use in error messages.
+func kernelVersionString() string {
+	data, err := os.ReadFile("/proc/version")
+	if err != nil {
+		return "unknown"
+	}
+	fields := strings.Fields(string(data))
+	for i, f := range fields {
+		if strings.EqualFold(f, "version") && i+1 < len(fields) {
+			return fields[i+1]
+		}
+	}
+	return "unknown"
 }

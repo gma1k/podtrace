@@ -2,6 +2,7 @@ package stacktrace
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -180,6 +181,61 @@ func TestGenerateStackTraceSectionWithContext_ContextTimeout(t *testing.T) {
 	result := GenerateStackTraceSectionWithContext(d, ctx)
 	if result != "" {
 		t.Log("Result may be empty or partial when context times out")
+	}
+}
+
+// ---- Direct stackResolver tests ----
+
+// TestStackResolver_ZeroAddr verifies that addr=0 returns "".
+func TestStackResolver_ZeroAddr(t *testing.T) {
+	r := &stackResolver{}
+	got := r.resolve(context.Background(), 1, 0)
+	if got != "" {
+		t.Errorf("resolve(addr=0) = %q, want empty", got)
+	}
+}
+
+// TestStackResolver_ContextCancelled verifies the ctx.Done early-return path.
+func TestStackResolver_ContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled
+
+	r := &stackResolver{}
+	got := r.resolve(ctx, 1, 0x1234)
+	if got != "" {
+		t.Errorf("resolve(cancelled ctx) = %q, want empty", got)
+	}
+}
+
+// TestStackResolver_NilCache verifies that a nil cache is lazily initialized.
+func TestStackResolver_NilCache(t *testing.T) {
+	r := &stackResolver{cache: nil}
+	// addr 0x1 with a non-existent PID — forces readlink to fail, returns hex addr.
+	got := r.resolve(context.Background(), 999999, 0x1)
+	if got == "" {
+		t.Error("expected non-empty hex addr for non-zero addr with non-existent PID")
+	}
+	if r.cache == nil {
+		t.Error("cache should have been initialized")
+	}
+}
+
+// TestStackResolver_CurrentPID uses the current process's PID to exercise
+// the exePath readlink success path and the addr2line invocation path.
+func TestStackResolver_CurrentPID(t *testing.T) {
+	pid := uint32(os.Getpid())
+	r := &stackResolver{cache: make(map[string]string)}
+
+	// Resolve an arbitrary address — addr2line may fail but the code path is exercised.
+	got1 := r.resolve(context.Background(), pid, 0xdeadbeef)
+	if got1 == "" {
+		t.Error("expected non-empty result for current PID with non-zero addr")
+	}
+
+	// Second call with the same args — should hit the cache.
+	got2 := r.resolve(context.Background(), pid, 0xdeadbeef)
+	if got1 != got2 {
+		t.Errorf("cache hit should return same value: got1=%q got2=%q", got1, got2)
 	}
 }
 
