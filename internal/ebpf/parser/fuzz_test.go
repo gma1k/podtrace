@@ -16,7 +16,7 @@ func FuzzParseEvent(f *testing.F) {
 	f.Add(make([]byte, 1))                                            // too short
 	f.Add(make([]byte, int(unsafe.Sizeof(rawEvent{}))-1))            // one byte short of V1
 
-	f.Fuzz(func(t *testing.T, data []byte) {
+	f.Fuzz(func(_ *testing.T, data []byte) {
 		// Must never panic
 		event := ParseEvent(data)
 		if event != nil {
