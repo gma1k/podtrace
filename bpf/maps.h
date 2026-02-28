@@ -149,6 +149,77 @@ struct {
 	__type(value, struct event);
 } event_buf SEC(".maps");
 
+/* --- PROTOCOL ADAPTER MAPS (Redis, Memcached, FastCGI, gRPC, Kafka) --- */
+
+/* FastCGI request state — keyed by pid<<32|requestId (BTF-only) */
+struct fastcgi_req {
+	u64 start_ns;
+	char uri[MAX_STRING_LEN];
+	char method[16];
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u64);
+	__type(value, struct fastcgi_req);
+} fastcgi_reqs SEC(".maps");
+
+/* Saved msghdr* for unix_stream_recvmsg kretprobe (BTF-only FastCGI) */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u64);
+	__type(value, u64);  /* msghdr pointer cast to u64 */
+} recvmsg_args SEC(".maps");
+
+/* Redis: pid<<32|tid → first word of redisCommand format string */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u64);
+	__type(value, char[MAX_STRING_LEN]);
+} redis_cmds SEC(".maps");
+
+/* Memcached: pid<<32|tid → "get/set/del key" operation string */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u64);
+	__type(value, char[MAX_STRING_LEN]);
+} memcached_ops SEC(".maps");
+
+/* gRPC: pid<<32|tid → "/Service/Method" path (BTF-only h2c inspection) */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u64);
+	__type(value, char[MAX_STRING_LEN]);
+} grpc_methods SEC(".maps");
+
+/* Kafka: rd_kafka_topic_t* → topic name string (populated by rd_kafka_topic_new) */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 256);
+	__type(key, u64);  /* rd_kafka_topic_t* cast to u64 */
+	__type(value, char[MAX_STRING_LEN]);
+} kafka_topic_names SEC(".maps");
+
+/* Kafka: pid<<32|tid → topic name (temporary during rd_kafka_topic_new call) */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 256);
+	__type(key, u64);
+	__type(value, char[MAX_STRING_LEN]);
+} kafka_topic_tmp SEC(".maps");
+
+/* Shared pending byte count for protocol uprobes (Redis, Memcached, Kafka) */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u64);  /* pid<<32|tid */
+	__type(value, u64); /* byte count captured at uprobe entry */
+} proto_bytes SEC(".maps");
+
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
 	__uint(max_entries, 1);

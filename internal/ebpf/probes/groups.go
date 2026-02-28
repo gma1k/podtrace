@@ -12,6 +12,9 @@ const (
 	GroupMemory     ProbeGroup = "memory"
 	GroupCPU        ProbeGroup = "cpu"
 	GroupPool       ProbeGroup = "pool"
+	GroupCache      ProbeGroup = "cache"      // Redis, Memcached
+	GroupMessaging  ProbeGroup = "messaging"  // Kafka
+	GroupFastCGI    ProbeGroup = "fastcgi"    // PHP-FPM / FastCGI unix socket probes
 )
 
 // probeGroupMap maps each BPF program name to its ProbeGroup.
@@ -73,6 +76,34 @@ var probeGroupMap = map[string]ProbeGroup{
 	// Pool
 	"uprobe_pool_acquire":  GroupPool,
 	"uretprobe_pool_acquire": GroupPool,
+
+	// Cache (Redis / Memcached)
+	"uprobe_redisCommand":         GroupCache,
+	"uretprobe_redisCommand":      GroupCache,
+	"uprobe_redisCommandArgv":     GroupCache,
+	"uretprobe_redisCommandArgv":  GroupCache,
+	"uprobe_memcached_get":        GroupCache,
+	"uretprobe_memcached_get":     GroupCache,
+	"uprobe_memcached_set":        GroupCache,
+	"uretprobe_memcached_set":     GroupCache,
+	"uprobe_memcached_delete":     GroupCache,
+	"uretprobe_memcached_delete":  GroupCache,
+
+	// Messaging (Kafka)
+	"uprobe_rd_kafka_topic_new":        GroupMessaging,
+	"uretprobe_rd_kafka_topic_new":     GroupMessaging,
+	"uprobe_rd_kafka_produce":          GroupMessaging,
+	"uretprobe_rd_kafka_produce":       GroupMessaging,
+	"uprobe_rd_kafka_consumer_poll":    GroupMessaging,
+	"uretprobe_rd_kafka_consumer_poll": GroupMessaging,
+
+	// FastCGI (unix socket PHP-FPM tracing)
+	"kprobe_unix_stream_recvmsg":    GroupFastCGI,
+	"kretprobe_unix_stream_recvmsg": GroupFastCGI,
+	"kprobe_unix_stream_sendmsg":    GroupFastCGI,
+
+	// gRPC (second kprobe on tcp_sendmsg for HTTP/2 inspection)
+	"kprobe_grpc_tcp_sendmsg": GroupNetwork,
 }
 
 // GroupForProbe returns the ProbeGroup for a BPF program name.

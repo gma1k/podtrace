@@ -35,8 +35,15 @@ enum event_type {
 	EVENT_POOL_ACQUIRE,
 	EVENT_POOL_RELEASE,
 	EVENT_POOL_EXHAUSTED,
-	EVENT_UNLINK,   /* 29: file unlinked via vfs_unlink */
-	EVENT_RENAME,   /* 30: file renamed via vfs_rename */
+	EVENT_UNLINK,           /* 29: file unlinked via vfs_unlink */
+	EVENT_RENAME,           /* 30: file renamed via vfs_rename */
+	EVENT_REDIS_CMD,        /* 31: Redis command (hiredis: redisCommand/redisCommandArgv) */
+	EVENT_MEMCACHED_CMD,    /* 32: Memcached operation (libmemcached) */
+	EVENT_FASTCGI_REQUEST,  /* 33: FastCGI request begin — BTF-only */
+	EVENT_FASTCGI_RESPONSE, /* 34: FastCGI request complete — BTF-only */
+	EVENT_GRPC_METHOD,      /* 35: gRPC method call via HTTP/2 HEADERS — BTF-only */
+	EVENT_KAFKA_PRODUCE,    /* 36: Kafka produce (librdkafka: rd_kafka_produce) */
+	EVENT_KAFKA_FETCH,      /* 37: Kafka consumer_poll result (librdkafka) */
 };
 
 struct event {

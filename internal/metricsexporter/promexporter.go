@@ -291,6 +291,59 @@ var (
 		},
 		[]string{"map"},
 	)
+
+	redisLatencyHistogram = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "podtrace_redis_latency_seconds",
+			Help:    "Distribution of Redis command latencies.",
+			Buckets: prometheus.ExponentialBuckets(0.0001, 2, 15),
+		},
+		[]string{"command", "process_name", "namespace"},
+	)
+
+	memcachedLatencyHistogram = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "podtrace_memcached_latency_seconds",
+			Help:    "Distribution of Memcached operation latencies.",
+			Buckets: prometheus.ExponentialBuckets(0.0001, 2, 15),
+		},
+		[]string{"operation", "process_name", "namespace"},
+	)
+
+	fastcgiLatencyHistogram = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "podtrace_fastcgi_latency_seconds",
+			Help:    "Distribution of FastCGI request latencies.",
+			Buckets: prometheus.ExponentialBuckets(0.0001, 2, 15),
+		},
+		[]string{"method", "process_name", "namespace"},
+	)
+
+	grpcLatencyHistogram = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "podtrace_grpc_latency_seconds",
+			Help:    "Distribution of gRPC method call latencies.",
+			Buckets: prometheus.ExponentialBuckets(0.0001, 2, 15),
+		},
+		[]string{"method", "process_name", "namespace"},
+	)
+
+	kafkaLatencyHistogram = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "podtrace_kafka_latency_seconds",
+			Help:    "Distribution of Kafka produce/consume latencies.",
+			Buckets: prometheus.ExponentialBuckets(0.0001, 2, 15),
+		},
+		[]string{"operation", "topic", "process_name", "namespace"},
+	)
+
+	kafkaBytesCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "podtrace_kafka_bytes_total",
+			Help: "Total bytes in Kafka produce/consume operations.",
+		},
+		[]string{"operation", "topic", "process_name", "namespace"},
+	)
 )
 
 func init() {
@@ -329,6 +382,12 @@ func init() {
 	prometheus.MustRegister(poolUtilizationGauge)
 	prometheus.MustRegister(eventChannelDepthGauge)
 	prometheus.MustRegister(bpfMapUtilizationGauge)
+	prometheus.MustRegister(redisLatencyHistogram)
+	prometheus.MustRegister(memcachedLatencyHistogram)
+	prometheus.MustRegister(fastcgiLatencyHistogram)
+	prometheus.MustRegister(grpcLatencyHistogram)
+	prometheus.MustRegister(kafkaLatencyHistogram)
+	prometheus.MustRegister(kafkaBytesCounter)
 }
 
 func HandleEvents(ch <-chan *events.Event) {
@@ -408,6 +467,60 @@ func HandleEventWithContext(e *events.Event, k8sContext map[string]interface{}) 
 
 	case events.EventPoolExhausted:
 		ExportPoolExhaustedMetricWithContext(e, namespace)
+
+	case events.EventRedisCmd:
+		latSec := float64(e.LatencyNS) / 1e9
+		cmd := e.Details
+		if cmd == "" {
+			cmd = "unknown"
+		}
+		redisLatencyHistogram.WithLabelValues(cmd, e.ProcessName, namespace).Observe(latSec)
+
+	case events.EventMemcachedCmd:
+		latSec := float64(e.LatencyNS) / 1e9
+		op := e.Details
+		if op == "" {
+			op = "unknown"
+		}
+		memcachedLatencyHistogram.WithLabelValues(op, e.ProcessName, namespace).Observe(latSec)
+
+	case events.EventFastCGIResp:
+		latSec := float64(e.LatencyNS) / 1e9
+		method := e.Details
+		if method == "" {
+			method = "unknown"
+		}
+		fastcgiLatencyHistogram.WithLabelValues(method, e.ProcessName, namespace).Observe(latSec)
+
+	case events.EventGRPCMethod:
+		latSec := float64(e.LatencyNS) / 1e9
+		method := e.Target
+		if method == "" {
+			method = "unknown"
+		}
+		grpcLatencyHistogram.WithLabelValues(method, e.ProcessName, namespace).Observe(latSec)
+
+	case events.EventKafkaProduce:
+		latSec := float64(e.LatencyNS) / 1e9
+		topic := e.Details
+		if topic == "" {
+			topic = "unknown"
+		}
+		kafkaLatencyHistogram.WithLabelValues("produce", topic, e.ProcessName, namespace).Observe(latSec)
+		if e.Bytes > 0 {
+			kafkaBytesCounter.WithLabelValues("produce", topic, e.ProcessName, namespace).Add(float64(e.Bytes))
+		}
+
+	case events.EventKafkaFetch:
+		latSec := float64(e.LatencyNS) / 1e9
+		topic := e.Details
+		if topic == "" {
+			topic = "unknown"
+		}
+		kafkaLatencyHistogram.WithLabelValues("fetch", topic, e.ProcessName, namespace).Observe(latSec)
+		if e.Bytes > 0 {
+			kafkaBytesCounter.WithLabelValues("fetch", topic, e.ProcessName, namespace).Add(float64(e.Bytes))
+		}
 	}
 }
 
