@@ -1497,3 +1497,85 @@ func TestEventTLSError(t *testing.T) {
 		t.Errorf("Expected message to contain 'error', got %q", msg)
 	}
 }
+
+func TestEventUnlink(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		e := &Event{Type: EventUnlink, Target: "/tmp/foo.txt", LatencyNS: 1000000}
+		msg := e.FormatMessage()
+		if !strings.Contains(msg, "[FS]") {
+			t.Errorf("Expected [FS] prefix, got %q", msg)
+		}
+		if !strings.Contains(msg, "unlink") {
+			t.Errorf("Expected 'unlink' in message, got %q", msg)
+		}
+		if !strings.Contains(msg, "/tmp/foo.txt") {
+			t.Errorf("Expected target in message, got %q", msg)
+		}
+	})
+	t.Run("error", func(t *testing.T) {
+		e := &Event{Type: EventUnlink, Target: "/tmp/foo.txt", Error: -2}
+		msg := e.FormatMessage()
+		if !strings.Contains(msg, "failed") {
+			t.Errorf("Expected 'failed' in error message, got %q", msg)
+		}
+	})
+	t.Run("empty_target", func(t *testing.T) {
+		e := &Event{Type: EventUnlink, LatencyNS: 500000}
+		msg := e.FormatMessage()
+		if !strings.Contains(msg, "file") {
+			t.Errorf("Expected 'file' fallback target in message, got %q", msg)
+		}
+	})
+	if e := (&Event{Type: EventUnlink}); e.TypeString() != "FS" {
+		t.Errorf("TypeString: got %q, want FS", e.TypeString())
+	}
+}
+
+func TestEventRename(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		e := &Event{Type: EventRename, Target: "/tmp/old.txt>/tmp/new.txt", LatencyNS: 2000000}
+		msg := e.FormatMessage()
+		if !strings.Contains(msg, "[FS]") {
+			t.Errorf("Expected [FS] prefix, got %q", msg)
+		}
+		if !strings.Contains(msg, "rename") {
+			t.Errorf("Expected 'rename' in message, got %q", msg)
+		}
+	})
+	t.Run("error", func(t *testing.T) {
+		e := &Event{Type: EventRename, Target: "/tmp/old.txt", Error: -1}
+		msg := e.FormatMessage()
+		if !strings.Contains(msg, "failed") {
+			t.Errorf("Expected 'failed' in error message, got %q", msg)
+		}
+	})
+	if e := (&Event{Type: EventRename}); e.TypeString() != "FS" {
+		t.Errorf("TypeString: got %q, want FS", e.TypeString())
+	}
+}
+
+func TestTypeString_UnlinkRename(t *testing.T) {
+	tests := []struct {
+		et   EventType
+		want string
+	}{
+		{EventUnlink, "FS"},
+		{EventRename, "FS"},
+	}
+	for _, tt := range tests {
+		e := &Event{Type: tt.et}
+		if got := e.TypeString(); got != tt.want {
+			t.Errorf("TypeString(%d): got %q, want %q", tt.et, got, tt.want)
+		}
+	}
+}
+
+func TestFormatRealtimeMessage_UnlinkRename(t *testing.T) {
+	e := &Event{Type: EventUnlink, Target: "/var/log/old.log", LatencyNS: 3000000}
+	msg := e.FormatRealtimeMessage()
+	if !strings.Contains(msg, "[FS]") {
+		t.Errorf("FormatRealtimeMessage for Unlink: got %q, want [FS] prefix", msg)
+	}
+	// Verify _ is unused
+	_ = config.MaxTargetStringLength
+}

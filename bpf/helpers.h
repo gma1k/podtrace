@@ -84,9 +84,15 @@ static inline void format_ipv6_port(const u8 *ipv6, u16 port, char *buf) {
 	buf[idx < MAX_STRING_LEN ? idx : max_idx] = '\0';
 }
 
+/* 64-bit finalizer hash — reduces collision probability vs plain XOR */
 static inline u64 build_stack_key(u32 pid, u32 tid, u64 timestamp) {
-	u64 base = ((u64)pid << 32) | tid;
-	return base ^ timestamp;
+	u64 h = (((u64)pid << 32) | tid) ^ timestamp;
+	h ^= h >> 33;
+	h *= 0xff51afd7ed558ccdULL;
+	h ^= h >> 33;
+	h *= 0xc4ceb9fe1a85ec53ULL;
+	h ^= h >> 33;
+	return h;
 }
 
 static inline struct event *get_event_buf(void) {
@@ -96,6 +102,14 @@ static inline struct event *get_event_buf(void) {
 		__builtin_memset(e, 0, sizeof(*e));
 		e->cgroup_id = bpf_get_current_cgroup_id();
 		bpf_get_current_comm(&e->comm, sizeof(e->comm));
+
+#ifdef PODTRACE_VMLINUX_FROM_BTF
+		/* Capture network namespace inum for multi-tenant correlation */
+		struct task_struct *__task = (struct task_struct *)bpf_get_current_task();
+		if (__task) {
+			e->net_ns_id = BPF_CORE_READ(__task, nsproxy, net_ns, ns.inum);
+		}
+#endif
 
 		u64 *target = bpf_map_lookup_elem(&target_cgroup_id, &zero);
 		if (target && *target != 0 && *target != e->cgroup_id) {

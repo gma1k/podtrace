@@ -283,6 +283,14 @@ var (
 		},
 		[]string{"channel"},
 	)
+
+	bpfMapUtilizationGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "podtrace_bpf_map_utilization_ratio",
+			Help: "Fill ratio of BPF hash maps (0.0–1.0). Values near 1.0 indicate map pressure.",
+		},
+		[]string{"map"},
+	)
 )
 
 func init() {
@@ -320,6 +328,7 @@ func init() {
 	prometheus.MustRegister(poolConnectionsGauge)
 	prometheus.MustRegister(poolUtilizationGauge)
 	prometheus.MustRegister(eventChannelDepthGauge)
+	prometheus.MustRegister(bpfMapUtilizationGauge)
 }
 
 func HandleEvents(ch <-chan *events.Event) {
@@ -513,6 +522,10 @@ func RecordError(eventType string, errorCode int32) {
 func RecordChannelDepths(eventLen, filteredLen int) {
 	eventChannelDepthGauge.WithLabelValues("event").Set(float64(eventLen))
 	eventChannelDepthGauge.WithLabelValues("filtered").Set(float64(filteredLen))
+}
+
+func RecordBPFMapUtilization(mapName string, ratio float64) {
+	bpfMapUtilizationGauge.WithLabelValues(mapName).Set(ratio)
 }
 
 var (

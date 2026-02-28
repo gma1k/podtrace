@@ -157,6 +157,8 @@ func TestParseEvent_AllEventTypes(t *testing.T) {
 		events.EventPoolAcquire,
 		events.EventPoolRelease,
 		events.EventPoolExhausted,
+		events.EventUnlink,
+		events.EventRename,
 	}
 
 	for i, et := range eventTypes {
@@ -397,6 +399,84 @@ func TestParseEvent_BinaryReadError_V2Path(t *testing.T) {
 	data := make([]byte, int(unsafe.Sizeof(rawEventV2{})))
 	if ev := ParseEvent(data); ev != nil {
 		t.Fatalf("expected nil event on V2 binary read error")
+	}
+}
+
+func TestParseEvent_ValidEventV4_WithNetNsID(t *testing.T) {
+	type rawEventV4 struct {
+		Timestamp uint64
+		PID       uint32
+		Type      uint32
+		LatencyNS uint64
+		Error     int32
+		_         uint32
+		Bytes     uint64
+		TCPState  uint32
+		_         uint32
+		StackKey  uint64
+		CgroupID  uint64
+		Comm      [16]byte
+		Target    [128]byte
+		Details   [128]byte
+		NetNsID   uint32
+		_         uint32
+	}
+
+	var raw rawEventV4
+	raw.Timestamp = 777
+	raw.PID = 99
+	raw.Type = uint32(events.EventConnect)
+	raw.LatencyNS = 2000
+	raw.CgroupID = 0xabcdef01
+	raw.NetNsID = 0x12345678
+	copy(raw.Comm[:], "svcworker\x00")
+	copy(raw.Target[:], "192.168.1.1:443")
+
+	var buf bytes.Buffer
+	if err := binary.Write(&buf, binary.LittleEndian, raw); err != nil {
+		t.Fatalf("binary.Write: %v", err)
+	}
+
+	event := ParseEvent(buf.Bytes())
+	if event == nil {
+		t.Fatal("ParseEvent returned nil for V4 event")
+	}
+	if event.NetNsID != raw.NetNsID {
+		t.Errorf("NetNsID: got %d, want %d", event.NetNsID, raw.NetNsID)
+	}
+	if event.CgroupID != raw.CgroupID {
+		t.Errorf("CgroupID: got %d, want %d", event.CgroupID, raw.CgroupID)
+	}
+	if event.ProcessName != "svcworker" {
+		t.Errorf("ProcessName: got %q, want %q", event.ProcessName, "svcworker")
+	}
+}
+
+func TestParseEvent_EventUnlink_EventRename(t *testing.T) {
+	for _, et := range []events.EventType{events.EventUnlink, events.EventRename} {
+		t.Run(fmt.Sprintf("EventType_%d", et), func(t *testing.T) {
+			var raw rawEvent
+			raw.Type = uint32(et)
+			raw.PID = 5
+			raw.Timestamp = 100
+			copy(raw.Target[:], "/tmp/testfile")
+
+			var buf bytes.Buffer
+			if err := binary.Write(&buf, binary.LittleEndian, raw); err != nil {
+				t.Fatalf("binary.Write: %v", err)
+			}
+
+			event := ParseEvent(buf.Bytes())
+			if event == nil {
+				t.Fatalf("ParseEvent returned nil for %v", et)
+			}
+			if event.Type != et {
+				t.Errorf("Type: got %v, want %v", event.Type, et)
+			}
+			if event.Target != "/tmp/testfile" {
+				t.Errorf("Target: got %q, want /tmp/testfile", event.Target)
+			}
+		})
 	}
 }
 
