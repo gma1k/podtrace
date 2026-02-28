@@ -46,6 +46,10 @@ var optionalProbes = map[string]string{
 	"kretprobe_do_futex":       "do_futex",
 	"kprobe_do_sys_openat2":    "do_sys_openat2",
 	"kretprobe_do_sys_openat2": "do_sys_openat2",
+	"kprobe_vfs_unlink":        "vfs_unlink",
+	"kretprobe_vfs_unlink":     "vfs_unlink",
+	"kprobe_vfs_rename":        "vfs_rename",
+	"kretprobe_vfs_rename":     "vfs_rename",
 }
 
 func attachKprobe(progName, symbol string, prog *ebpf.Program) (link.Link, error) {

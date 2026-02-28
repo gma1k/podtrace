@@ -2,14 +2,17 @@ package tracer
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -43,6 +46,8 @@ type stackTraceValue struct {
 type Tracer struct {
 	collection               *ebpf.Collection
 	links                    []link.Link
+	probeGroupsMu            sync.Mutex
+	probeGroups              map[probes.ProbeGroup][]link.Link
 	reader                   *ringbuf.Reader
 	filter                   *filter.CgroupFilter
 	containerID              string
@@ -53,6 +58,20 @@ type Tracer struct {
 	cgroupPath               string
 	useUserspaceCgroupFilter bool
 	targetCgroupID           uint64
+}
+
+// roundUpPow2 rounds n up to the nearest power of two, minimum 4096.
+func roundUpPow2(n uint32) uint32 {
+	if n < 4096 {
+		return 4096
+	}
+	n--
+	n |= n >> 1
+	n |= n >> 2
+	n |= n >> 4
+	n |= n >> 8
+	n |= n >> 16
+	return n + 1
 }
 
 var _ TracerInterface = (*Tracer)(nil)
@@ -91,6 +110,19 @@ func NewTracer() (*Tracer, error) {
 		return nil, err
 	}
 
+	// Patch ring buffer size (must be power-of-2 multiple of page size).
+	rbSize := roundUpPow2(uint32(config.RingBufferSizeKB * 1024))
+	if m, ok := spec.Maps["events"]; ok {
+		m.MaxEntries = rbSize
+	}
+	// Patch hash map sizes.
+	hashSize := uint32(config.BPFHashMapSize)
+	for name, m := range spec.Maps {
+		if m.Type == ebpf.Hash {
+			spec.Maps[name].MaxEntries = hashSize
+		}
+	}
+
 	var opts ebpf.CollectionOptions
 	if config.BTFFilePath != "" {
 		if _, err := os.Stat(config.BTFFilePath); err == nil {
@@ -105,6 +137,22 @@ func NewTracer() (*Tracer, error) {
 	coll, err := ebpf.NewCollectionWithOptions(spec, opts)
 	if err != nil {
 		return nil, NewCollectionError(err)
+	}
+
+	// Initialize configurable alert thresholds in the BPF map.
+	if threshMap, ok := coll.Maps["alert_thresholds"]; ok && threshMap != nil {
+		thresholds := []uint32{
+			uint32(config.AlertWarnPct),
+			uint32(config.AlertCritPct),
+			uint32(config.AlertEmergPct),
+		}
+		for i, v := range thresholds {
+			k := uint32(i)
+			val := v
+			if err := threshMap.Update(&k, &val, ebpf.UpdateAny); err != nil {
+				logger.Warn("Failed to set alert threshold", zap.Int("index", i), zap.Uint32("value", val), zap.Error(err))
+			}
+		}
 	}
 
 	links, err := probes.AttachProbes(coll)
@@ -128,6 +176,7 @@ func NewTracer() (*Tracer, error) {
 	return &Tracer{
 		collection:               coll,
 		links:                    links,
+		probeGroups:              make(map[probes.ProbeGroup][]link.Link),
 		reader:                   rd,
 		filter:                   filter.NewCgroupFilter(),
 		processNameCache:         processCache,
@@ -284,9 +333,14 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 				if t.pathCache != nil {
 					t.pathCache.CleanupExpired()
 				}
+				t.pollBPFMapUtilization()
 			}
 		}
 	}()
+
+	if config.ManagementPort > 0 {
+		go t.serveManagementAPI(ctx, config.ManagementPort)
+	}
 
 	var eventsCollected int64
 	var eventsFiltered int64
@@ -591,6 +645,113 @@ func (t *Tracer) getProcessNameQuick(pid uint32) string {
 	sanitized := validation.SanitizeProcessName(name)
 	t.processNameCache.Set(pid, sanitized)
 	return sanitized
+}
+
+// pollBPFMapUtilization reads fill ratios for key BPF hash maps and records them.
+func (t *Tracer) pollBPFMapUtilization() {
+	if t.collection == nil {
+		return
+	}
+	tracked := []string{"stack_traces", "start_times", "socket_conns", "db_queries", "pool_states"}
+	for _, name := range tracked {
+		m, ok := t.collection.Maps[name]
+		if !ok || m == nil {
+			continue
+		}
+		info, err := m.Info()
+		if err != nil || info.MaxEntries == 0 {
+			continue
+		}
+		// Count entries via iterator (no Count() method in cilium/ebpf).
+		var count uint32
+		var key, val []byte
+		iter := m.Iterate()
+		for iter.Next(&key, &val) {
+			count++
+		}
+		ratio := float64(count) / float64(info.MaxEntries)
+		metricsexporter.RecordBPFMapUtilization(name, ratio)
+	}
+}
+
+// ActiveProbeGroups returns the set of probe groups currently enabled.
+func (t *Tracer) ActiveProbeGroups() []probes.ProbeGroup {
+	t.probeGroupsMu.Lock()
+	defer t.probeGroupsMu.Unlock()
+	result := make([]probes.ProbeGroup, 0, len(t.probeGroups))
+	for g := range t.probeGroups {
+		result = append(result, g)
+	}
+	return result
+}
+
+// DisableProbeGroup closes all links associated with the given group.
+func (t *Tracer) DisableProbeGroup(g probes.ProbeGroup) error {
+	t.probeGroupsMu.Lock()
+	defer t.probeGroupsMu.Unlock()
+	ls, ok := t.probeGroups[g]
+	if !ok || len(ls) == 0 {
+		return nil
+	}
+	for _, l := range ls {
+		_ = l.Close()
+	}
+	delete(t.probeGroups, g)
+	logger.Info("Probe group disabled", zap.String("group", string(g)))
+	return nil
+}
+
+// serveManagementAPI starts a lightweight HTTP server for probe group management.
+func (t *Tracer) serveManagementAPI(ctx context.Context, port int) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/probes", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		groups := t.ActiveProbeGroups()
+		strs := make([]string, len(groups))
+		for i, g := range groups {
+			strs[i] = string(g)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"active_groups": strs})
+	})
+	mux.HandleFunc("/probes/", func(w http.ResponseWriter, r *http.Request) {
+		// Expect /probes/{group}/disable
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/probes/"), "/")
+		if len(parts) != 2 || r.Method != http.MethodPost {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		group := probes.ProbeGroup(parts[0])
+		action := parts[1]
+		switch action {
+		case "disable":
+			if err := t.DisableProbeGroup(group); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "unknown action", http.StatusBadRequest)
+		}
+	})
+
+	srv := &http.Server{
+		Addr:         fmt.Sprintf("127.0.0.1:%d", port),
+		Handler:      mux,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 5 * time.Second,
+	}
+	logger.Info("Management API listening", zap.Int("port", port))
+	go func() {
+		<-ctx.Done()
+		_ = srv.Close()
+	}()
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		logger.Warn("Management API server error", zap.Error(err))
+	}
 }
 
 func WaitForInterrupt() {

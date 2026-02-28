@@ -58,37 +58,17 @@ int kretprobe_tcp_v6_connect(struct pt_regs *ctx) {
 		u16 family;
 		if (bpf_probe_read_user(&family, sizeof(family), uaddr) == 0) {
 			if (family == AF_INET6) {
+				/* Read the full sockaddr_in6 to extract the real IPv6 address */
 				struct {
 					u16 sin6_family;
 					u16 sin6_port;
-				} addr;
-				if (bpf_probe_read_user(&addr, sizeof(addr), uaddr) == 0) {
-					u16 port = __builtin_bswap16(addr.sin6_port);
-					u32 idx = 0;
-					u32 max_idx = MAX_STRING_LEN - 1;
-					if (idx < max_idx) e->target[idx++] = '[';
-					if (idx < max_idx) e->target[idx++] = 'I';
-					if (idx < max_idx) e->target[idx++] = 'P';
-					if (idx < max_idx) e->target[idx++] = 'v';
-					if (idx < max_idx) e->target[idx++] = '6';
-					if (idx < max_idx) e->target[idx++] = ']';
-					if (idx < max_idx) e->target[idx++] = ':';
-					if (port >= 10000 && idx < max_idx) {
-						e->target[idx++] = '0' + (port / 10000) % 10;
-					}
-					if (port >= 1000 && idx < max_idx) {
-						e->target[idx++] = '0' + (port / 1000) % 10;
-					}
-					if (port >= 100 && idx < max_idx) {
-						e->target[idx++] = '0' + (port / 100) % 10;
-					}
-					if (port >= 10 && idx < max_idx) {
-						e->target[idx++] = '0' + (port / 10) % 10;
-					}
-					if (idx < max_idx) {
-						e->target[idx++] = '0' + port % 10;
-					}
-					e->target[idx < MAX_STRING_LEN ? idx : max_idx] = '\0';
+					u32 sin6_flowinfo;
+					u8  sin6_addr[16];
+					u32 sin6_scope_id;
+				} addr6;
+				if (bpf_probe_read_user(&addr6, sizeof(addr6), uaddr) == 0) {
+					u16 port = __builtin_bswap16(addr6.sin6_port);
+					format_ipv6_port(addr6.sin6_addr, port, e->target);
 				}
 			}
 		}

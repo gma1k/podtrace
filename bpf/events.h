@@ -35,6 +35,8 @@ enum event_type {
 	EVENT_POOL_ACQUIRE,
 	EVENT_POOL_RELEASE,
 	EVENT_POOL_EXHAUSTED,
+	EVENT_UNLINK,   /* 29: file unlinked via vfs_unlink */
+	EVENT_RENAME,   /* 30: file renamed via vfs_rename */
 };
 
 struct event {
@@ -50,6 +52,9 @@ struct event {
 	char comm[COMM_LEN];
 	char target[MAX_STRING_LEN];
 	char details[MAX_STRING_LEN];
+	/* V4 additions — populated under PODTRACE_VMLINUX_FROM_BTF */
+	u32 net_ns_id;  /* network namespace inum (0 if BTF unavailable) */
+	u32 _pad2;      /* explicit padding to keep struct 8-byte aligned */
 };
 
 #endif

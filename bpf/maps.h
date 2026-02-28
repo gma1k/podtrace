@@ -134,6 +134,14 @@ struct {
 	__type(value, u32);
 } pool_db_types SEC(".maps");
 
+/* alert_thresholds[0]=warn%, [1]=crit%, [2]=emerg% — written from Go at startup */
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 3);
+	__type(key, u32);
+	__type(value, u32);
+} alert_thresholds SEC(".maps");
+
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
 	__uint(max_entries, 1);

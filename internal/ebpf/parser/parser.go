@@ -66,7 +66,26 @@ func ParseEvent(data []byte) *events.Event {
 		Target    [128]byte
 		Details   [128]byte
 	}
+	type rawEventV4 struct {
+		Timestamp uint64
+		PID       uint32
+		Type      uint32
+		LatencyNS uint64
+		Error     int32
+		_         uint32
+		Bytes     uint64
+		TCPState  uint32
+		_         uint32
+		StackKey  uint64
+		CgroupID  uint64
+		Comm      [16]byte
+		Target    [128]byte
+		Details   [128]byte
+		NetNsID   uint32
+		_         uint32 // explicit padding
+	}
 
+	expectedV4 := int(unsafe.Sizeof(rawEventV4{}))
 	expectedV3 := int(unsafe.Sizeof(rawEventV3{}))
 	expectedV2 := int(unsafe.Sizeof(rawEventV2{}))
 	expectedV1 := int(unsafe.Sizeof(rawEventV1{}))
@@ -78,6 +97,30 @@ func ParseEvent(data []byte) *events.Event {
 	event.ProcessName = ""
 	event.Stack = nil
 	event.CgroupID = 0
+	event.NetNsID = 0
+
+	if len(data) >= expectedV4 {
+		var e rawEventV4
+		if err := binaryRead(bytes.NewReader(data[:expectedV4]), binary.LittleEndian, &e); err != nil {
+			return nil
+		}
+
+		event.Timestamp = e.Timestamp
+		event.PID = e.PID
+		event.Type = events.EventType(e.Type)
+		event.LatencyNS = e.LatencyNS
+		event.Error = e.Error
+		event.Bytes = e.Bytes
+		event.TCPState = e.TCPState
+		event.StackKey = e.StackKey
+		event.CgroupID = e.CgroupID
+		event.ProcessName = string(bytes.TrimRight(e.Comm[:], "\x00"))
+		event.Target = string(bytes.TrimRight(e.Target[:], "\x00"))
+		event.Details = string(bytes.TrimRight(e.Details[:], "\x00"))
+		event.NetNsID = e.NetNsID
+
+		return event
+	}
 
 	if len(data) >= expectedV3 {
 		var e rawEventV3
@@ -149,5 +192,6 @@ func PutEvent(event *events.Event) {
 	event.ProcessName = ""
 	event.Target = ""
 	event.Details = ""
+	event.NetNsID = 0
 	eventPool.Put(event)
 }

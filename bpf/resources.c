@@ -20,14 +20,30 @@ static inline u32 calculate_utilization(u64 usage, u64 limit) {
     return (u32)(percent > 100 ? 100 : percent);
 }
 
+/*
+ * check_alert_threshold — returns alert level (0=none, 1=warn, 2=crit, 3=emerg).
+ * Thresholds are read from the alert_thresholds BPF map so Go can configure them
+ * at runtime (PODTRACE_ALERT_WARN_PCT / _CRIT_PCT / _EMERG_PCT env vars).
+ * Falls back to 80/90/95 if the map is unset.
+ */
 static inline u32 check_alert_threshold(u32 utilization) {
-    if (utilization >= 95) {
-        return 3;
-    } else if (utilization >= 90) {
-        return 2;
-    } else if (utilization >= 80) {
-        return 1;
-    }
+    u32 key;
+
+    key = 2;
+    u32 *t_emerg = bpf_map_lookup_elem(&alert_thresholds, &key);
+    u32 emerg = (t_emerg && *t_emerg > 0) ? *t_emerg : 95;
+
+    key = 1;
+    u32 *t_crit = bpf_map_lookup_elem(&alert_thresholds, &key);
+    u32 crit = (t_crit && *t_crit > 0) ? *t_crit : 90;
+
+    key = 0;
+    u32 *t_warn = bpf_map_lookup_elem(&alert_thresholds, &key);
+    u32 warn = (t_warn && *t_warn > 0) ? *t_warn : 80;
+
+    if (utilization >= emerg) return 3;
+    if (utilization >= crit)  return 2;
+    if (utilization >= warn)  return 1;
     return 0;
 }
 
