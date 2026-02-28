@@ -4,6 +4,7 @@
 #include "maps.h"
 #include "events.h"
 #include "helpers.h"
+#include "protocols.h"
 
 #include "network.c"
 #include "filesystem.c"
@@ -12,5 +13,10 @@
 #include "syscalls.c"
 #include "resources.c"
 #include "database.c"
+#include "redis.c"
+#include "memcached.c"
+#include "kafka.c"
+#include "fastcgi.c"
+#include "grpc.c"
 
 char LICENSE[] SEC("license") = "GPL";

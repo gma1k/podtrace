@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sys/unix"
 
+	"github.com/podtrace/podtrace/internal/analysis/criticalpath"
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/ebpf/cache"
 	"github.com/podtrace/podtrace/internal/ebpf/filter"
@@ -33,6 +34,7 @@ import (
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/internal/logger"
 	"github.com/podtrace/podtrace/internal/metricsexporter"
+	"github.com/podtrace/podtrace/internal/redactor"
 	"github.com/podtrace/podtrace/internal/resource"
 	"github.com/podtrace/podtrace/internal/validation"
 )
@@ -58,6 +60,8 @@ type Tracer struct {
 	cgroupPath               string
 	useUserspaceCgroupFilter bool
 	targetCgroupID           uint64
+	cpAnalyzer               *criticalpath.Analyzer
+	piiRedactor              *redactor.Redactor
 }
 
 // roundUpPow2 rounds n up to the nearest power of two, minimum 4096.
@@ -173,7 +177,7 @@ func NewTracer() (*Tracer, error) {
 	ttl := time.Duration(config.CacheTTLSeconds) * time.Second
 	processCache := cache.NewLRUCache(config.CacheMaxSize, ttl)
 
-	return &Tracer{
+	t := &Tracer{
 		collection:               coll,
 		links:                    links,
 		probeGroups:              make(map[probes.ProbeGroup][]link.Link),
@@ -182,7 +186,25 @@ func NewTracer() (*Tracer, error) {
 		processNameCache:         processCache,
 		pathCache:                cache.NewPathCache(),
 		useUserspaceCgroupFilter: true,
-	}, nil
+	}
+
+	if config.CriticalPathEnabled {
+		window := time.Duration(config.CriticalPathWindowMS) * time.Millisecond
+		t.cpAnalyzer = criticalpath.New(window, func(cp criticalpath.CriticalPath) {
+			fields := make([]zap.Field, 0, len(cp.Segments)+2)
+			fields = append(fields, zap.Uint32("pid", cp.PID), zap.Duration("total", cp.TotalLatency))
+			for _, s := range cp.Segments {
+				fields = append(fields, zap.String(s.Label, fmt.Sprintf("%.1f%%", s.Fraction*100)))
+			}
+			logger.Info("Critical path", fields...)
+		})
+	}
+
+	if config.RedactPII {
+		t.piiRedactor = redactor.Default()
+	}
+
+	return t, nil
 }
 
 func (t *Tracer) AttachToCgroup(cgroupPath string) error {
@@ -293,6 +315,11 @@ func (t *Tracer) SetContainerID(containerID string) error {
 	if len(tlsLinks) > 0 {
 		t.links = append(t.links, tlsLinks...)
 	}
+	t.links = append(t.links, probes.AttachRedisProbesWithPID(t.collection, containerID, t.containerPID)...)
+	t.links = append(t.links, probes.AttachMemcachedProbesWithPID(t.collection, containerID, t.containerPID)...)
+	t.links = append(t.links, probes.AttachKafkaProbesWithPID(t.collection, containerID, t.containerPID)...)
+	t.links = append(t.links, probes.AttachFastCGIProbes(t.collection)...)
+	t.links = append(t.links, probes.AttachGRPCProbes(t.collection)...)
 	return nil
 }
 
@@ -491,6 +518,13 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 					event.ProcessName = t.getProcessNameQuick(event.PID)
 				}
 				event.ProcessName = validation.SanitizeProcessName(event.ProcessName)
+
+				if t.piiRedactor != nil {
+					t.piiRedactor.Redact(event)
+				}
+				if t.cpAnalyzer != nil {
+					t.cpAnalyzer.Feed(event)
+				}
 
 				if event.Target != "" && event.Target != "<disconnected>" {
 					cacheKey := fmt.Sprintf("%d:%s", event.PID, event.Target)

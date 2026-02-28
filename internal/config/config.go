@@ -111,6 +111,14 @@ var (
 
 	// Optional HTTP management port for runtime probe group control (0 = disabled).
 	ManagementPort = getIntEnvOrDefault("PODTRACE_MANAGEMENT_PORT", 0)
+
+	// Language-runtime adapter options.
+	GRPCPort             = getIntEnvOrDefault("PODTRACE_GRPC_PORT", 50051)
+	USDTEnabled          = getEnvOrDefault("PODTRACE_USDT_ENABLED", "false") == "true"
+	RedactPII            = getEnvOrDefault("PODTRACE_REDACT_PII", "false") == "true"
+	RedactCustomRules    = getEnvOrDefault("PODTRACE_REDACT_CUSTOM_RULES", "")
+	CriticalPathEnabled  = getEnvOrDefault("PODTRACE_CRITICAL_PATH", "true") == "true"
+	CriticalPathWindowMS = getIntEnvOrDefault("PODTRACE_CRITICAL_PATH_WINDOW_MS", 500)
 )
 
 const (

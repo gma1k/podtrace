@@ -53,6 +53,14 @@ Podtrace documentation is available in the [`doc/`](doc/) directory.
 - **Database Query Tracing**: Tracks PostgreSQL and MySQL query execution with pattern extraction and latency analysis
 - **TLS/SSL Handshake Tracking**: Track TLS handshake latency, errors and failures
 - **Connection Pool Monitoring**: Tracks connection pool usage, monitors pool exhaustion, and tracks connection reuse patterns
+- **Redis Tracing**: Captures hiredis `redisCommand` / `redisCommandArgv` calls with command name and latency (no application changes required)
+- **Memcached Tracing**: Captures libmemcached `get`, `set`, and `delete` operations with key and value size
+- **FastCGI / PHP-FPM Tracing**: Tracks FastCGI request URI, method, and end-to-end latency via unix-socket kprobes (BTF-only)
+- **gRPC Method Tracing**: Extracts gRPC method paths from HTTP/2 HEADERS frames via a second kprobe on `tcp_sendmsg` (BTF-only)
+- **Kafka Tracing**: Tracks librdkafka `rd_kafka_produce` and `rd_kafka_consumer_poll` with topic name, payload size, and latency
+- **USDT Auto-Detection**: Scans ELF binaries for `.note.stapsdt` sections and reports available userspace tracepoints
+- **Critical Path Reconstruction**: Automatically correlates per-request latency segments by PID and emits a breakdown on HTTP/FastCGI/gRPC response boundaries
+- **PII Redaction**: Applies configurable regex rules to scrub passwords, Bearer tokens, email addresses, and credit card numbers from event fields before dispatch
 
 ### System Monitoring
 - **CPU/Scheduling Tracking**: Monitors thread blocking and CPU scheduling events
@@ -223,6 +231,12 @@ See the [Alerting Guide](doc/alerting.md) for detailed configuration and usage.
 
 ---
 
+## Language-Runtime Adapters
+
+Podtrace can trace application-level protocols and runtimes (Redis, Memcached, FastCGI/PHP-FPM, gRPC, Kafka) using library uprobes and socket kprobes — no changes to application code or container images required. It also supports critical path reconstruction, PII redaction, and USDT auto-detection.
+
+---
+
 ## Prometheus & Grafana Integration
 
 Podtrace exposes runtime metrics for Kubernetes pods using a built-in Prometheus endpoint. These metrics cover networking (TCP/UDP), DNS, CPU scheduling, file system operations, memory events, and HTTP tracing, all labeled per process and event type.
@@ -278,6 +292,12 @@ All metrics are exported per process and per event type:
 | `podtrace_pool_wait_time_seconds`        | Histogram of pool wait times                     |
 | `podtrace_pool_connections`             | Current number of connections in pool            |
 | `podtrace_pool_utilization`              | Pool utilization percentage                      |
+| `podtrace_redis_latency_seconds`         | Distribution of Redis command latencies          |
+| `podtrace_memcached_latency_seconds`     | Distribution of Memcached operation latencies    |
+| `podtrace_fastcgi_latency_seconds`       | Distribution of FastCGI request latencies        |
+| `podtrace_grpc_latency_seconds`          | Distribution of gRPC method call latencies       |
+| `podtrace_kafka_latency_seconds`         | Distribution of Kafka produce/consume latencies  |
+| `podtrace_kafka_bytes_total`             | Total bytes in Kafka produce/consume operations  |
 
 ## Grafana Dashboard
 

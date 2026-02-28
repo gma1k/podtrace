@@ -54,8 +54,15 @@ const (
 	EventPoolAcquire
 	EventPoolRelease
 	EventPoolExhausted
-	EventUnlink // 29
-	EventRename // 30
+	EventUnlink       // 29
+	EventRename       // 30
+	EventRedisCmd     // 31: Redis command (hiredis)
+	EventMemcachedCmd // 32: Memcached operation (libmemcached)
+	EventFastCGIReq   // 33: FastCGI request begin (BTF-only)
+	EventFastCGIResp  // 34: FastCGI request complete (BTF-only)
+	EventGRPCMethod   // 35: gRPC method call (BTF-only h2c)
+	EventKafkaProduce // 36: Kafka produce (librdkafka)
+	EventKafkaFetch   // 37: Kafka consumer_poll result (librdkafka)
 )
 
 type Event struct {
@@ -122,6 +129,14 @@ func (e *Event) TypeString() string {
 		return "POOL"
 	case EventUnlink, EventRename:
 		return "FS"
+	case EventRedisCmd, EventMemcachedCmd:
+		return "CACHE"
+	case EventFastCGIReq, EventFastCGIResp:
+		return "FASTCGI"
+	case EventGRPCMethod:
+		return "gRPC"
+	case EventKafkaProduce, EventKafkaFetch:
+		return "KAFKA"
 	default:
 		return "UNKNOWN"
 	}
@@ -468,6 +483,94 @@ func formatEventMessage(e *Event, realtime bool) string {
 			return fmt.Sprintf("[FS] rename() %s failed: error %d", sanitizeString(target), e.Error)
 		}
 		return fmt.Sprintf("[FS] rename() %s took %.2fms", sanitizeString(target), latencyMs)
+
+	case EventRedisCmd:
+		cmd := truncateString(e.Details, maxTargetLen)
+		if cmd == "" {
+			cmd = "CMD"
+		}
+		if e.Error != 0 {
+			return fmt.Sprintf("[REDIS] %s failed (%.2fms)", sanitizeString(cmd), latencyMs)
+		}
+		msg := fmt.Sprintf("[REDIS] %s took %.2fms", sanitizeString(cmd), latencyMs)
+		if e.Bytes > 0 {
+			msg += fmt.Sprintf(" (%d bytes)", e.Bytes)
+		}
+		return msg
+
+	case EventMemcachedCmd:
+		op := truncateString(e.Details, maxTargetLen)
+		if op == "" {
+			op = "op"
+		}
+		if e.Error != 0 {
+			return fmt.Sprintf("[CACHE] memcached %s failed (error=%d)", sanitizeString(op), e.Error)
+		}
+		msg := fmt.Sprintf("[CACHE] memcached %s took %.2fms", sanitizeString(op), latencyMs)
+		if e.Bytes > 0 {
+			msg += fmt.Sprintf(" (%d bytes)", e.Bytes)
+		}
+		return msg
+
+	case EventFastCGIReq:
+		method := truncateString(e.Details, 16)
+		uri := truncateString(e.Target, maxTargetLen)
+		if uri == "" {
+			uri = "/"
+		}
+		if method == "" {
+			method = "REQ"
+		}
+		return fmt.Sprintf("[FASTCGI] → %s %s", sanitizeString(method), sanitizeString(uri))
+
+	case EventFastCGIResp:
+		uri := truncateString(e.Target, maxTargetLen)
+		if uri == "" {
+			uri = "/"
+		}
+		return fmt.Sprintf("[FASTCGI] ← %s %.2fms (appStatus=%d)", sanitizeString(uri), latencyMs, e.Error)
+
+	case EventGRPCMethod:
+		method := truncateString(e.Target, maxTargetLen)
+		if method == "" {
+			method = "/unknown"
+		}
+		if e.Error != 0 {
+			return fmt.Sprintf("[gRPC] %s failed (error=%d, %.2fms)", sanitizeString(method), e.Error, latencyMs)
+		}
+		msg := fmt.Sprintf("[gRPC] %s took %.2fms", sanitizeString(method), latencyMs)
+		if e.Bytes > 0 {
+			msg += fmt.Sprintf(" (%d bytes)", e.Bytes)
+		}
+		return msg
+
+	case EventKafkaProduce:
+		topic := truncateString(e.Details, maxTargetLen)
+		if topic == "" {
+			topic = "unknown"
+		}
+		if e.Error != 0 {
+			return fmt.Sprintf("[KAFKA] produce %s failed (error=%d)", sanitizeString(topic), e.Error)
+		}
+		msg := fmt.Sprintf("[KAFKA] produce %s took %.2fms", sanitizeString(topic), latencyMs)
+		if e.Bytes > 0 {
+			msg += fmt.Sprintf(" (%d bytes)", e.Bytes)
+		}
+		return msg
+
+	case EventKafkaFetch:
+		topic := truncateString(e.Details, maxTargetLen)
+		if topic == "" {
+			topic = "unknown"
+		}
+		if e.Error != 0 {
+			return fmt.Sprintf("[KAFKA] fetch %s error=%d", sanitizeString(topic), e.Error)
+		}
+		msg := fmt.Sprintf("[KAFKA] fetch %s took %.2fms", sanitizeString(topic), latencyMs)
+		if e.Bytes > 0 {
+			msg += fmt.Sprintf(" (%d bytes)", e.Bytes)
+		}
+		return msg
 
 	default:
 		return fmt.Sprintf("[UNKNOWN] event type %d", e.Type)
