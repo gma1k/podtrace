@@ -6,6 +6,8 @@ LLC ?= llc
 GO ?= $(shell if [ -f /usr/local/go/bin/go ]; then echo /usr/local/go/bin/go; else echo go; fi)
 BPF_SRC = bpf/podtrace.bpf.c bpf/network.c bpf/filesystem.c bpf/cpu.c bpf/memory.c
 BPF_OBJ = bpf/podtrace.bpf.o
+BPF_GEN_DIR = bpf/.generated
+VMLINUX_GEN = $(BPF_GEN_DIR)/vmlinux.h
 BINARY = bin/podtrace
 
 # Export GOTOOLCHAIN=auto to automatically download required Go version (Go 1.21+)
@@ -30,7 +32,7 @@ else
 endif
 
 LIBBPF_INCLUDE ?= /usr/include
-BPF_CFLAGS = -O2 -g -target bpf $(BPF_ARCH_DEFINE) -mcpu=$(BPF_MCPU) -I$(LIBBPF_INCLUDE)
+BPF_CFLAGS = -O2 -g -target bpf $(BPF_ARCH_DEFINE) -mcpu=$(BPF_MCPU) -I$(LIBBPF_INCLUDE) -I$(BPF_GEN_DIR)
 
 all: check-go build
 
@@ -71,20 +73,21 @@ endif
 
 ifdef USE_BTF_VMLINUX
 # /sys/kernel/btf/vmlinux is a sysfs pseudo-file whose modification time can be
-# unreliable for make dependency checks. Use a phony intermediate so vmlinux.h
-# is always regenerated when bpftool is available.
+# unreliable for make dependency checks. Use a phony intermediate so generated
+# vmlinux.h is always refreshed when bpftool is available.
 .PHONY: _vmlinux_btf_gen
 _vmlinux_btf_gen:
-	@echo "Regenerating bpf/vmlinux.h from kernel BTF..."
-	bpftool btf dump file $(VMLINUX_BTF) format c > bpf/vmlinux.h
+	@mkdir -p "$(BPF_GEN_DIR)"
+	@echo "Regenerating $(VMLINUX_GEN) from kernel BTF..."
+	bpftool btf dump file $(VMLINUX_BTF) format c > "$(VMLINUX_GEN)"
 
-bpf/vmlinux.h: _vmlinux_btf_gen
+$(VMLINUX_GEN): _vmlinux_btf_gen
 else
-bpf/vmlinux.h:
+$(VMLINUX_GEN):
 	@[ -f bpf/vmlinux.h ] || (echo "Error: bpf/vmlinux.h missing and bpftool unavailable"; exit 1)
 endif
 
-$(BPF_OBJ): bpf/vmlinux.h bpf/podtrace.bpf.c bpf/*.h bpf/network.c bpf/filesystem.c bpf/cpu.c bpf/memory.c
+$(BPF_OBJ): $(VMLINUX_GEN) bpf/podtrace.bpf.c bpf/*.h bpf/network.c bpf/filesystem.c bpf/cpu.c bpf/memory.c
 	@mkdir -p $(dir $(BPF_OBJ))
 	$(CLANG) $(BPF_CFLAGS) -Ibpf -I. -c bpf/podtrace.bpf.c -o $(BPF_OBJ)
 
@@ -97,9 +100,7 @@ clean:
 	rm -f $(BINARY)
 	rm -rf bin
 	rm -f coverage.out coverage.html
-ifdef USE_BTF_VMLINUX
-	rm -f bpf/vmlinux.h
-endif
+	rm -rf "$(BPF_GEN_DIR)"
 
 deps:
 	$(GO) mod download

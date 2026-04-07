@@ -3,7 +3,11 @@
 #ifndef PODTRACE_COMMON_H
 #define PODTRACE_COMMON_H
 
+#ifdef PODTRACE_VMLINUX_FROM_BTF
+#include <vmlinux.h>
+#else
 #include "vmlinux.h"
+#endif
 
 #ifndef __u8
 typedef unsigned char __u8;
