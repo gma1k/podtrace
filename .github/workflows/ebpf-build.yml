@@ -55,35 +55,13 @@ jobs:
             || sudo apt-get install -y clang llvm libbpf-dev \
             linux-headers-generic linux-tools-generic
 
-      - name: Generate vmlinux.h from BTF
-        run: |
-          if [ -f /sys/kernel/btf/vmlinux ] && command -v bpftool &>/dev/null; then
-            echo "Generating bpf/vmlinux.h from kernel BTF (arch=${{ matrix.bpf_arch }})..."
-            if bpftool btf dump file /sys/kernel/btf/vmlinux format c > bpf/vmlinux.h 2>/dev/null; then
-              echo "vmlinux.h generated: $(wc -l < bpf/vmlinux.h) lines"
-            else
-              echo "bpftool failed — using placeholder bpf/vmlinux.h"
-            fi
-          else
-            echo "bpftool or BTF unavailable — using placeholder bpf/vmlinux.h"
-          fi
-
       - name: Install Go dependencies
         run: GOTOOLCHAIN=auto go mod download && GOTOOLCHAIN=auto go mod verify
 
       - name: Compile eBPF program
         run: |
-          VMLINUX_SIZE=$(stat -c%s bpf/vmlinux.h 2>/dev/null || echo 0)
-          if [ "$VMLINUX_SIZE" -gt 50000 ]; then
-            VMLINUX_FLAG="-DPODTRACE_VMLINUX_FROM_BTF"
-          else
-            VMLINUX_FLAG=""
-          fi
-          clang -O2 -g -target bpf \
-            -D__TARGET_ARCH_${{ matrix.bpf_arch }} \
-            ${VMLINUX_FLAG} \
-            -I./bpf -c bpf/podtrace.bpf.c -o bpf/podtrace.bpf.o
-          echo "eBPF object compiled for arch=${{ matrix.bpf_arch }}"
+          make bpf/podtrace.bpf.o BPF_GOARCH=${{ matrix.goarch }}
+          echo "eBPF object compiled via Makefile (arch=${{ matrix.bpf_arch }})"
 
       - name: Build Go binary
         run: GOTOOLCHAIN=auto GOARCH=${{ matrix.goarch }} go build -o bin/podtrace ./cmd/podtrace

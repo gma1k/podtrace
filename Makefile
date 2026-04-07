@@ -6,6 +6,8 @@ LLC ?= llc
 GO ?= $(shell if [ -f /usr/local/go/bin/go ]; then echo /usr/local/go/bin/go; else echo go; fi)
 BPF_SRC = bpf/podtrace.bpf.c bpf/network.c bpf/filesystem.c bpf/cpu.c bpf/memory.c
 BPF_OBJ = bpf/podtrace.bpf.o
+BPF_GEN_DIR = bpf/.generated
+VMLINUX_GEN = $(BPF_GEN_DIR)/vmlinux.h
 BINARY = bin/podtrace
 
 # Export GOTOOLCHAIN=auto to automatically download required Go version (Go 1.21+)
@@ -30,7 +32,7 @@ else
 endif
 
 LIBBPF_INCLUDE ?= /usr/include
-BPF_CFLAGS = -O2 -g -target bpf $(BPF_ARCH_DEFINE) -mcpu=$(BPF_MCPU) -I$(LIBBPF_INCLUDE)
+BPF_CFLAGS = -O2 -g -target bpf $(BPF_ARCH_DEFINE) -mcpu=$(BPF_MCPU) -I$(LIBBPF_INCLUDE) -I$(BPF_GEN_DIR)
 
 all: check-go build
 
@@ -60,24 +62,45 @@ check-go:
 # common.h skips its placeholder struct definitions (pt_regs, sockaddr_in).
 VMLINUX_BTF  = /sys/kernel/btf/vmlinux
 HAVE_BPFTOOL := $(shell command -v bpftool 2>/dev/null)
+HAVE_WORKING_BPFTOOL := $(shell bpftool version >/dev/null 2>&1 && echo yes)
 HAVE_BTF     := $(shell test -r $(VMLINUX_BTF) && echo yes)
 
 ifneq ($(HAVE_BPFTOOL),)
-  ifeq ($(HAVE_BTF),yes)
-    USE_BTF_VMLINUX := yes
-    BPF_CFLAGS += -DPODTRACE_VMLINUX_FROM_BTF
+  ifeq ($(HAVE_WORKING_BPFTOOL),yes)
+    ifeq ($(HAVE_BTF),yes)
+      USE_BTF_VMLINUX := yes
+      BPF_CFLAGS += -DPODTRACE_VMLINUX_FROM_BTF
+    endif
   endif
 endif
 
-bpf/vmlinux.h: $(if $(USE_BTF_VMLINUX),$(VMLINUX_BTF),)
-ifdef USE_BTF_VMLINUX
-	@echo "Regenerating bpf/vmlinux.h from kernel BTF..."
-	bpftool btf dump file $(VMLINUX_BTF) format c > bpf/vmlinux.h
-else
-	@[ -f bpf/vmlinux.h ] || (echo "Error: bpf/vmlinux.h missing and bpftool unavailable"; exit 1)
+ifeq ($(HAVE_BTF),yes)
+  ifneq ($(HAVE_BPFTOOL),)
+    ifneq ($(HAVE_WORKING_BPFTOOL),yes)
+      $(warning bpftool found but unusable; falling back to stub bpf/vmlinux.h)
+    endif
+  endif
 endif
 
-$(BPF_OBJ): bpf/vmlinux.h bpf/podtrace.bpf.c bpf/*.h bpf/network.c bpf/filesystem.c bpf/cpu.c bpf/memory.c
+ifdef USE_BTF_VMLINUX
+# /sys/kernel/btf/vmlinux is a sysfs pseudo-file whose modification time can be
+# unreliable for make dependency checks. Use a phony intermediate so generated
+# vmlinux.h is always refreshed when bpftool is available.
+.PHONY: _vmlinux_btf_gen
+_vmlinux_btf_gen:
+	@mkdir -p "$(BPF_GEN_DIR)"
+	@echo "Regenerating $(VMLINUX_GEN) from kernel BTF..."
+	bpftool btf dump file $(VMLINUX_BTF) format c > "$(VMLINUX_GEN)"
+
+$(VMLINUX_GEN): _vmlinux_btf_gen
+else
+$(VMLINUX_GEN):
+	@mkdir -p "$(BPF_GEN_DIR)"
+	@[ -f bpf/vmlinux.h ] || (echo "Error: bpf/vmlinux.h missing and bpftool unavailable"; exit 1)
+	@cp bpf/vmlinux.h "$(VMLINUX_GEN)"
+endif
+
+$(BPF_OBJ): $(VMLINUX_GEN) bpf/podtrace.bpf.c bpf/*.h bpf/network.c bpf/filesystem.c bpf/cpu.c bpf/memory.c
 	@mkdir -p $(dir $(BPF_OBJ))
 	$(CLANG) $(BPF_CFLAGS) -Ibpf -I. -c bpf/podtrace.bpf.c -o $(BPF_OBJ)
 
@@ -90,6 +113,7 @@ clean:
 	rm -f $(BINARY)
 	rm -rf bin
 	rm -f coverage.out coverage.html
+	rm -rf "$(BPF_GEN_DIR)"
 
 deps:
 	$(GO) mod download

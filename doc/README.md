@@ -7,6 +7,7 @@ Welcome to the `Podtrace` documentation. This directory contains comprehensive g
 - **[Architecture](architecture.md)** - System architecture, components, and data flow
 - **[Installation](installation.md)** - Installation guide, prerequisites, and troubleshooting
 - **[Usage Guide](usage.md)** - Usage examples, command-line options, and tips
+- **[Multi-Pod Tracing](multi-pod-tracing.md)** - Multi-pod and cross-namespace tracing guide with selector patterns
 - **[eBPF Internals](ebpf-internals.md)** - Deep dive into eBPF programs and tracing mechanisms
 - **[Metrics](metrics.md)** - Prometheus metrics, Grafana integration, and query examples
 - **[Development](development.md)** - Development guide, code structure, testing, and contributing
@@ -15,7 +16,7 @@ Welcome to the `Podtrace` documentation. This directory contains comprehensive g
 
 ## Quick Start
 
-1. **New to Podtrace?** Start with [Installation](installation.md) and [Usage Guide](usage.md)
+1. **New to Podtrace?** Start with [Installation](installation.md), [Usage Guide](usage.md), and [Multi-Pod Tracing](multi-pod-tracing.md)
 2. **Want to understand how it works?** Read [Architecture](architecture.md)
 3. **Need to integrate metrics?** Check [Metrics](metrics.md)
 4. **Setting up distributed tracing?** See [Distributed Tracing Guide](distributed-tracing.md) and [Tracing Exporters Setup](tracing-exporters.md)

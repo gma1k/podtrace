@@ -91,7 +91,7 @@ func collectEnvReport() envReport {
 		}
 		for name := range spec.Maps {
 			rep.BPFMaps = append(rep.BPFMaps, name)
-			if name == "target_cgroup_id" {
+			if name == "target_cgroup_ids" {
 				rep.HasCgroupIDMap = true
 			}
 		}
@@ -103,7 +103,7 @@ func collectEnvReport() envReport {
 		rep.Warnings = append(rep.Warnings, "kernel BTF (/sys/kernel/btf/vmlinux) not found and PODTRACE_BTF_FILE not set; CO-RE relocations may fail")
 	}
 	if rep.CgroupV2 && !rep.HasCgroupIDMap {
-		rep.Warnings = append(rep.Warnings, "cgroup v2 detected but BPF map target_cgroup_id missing; kernel-side cgroup filtering will be unavailable")
+		rep.Warnings = append(rep.Warnings, "cgroup v2 detected but BPF map target_cgroup_ids missing; kernel-side cgroup filtering will be unavailable")
 	}
 
 	return rep

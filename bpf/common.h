@@ -3,7 +3,11 @@
 #ifndef PODTRACE_COMMON_H
 #define PODTRACE_COMMON_H
 
+#ifdef PODTRACE_VMLINUX_FROM_BTF
+#include <vmlinux.h>
+#else
 #include "vmlinux.h"
+#endif
 
 #ifndef __u8
 typedef unsigned char __u8;
@@ -112,6 +116,9 @@ struct sockaddr_in {
 #endif
 #ifndef BPF_MAP_TYPE_ARRAY
 #define BPF_MAP_TYPE_ARRAY 2
+#endif
+#ifndef BPF_MAP_TYPE_LRU_HASH
+#define BPF_MAP_TYPE_LRU_HASH 9
 #endif
 #ifndef BPF_ANY
 #define BPF_ANY 0

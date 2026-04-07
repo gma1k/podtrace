@@ -14,23 +14,46 @@ import (
 var readFile = os.ReadFile
 
 type CgroupFilter struct {
-	cgroupPath string
-	pidCache   map[uint32]bool
-	pidCacheMu sync.RWMutex
+	cgroupPath  string
+	cgroupPaths map[string]struct{}
+	pidCache    map[uint32]bool
+	pidCacheMu  sync.RWMutex
 }
 
 func NewCgroupFilter() *CgroupFilter {
 	return &CgroupFilter{
-		pidCache: make(map[uint32]bool),
+		cgroupPaths: make(map[string]struct{}),
+		pidCache:    make(map[uint32]bool),
 	}
 }
 
 func (f *CgroupFilter) SetCgroupPath(path string) {
 	f.cgroupPath = path
+	f.cgroupPaths = make(map[string]struct{})
+	if path != "" {
+		f.cgroupPaths[path] = struct{}{}
+	}
+	f.pidCacheMu.Lock()
+	f.pidCache = make(map[uint32]bool)
+	f.pidCacheMu.Unlock()
+}
+
+func (f *CgroupFilter) SetCgroupPaths(paths []string) {
+	f.cgroupPath = ""
+	f.cgroupPaths = make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		f.cgroupPaths[path] = struct{}{}
+	}
+	f.pidCacheMu.Lock()
+	f.pidCache = make(map[uint32]bool)
+	f.pidCacheMu.Unlock()
 }
 
 func (f *CgroupFilter) IsPIDInCgroup(pid uint32) bool {
-	if f.cgroupPath == "" {
+	if f.cgroupPath == "" && len(f.cgroupPaths) == 0 {
 		return true
 	}
 
@@ -94,18 +117,29 @@ func (f *CgroupFilter) IsPIDInCgroup(pid uint32) bool {
 		return false
 	}
 
-	normalizedTarget := NormalizeCgroupPath(f.cgroupPath)
 	normalizedPID := NormalizeCgroupPath(pidCgroupPath)
+	targets := make([]string, 0, len(f.cgroupPaths)+1)
+	if f.cgroupPath != "" {
+		targets = append(targets, f.cgroupPath)
+	}
+	for p := range f.cgroupPaths {
+		if p != "" {
+			targets = append(targets, p)
+		}
+	}
 
 	result := false
-	// If the configured target normalizes to empty (e.g. "/" or the cgroup base),
-	// treat it as invalid to avoid accidentally matching everything.
-	if normalizedTarget == "" {
-		result = false
-	} else if normalizedPID == normalizedTarget {
-		result = true
-	} else if strings.HasPrefix(normalizedPID, normalizedTarget+"/") {
-		result = true
+	for _, target := range targets {
+		normalizedTarget := NormalizeCgroupPath(target)
+		// If the configured target normalizes to empty (e.g. "/" or the cgroup base),
+		// treat it as invalid to avoid accidentally matching everything.
+		if normalizedTarget == "" {
+			continue
+		}
+		if normalizedPID == normalizedTarget || strings.HasPrefix(normalizedPID, normalizedTarget+"/") {
+			result = true
+			break
+		}
 	}
 
 	f.pidCacheMu.Lock()

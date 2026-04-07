@@ -84,7 +84,7 @@ func GenerateCgroupScopeSection(d Diagnostician) string {
 		}
 	}
 	if len(counts) > 1 {
-		report += "  Warning: multiple cgroup_ids seen; target scoping may be too broad.\n"
+		report += "  multiple cgroup_ids seen, expected in multi-pod mode\n"
 	}
 	if zero == len(evs) {
 		report += "  Warning: all events have cgroup_id=0; your loaded BPF object may not include cgroup_id support.\n"

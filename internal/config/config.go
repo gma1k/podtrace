@@ -29,7 +29,7 @@ const (
 	DefaultAlertMaxRetries       = 3
 	DefaultAlertRetryBackoffBase = 1 * time.Second
 	DefaultAlertMaxPayloadSize   = 1024 * 1024
-	DefaultVersion               = "v0.8.0"
+	DefaultVersion               = "v0.9.0"
 )
 
 const (
