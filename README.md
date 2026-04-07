@@ -28,11 +28,6 @@ Podtrace documentation is available in the [`doc/`](doc/) directory.
 
 ## Features
 
-### Multi-Pod Tracing
-- **Dynamic Multi-Pod Targeting**: Trace multiple pods in one run using explicit pod lists, label selectors, or namespace-wide selection
-- **Cross-Namespace Support**: Trace pods across namespaces with `--namespaces` and selector-based targeting
-- **Live Target Updates**: Automatically refresh target pod/cgroup filters when pods are added, updated, or deleted
-
 ### Network Tracing
 - **TCP Connection Monitoring**: Tracks TCP IPv4/IPv6 connection latency and errors
 - **TCP RTT Analysis**: Detects RTT spikes and retry patterns
@@ -78,6 +73,11 @@ Podtrace documentation is available in the [`doc/`](doc/) directory.
 - **Database Query Tracing**: Tracks PostgreSQL and MySQL query execution patterns and latency
 - **Resource Limit Monitoring**: Monitor resource usage vs limits
 - **Error Correlation with Root Cause Analysis**: Correlates errors with operations and Kubernetes context
+
+### Multi-Pod Tracing
+- **Dynamic Multi-Pod Targeting**: Trace multiple pods in one run using explicit pod lists, label selectors, or namespace-wide selection
+- **Cross-Namespace Support**: Trace pods across namespaces with `--namespaces` and selector-based targeting
+- **Live Target Updates**: Automatically refresh target pod/cgroup filters when pods are added, updated, or deleted
 
 ### Distributed Tracing
 - **Trace Context Extraction**: Automatically extracts trace context from HTTP/HTTP2 headers and gRPC metadata
