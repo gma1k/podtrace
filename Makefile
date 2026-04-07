@@ -62,12 +62,23 @@ check-go:
 # common.h skips its placeholder struct definitions (pt_regs, sockaddr_in).
 VMLINUX_BTF  = /sys/kernel/btf/vmlinux
 HAVE_BPFTOOL := $(shell command -v bpftool 2>/dev/null)
+HAVE_WORKING_BPFTOOL := $(shell bpftool version >/dev/null 2>&1 && echo yes)
 HAVE_BTF     := $(shell test -r $(VMLINUX_BTF) && echo yes)
 
 ifneq ($(HAVE_BPFTOOL),)
-  ifeq ($(HAVE_BTF),yes)
-    USE_BTF_VMLINUX := yes
-    BPF_CFLAGS += -DPODTRACE_VMLINUX_FROM_BTF
+  ifeq ($(HAVE_WORKING_BPFTOOL),yes)
+    ifeq ($(HAVE_BTF),yes)
+      USE_BTF_VMLINUX := yes
+      BPF_CFLAGS += -DPODTRACE_VMLINUX_FROM_BTF
+    endif
+  endif
+endif
+
+ifeq ($(HAVE_BTF),yes)
+  ifneq ($(HAVE_BPFTOOL),)
+    ifneq ($(HAVE_WORKING_BPFTOOL),yes)
+      $(warning bpftool found but unusable; falling back to stub bpf/vmlinux.h)
+    endif
   endif
 endif
 
@@ -84,7 +95,9 @@ _vmlinux_btf_gen:
 $(VMLINUX_GEN): _vmlinux_btf_gen
 else
 $(VMLINUX_GEN):
+	@mkdir -p "$(BPF_GEN_DIR)"
 	@[ -f bpf/vmlinux.h ] || (echo "Error: bpf/vmlinux.h missing and bpftool unavailable"; exit 1)
+	@cp bpf/vmlinux.h "$(VMLINUX_GEN)"
 endif
 
 $(BPF_OBJ): $(VMLINUX_GEN) bpf/podtrace.bpf.c bpf/*.h bpf/network.c bpf/filesystem.c bpf/cpu.c bpf/memory.c
