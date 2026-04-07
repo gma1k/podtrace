@@ -111,9 +111,17 @@ static inline struct event *get_event_buf(void) {
 		}
 #endif
 
-		u64 *target = bpf_map_lookup_elem(&target_cgroup_id, &zero);
-		if (target && *target != 0 && *target != e->cgroup_id) {
-			return NULL;
+		/* In-kernel prefilter:
+		 * - empty target_cgroup_ids map => allow all
+		 * - non-empty map => allow only keys present in map */
+		u64 probe_key = 0;
+		u8 *probe_val = bpf_map_lookup_elem(&target_cgroup_ids, &probe_key);
+		if (probe_val) {
+			u64 cgid = e->cgroup_id;
+			u8 *allowed = bpf_map_lookup_elem(&target_cgroup_ids, &cgid);
+			if (!allowed) {
+				return NULL;
+			}
 		}
 	}
 	return e;

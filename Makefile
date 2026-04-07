@@ -69,11 +69,18 @@ ifneq ($(HAVE_BPFTOOL),)
   endif
 endif
 
-bpf/vmlinux.h: $(if $(USE_BTF_VMLINUX),$(VMLINUX_BTF),)
 ifdef USE_BTF_VMLINUX
+# /sys/kernel/btf/vmlinux is a sysfs pseudo-file whose modification time can be
+# unreliable for make dependency checks. Use a phony intermediate so vmlinux.h
+# is always regenerated when bpftool is available.
+.PHONY: _vmlinux_btf_gen
+_vmlinux_btf_gen:
 	@echo "Regenerating bpf/vmlinux.h from kernel BTF..."
 	bpftool btf dump file $(VMLINUX_BTF) format c > bpf/vmlinux.h
+
+bpf/vmlinux.h: _vmlinux_btf_gen
 else
+bpf/vmlinux.h:
 	@[ -f bpf/vmlinux.h ] || (echo "Error: bpf/vmlinux.h missing and bpftool unavailable"; exit 1)
 endif
 
@@ -90,6 +97,9 @@ clean:
 	rm -f $(BINARY)
 	rm -rf bin
 	rm -f coverage.out coverage.html
+ifdef USE_BTF_VMLINUX
+	rm -f bpf/vmlinux.h
+endif
 
 deps:
 	$(GO) mod download

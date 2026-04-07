@@ -234,22 +234,21 @@ int kprobe_vfs_rename(struct pt_regs *ctx) {
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 
 #ifdef PODTRACE_VMLINUX_FROM_BTF
+	/* Works with both old and new BTF-generated layouts via CO-RE.
+	 * Use fixed compile-time offsets so the BPF verifier can bound stack
+	 * writes — variable-offset writes (buf[idx]) are often rejected on 6.x.
+	 * Layout: [0 .. HALF-2] old name, [HALF-1] '>', [HALF .. END] new name. */
 	struct dentry *old_de = (struct dentry *)PT_REGS_PARM2(ctx);
 	struct dentry *new_de = (struct dentry *)PT_REGS_PARM4(ctx);
 	if (old_de && new_de) {
 		char buf[MAX_STRING_LEN] = {};
 		const unsigned char *old_name = BPF_CORE_READ(old_de, d_name.name);
 		const unsigned char *new_name = BPF_CORE_READ(new_de, d_name.name);
-		u32 idx = 0;
-		u32 max_idx = MAX_STRING_LEN - 1;
-		if (old_name) {
-			int n = bpf_probe_read_kernel_str(buf, sizeof(buf) - 1, old_name);
-			if (n > 1) idx = (u32)(n - 1);
-		}
-		if (idx < max_idx) buf[idx++] = '>';
-		if (new_name && idx < max_idx)
-			bpf_probe_read_kernel_str(buf + idx, max_idx - idx, new_name);
-		buf[max_idx] = '\0';
+		if (old_name)
+			bpf_probe_read_kernel_str(buf, MAX_STRING_LEN / 2 - 1, old_name);
+		buf[MAX_STRING_LEN / 2 - 1] = '>';
+		if (new_name)
+			bpf_probe_read_kernel_str(buf + MAX_STRING_LEN / 2, MAX_STRING_LEN / 2, new_name);
 		bpf_map_update_elem(&syscall_paths, &key, buf, BPF_ANY);
 	}
 #endif

@@ -100,12 +100,14 @@ struct {
 	__type(value, u32);
 } cgroup_alerts SEC(".maps");
 
+/* Allowed cgroup IDs for in-kernel prefiltering.
+ * Empty map means "allow all". */
 struct {
-	__uint(type, BPF_MAP_TYPE_ARRAY);
-	__uint(max_entries, 1);
-	__type(key, u32);
-	__type(value, u64);
-} target_cgroup_id SEC(".maps");
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 4096);
+	__type(key, u64);
+	__type(value, u8);
+} target_cgroup_ids SEC(".maps");
 
 struct pool_state {
 	u64 last_use_ns;

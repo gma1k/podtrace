@@ -58,8 +58,10 @@ type Tracer struct {
 	pathCache                *cache.PathCache
 	resourceMonitor          *resource.ResourceMonitor
 	cgroupPath               string
+	cgroupPaths              []string
 	useUserspaceCgroupFilter bool
 	targetCgroupID           uint64
+	targetCgroupIDs          map[uint64]struct{}
 	cpAnalyzer               *criticalpath.Analyzer
 	piiRedactor              *redactor.Redactor
 }
@@ -186,6 +188,7 @@ func NewTracer() (*Tracer, error) {
 		processNameCache:         processCache,
 		pathCache:                cache.NewPathCache(),
 		useUserspaceCgroupFilter: true,
+		targetCgroupIDs:          make(map[uint64]struct{}),
 	}
 
 	if config.CriticalPathEnabled {
@@ -208,50 +211,104 @@ func NewTracer() (*Tracer, error) {
 }
 
 func (t *Tracer) AttachToCgroup(cgroupPath string) error {
-	containerSubPath := filepath.Join(cgroupPath, "container")
-	if _, err := os.Stat(filepath.Join(containerSubPath, "cgroup.procs")); err == nil {
-		logger.Debug("Found CRI-O container subfolder, using it for precise cgroup filtering",
-			zap.String("parent_path", cgroupPath),
-			zap.String("container_path", containerSubPath))
-		cgroupPath = containerSubPath
-	}
+	return t.AttachToCgroups([]string{cgroupPath})
+}
 
-	t.filter.SetCgroupPath(cgroupPath)
-	t.cgroupPath = cgroupPath
-
-	if cgroupPath != "" && filter.NormalizeCgroupPath(cgroupPath) == "" && os.Getenv("PODTRACE_ALLOW_ROOT_CGROUP") != "1" {
-		return fmt.Errorf("podtrace: resolved cgroup path %q normalizes to root; refusing to attach (set PODTRACE_ALLOW_ROOT_CGROUP=1 to override)", cgroupPath)
-	}
-
-	if t.containerPID == 0 && cgroupPath != "" {
-		if pid := readFirstPIDFromCgroupProcs(cgroupPath); pid != 0 {
-			t.containerPID = pid
+func (t *Tracer) AttachToCgroups(cgroupPaths []string) error {
+	normalized := make([]string, 0, len(cgroupPaths))
+	for _, cgroupPath := range cgroupPaths {
+		if cgroupPath == "" {
+			continue
 		}
+		containerSubPath := filepath.Join(cgroupPath, "container")
+		if _, err := os.Stat(filepath.Join(containerSubPath, "cgroup.procs")); err == nil {
+			logger.Debug("Found CRI-O container subfolder, using it for precise cgroup filtering",
+				zap.String("parent_path", cgroupPath),
+				zap.String("container_path", containerSubPath))
+			cgroupPath = containerSubPath
+		}
+		if filter.NormalizeCgroupPath(cgroupPath) == "" && os.Getenv("PODTRACE_ALLOW_ROOT_CGROUP") != "1" {
+			return fmt.Errorf("podtrace: resolved cgroup path %q normalizes to root; refusing to attach (set PODTRACE_ALLOW_ROOT_CGROUP=1 to override)", cgroupPath)
+		}
+		normalized = append(normalized, cgroupPath)
+	}
+	if len(normalized) == 0 {
+		return fmt.Errorf("no valid cgroup paths provided")
 	}
 
-	if t.collection != nil && t.collection.Maps != nil {
-		if targetMap, ok := t.collection.Maps["target_cgroup_id"]; ok && targetMap != nil {
-			if isCgroupV2Base(config.CgroupBasePath) {
-				if cgid, err := getCgroupIDFromPath(cgroupPath); err == nil && cgid != 0 {
-					t.targetCgroupID = cgid
-					zero := uint32(0)
-					if err := targetMap.Update(&zero, &cgid, ebpf.UpdateAny); err != nil {
-						logger.Warn("Failed to update target_cgroup_id map", zap.Error(err), zap.Uint64("cgroup_id", cgid))
-					} else {
-						logger.Debug("Set target cgroup ID for in-kernel filtering", zap.Uint64("cgroup_id", cgid), zap.String("cgroup_path", cgroupPath))
-					}
-					if os.Getenv("PODTRACE_DISABLE_USERSPACE_CGROUP_FILTER") == "1" {
-						t.useUserspaceCgroupFilter = false
-					}
-				} else {
-					logger.Debug("Could not get cgroup ID from path", zap.Error(err), zap.String("cgroup_path", cgroupPath))
-				}
-			} else {
-				logger.Debug("Cgroup v2 not detected, using userspace filtering only", zap.String("cgroup_base", config.CgroupBasePath))
+	t.cgroupPaths = normalized
+	t.cgroupPath = normalized[0]
+	t.filter.SetCgroupPaths(normalized)
+
+	if t.containerPID == 0 {
+		for _, cgroupPath := range normalized {
+			if pid := readFirstPIDFromCgroupProcs(cgroupPath); pid != 0 {
+				t.containerPID = pid
+				break
 			}
 		}
 	}
-	logger.Debug("Attached to cgroup", zap.String("cgroup_path", cgroupPath), zap.Uint32("container_pid", t.containerPID), zap.Uint64("target_cgroup_id", t.targetCgroupID), zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter))
+
+	t.targetCgroupID = 0
+	t.targetCgroupIDs = make(map[uint64]struct{}, len(normalized))
+	if isCgroupV2Base(config.CgroupBasePath) {
+		for _, cgroupPath := range normalized {
+			if cgid, err := getCgroupIDFromPath(cgroupPath); err == nil && cgid != 0 {
+				t.targetCgroupIDs[cgid] = struct{}{}
+				if t.targetCgroupID == 0 {
+					t.targetCgroupID = cgid
+				}
+			} else {
+				logger.Debug("Could not get cgroup ID from path", zap.Error(err), zap.String("cgroup_path", cgroupPath))
+			}
+		}
+		if err := t.syncTargetCgroupMap(); err != nil {
+			logger.Warn("Failed to sync target_cgroup_ids map", zap.Error(err))
+		} else if len(t.targetCgroupIDs) > 0 {
+			logger.Debug("Set target cgroup IDs for in-kernel filtering", zap.Int("count", len(t.targetCgroupIDs)))
+		}
+		if len(t.targetCgroupIDs) > 0 && os.Getenv("PODTRACE_DISABLE_USERSPACE_CGROUP_FILTER") == "1" {
+			t.useUserspaceCgroupFilter = false
+		}
+	} else {
+		logger.Debug("Cgroup v2 not detected, using userspace filtering only", zap.String("cgroup_base", config.CgroupBasePath))
+	}
+	logger.Debug("Attached to cgroups",
+		zap.Int("cgroup_count", len(t.cgroupPaths)),
+		zap.Uint32("container_pid", t.containerPID),
+		zap.Int("target_cgroup_id_count", len(t.targetCgroupIDs)),
+		zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter))
+	return nil
+}
+
+func (t *Tracer) syncTargetCgroupMap() error {
+	if t.collection == nil || t.collection.Maps == nil {
+		return nil
+	}
+	targetMap, ok := t.collection.Maps["target_cgroup_ids"]
+	if !ok || targetMap == nil {
+		return nil
+	}
+
+	// Clear existing keys.
+	var key uint64
+	var val uint8
+	iter := targetMap.Iterate()
+	keys := make([]uint64, 0, len(t.targetCgroupIDs))
+	for iter.Next(&key, &val) {
+		keys = append(keys, key)
+	}
+	for _, k := range keys {
+		_ = targetMap.Delete(&k)
+	}
+
+	one := uint8(1)
+	for cgid := range t.targetCgroupIDs {
+		cgidCopy := cgid
+		if err := targetMap.Update(&cgidCopy, &one, ebpf.UpdateAny); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -294,30 +351,48 @@ func getCgroupIDFromPath(path string) (uint64, error) {
 }
 
 func (t *Tracer) SetContainerID(containerID string) error {
-	t.containerID = containerID
-	dnsLinks := probes.AttachDNSProbesWithPID(t.collection, containerID, t.containerPID)
+	return t.SetContainerIDs([]string{containerID})
+}
+
+func (t *Tracer) SetContainerIDs(containerIDs []string) error {
+	if len(containerIDs) == 0 {
+		return fmt.Errorf("no container IDs provided")
+	}
+	primary := ""
+	for _, id := range containerIDs {
+		if id != "" {
+			primary = id
+			break
+		}
+	}
+	if primary == "" {
+		return fmt.Errorf("all container IDs are empty")
+	}
+
+	t.containerID = primary
+	dnsLinks := probes.AttachDNSProbesWithPID(t.collection, primary, t.containerPID)
 	if len(dnsLinks) > 0 {
 		t.links = append(t.links, dnsLinks...)
 	}
-	syncLinks := probes.AttachSyncProbesWithPID(t.collection, containerID, t.containerPID)
+	syncLinks := probes.AttachSyncProbesWithPID(t.collection, primary, t.containerPID)
 	if len(syncLinks) > 0 {
 		t.links = append(t.links, syncLinks...)
 	}
-	dbLinks := probes.AttachDBProbesWithPID(t.collection, containerID, t.containerPID)
+	dbLinks := probes.AttachDBProbesWithPID(t.collection, primary, t.containerPID)
 	if len(dbLinks) > 0 {
 		t.links = append(t.links, dbLinks...)
 	}
-	poolLinks := probes.AttachPoolProbesWithPID(t.collection, containerID, t.containerPID)
+	poolLinks := probes.AttachPoolProbesWithPID(t.collection, primary, t.containerPID)
 	if len(poolLinks) > 0 {
 		t.links = append(t.links, poolLinks...)
 	}
-	tlsLinks := probes.AttachTLSProbesWithPID(t.collection, containerID, t.containerPID)
+	tlsLinks := probes.AttachTLSProbesWithPID(t.collection, primary, t.containerPID)
 	if len(tlsLinks) > 0 {
 		t.links = append(t.links, tlsLinks...)
 	}
-	t.links = append(t.links, probes.AttachRedisProbesWithPID(t.collection, containerID, t.containerPID)...)
-	t.links = append(t.links, probes.AttachMemcachedProbesWithPID(t.collection, containerID, t.containerPID)...)
-	t.links = append(t.links, probes.AttachKafkaProbesWithPID(t.collection, containerID, t.containerPID)...)
+	t.links = append(t.links, probes.AttachRedisProbesWithPID(t.collection, primary, t.containerPID)...)
+	t.links = append(t.links, probes.AttachMemcachedProbesWithPID(t.collection, primary, t.containerPID)...)
+	t.links = append(t.links, probes.AttachKafkaProbesWithPID(t.collection, primary, t.containerPID)...)
 	t.links = append(t.links, probes.AttachFastCGIProbes(t.collection)...)
 	t.links = append(t.links, probes.AttachGRPCProbes(t.collection)...)
 	return nil
@@ -381,6 +456,7 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 		zap.String("cgroup_path", t.cgroupPath),
 		zap.Uint32("container_pid", t.containerPID),
 		zap.Uint64("target_cgroup_id", t.targetCgroupID),
+		zap.Int("target_cgroup_id_count", len(t.targetCgroupIDs)),
 		zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter))
 
 	go func() {
@@ -401,13 +477,9 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 					filteringDisabled = true
 					t.useUserspaceCgroupFilter = false
 					t.targetCgroupID = 0
-					if t.collection != nil && t.collection.Maps != nil {
-						if targetMap, ok := t.collection.Maps["target_cgroup_id"]; ok && targetMap != nil {
-							zero := uint32(0)
-							zeroCgid := uint64(0)
-							_ = targetMap.Update(&zero, &zeroCgid, ebpf.UpdateAny)
-							logger.Info("Cleared kernel-side cgroup filter")
-						}
+					t.targetCgroupIDs = map[uint64]struct{}{}
+					if err := t.syncTargetCgroupMap(); err == nil {
+						logger.Info("Cleared kernel-side cgroup filter")
 					}
 				} else if eventsParsed == 0 && elapsed > 15*time.Second {
 					logger.Warn("No events parsed from ring buffer after 15 seconds - check eBPF program attachment",
@@ -543,15 +615,15 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 				if filteringDisabled {
 					// Fallback mode: allow all events
 					allowed = true
-				} else if t.targetCgroupID != 0 && event.CgroupID != 0 {
-					allowed = (event.CgroupID == t.targetCgroupID)
+				} else if len(t.targetCgroupIDs) > 0 && event.CgroupID != 0 {
+					_, allowed = t.targetCgroupIDs[event.CgroupID]
 					if !allowed {
 						eventsFiltered++
 						// Log first few mismatches for debugging, then throttle
 						if eventsFiltered <= 5 || time.Now().Unix()%10 == 0 {
 							logger.Debug("Event filtered by cgroup ID mismatch",
 								zap.Uint64("event_cgroup_id", event.CgroupID),
-								zap.Uint64("target_cgroup_id", t.targetCgroupID),
+								zap.Int("target_cgroup_id_count", len(t.targetCgroupIDs)),
 								zap.Uint32("pid", event.PID),
 								zap.String("process", event.ProcessName))
 						}

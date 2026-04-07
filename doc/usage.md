@@ -50,6 +50,10 @@ Usage: ./bin/podtrace -n <namespace> <pod-name> [flags]
 
 Flags:
   -n, --namespace string        Kubernetes namespace (default: "default")
+      --namespaces string       Comma-separated namespaces for multi-pod tracing
+      --pods string             Comma-separated pod references (pod or namespace/pod)
+      --pod-selector string     Label selector for target pods
+      --all-in-namespace        Trace all pods in --namespace (or all --namespaces)
       --diagnose string         Run in diagnose mode for the specified duration (e.g., 10s, 5m)
       --metrics                 Enable Prometheus metrics server
       --export string           Export format for diagnose report (json, csv)
@@ -59,6 +63,8 @@ Flags:
       --rtt-threshold float     RTT spike threshold in milliseconds (default: 100.0)
       --fs-threshold float      File system slow operation threshold in milliseconds (default: 10.0)
 ```
+
+For multi-pod and cross-namespace examples, see [Multi-Pod Tracing](multi-pod-tracing.md).
 
 ### Alerting Configuration
 
@@ -236,7 +242,7 @@ Review:
 
 ## Limitations
 
-- Only traces the first container in a pod
+- By default traces the first container per selected pod (override with `--container`)
 - Requires kernel 5.8+ with BTF support
 - File path tracking uses inode-based correlation and works on all kernels (5.8+)
 - DNS tracking may be unavailable if libc path cannot be determined

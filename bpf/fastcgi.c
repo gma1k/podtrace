@@ -146,9 +146,15 @@ int kretprobe_unix_stream_recvmsg(struct pt_regs *ctx)
 			    params[i+4] == 'E' && params[i+5] == 'S' && params[i+6] == 'T' &&
 			    params[i+7] == '_' && params[i+8] == 'U' && params[i+9] == 'R' &&
 			    params[i+10] == 'I') {
-				/* Scan forward for the '/' that starts the URI value */
+				/* Scan forward for the '/' that starts the URI value.
+				 * In FastCGI NV format, value-length bytes are 1 or 4 bytes
+				 * wide, so '/' is always within 5 bytes of the name end.
+				 * Bounding this inner loop is critical: the outer loop can
+				 * run up to FCGI_PARAMS_SCAN_LEN times, and nested unbounded
+				 * loops exceed the BPF verifier's 1M instruction limit on
+				 * Linux 6.x kernels. */
 				u32 j;
-				for (j = i + 11; j + 1 < FCGI_PARAMS_SCAN_LEN; j++) {
+				for (j = i + 11; j < i + 16 && j + 1 < FCGI_PARAMS_SCAN_LEN; j++) {
 					if (params[j] == '/') {
 						/* Copy URI into event buffer.
 						 * Max is min(remaining bytes, MAX_STRING_LEN-1). */
