@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -242,5 +243,17 @@ func TestCleanupLoop(t *testing.T) {
 	defer cancel()
 	if err := m.Shutdown(shutdownCtx); err != nil {
 		t.Fatalf("Shutdown: %v", err)
+	}
+}
+
+func TestRedactURLForLog(t *testing.T) {
+	if got := redactURLForLog(""); got != "" {
+		t.Fatalf("empty: %q", got)
+	}
+	if got := redactURLForLog("https://hooks.example.com/path?token=secret&x=1"); !strings.Contains(got, "hooks.example.com") || strings.Contains(got, "token") {
+		t.Fatalf("redacted: %q", got)
+	}
+	if got := redactURLForLog("not a url"); got != "[invalid-url]" {
+		t.Fatalf("invalid: %q", got)
 	}
 }

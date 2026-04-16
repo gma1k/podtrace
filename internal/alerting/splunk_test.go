@@ -42,6 +42,12 @@ func TestNewSplunkAlertSender(t *testing.T) {
 			token:    "test-token",
 			wantErr:  true,
 		},
+		{
+			name:     "http to non-loopback requires https or env",
+			endpoint: "http://splunk.example.com:8088/services/collector",
+			token:    "test-token",
+			wantErr:  true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -54,6 +60,14 @@ func TestNewSplunkAlertSender(t *testing.T) {
 				t.Error("NewSplunkAlertSender() returned nil for valid input")
 			}
 		})
+	}
+}
+
+func TestNewSplunkAlertSender_HTTPNonLoopbackWithAllowEnv(t *testing.T) {
+	t.Setenv("PODTRACE_ALERT_SPLUNK_ALLOW_HTTP", "1")
+	_, err := NewSplunkAlertSender("http://splunk.example.com:8088/services/collector", "tok", 10*time.Second)
+	if err != nil {
+		t.Fatalf("NewSplunkAlertSender: %v", err)
 	}
 }
 
@@ -232,10 +246,10 @@ func TestNewSplunkAlertSender_InvalidScheme(t *testing.T) {
 			wantErr:  true,
 		},
 		{
-			name:     "http scheme",
+			name:     "http scheme to non-loopback rejected",
 			endpoint: "http://splunk.example.com:8088/services/collector",
 			token:    "test-token",
-			wantErr:  false,
+			wantErr:  true,
 		},
 		{
 			name:     "https scheme",

@@ -27,16 +27,16 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go-version: [1.24]
+        go-version: [1.25]
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
@@ -44,18 +44,20 @@ jobs:
       - name: Install dependencies
         run: GOTOOLCHAIN=auto go mod download
 
+      # v1.64 is built with Go <1.25 and exits with "targeted Go version ... is higher than ..."
+      # when go.mod uses go 1.25.x. Use a 2.x release built with Go 1.25+.
       - name: Run golangci-lint
         timeout-minutes: 5
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v7
         with:
-          version: v1.64
+          version: v2.7.2
           args: --timeout=5m
-          
+
       - name: Run govulncheck
         timeout-minutes: 5
         run: |
-          GOTOOLCHAIN=go1.25.8 go install golang.org/x/vuln/cmd/govulncheck@latest
-          GOTOOLCHAIN=go1.25.8 govulncheck ./...
+          GOTOOLCHAIN=auto go install golang.org/x/vuln/cmd/govulncheck@latest
+          GOTOOLCHAIN=auto govulncheck ./...
 
       - name: Build
         timeout-minutes: 5
@@ -152,8 +154,8 @@ jobs:
           fi
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        if: always()
+        uses: codecov/codecov-action@v5
+        if: hashFiles('coverage.out') != ''
         with:
           file: ./coverage.out
           flags: unittests
@@ -166,10 +168,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version: stable
           cache: true

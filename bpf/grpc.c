@@ -80,10 +80,11 @@ int kprobe_grpc_tcp_sendmsg(struct pt_regs *ctx)
 		return 0;
 
 	u8 buf[GRPC_INSPECT_LEN] = {};
-	u32 read_len = iov_entry.iov_len < GRPC_INSPECT_LEN ?
-	               (u32)iov_entry.iov_len : GRPC_INSPECT_LEN;
-	if (bpf_probe_read_user(buf, read_len & (GRPC_INSPECT_LEN - 1),
-	                        iov_entry.iov_base) != 0)
+	u32 read_len = (u32)iov_entry.iov_len;
+	if (read_len > GRPC_INSPECT_LEN)
+		read_len = GRPC_INSPECT_LEN;
+	/* Do not use (read_len & (N-1)) unless N is a power of two; GRPC_INSPECT_LEN is 50. */
+	if (bpf_probe_read_user(buf, read_len, iov_entry.iov_base) != 0)
 		return 0;
 
 	/* Check HTTP/2 frame type (byte 3 in the 9-byte frame header) */
