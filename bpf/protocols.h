@@ -43,7 +43,9 @@
 /* Minimum FastCGI record header size */
 #define FCGI_HEADER_LEN      8
 
-/* Max bytes to read from a PARAMS record when full parsing is enabled (see fastcgi.c). */
+/* Max bytes to read from a PARAMS record for URI extraction.
+ * Kept at 128 to bound the nested loop verifier instruction count on
+ * strict 6.x kernels (verifier limit = 1M processed instructions). */
 #define FCGI_PARAMS_SCAN_LEN 128
 
 #endif /* PODTRACE_PROTOCOLS_H */

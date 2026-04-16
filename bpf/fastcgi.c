@@ -15,13 +15,12 @@
  *     [7]   reserved
  *
  * From the php-fpm worker's perspective:
- *   - kretprobe/unix_stream_recvmsg: on PARAMS records, records correlation state in fastcgi_reqs
- *     (full REQUEST_URI / REQUEST_METHOD parsing was removed — it exceeded the ~1M BPF
- *     verifier instruction limit on common kernels).
+ *   - kretprobe/unix_stream_recvmsg: php-fpm receives PARAMS from nginx → extract URI/method
  *   - kprobe/unix_stream_sendmsg: php-fpm sends END_REQUEST back → emit response event
  *
  * Field mapping:
- *   EVENT_FASTCGI_RESPONSE: target/details may be empty; error=appStatus; latency_ns=request latency
+ *   EVENT_FASTCGI_REQUEST: target=REQUEST_URI, details=REQUEST_METHOD
+ *   EVENT_FASTCGI_RESPONSE: target=REQUEST_URI, error=appStatus, latency_ns=request latency
  */
 
 #include "common.h"
@@ -74,11 +73,10 @@ int kprobe_unix_stream_recvmsg(struct pt_regs *ctx)
 }
 
 /* -----------------------------------------------------------------------
- * kretprobe/unix_stream_recvmsg — PARAMS correlation only (verifier-safe)
+ * kretprobe/unix_stream_recvmsg — parse FastCGI PARAMS record
  * -----------------------------------------------------------------------
- * Full NV parsing for REQUEST_URI / REQUEST_METHOD was removed: nested scans
- * pushed this program past the kernel BPF verifier limit (~1M instructions).
- * We only detect FCGI_PARAMS and store start_ns so END_REQUEST can emit latency.
+ * After the recvmsg returns, the buffer has been filled.
+ * Look for FCGI_PARAMS (type=4) and extract REQUEST_URI / REQUEST_METHOD.
  */
 SEC("kretprobe/unix_stream_recvmsg")
 int kretprobe_unix_stream_recvmsg(struct pt_regs *ctx)
@@ -88,19 +86,18 @@ int kretprobe_unix_stream_recvmsg(struct pt_regs *ctx)
 	u64 key = get_key(pid, tid);
 
 	u64 *msg_ptr_stored = bpf_map_lookup_elem(&recvmsg_args, &key);
-	if (!msg_ptr_stored)
-		return 0;
+	if (!msg_ptr_stored) return 0;
 	u64 msg_ptr = *msg_ptr_stored;
 	bpf_map_delete_elem(&recvmsg_args, &key);
 
-	if (PT_REGS_RC(ctx) <= 0)
-		return 0;
+	if (PT_REGS_RC(ctx) <= 0) return 0;
 
 	struct msghdr *msg = (struct msghdr *)msg_ptr;
 	u8 hdr[FCGI_HEADER_LEN];
 	if (read_msghdr_data(msg, hdr, FCGI_HEADER_LEN) != 0)
 		return 0;
 
+	/* Validate FastCGI version and record type */
 	if (hdr[0] != FCGI_VERSION_1)
 		return 0;
 	if (hdr[1] != FCGI_PARAMS)
@@ -111,11 +108,118 @@ int kretprobe_unix_stream_recvmsg(struct pt_regs *ctx)
 	if (content_len == 0)
 		return 0;
 
+	/* FastCGI request key: lower 32 bits = requestId */
 	u64 req_key = get_key(pid, tid) ^ (u64)request_id;
 
+	struct event *e = get_event_buf();
+	if (!e) return 0;
+
+	/* Read PARAMS body — scan for REQUEST_URI */
+	u8 params[FCGI_PARAMS_SCAN_LEN] = {};
+	u32 scan_len = content_len < FCGI_PARAMS_SCAN_LEN ? content_len : FCGI_PARAMS_SCAN_LEN;
+
+	const struct iovec *iov = BPF_CORE_READ(msg, msg_iter.__iov);
+	if (!iov) return 0;
+
+	struct iovec iov_entry;
+	if (bpf_probe_read_kernel(&iov_entry, sizeof(iov_entry), iov) != 0)
+		return 0;
+
+	/* Params start after the 8-byte header */
+	u8 *params_base = (u8 *)iov_entry.iov_base + FCGI_HEADER_LEN;
+	if (bpf_probe_read_user(params, scan_len & 0xFF, params_base) != 0)
+		return 0;
+
+	/* Linear scan: find "REQUEST_URI" (11 bytes) in the params buffer.
+	 * In FastCGI NV format, name comes first. After "REQUEST_URI" we skip
+	 * the NV length bytes and find the value (the URI starts with '/'). */
+	u8 found_uri = 0, found_method = 0;
+	u32 i;
+
+	for (i = 0; i + 14 < FCGI_PARAMS_SCAN_LEN - 3; i++) {
+		if (found_uri && found_method)
+			break;
+
+		/* REQUEST_URI (11 bytes) */
+		if (!found_uri && params[i] == 'R' && i + 11 < FCGI_PARAMS_SCAN_LEN) {
+			if (params[i+1] == 'E' && params[i+2] == 'Q' && params[i+3] == 'U' &&
+			    params[i+4] == 'E' && params[i+5] == 'S' && params[i+6] == 'T' &&
+			    params[i+7] == '_' && params[i+8] == 'U' && params[i+9] == 'R' &&
+			    params[i+10] == 'I') {
+				/* Scan forward for the '/' that starts the URI value.
+				 * In FastCGI NV format, value-length bytes are 1 or 4 bytes
+				 * wide, so '/' is always within 5 bytes of the name end.
+				 * Bounding this inner loop is critical: the outer loop can
+				 * run up to FCGI_PARAMS_SCAN_LEN times, and nested unbounded
+				 * loops exceed the BPF verifier's 1M instruction limit on
+				 * Linux 6.x kernels. */
+				u32 j;
+				for (j = i + 11; j < i + 16 && j + 1 < FCGI_PARAMS_SCAN_LEN; j++) {
+					if (params[j] == '/') {
+						/* Copy URI into event buffer.
+						 * Max is min(remaining bytes, MAX_STRING_LEN-1). */
+						u32 copy = FCGI_PARAMS_SCAN_LEN - j;
+						if (copy >= MAX_STRING_LEN)
+							copy = MAX_STRING_LEN - 1;
+						bpf_probe_read_kernel(e->target, copy & (MAX_STRING_LEN - 1),
+						                     &params[j]);
+						e->target[MAX_STRING_LEN - 1] = '\0';
+						found_uri = 1;
+						break;
+					}
+				}
+			}
+		}
+
+		/* REQUEST_METHOD (14 bytes) */
+		if (!found_method && params[i] == 'R' && i + 14 < FCGI_PARAMS_SCAN_LEN) {
+			if (params[i+1] == 'E' && params[i+2] == 'Q' && params[i+3] == 'U' &&
+			    params[i+4] == 'E' && params[i+5] == 'S' && params[i+6] == 'T' &&
+			    params[i+7] == '_' && params[i+8] == 'M' && params[i+9] == 'E' &&
+			    params[i+10] == 'T' && params[i+11] == 'H' && params[i+12] == 'O' &&
+			    params[i+13] == 'D') {
+				/* Value follows: typical methods are GET/POST/PUT 3-6 chars */
+				u32 j;
+				for (j = i + 14; j < FCGI_PARAMS_SCAN_LEN && j < i + 20; j++) {
+					/* Skip non-alpha (NV length bytes) to find the method text */
+					if ((params[j] >= 'A' && params[j] <= 'Z') ||
+					    (params[j] >= 'a' && params[j] <= 'z')) {
+						u32 copy = 15;
+						if (j + copy > FCGI_PARAMS_SCAN_LEN)
+							copy = FCGI_PARAMS_SCAN_LEN - j;
+						bpf_probe_read_kernel(e->details, copy & 0xF,
+						                     &params[j]);
+						e->details[15] = '\0';
+						found_method = 1;
+						break;
+					}
+				}
+			}
+		}
+	}
+
+	if (!found_uri && !found_method)
+		return 0;  /* Not a PARAMS record we can decode */
+
+	if (!found_uri) e->target[0] = '\0';
+	if (!found_method) e->details[0] = '\0';
+
+	/* Store request state for END_REQUEST correlation */
 	struct fastcgi_req req = {};
 	req.start_ns = bpf_ktime_get_ns();
+	bpf_probe_read_kernel_str(req.uri, sizeof(req.uri), e->target);
+	bpf_probe_read_kernel_str(req.method, sizeof(req.method), e->details);
 	bpf_map_update_elem(&fastcgi_reqs, &req_key, &req, BPF_ANY);
+
+	/* Emit EVENT_FASTCGI_REQUEST */
+	e->timestamp  = req.start_ns;
+	e->pid        = pid;
+	e->type       = EVENT_FASTCGI_REQUEST;
+	e->latency_ns = 0;
+	e->error      = 0;
+	e->bytes      = 0;
+	e->tcp_state  = 0;
+	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	return 0;
 }
 
