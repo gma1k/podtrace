@@ -396,3 +396,26 @@ func GetVersion() string {
 func GetUserAgent() string {
 	return "Podtrace/" + Version
 }
+
+// OTLPAllowInsecureNonLoopback returns true when PODTRACE_OTLP_INSECURE=1,
+// allowing http:// to non-loopback OTLP collectors (cleartext).
+func OTLPAllowInsecureNonLoopback() bool {
+	return os.Getenv("PODTRACE_OTLP_INSECURE") == "1"
+}
+
+// MetricsEnablePprof registers /debug/pprof/* when PODTRACE_METRICS_ENABLE_PPROF=1.
+func MetricsEnablePprof() bool {
+	return os.Getenv("PODTRACE_METRICS_ENABLE_PPROF") == "1"
+}
+
+// SplunkAlertAllowHTTP returns true when PODTRACE_ALERT_SPLUNK_ALLOW_HTTP=1,
+// allowing http:// Splunk HEC URLs for non-loopback hosts.
+func SplunkAlertAllowHTTP() bool {
+	return os.Getenv("PODTRACE_ALERT_SPLUNK_ALLOW_HTTP") == "1"
+}
+
+// AllowCgroupFilterAutoDisable returns true when PODTRACE_ALLOW_CGROUP_FILTER_DISABLE=1,
+// permitting the tracer to automatically disable cgroup filtering as a last-resort fallback.
+func AllowCgroupFilterAutoDisable() bool {
+	return os.Getenv("PODTRACE_ALLOW_CGROUP_FILTER_DISABLE") == "1"
+}

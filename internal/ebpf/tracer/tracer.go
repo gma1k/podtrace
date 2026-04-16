@@ -460,6 +460,7 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 		zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter))
 
 	go func() {
+		filterAutoDisableHintLogged := false
 		for {
 			select {
 			case <-ctx.Done():
@@ -467,19 +468,28 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 			case <-eventCollectionTicker.C:
 				elapsed := time.Since(startTime)
 				if !filteringDisabled && eventsParsed > 10 && eventsCollected == 0 && elapsed > 10*time.Second {
-					logger.Warn("Events being parsed but all filtered - disabling filtering as fallback",
-						zap.Int64("events_parsed", eventsParsed),
-						zap.Int64("events_filtered", eventsFiltered),
-						zap.Int64("events_collected", eventsCollected),
-						zap.Uint64("target_cgroup_id", t.targetCgroupID),
-						zap.String("cgroup_path", t.cgroupPath),
-						zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter))
-					filteringDisabled = true
-					t.useUserspaceCgroupFilter = false
-					t.targetCgroupID = 0
-					t.targetCgroupIDs = map[uint64]struct{}{}
-					if err := t.syncTargetCgroupMap(); err == nil {
-						logger.Info("Cleared kernel-side cgroup filter")
+					if config.AllowCgroupFilterAutoDisable() {
+						logger.Warn("Events being parsed but all filtered - disabling filtering as fallback",
+							zap.Int64("events_parsed", eventsParsed),
+							zap.Int64("events_filtered", eventsFiltered),
+							zap.Int64("events_collected", eventsCollected),
+							zap.Uint64("target_cgroup_id", t.targetCgroupID),
+							zap.String("cgroup_path", t.cgroupPath),
+							zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter))
+						filteringDisabled = true
+						t.useUserspaceCgroupFilter = false
+						t.targetCgroupID = 0
+						t.targetCgroupIDs = map[uint64]struct{}{}
+						if err := t.syncTargetCgroupMap(); err == nil {
+							logger.Info("Cleared kernel-side cgroup filter")
+						}
+					} else if !filterAutoDisableHintLogged {
+						filterAutoDisableHintLogged = true
+						logger.Warn("Events parsed but all filtered; automatic cgroup filter disable not applied. Set PODTRACE_ALLOW_CGROUP_FILTER_DISABLE=1 to allow clearing cgroup filters as a last resort",
+							zap.Int64("events_parsed", eventsParsed),
+							zap.Int64("events_filtered", eventsFiltered),
+							zap.Int64("events_collected", eventsCollected),
+							zap.String("cgroup_path", t.cgroupPath))
 					}
 				} else if eventsParsed == 0 && elapsed > 15*time.Second {
 					logger.Warn("No events parsed from ring buffer after 15 seconds - check eBPF program attachment",

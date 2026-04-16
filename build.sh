@@ -79,12 +79,7 @@ build_go_binary() {
 }
 
 print_success() {
-	echo ""
-	echo "Build successful!"
-	echo "Binary location: bin/podtrace"
-	echo ""
-	echo "To run:"
-	echo "  sudo ./bin/podtrace -n <namespace> <pod-name> --diagnose 10s"
+	echo "Build successful: bin/podtrace"
 }
 
 main() {

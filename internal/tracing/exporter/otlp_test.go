@@ -2,6 +2,7 @@ package exporter
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,8 +13,27 @@ import (
 func TestNewOTLPExporter_InvalidEndpoint(t *testing.T) {
 	_, err := NewOTLPExporter("invalid://endpoint", 1.0)
 	if err == nil {
-		t.Skip("NewOTLPExporter() may not validate endpoint format, skipping")
+		t.Fatal("NewOTLPExporter() expected error for invalid scheme")
 	}
+	if !strings.Contains(err.Error(), "scheme") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestNewOTLPExporter_RemoteHTTPRejected(t *testing.T) {
+	_, err := NewOTLPExporter("http://otel-collector.example:4318", 1.0)
+	if err == nil {
+		t.Fatal("expected error for cleartext OTLP to non-loopback host")
+	}
+}
+
+func TestNewOTLPExporter_RemoteHTTPAllowedWithEnv(t *testing.T) {
+	t.Setenv("PODTRACE_OTLP_INSECURE", "1")
+	e, err := NewOTLPExporter("http://otel-collector.example:4318", 1.0)
+	if err != nil {
+		t.Fatalf("NewOTLPExporter: %v", err)
+	}
+	defer func() { _ = e.Shutdown(context.Background()) }()
 }
 
 func TestNewOTLPExporter_EmptyEndpoint(t *testing.T) {

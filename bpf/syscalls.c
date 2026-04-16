@@ -74,9 +74,10 @@ int tracepoint_sched_process_fork(void *ctx) {
 		char child_comm[16];
 		s32 child_pid;
 		int child_prio;
-	} *args = (typeof(args))ctx;
+	} args_local = {};
+	bpf_probe_read_kernel(&args_local, sizeof(args_local), ctx);
 
-	u32 child_pid = args->child_pid;
+	u32 child_pid = args_local.child_pid;
 	if (child_pid == 0) {
 		return 0;
 	}
@@ -93,7 +94,7 @@ int tracepoint_sched_process_fork(void *ctx) {
 	e->bytes = 0;
 	e->tcp_state = 0;
 
-	bpf_probe_read_kernel_str(e->target, sizeof(e->target), args->child_comm);
+	bpf_probe_read_kernel_str(e->target, sizeof(e->target), args_local.child_comm);
 
 	capture_user_stack(ctx, child_pid, 0, e);
 	bpf_ringbuf_output(&events, e, sizeof(*e), 0);

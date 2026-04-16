@@ -19,10 +19,11 @@ int tracepoint_sched_switch(void *ctx) {
 		char next_comm[16];
 		u32 next_pid;
 		int next_prio;
-	} *args = (typeof(args))ctx;
-	
-	u32 prev_pid = args->prev_pid;
-	u32 next_pid = args->next_pid;
+	} args_local = {};
+	bpf_probe_read_kernel(&args_local, sizeof(args_local), ctx);
+
+	u32 prev_pid = args_local.prev_pid;
+	u32 next_pid = args_local.next_pid;
 	u64 timestamp = bpf_ktime_get_ns();
 	
 	if (prev_pid > 0) {

@@ -63,16 +63,7 @@ verify_capabilities() {
 }
 
 print_success_message() {
-	echo "✓ Capabilities set successfully!"
-	echo ""
-	echo "You can now run podtrace without sudo:"
-	echo "  ${BINARY} -n <namespace> <pod-name>"
-	echo ""
-	echo "To verify capabilities:"
-	echo "  getcap ${BINARY}"
-	echo ""
-	echo "To remove capabilities:"
-	echo "  sudo setcap -r ${BINARY}"
+	echo "Capabilities set on ${BINARY}"
 }
 
 main() {

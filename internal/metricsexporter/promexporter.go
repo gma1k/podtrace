@@ -678,11 +678,13 @@ type Server struct {
 func StartServer() *Server {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", securityHeadersMiddleware(rateLimitMiddleware(promhttp.Handler())))
-	mux.HandleFunc("/debug/pprof/", pprofhttp.Index)
-	mux.HandleFunc("/debug/pprof/cmdline", pprofhttp.Cmdline)
-	mux.HandleFunc("/debug/pprof/profile", pprofhttp.Profile)
-	mux.HandleFunc("/debug/pprof/symbol", pprofhttp.Symbol)
-	mux.HandleFunc("/debug/pprof/trace", pprofhttp.Trace)
+	if config.MetricsEnablePprof() {
+		mux.HandleFunc("/debug/pprof/", pprofhttp.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprofhttp.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", pprofhttp.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprofhttp.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", pprofhttp.Trace)
+	}
 
 	addr := config.GetMetricsAddress()
 
@@ -714,6 +716,10 @@ func StartServer() *Server {
 					zap.ByteString("stack", debug.Stack()))
 			}
 		}()
+		if config.MetricsEnablePprof() {
+			logger.Info("Prometheus metrics server includes /debug/pprof (PODTRACE_METRICS_ENABLE_PPROF=1)",
+				zap.String("addr", addr))
+		}
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("Metrics server error", zap.Error(err))
 		}

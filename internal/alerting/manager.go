@@ -2,6 +2,7 @@ package alerting
 
 import (
 	"context"
+	"net/url"
 	"sync"
 	"time"
 
@@ -33,6 +34,20 @@ type Manager struct {
 	wg            sync.WaitGroup
 }
 
+// redactURLForLog returns a URL safe to log (query and fragment stripped).
+func redactURLForLog(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "[invalid-url]"
+	}
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
+}
+
 func NewManager() (*Manager, error) {
 	if !config.AlertingEnabled {
 		return &Manager{enabled: false}, nil
@@ -48,7 +63,7 @@ func NewManager() (*Manager, error) {
 		webhookSender, err := NewWebhookSender(config.AlertWebhookURL, config.AlertHTTPTimeout)
 		if err != nil {
 			alertLog.Warn("Failed to create webhook alert sender — alerts will not be delivered via webhook",
-				zap.Error(err), zap.String("url", config.AlertWebhookURL))
+				zap.Error(err), zap.String("url", redactURLForLog(config.AlertWebhookURL)))
 		} else {
 			retrySender := NewRetrySender(webhookSender, config.AlertMaxRetries, config.DefaultAlertRetryBackoffBase)
 			manager.senders = append(manager.senders, retrySender)
@@ -71,7 +86,7 @@ func NewManager() (*Manager, error) {
 			splunkSender, err := NewSplunkAlertSender(splunkEndpoint, splunkToken, config.AlertHTTPTimeout)
 			if err != nil {
 				alertLog.Warn("Failed to create Splunk alert sender — alerts will not be delivered via Splunk",
-					zap.Error(err), zap.String("endpoint", splunkEndpoint))
+					zap.Error(err), zap.String("endpoint", redactURLForLog(splunkEndpoint)))
 			} else {
 				retrySender := NewRetrySender(splunkSender, config.AlertMaxRetries, config.DefaultAlertRetryBackoffBase)
 				manager.senders = append(manager.senders, retrySender)
@@ -104,13 +119,13 @@ func (m *Manager) SendAlert(alert *Alert) {
 	senders := make([]Sender, len(m.senders))
 	copy(senders, m.senders)
 	m.mu.RUnlock()
-		for _, sender := range senders {
-			go func(s Sender) {
-				ctx, cancel := context.WithTimeout(context.Background(), config.AlertHTTPTimeout*2)
-				defer cancel()
-				_ = s.Send(ctx, alert)
-			}(sender)
-		}
+	for _, sender := range senders {
+		go func(s Sender) {
+			ctx, cancel := context.WithTimeout(context.Background(), config.AlertHTTPTimeout*2)
+			defer cancel()
+			_ = s.Send(ctx, alert)
+		}(sender)
+	}
 }
 
 func (m *Manager) cleanupLoop() {

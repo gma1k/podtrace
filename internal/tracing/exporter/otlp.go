@@ -3,6 +3,8 @@ package exporter
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -26,16 +28,55 @@ type OTLPExporter struct {
 	sampleRate float64
 }
 
+func isLoopbackHost(host string) bool {
+	h := strings.ToLower(host)
+	return h == "localhost" || h == "127.0.0.1" || h == "::1"
+}
+
+// normalizeOTLPHTTPEndpoint returns a full URL for WithEndpointURL and whether to use WithInsecure (HTTP).
+func normalizeOTLPHTTPEndpoint(endpoint string) (endpointURL string, useInsecure bool, err error) {
+	raw := strings.TrimSpace(endpoint)
+	if raw == "" {
+		raw = config.DefaultOTLPEndpoint
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", false, fmt.Errorf("parse OTLP endpoint: %w", err)
+	}
+	if u.Scheme == "" || u.Host == "" {
+		u, err = url.Parse("http://" + raw)
+		if err != nil {
+			return "", false, fmt.Errorf("parse OTLP endpoint: %w", err)
+		}
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", false, fmt.Errorf("otlp endpoint scheme must be http or https")
+	}
+	host := u.Hostname()
+	if u.Scheme == "http" {
+		if isLoopbackHost(host) || config.OTLPAllowInsecureNonLoopback() {
+			return u.String(), true, nil
+		}
+		return "", false, fmt.Errorf("otlp: refusing cleartext http to %q; use https:// or set PODTRACE_OTLP_INSECURE=1", host)
+	}
+	return u.String(), false, nil
+}
+
 func NewOTLPExporter(endpoint string, sampleRate float64) (*OTLPExporter, error) {
-	if endpoint == "" {
-		endpoint = config.DefaultOTLPEndpoint
+	endpointURL, useInsecure, err := normalizeOTLPHTTPEndpoint(endpoint)
+	if err != nil {
+		return nil, err
 	}
 
 	ctx := context.Background()
-	otlpExporter, err := otlptracehttp.New(ctx,
-		otlptracehttp.WithEndpoint(endpoint),
-		otlptracehttp.WithInsecure(),
-	)
+	opts := []otlptracehttp.Option{
+		otlptracehttp.WithEndpointURL(endpointURL),
+		otlptracehttp.WithTimeout(config.TracingExporterTimeout),
+	}
+	if useInsecure {
+		opts = append(opts, otlptracehttp.WithInsecure())
+	}
+	otlpExporter, err := otlptracehttp.New(ctx, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
 	}
@@ -60,7 +101,7 @@ func NewOTLPExporter(endpoint string, sampleRate float64) (*OTLPExporter, error)
 		exporter:   otlpExporter,
 		tp:         tp,
 		tracer:     tp.Tracer("Podtrace"),
-		endpoint:   endpoint,
+		endpoint:   endpointURL,
 		enabled:    true,
 		sampleRate: sampleRate,
 	}, nil

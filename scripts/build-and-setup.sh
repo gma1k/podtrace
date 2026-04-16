@@ -42,11 +42,7 @@ set_capabilities() {
 	echo ""
 	echo "Setting capabilities..."
 	if sudo ./scripts/setup-capabilities.sh; then
-		echo ""
-		echo "Build and setup complete!"
-		echo ""
-		echo "You can now run podtrace:"
-		echo "  ./bin/podtrace -n <namespace> <pod-name>"
+		echo "Build and setup complete."
 	else
 		echo ""
 		echo "Build succeeded but failed to set capabilities."
