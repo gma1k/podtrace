@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -372,12 +373,12 @@ func TestManager_SendAlert_DeduplicatorFilters(t *testing.T) {
 	config.AlertingEnabled = true
 	defer func() { config.AlertingEnabled = origEnabled }()
 
-	var sendCount int
+	var sendCount atomic.Int64
 	m := &Manager{
 		enabled: true,
 		senders: []Sender{&testMockSender{
 			sendFunc: func(_ context.Context, _ *Alert) error {
-				sendCount++
+				sendCount.Add(1)
 				return nil
 			},
 		}},
@@ -399,7 +400,7 @@ func TestManager_SendAlert_DeduplicatorFilters(t *testing.T) {
 	m.SendAlert(alert)
 	time.Sleep(50 * time.Millisecond)
 	// No assertions on count because ShouldSendAlert might gate based on config.
-	_ = sendCount
+	_ = sendCount.Load()
 }
 
 // ─── NewManager Slack webhook path ───────────────────────────────────────────

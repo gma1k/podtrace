@@ -28,13 +28,13 @@ jobs:
 
       - name: Set up Go
         if: matrix.language == 'go'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: stable
           cache: true
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v5
+        uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
 
@@ -70,7 +70,7 @@ jobs:
 
       - name: Upload gosec SARIF results
         if: matrix.language == 'go'
-        uses: github/codeql-action/upload-sarif@v5
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: gosec-results.sarif
           category: gosec
@@ -87,4 +87,4 @@ jobs:
           make bpf/podtrace.bpf.o BPF_GOARCH=amd64
 
       - name: Analyze
-        uses: github/codeql-action/analyze@v5
+        uses: github/codeql-action/analyze@v4
