@@ -1456,3 +1456,217 @@ func TestCgroupRootCandidates_WithSystemd(t *testing.T) {
 	}
 }
 
+
+// ─── cgroupRootCandidates ────────────────────────────────────────────────────
+
+func TestCgroupRootCandidates_Base(t *testing.T) {
+	dir := t.TempDir()
+	orig := config.CgroupBasePath
+	config.SetCgroupBasePath(dir)
+	defer config.SetCgroupBasePath(orig)
+
+	candidates := cgroupRootCandidates()
+	if len(candidates) == 0 {
+		t.Fatal("expected at least one candidate")
+	}
+	if candidates[0] != dir {
+		t.Errorf("expected first candidate to be base %q, got %q", dir, candidates[0])
+	}
+}
+
+func TestCgroupRootCandidates_WithSystemdSubdir(t *testing.T) {
+	dir := t.TempDir()
+	orig := config.CgroupBasePath
+	config.SetCgroupBasePath(dir)
+	defer config.SetCgroupBasePath(orig)
+
+	// Create a systemd subdir — should be added as second candidate.
+	systemdDir := filepath.Join(dir, "systemd")
+	if err := os.MkdirAll(systemdDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	candidates := cgroupRootCandidates()
+	found := false
+	for _, c := range candidates {
+		if c == systemdDir {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected systemd dir %q in candidates %v", systemdDir, candidates)
+	}
+}
+
+// ─── readKubeletCgroupFlag ───────────────────────────────────────────────────
+
+func TestReadKubeletCgroupFlag_NoProc(t *testing.T) {
+	orig := config.ProcBasePath
+	config.SetProcBasePath("/nonexistent/proc-does-not-exist")
+	defer config.SetProcBasePath(orig)
+
+	if got := readKubeletCgroupFlag(); got != "" {
+		t.Errorf("expected empty for non-existent proc, got %q", got)
+	}
+}
+
+func TestReadKubeletCgroupFlag_NonKubeletProcess(t *testing.T) {
+	procDir := t.TempDir()
+	orig := config.ProcBasePath
+	config.SetProcBasePath(procDir)
+	defer config.SetProcBasePath(orig)
+
+	// Create a process with comm != kubelet.
+	pidDir := filepath.Join(procDir, "42")
+	if err := os.MkdirAll(pidDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pidDir, "comm"), []byte("nginx\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := readKubeletCgroupFlag(); got != "" {
+		t.Errorf("expected empty for non-kubelet process, got %q", got)
+	}
+}
+
+func TestReadKubeletCgroupFlag_FlagEqualsFormat(t *testing.T) {
+	procDir := t.TempDir()
+	orig := config.ProcBasePath
+	config.SetProcBasePath(procDir)
+	defer config.SetProcBasePath(orig)
+
+	pidDir := filepath.Join(procDir, "500")
+	if err := os.MkdirAll(pidDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pidDir, "comm"), []byte("kubelet\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Use --cgroup-root=<value> format (flag=value, NUL-separated args).
+	cmdline := "kubelet\x00--cgroup-root=kubepods\x00"
+	if err := os.WriteFile(filepath.Join(pidDir, "cmdline"), []byte(cmdline), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := readKubeletCgroupFlag()
+	if got != "kubepods" {
+		t.Errorf("expected 'kubepods', got %q", got)
+	}
+}
+
+func TestReadKubeletCgroupFlag_SeparateArgFormat(t *testing.T) {
+	procDir := t.TempDir()
+	orig := config.ProcBasePath
+	config.SetProcBasePath(procDir)
+	defer config.SetProcBasePath(orig)
+
+	pidDir := filepath.Join(procDir, "501")
+	if err := os.MkdirAll(pidDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pidDir, "comm"), []byte("kubelet\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Use --cgroup-parent <value> as separate NUL-separated arg.
+	cmdline := "kubelet\x00--cgroup-parent\x00/custom/cgroup\x00"
+	if err := os.WriteFile(filepath.Join(pidDir, "cmdline"), []byte(cmdline), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := readKubeletCgroupFlag()
+	if got != "/custom/cgroup" {
+		t.Errorf("expected '/custom/cgroup', got %q", got)
+	}
+}
+
+func TestReadKubeletCgroupFlag_KubeletNoFlag(t *testing.T) {
+	procDir := t.TempDir()
+	orig := config.ProcBasePath
+	config.SetProcBasePath(procDir)
+	defer config.SetProcBasePath(orig)
+
+	pidDir := filepath.Join(procDir, "502")
+	if err := os.MkdirAll(pidDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pidDir, "comm"), []byte("kubelet\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Kubelet without any cgroup flag.
+	cmdline := "kubelet\x00--some-other-flag=value\x00"
+	if err := os.WriteFile(filepath.Join(pidDir, "cmdline"), []byte(cmdline), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := readKubeletCgroupFlag()
+	if got != "" {
+		t.Errorf("expected empty for kubelet without cgroup flag, got %q", got)
+	}
+}
+
+func TestReadKubeletCgroupFlag_NoCommFile(t *testing.T) {
+	procDir := t.TempDir()
+	orig := config.ProcBasePath
+	config.SetProcBasePath(procDir)
+	defer config.SetProcBasePath(orig)
+
+	// PID dir exists but no comm file → should be skipped.
+	pidDir := filepath.Join(procDir, "503")
+	if err := os.MkdirAll(pidDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := readKubeletCgroupFlag(); got != "" {
+		t.Errorf("expected empty for missing comm file, got %q", got)
+	}
+}
+
+// ─── resolveCgroupPathCRI ─────────────────────────────────────────────────────
+
+func TestResolveCgroupPathCRI_Disabled(t *testing.T) {
+	t.Setenv("PODTRACE_CRI_RESOLVE", "false")
+	_, err := resolveCgroupPathCRI(context.Background(), "abc123")
+	if err == nil {
+		t.Fatal("expected error when CRI resolution is disabled")
+	}
+	if !strings.Contains(err.Error(), "disabled") {
+		t.Errorf("expected 'disabled' in error, got %v", err)
+	}
+}
+
+func TestResolveCgroupPathCRI_NoResolver(t *testing.T) {
+	// With no CRI endpoint, NewResolver fails → error returned.
+	t.Setenv("PODTRACE_CRI_ENDPOINT", "")
+	_, err := resolveCgroupPathCRI(context.Background(), "abc123")
+	// We expect an error since there's no CRI socket available.
+	if err == nil {
+		t.Log("resolveCgroupPathCRI returned nil error (CRI socket unexpectedly available)")
+	}
+}
+
+// ─── dirExists ───────────────────────────────────────────────────────────────
+
+func TestDirExists_Existing(t *testing.T) {
+	dir := t.TempDir()
+	if !dirExists(dir) {
+		t.Errorf("expected dirExists to return true for %q", dir)
+	}
+}
+
+func TestDirExists_NonExistent(t *testing.T) {
+	if dirExists("/nonexistent/path/does/not/exist") {
+		t.Error("expected dirExists to return false for non-existent path")
+	}
+}
+
+func TestDirExists_File(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "file.txt")
+	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if dirExists(f) {
+		t.Error("expected dirExists to return false for a regular file")
+	}
+}

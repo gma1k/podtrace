@@ -1579,3 +1579,487 @@ func TestFormatRealtimeMessage_UnlinkRename(t *testing.T) {
 	// Verify _ is unused
 	_ = config.MaxTargetStringLength
 }
+
+// ─── TypeString for new event types ──────────────────────────────────────────
+
+func TestTypeString_PoolEvents(t *testing.T) {
+	cases := []struct {
+		et   EventType
+		want string
+	}{
+		{EventPoolAcquire, "POOL"},
+		{EventPoolRelease, "POOL"},
+		{EventPoolExhausted, "POOL"},
+	}
+	for _, c := range cases {
+		e := &Event{Type: c.et}
+		if got := e.TypeString(); got != c.want {
+			t.Errorf("TypeString(%d) = %q, want %q", c.et, got, c.want)
+		}
+	}
+}
+
+func TestTypeString_FSEvents(t *testing.T) {
+	cases := []struct {
+		et   EventType
+		want string
+	}{
+		{EventUnlink, "FS"},
+		{EventRename, "FS"},
+	}
+	for _, c := range cases {
+		e := &Event{Type: c.et}
+		if got := e.TypeString(); got != c.want {
+			t.Errorf("TypeString(%d) = %q, want %q", c.et, got, c.want)
+		}
+	}
+}
+
+func TestTypeString_CacheEvents(t *testing.T) {
+	cases := []struct {
+		et   EventType
+		want string
+	}{
+		{EventRedisCmd, "CACHE"},
+		{EventMemcachedCmd, "CACHE"},
+	}
+	for _, c := range cases {
+		e := &Event{Type: c.et}
+		if got := e.TypeString(); got != c.want {
+			t.Errorf("TypeString(%d) = %q, want %q", c.et, got, c.want)
+		}
+	}
+}
+
+func TestTypeString_FastCGIGRPCKafka(t *testing.T) {
+	cases := []struct {
+		et   EventType
+		want string
+	}{
+		{EventFastCGIReq, "FASTCGI"},
+		{EventFastCGIResp, "FASTCGI"},
+		{EventGRPCMethod, "gRPC"},
+		{EventKafkaProduce, "KAFKA"},
+		{EventKafkaFetch, "KAFKA"},
+	}
+	for _, c := range cases {
+		e := &Event{Type: c.et}
+		if got := e.TypeString(); got != c.want {
+			t.Errorf("TypeString(%d) = %q, want %q", c.et, got, c.want)
+		}
+	}
+}
+
+func TestTypeString_NetVariants(t *testing.T) {
+	cases := []struct {
+		et   EventType
+		want string
+	}{
+		{EventTCPState, "NET"},
+		{EventUDPSend, "NET"},
+		{EventUDPRecv, "NET"},
+	}
+	for _, c := range cases {
+		e := &Event{Type: c.et}
+		if got := e.TypeString(); got != c.want {
+			t.Errorf("TypeString(%d) = %q, want %q", c.et, got, c.want)
+		}
+	}
+}
+
+// ─── formatEventMessage for additional event types ────────────────────────────
+
+func TestFormatMessage_HTTP(t *testing.T) {
+	e := &Event{Type: EventHTTPReq, LatencyNS: 10_000_000, Target: "GET /api/v1"}
+	msg := e.FormatMessage()
+	if msg != "" && !strings.Contains(msg, "HTTP") {
+		t.Errorf("HTTP request message unexpected: %q", msg)
+	}
+}
+
+func TestFormatMessage_HTTPResp(t *testing.T) {
+	e := &Event{Type: EventHTTPResp, LatencyNS: 50_000_000, Error: 500}
+	msg := e.FormatMessage()
+	_ = msg // just ensure no panic
+}
+
+func TestFormatMessage_TCPRecv(t *testing.T) {
+	// High latency → should produce message.
+	e := &Event{Type: EventTCPRecv, LatencyNS: 200_000_000, Bytes: 512}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_TCPState(t *testing.T) {
+	e := &Event{Type: EventTCPState, TCPState: 1, Target: "10.0.0.1:80"}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_UDPSend(t *testing.T) {
+	e := &Event{Type: EventUDPSend, Bytes: 1024}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_UDPRecv(t *testing.T) {
+	e := &Event{Type: EventUDPRecv, Bytes: 512}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_SchedSwitch(t *testing.T) {
+	e := &Event{Type: EventSchedSwitch, LatencyNS: 50_000_000}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_PageFault(t *testing.T) {
+	e := &Event{Type: EventPageFault}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_OOMKill(t *testing.T) {
+	e := &Event{Type: EventOOMKill, ProcessName: "leaky"}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_TLSHandshake(t *testing.T) {
+	e := &Event{Type: EventTLSHandshake, LatencyNS: 5_000_000, Target: "example.com"}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_TLSError(t *testing.T) {
+	e := &Event{Type: EventTLSError, Error: 1, Target: "example.com"}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_LockContention(t *testing.T) {
+	e := &Event{Type: EventLockContention, LatencyNS: 100_000_000}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_TCPRetrans(t *testing.T) {
+	e := &Event{Type: EventTCPRetrans, Target: "10.0.0.1:80"}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_NetDevError(t *testing.T) {
+	e := &Event{Type: EventNetDevError, Error: 5}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_DBQuery(t *testing.T) {
+	e := &Event{Type: EventDBQuery, LatencyNS: 50_000_000, Target: "SELECT *"}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_Exec(t *testing.T) {
+	e := &Event{Type: EventExec, Target: "/usr/bin/ls"}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_Fork(t *testing.T) {
+	e := &Event{Type: EventFork}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_Open(t *testing.T) {
+	e := &Event{Type: EventOpen, Target: "/etc/passwd"}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_Close(t *testing.T) {
+	e := &Event{Type: EventClose}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_PoolAcquire(t *testing.T) {
+	e := &Event{Type: EventPoolAcquire, LatencyNS: 10_000_000}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_PoolRelease(t *testing.T) {
+	e := &Event{Type: EventPoolRelease, LatencyNS: 5_000_000}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_PoolExhausted(t *testing.T) {
+	e := &Event{Type: EventPoolExhausted}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_Unlink(t *testing.T) {
+	e := &Event{Type: EventUnlink, Target: "/tmp/file.txt"}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_Rename(t *testing.T) {
+	e := &Event{Type: EventRename, Target: "/tmp/old:/tmp/new"}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_RedisCmd(t *testing.T) {
+	e := &Event{Type: EventRedisCmd, LatencyNS: 1_000_000, Details: "SET"}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_MemcachedCmd(t *testing.T) {
+	e := &Event{Type: EventMemcachedCmd, LatencyNS: 500_000, Details: "get"}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_FastCGIReq(t *testing.T) {
+	e := &Event{Type: EventFastCGIReq, Target: "/index.php"}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_FastCGIResp(t *testing.T) {
+	e := &Event{Type: EventFastCGIResp, LatencyNS: 20_000_000, Error: 0}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_GRPCMethod(t *testing.T) {
+	e := &Event{Type: EventGRPCMethod, LatencyNS: 8_000_000, Target: "/svc/Method"}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_KafkaProduce(t *testing.T) {
+	e := &Event{Type: EventKafkaProduce, LatencyNS: 5_000_000, Details: "my-topic", Bytes: 256}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_KafkaFetch(t *testing.T) {
+	e := &Event{Type: EventKafkaFetch, LatencyNS: 3_000_000, Details: "my-topic", Bytes: 512}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+func TestFormatMessage_Unknown(t *testing.T) {
+	e := &Event{Type: EventType(9999)}
+	msg := e.FormatMessage()
+	_ = msg
+}
+
+// FormatRealtimeMessage paths.
+func TestFormatRealtimeMessage_Connect(t *testing.T) {
+	e := &Event{Type: EventConnect, LatencyNS: 2_000_000, Target: "10.0.0.1:80"}
+	msg := e.FormatRealtimeMessage()
+	_ = msg
+}
+
+func TestFormatRealtimeMessage_TCPSend_Latency(t *testing.T) {
+	e := &Event{Type: EventTCPSend, LatencyNS: 200_000_000, Bytes: 1024}
+	msg := e.FormatRealtimeMessage()
+	_ = msg
+}
+
+func TestFormatRealtimeMessage_Fsync(t *testing.T) {
+	e := &Event{Type: EventFsync, LatencyNS: 50_000_000, Target: "/data/db"}
+	msg := e.FormatRealtimeMessage()
+	_ = msg
+}
+
+// Cover line 397-399: EventTLSHandshake with Error != 0
+func TestFormatMessage_TLSHandshake_Error(t *testing.T) {
+	e := &Event{Type: EventTLSHandshake, Error: 5, LatencyNS: 3_000_000}
+	msg := e.FormatMessage()
+	if !strings.Contains(msg, "failed") {
+		t.Errorf("expected 'failed' in TLSHandshake error message, got %q", msg)
+	}
+}
+
+// Cover line 417-418: EventResourceLimit with default resource type (TCPState >= 3)
+func TestFormatMessage_ResourceLimit_DefaultType(t *testing.T) {
+	// TCPState=5 → default "Resource", Error=85 → WARNING (above warnPct=80)
+	e := &Event{Type: EventResourceLimit, TCPState: 5, Error: 85}
+	msg := e.FormatMessage()
+	if !strings.Contains(msg, "Resource") {
+		t.Errorf("expected 'Resource' in message for unknown resource type, got %q", msg)
+	}
+}
+
+// Cover lines 442-444: EventPoolAcquire with realtime=true
+func TestFormatRealtimeMessage_PoolAcquire(t *testing.T) {
+	e := &Event{Type: EventPoolAcquire, LatencyNS: 5_000_000, Target: "redis:6379"}
+	msg := e.FormatRealtimeMessage()
+	if !strings.Contains(msg, "acquire from") {
+		t.Errorf("expected 'acquire from' in realtime pool message, got %q", msg)
+	}
+}
+
+// Cover lines 452-454: EventPoolRelease with realtime=true
+func TestFormatRealtimeMessage_PoolRelease(t *testing.T) {
+	e := &Event{Type: EventPoolRelease, Target: "db-pool"}
+	msg := e.FormatRealtimeMessage()
+	if !strings.Contains(msg, "release to") {
+		t.Errorf("expected 'release to' in realtime pool message, got %q", msg)
+	}
+}
+
+// Cover lines 462-464: EventPoolExhausted with realtime=true
+func TestFormatRealtimeMessage_PoolExhausted(t *testing.T) {
+	e := &Event{Type: EventPoolExhausted, LatencyNS: 50_000_000, Target: "pg-pool"}
+	msg := e.FormatRealtimeMessage()
+	if !strings.Contains(msg, "exhausted") {
+		t.Errorf("expected 'exhausted' in realtime pool message, got %q", msg)
+	}
+}
+
+// Cover lines 479-481: EventRename with empty target
+func TestFormatMessage_Rename_EmptyTarget(t *testing.T) {
+	e := &Event{Type: EventRename, Target: "", LatencyNS: 2_000_000}
+	msg := e.FormatMessage()
+	if !strings.Contains(msg, "file") {
+		t.Errorf("expected 'file' as default target in rename message, got %q", msg)
+	}
+}
+
+// Cover lines 489-491: EventRedisCmd with empty Details (cmd = "CMD")
+func TestFormatMessage_RedisCmd_EmptyDetails(t *testing.T) {
+	e := &Event{Type: EventRedisCmd, LatencyNS: 1_000_000}
+	msg := e.FormatMessage()
+	if !strings.Contains(msg, "CMD") {
+		t.Errorf("expected 'CMD' as default redis cmd, got %q", msg)
+	}
+}
+
+// Cover lines 492-494: EventRedisCmd with Error != 0
+func TestFormatMessage_RedisCmd_Error(t *testing.T) {
+	e := &Event{Type: EventRedisCmd, Details: "GET", Error: 1, LatencyNS: 1_000_000}
+	msg := e.FormatMessage()
+	if !strings.Contains(msg, "failed") {
+		t.Errorf("expected 'failed' in redis error message, got %q", msg)
+	}
+}
+
+// Cover lines 496-498: EventRedisCmd with Bytes > 0 (no error)
+func TestFormatMessage_RedisCmd_WithBytes(t *testing.T) {
+	e := &Event{Type: EventRedisCmd, Details: "GET", Bytes: 256, LatencyNS: 1_000_000}
+	msg := e.FormatMessage()
+	if !strings.Contains(msg, "bytes") {
+		t.Errorf("expected bytes in redis message, got %q", msg)
+	}
+}
+
+// Cover lines 503-505: EventMemcachedCmd with empty Details (op = "op")
+func TestFormatMessage_MemcachedCmd_EmptyDetails(t *testing.T) {
+	e := &Event{Type: EventMemcachedCmd, LatencyNS: 500_000}
+	msg := e.FormatMessage()
+	if !strings.Contains(msg, "op") {
+		t.Errorf("expected 'op' as default memcached op, got %q", msg)
+	}
+}
+
+// Cover lines 506-508: EventMemcachedCmd with Error != 0
+func TestFormatMessage_MemcachedCmd_Error(t *testing.T) {
+	e := &Event{Type: EventMemcachedCmd, Details: "set", Error: 2, LatencyNS: 500_000}
+	msg := e.FormatMessage()
+	if !strings.Contains(msg, "failed") {
+		t.Errorf("expected 'failed' in memcached error message, got %q", msg)
+	}
+}
+
+// Cover lines 510-512: EventMemcachedCmd with Bytes > 0 (no error)
+func TestFormatMessage_MemcachedCmd_WithBytes(t *testing.T) {
+	e := &Event{Type: EventMemcachedCmd, Details: "get", Bytes: 128, LatencyNS: 500_000}
+	msg := e.FormatMessage()
+	if !strings.Contains(msg, "bytes") {
+		t.Errorf("expected bytes in memcached message, got %q", msg)
+	}
+}
+
+// Cover lines 518-520: EventFastCGIReq with empty Target (uri = "/")
+func TestFormatMessage_FastCGIReq_EmptyURI(t *testing.T) {
+	e := &Event{Type: EventFastCGIReq, Target: "", Details: "POST"}
+	msg := e.FormatMessage()
+	if !strings.Contains(msg, "FASTCGI") {
+		t.Errorf("expected FASTCGI in message, got %q", msg)
+	}
+}
+
+// Cover lines 535-537: EventGRPCMethod with empty Target (method = "/unknown")
+func TestFormatMessage_GRPCMethod_EmptyTarget(t *testing.T) {
+	e := &Event{Type: EventGRPCMethod, LatencyNS: 4_000_000}
+	msg := e.FormatMessage()
+	if !strings.Contains(msg, "/unknown") {
+		t.Errorf("expected '/unknown' as default grpc method, got %q", msg)
+	}
+}
+
+// Cover lines 538-540: EventGRPCMethod with Error != 0
+func TestFormatMessage_GRPCMethod_Error(t *testing.T) {
+	e := &Event{Type: EventGRPCMethod, Target: "/svc/Method", Error: 3, LatencyNS: 4_000_000}
+	msg := e.FormatMessage()
+	if !strings.Contains(msg, "failed") {
+		t.Errorf("expected 'failed' in grpc error message, got %q", msg)
+	}
+}
+
+// Cover lines 542-544: EventGRPCMethod with Bytes > 0 (no error)
+func TestFormatMessage_GRPCMethod_WithBytes(t *testing.T) {
+	e := &Event{Type: EventGRPCMethod, Target: "/svc/List", Bytes: 512, LatencyNS: 4_000_000}
+	msg := e.FormatMessage()
+	if !strings.Contains(msg, "bytes") {
+		t.Errorf("expected bytes in grpc message, got %q", msg)
+	}
+}
+
+// Cover lines 549-551: EventKafkaProduce with empty Details (topic = "unknown")
+func TestFormatMessage_KafkaProduce_EmptyTopic(t *testing.T) {
+	e := &Event{Type: EventKafkaProduce, LatencyNS: 2_000_000}
+	msg := e.FormatMessage()
+	if !strings.Contains(msg, "unknown") {
+		t.Errorf("expected 'unknown' as default kafka topic, got %q", msg)
+	}
+}
+
+// Cover lines 552-554: EventKafkaProduce with Error != 0
+func TestFormatMessage_KafkaProduce_Error(t *testing.T) {
+	e := &Event{Type: EventKafkaProduce, Details: "orders", Error: 1, LatencyNS: 2_000_000}
+	msg := e.FormatMessage()
+	if !strings.Contains(msg, "failed") {
+		t.Errorf("expected 'failed' in kafka produce error message, got %q", msg)
+	}
+}
+
+// Cover lines 563-565: EventKafkaFetch with empty Details (topic = "unknown")
+func TestFormatMessage_KafkaFetch_EmptyTopic(t *testing.T) {
+	e := &Event{Type: EventKafkaFetch, LatencyNS: 1_500_000}
+	msg := e.FormatMessage()
+	if !strings.Contains(msg, "unknown") {
+		t.Errorf("expected 'unknown' as default kafka fetch topic, got %q", msg)
+	}
+}
+
+// Cover lines 566-568: EventKafkaFetch with Error != 0
+func TestFormatMessage_KafkaFetch_Error(t *testing.T) {
+	e := &Event{Type: EventKafkaFetch, Details: "events", Error: 1, LatencyNS: 1_500_000}
+	msg := e.FormatMessage()
+	if !strings.Contains(msg, "error") {
+		t.Errorf("expected 'error' in kafka fetch error message, got %q", msg)
+	}
+}

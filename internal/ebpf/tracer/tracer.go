@@ -45,6 +45,22 @@ type stackTraceValue struct {
 	Pad uint32
 }
 
+// ProfilingController is implemented by internal/profiling.Handler and
+// registered via SetProfilingController before Start() to expose
+// /profile/* routes on the management port HTTP server.
+type ProfilingController interface {
+	HTTPStart(w http.ResponseWriter, r *http.Request)
+	HTTPStatus(w http.ResponseWriter, r *http.Request)
+	HTTPResult(w http.ResponseWriter, r *http.Request)
+}
+
+// ProfilingControllerSetter is satisfied by *Tracer.  main.go uses a type
+// assertion against this interface so it can wire in the profiling handler
+// without modifying TracerInterface.
+type ProfilingControllerSetter interface {
+	SetProfilingController(ctrl ProfilingController)
+}
+
 type Tracer struct {
 	collection               *ebpf.Collection
 	links                    []link.Link
@@ -64,6 +80,13 @@ type Tracer struct {
 	targetCgroupIDs          map[uint64]struct{}
 	cpAnalyzer               *criticalpath.Analyzer
 	piiRedactor              *redactor.Redactor
+	profilingCtrl            ProfilingController
+}
+
+// SetProfilingController wires an optional profiling controller into the
+// management API server.  Must be called before Start().
+func (t *Tracer) SetProfilingController(ctrl ProfilingController) {
+	t.profilingCtrl = ctrl
 }
 
 // roundUpPow2 rounds n up to the nearest power of two, minimum 4096.
@@ -853,6 +876,15 @@ func (t *Tracer) serveManagementAPI(ctx context.Context, port int) {
 			http.Error(w, "unknown action", http.StatusBadRequest)
 		}
 	})
+
+	// Wire profiling endpoints when a controller has been registered.
+	if t.profilingCtrl != nil {
+		mux.HandleFunc("/profile/start", t.profilingCtrl.HTTPStart)
+		mux.HandleFunc("/profile/status", t.profilingCtrl.HTTPStatus)
+		mux.HandleFunc("/profile/result", t.profilingCtrl.HTTPResult)
+		logger.Info("Profiling management endpoints registered",
+			zap.Int("port", port))
+	}
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf("127.0.0.1:%d", port),

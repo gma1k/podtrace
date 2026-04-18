@@ -196,3 +196,114 @@ func TestTraceContext_ToB3Headers(t *testing.T) {
 		t.Error("X-B3-Sampled should be 1 when sampled")
 	}
 }
+
+// ─── ParseW3CTraceParent edge cases ──────────────────────────────────────────
+
+func TestParseW3CTraceParent_ShortParentID(t *testing.T) {
+	// Parent ID must be 16 chars; provide only 8.
+	_, err := ParseW3CTraceParent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa-01")
+	if err == nil {
+		t.Error("expected error for short parent ID")
+	}
+}
+
+func TestParseW3CTraceParent_InvalidFlagsHex(t *testing.T) {
+	// Flags must be valid hex; "gg" is not.
+	_, err := ParseW3CTraceParent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-gg")
+	if err == nil {
+		t.Error("expected error for invalid flags hex")
+	}
+}
+
+func TestParseW3CTraceParent_ShortFlagsLength(t *testing.T) {
+	// Flags must be 2 chars.
+	_, err := ParseW3CTraceParent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-1")
+	if err == nil {
+		t.Error("expected error for single-char flags")
+	}
+}
+
+// ─── ParseB3TraceContext edge cases ──────────────────────────────────────────
+
+func TestParseB3TraceContext_FlagsOne(t *testing.T) {
+	// x-b3-flags: "1" should set sampled.
+	headers := map[string]string{
+		"x-b3-traceid": "abc123",
+		"x-b3-spanid":  "def456",
+		"x-b3-flags":   "1",
+	}
+	tc := ParseB3TraceContext(headers)
+	if tc == nil {
+		t.Fatal("expected non-nil context")
+	}
+	if !tc.IsSampled() {
+		t.Error("expected sampled when x-b3-flags=1")
+	}
+}
+
+func TestParseB3TraceContext_SampledTrue(t *testing.T) {
+	// x-b3-sampled: "true" should set sampled.
+	headers := map[string]string{
+		"x-b3-traceid": "abc123",
+		"x-b3-spanid":  "def456",
+		"x-b3-sampled": "true",
+	}
+	tc := ParseB3TraceContext(headers)
+	if tc == nil {
+		t.Fatal("expected non-nil context")
+	}
+	if !tc.IsSampled() {
+		t.Error("expected sampled when x-b3-sampled=true")
+	}
+}
+
+func TestParseB3TraceContext_WithParentSpanID(t *testing.T) {
+	headers := map[string]string{
+		"x-b3-traceid":     "abc123",
+		"x-b3-spanid":      "def456",
+		"x-b3-parentspanid": "parent789",
+	}
+	tc := ParseB3TraceContext(headers)
+	if tc == nil {
+		t.Fatal("expected non-nil context")
+	}
+	if tc.ParentSpanID != "parent789" {
+		t.Errorf("expected ParentSpanID=parent789, got %q", tc.ParentSpanID)
+	}
+}
+
+// ─── ToW3CTraceParent edge cases ─────────────────────────────────────────────
+
+func TestToW3CTraceParent_Invalid(t *testing.T) {
+	tc := &TraceContext{TraceID: "", SpanID: ""}
+	if got := tc.ToW3CTraceParent(); got != "" {
+		t.Errorf("expected empty string for invalid context, got %q", got)
+	}
+}
+
+// ─── ToB3Headers edge cases ───────────────────────────────────────────────────
+
+func TestToB3Headers_Invalid(t *testing.T) {
+	tc := &TraceContext{TraceID: "", SpanID: ""}
+	if got := tc.ToB3Headers(); got != nil {
+		t.Errorf("expected nil for invalid context, got %v", got)
+	}
+}
+
+func TestToB3Headers_NoParentSpanID_NotSampled(t *testing.T) {
+	tc := &TraceContext{
+		TraceID: "abc123",
+		SpanID:  "def456",
+		Flags:   0x00, // not sampled
+	}
+	headers := tc.ToB3Headers()
+	if headers == nil {
+		t.Fatal("expected non-nil headers for valid context")
+	}
+	if _, ok := headers["X-B3-ParentSpanID"]; ok {
+		t.Error("expected no X-B3-ParentSpanID when ParentSpanID is empty")
+	}
+	if _, ok := headers["X-B3-Sampled"]; ok {
+		t.Error("expected no X-B3-Sampled when not sampled")
+	}
+}

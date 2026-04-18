@@ -1693,3 +1693,188 @@ func TestResourceMonitor_GetLimits_WithData(t *testing.T) {
 		}
 	}
 }
+
+// ─── syncToBPF ───────────────────────────────────────────────────────────────
+
+func TestSyncToBPF_NilLimitsMap(t *testing.T) {
+	dir := t.TempDir()
+	cgroupPath := filepath.Join(dir, "cgroup")
+	if err := os.MkdirAll(cgroupPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	eventChan := make(chan *events.Event, 1)
+	rm, err := NewResourceMonitor(cgroupPath, nil, nil, eventChan, "ns")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// limitsMap is nil → syncToBPF returns nil immediately.
+	if err := rm.syncToBPF(); err != nil {
+		t.Errorf("syncToBPF with nil limitsMap should return nil, got %v", err)
+	}
+}
+
+func TestSyncToBPF_WithLimits_NilMap(t *testing.T) {
+	dir := t.TempDir()
+	cgroupPath := filepath.Join(dir, "cgroup")
+	if err := os.MkdirAll(cgroupPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	eventChan := make(chan *events.Event, 1)
+	rm, err := NewResourceMonitor(cgroupPath, nil, nil, eventChan, "ns")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add a limit entry even though limitsMap is nil.
+	rm.limits[ResourceCPU] = &ResourceLimit{
+		LimitBytes:   1000,
+		UsageBytes:   500,
+		LastUpdateNS: uint64(time.Now().UnixNano()),
+		ResourceType: ResourceCPU,
+	}
+
+	// nil limitsMap still returns nil.
+	if err := rm.syncToBPF(); err != nil {
+		t.Errorf("syncToBPF with nil limitsMap should return nil, got %v", err)
+	}
+}
+
+// ─── checkAlerts ─────────────────────────────────────────────────────────────
+
+func TestCheckAlerts_NilAlertsMap(t *testing.T) {
+	dir := t.TempDir()
+	cgroupPath := filepath.Join(dir, "cgroup")
+	if err := os.MkdirAll(cgroupPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	eventChan := make(chan *events.Event, 1)
+	rm, err := NewResourceMonitor(cgroupPath, nil, nil, eventChan, "ns")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// alertsMap is nil → checkAlerts returns immediately without panic.
+	rm.checkAlerts()
+}
+
+func TestCheckAlerts_WithZeroLimitBytes(t *testing.T) {
+	dir := t.TempDir()
+	cgroupPath := filepath.Join(dir, "cgroup")
+	if err := os.MkdirAll(cgroupPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	eventChan := make(chan *events.Event, 1)
+	rm, err := NewResourceMonitor(cgroupPath, nil, nil, eventChan, "ns")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add a limit with LimitBytes=0 → skipped in checkAlerts.
+	rm.limits[ResourceMemory] = &ResourceLimit{
+		LimitBytes: 0,
+		UsageBytes: 100,
+	}
+
+	// alertsMap is nil → returns early regardless.
+	rm.checkAlerts()
+}
+
+func TestCheckAlerts_WithMaxLimitBytes(t *testing.T) {
+	dir := t.TempDir()
+	cgroupPath := filepath.Join(dir, "cgroup")
+	if err := os.MkdirAll(cgroupPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	eventChan := make(chan *events.Event, 1)
+	rm, err := NewResourceMonitor(cgroupPath, nil, nil, eventChan, "ns")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// LimitBytes == ^uint64(0) → also skipped.
+	rm.limits[ResourceCPU] = &ResourceLimit{
+		LimitBytes: ^uint64(0),
+		UsageBytes: 100,
+	}
+
+	rm.checkAlerts()
+}
+
+// ─── readCgroupFile ───────────────────────────────────────────────────────────
+
+func TestReadCgroupFile_WithContent_Extra(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "memory.max")
+	if err := os.WriteFile(f, []byte("1073741824\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readCgroupFile(f)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) == 0 {
+		t.Error("expected non-empty result")
+	}
+}
+
+// ─── getCgroupInode ───────────────────────────────────────────────────────────
+
+func TestGetCgroupInode_Existing(t *testing.T) {
+	dir := t.TempDir()
+	inode, err := getCgroupInode(dir)
+	if err != nil {
+		t.Fatalf("getCgroupInode(%q) error: %v", dir, err)
+	}
+	if inode == 0 {
+		t.Error("expected non-zero inode")
+	}
+}
+
+// ─── updateResourceUsage ─────────────────────────────────────────────────────
+
+func TestUpdateResourceUsage_NoCgroupFiles(t *testing.T) {
+	dir := t.TempDir()
+	cgroupPath := filepath.Join(dir, "cgroup")
+	if err := os.MkdirAll(cgroupPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	eventChan := make(chan *events.Event, 1)
+	rm, err := NewResourceMonitor(cgroupPath, nil, nil, eventChan, "ns")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// No cgroup files → updateResourceUsage returns an error or nil (depends on cgroup version detection).
+	_ = rm.updateResourceUsage()
+}
+
+func TestUpdateResourceUsage_WithMemoryMax(t *testing.T) {
+	dir := t.TempDir()
+	cgroupPath := filepath.Join(dir, "cgroup")
+	if err := os.MkdirAll(cgroupPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a fake memory.max file (cgroup v2 style).
+	if err := os.WriteFile(filepath.Join(cgroupPath, "memory.max"), []byte("104857600\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cgroupPath, "memory.current"), []byte("1048576\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	eventChan := make(chan *events.Event, 1)
+	rm, err := NewResourceMonitor(cgroupPath, nil, nil, eventChan, "ns")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_ = rm.updateResourceUsage()
+}

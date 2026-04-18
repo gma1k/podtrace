@@ -157,7 +157,7 @@ jobs:
         uses: codecov/codecov-action@v5
         if: hashFiles('coverage.out') != ''
         with:
-          file: ./coverage.out
+          files: ./coverage.out
           flags: unittests
           name: codecov-umbrella
           fail_ci_if_error: false
@@ -184,7 +184,7 @@ jobs:
           GOTOOLCHAIN=auto go test -bench=. -benchmem ./... | tee benchmark.txt || true
 
       - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         if: always()
         with:
           name: benchmark-results

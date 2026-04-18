@@ -344,6 +344,31 @@ var (
 		},
 		[]string{"operation", "topic", "process_name", "namespace"},
 	)
+
+	// Profiling integration metrics.
+	profilingGoroutinesGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "podtrace_profiling_goroutines",
+			Help: "Number of goroutines observed in the last pprof goroutine profile of the target pod.",
+		},
+		[]string{"pod_ip", "state"}, // state: total | blocked
+	)
+
+	profilingAutoTriggersTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "podtrace_profiling_auto_triggers_total",
+			Help: "Number of times profiling was automatically triggered by a latency spike.",
+		},
+		[]string{"pod_ip"},
+	)
+
+	profilingFetchErrorsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "podtrace_profiling_fetch_errors_total",
+			Help: "Number of failed pprof endpoint fetch attempts.",
+		},
+		[]string{"pod_ip", "profile_type"},
+	)
 )
 
 func init() {
@@ -388,6 +413,25 @@ func init() {
 	prometheus.MustRegister(grpcLatencyHistogram)
 	prometheus.MustRegister(kafkaLatencyHistogram)
 	prometheus.MustRegister(kafkaBytesCounter)
+	prometheus.MustRegister(profilingGoroutinesGauge)
+	prometheus.MustRegister(profilingAutoTriggersTotal)
+	prometheus.MustRegister(profilingFetchErrorsTotal)
+}
+
+// RecordProfilingGoroutines records goroutine counts from the last pprof fetch.
+func RecordProfilingGoroutines(podIP string, total, blocked int) {
+	profilingGoroutinesGauge.WithLabelValues(podIP, "total").Set(float64(total))
+	profilingGoroutinesGauge.WithLabelValues(podIP, "blocked").Set(float64(blocked))
+}
+
+// RecordProfilingAutoTrigger increments the auto-trigger counter.
+func RecordProfilingAutoTrigger(podIP string) {
+	profilingAutoTriggersTotal.WithLabelValues(podIP).Inc()
+}
+
+// RecordProfilingFetchError increments the fetch error counter.
+func RecordProfilingFetchError(podIP, profileType string) {
+	profilingFetchErrorsTotal.WithLabelValues(podIP, profileType).Inc()
 }
 
 func HandleEvents(ch <-chan *events.Event) {
