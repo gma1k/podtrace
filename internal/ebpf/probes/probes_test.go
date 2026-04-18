@@ -2051,3 +2051,316 @@ func TestFindDBLibsInContainer_AllPaths(t *testing.T) {
 		}
 	}
 }
+
+// ─── GroupForProbe ────────────────────────────────────────────────────────────
+
+func TestGroupForProbe_KnownPrograms(t *testing.T) {
+	cases := []struct {
+		prog  string
+		group ProbeGroup
+	}{
+		{"kprobe_tcp_connect", GroupNetwork},
+		{"kprobe_vfs_write", GroupFileSystem},
+		{"kprobe_do_futex", GroupCPU},
+		{"kprobe_unix_stream_recvmsg", GroupFastCGI},
+		{"kprobe_grpc_tcp_sendmsg", GroupNetwork},
+	}
+	for _, c := range cases {
+		if got := GroupForProbe(c.prog); got != c.group {
+			t.Errorf("GroupForProbe(%q) = %q, want %q", c.prog, got, c.group)
+		}
+	}
+}
+
+func TestGroupForProbe_Unknown(t *testing.T) {
+	// Unknown programs default to GroupNetwork.
+	if got := GroupForProbe("totally_unknown_prog"); got != GroupNetwork {
+		t.Errorf("expected GroupNetwork for unknown prog, got %q", got)
+	}
+}
+
+// ─── fileInProcRoot ───────────────────────────────────────────────────────────
+
+func TestFileInProcRoot_EmptyContainerPath(t *testing.T) {
+	if got := fileInProcRoot(1, ""); got != "" {
+		t.Errorf("expected empty for empty containerPath, got %q", got)
+	}
+}
+
+func TestFileInProcRoot_BracketPrefix(t *testing.T) {
+	// Paths starting with '[' (like [heap]) should be skipped.
+	if got := fileInProcRoot(1, "[heap]"); got != "" {
+		t.Errorf("expected empty for [heap], got %q", got)
+	}
+}
+
+func TestFileInProcRoot_DirectFileExists(t *testing.T) {
+	// Create a real file and use it as the containerPath directly.
+	dir := t.TempDir()
+	libFile := filepath.Join(dir, "libtest.so")
+	if err := os.WriteFile(libFile, []byte("ELF"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Point ProcBasePath to a temp dir that has no root subdir,
+	// so fileInProcRoot falls back to checking containerPath directly.
+	origProc := config.ProcBasePath
+	config.SetProcBasePath(t.TempDir())
+	defer config.SetProcBasePath(origProc)
+
+	got := fileInProcRoot(9999, libFile)
+	if got != libFile {
+		t.Errorf("expected %q, got %q", libFile, got)
+	}
+}
+
+func TestFileInProcRoot_NonExistent(t *testing.T) {
+	origProc := config.ProcBasePath
+	config.SetProcBasePath(t.TempDir())
+	defer config.SetProcBasePath(origProc)
+
+	got := fileInProcRoot(9999, "/nonexistent/lib.so")
+	if got != "" {
+		t.Errorf("expected empty for non-existent path, got %q", got)
+	}
+}
+
+func TestFileInProcRoot_Directory(t *testing.T) {
+	// A directory should not be returned.
+	dir := t.TempDir()
+	origProc := config.ProcBasePath
+	config.SetProcBasePath(t.TempDir())
+	defer config.SetProcBasePath(origProc)
+
+	got := fileInProcRoot(9999, dir)
+	if got != "" {
+		t.Errorf("expected empty when path is a directory, got %q", got)
+	}
+}
+
+// ─── findLibcViaProcessMapsProcRoot ──────────────────────────────────────────
+
+func TestFindLibcViaProcessMapsProcRoot_NoFile(t *testing.T) {
+	origProc := config.ProcBasePath
+	config.SetProcBasePath(t.TempDir())
+	defer config.SetProcBasePath(origProc)
+
+	// No maps file → returns ""
+	got := findLibcViaProcessMapsProcRoot(99999)
+	if got != "" {
+		t.Errorf("expected empty when no maps file, got %q", got)
+	}
+}
+
+func TestFindLibcViaProcessMapsProcRoot_WithLibc(t *testing.T) {
+	dir := t.TempDir()
+	origProc := config.ProcBasePath
+	config.SetProcBasePath(dir)
+	defer config.SetProcBasePath(origProc)
+
+	pid := uint32(12300)
+	pidDir := filepath.Join(dir, fmt.Sprintf("%d", pid))
+	if err := os.MkdirAll(pidDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a fake libc.so file.
+	libcDir := filepath.Join(dir, fmt.Sprintf("%d", pid), "root", "lib")
+	if err := os.MkdirAll(libcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	libcPath := filepath.Join(libcDir, "libc.so.6")
+	if err := os.WriteFile(libcPath, []byte("ELF"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mapsContent := "7f000000-7f001000 r-xp 00000000 fd:01 123 /lib/libc.so.6\n"
+	if err := os.WriteFile(filepath.Join(pidDir, "maps"), []byte(mapsContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := findLibcViaProcessMapsProcRoot(pid)
+	// Either finds via proc/root or returns empty — just ensure no panic.
+	_ = got
+}
+
+// ─── findLibcInProcess ────────────────────────────────────────────────────────
+
+func TestFindLibcInProcess_NotFound(t *testing.T) {
+	origProc := config.ProcBasePath
+	config.SetProcBasePath(t.TempDir())
+	defer config.SetProcBasePath(origProc)
+
+	got := findLibcInProcess(99999)
+	if got != "" {
+		t.Errorf("expected empty for non-existent process, got %q", got)
+	}
+}
+
+// ─── findDBLibsViaProcessMapsProcRoot ────────────────────────────────────────
+
+func TestFindDBLibsViaProcessMapsProcRoot_NoFile(t *testing.T) {
+	origProc := config.ProcBasePath
+	config.SetProcBasePath(t.TempDir())
+	defer config.SetProcBasePath(origProc)
+
+	got := findDBLibsViaProcessMapsProcRoot(99999, []string{"libpq.so"})
+	if len(got) != 0 {
+		t.Errorf("expected empty when no maps file, got %v", got)
+	}
+}
+
+func TestFindDBLibsViaProcessMapsProcRoot_WithLib(t *testing.T) {
+	dir := t.TempDir()
+	origProc := config.ProcBasePath
+	config.SetProcBasePath(dir)
+	defer config.SetProcBasePath(origProc)
+
+	pid := uint32(12301)
+	pidDir := filepath.Join(dir, fmt.Sprintf("%d", pid))
+	if err := os.MkdirAll(pidDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a fake libpq.so file.
+	libDir := filepath.Join(dir, fmt.Sprintf("%d", pid), "root", "usr", "lib")
+	if err := os.MkdirAll(libDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	libPath := filepath.Join(libDir, "libpq.so.5")
+	if err := os.WriteFile(libPath, []byte("ELF"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mapsContent := "7f000000-7f001000 r-xp 00000000 fd:01 456 /usr/lib/libpq.so.5\n"
+	if err := os.WriteFile(filepath.Join(pidDir, "maps"), []byte(mapsContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := findDBLibsViaProcessMapsProcRoot(pid, []string{"libpq.so"})
+	_ = got // may or may not find it depending on filesystem layout
+}
+
+// ─── findTLSLibsViaProcessMapsProcRoot ───────────────────────────────────────
+
+func TestFindTLSLibsViaProcessMapsProcRoot_NoFile(t *testing.T) {
+	origProc := config.ProcBasePath
+	config.SetProcBasePath(t.TempDir())
+	defer config.SetProcBasePath(origProc)
+
+	got := findTLSLibsViaProcessMapsProcRoot(99999, []string{"libssl.so"})
+	if len(got) != 0 {
+		t.Errorf("expected empty when no maps file, got %v", got)
+	}
+}
+
+func TestFindTLSLibsViaProcessMapsProcRoot_WithTLSLib(t *testing.T) {
+	dir := t.TempDir()
+	origProc := config.ProcBasePath
+	config.SetProcBasePath(dir)
+	defer config.SetProcBasePath(origProc)
+
+	pid := uint32(54300)
+	pidDir := filepath.Join(dir, fmt.Sprintf("%d", pid))
+	if err := os.MkdirAll(pidDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a fake libssl.so file inside the fake /proc/<pid>/root tree.
+	tlsDir := filepath.Join(pidDir, "root", "lib", "x86_64-linux-gnu")
+	if err := os.MkdirAll(tlsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tlsPath := filepath.Join(tlsDir, "libssl.so.3")
+	if err := os.WriteFile(tlsPath, []byte("ELF"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write a fake /proc/<pid>/maps that references libssl.so.
+	mapsContent := "7f000000-7f001000 r-xp 00000000 fd:01 456 /lib/x86_64-linux-gnu/libssl.so.3\n"
+	if err := os.WriteFile(filepath.Join(pidDir, "maps"), []byte(mapsContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := findTLSLibsViaProcessMapsProcRoot(pid, []string{"libssl.so"})
+	// Either finds the lib or returns empty — just ensure no panic.
+	_ = got
+}
+
+func TestFindTLSLibsViaProcessMapsProcRoot_EmptyPatterns(t *testing.T) {
+	dir := t.TempDir()
+	origProc := config.ProcBasePath
+	config.SetProcBasePath(dir)
+	defer config.SetProcBasePath(origProc)
+
+	pid := uint32(54301)
+	pidDir := filepath.Join(dir, fmt.Sprintf("%d", pid))
+	if err := os.MkdirAll(pidDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mapsContent := "7f000000-7f001000 r-xp 00000000 fd:01 456 /lib/libssl.so.3\n"
+	if err := os.WriteFile(filepath.Join(pidDir, "maps"), []byte(mapsContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Empty patterns → no matches.
+	got := findTLSLibsViaProcessMapsProcRoot(pid, []string{})
+	if len(got) != 0 {
+		t.Errorf("expected empty for empty patterns, got %v", got)
+	}
+}
+
+// ─── Protocol attach functions with nil/empty collection ────────────────────
+
+func TestAttachRedisProbesWithPID_NilCollection(t *testing.T) {
+	// nil collection → should return empty without panic
+	links := AttachRedisProbesWithPID(nil, "", 0)
+	_ = links
+}
+
+func TestAttachRedisProbesWithPID_EmptyCollection(t *testing.T) {
+	coll := &ebpf.Collection{Programs: make(map[string]*ebpf.Program)}
+	links := AttachRedisProbesWithPID(coll, "", 0)
+	_ = links
+}
+
+func TestAttachMemcachedProbesWithPID_EmptyCollection(t *testing.T) {
+	coll := &ebpf.Collection{Programs: make(map[string]*ebpf.Program)}
+	links := AttachMemcachedProbesWithPID(coll, "", 0)
+	_ = links
+}
+
+func TestAttachKafkaProbesWithPID_EmptyCollection(t *testing.T) {
+	coll := &ebpf.Collection{Programs: make(map[string]*ebpf.Program)}
+	links := AttachKafkaProbesWithPID(coll, "", 0)
+	_ = links
+}
+
+func TestAttachFastCGIProbes_EmptyCollection(t *testing.T) {
+	coll := &ebpf.Collection{Programs: make(map[string]*ebpf.Program)}
+	links := AttachFastCGIProbes(coll)
+	_ = links
+}
+
+func TestAttachGRPCProbes_EmptyCollection(t *testing.T) {
+	coll := &ebpf.Collection{Programs: make(map[string]*ebpf.Program)}
+	links := AttachGRPCProbes(coll)
+	_ = links
+}
+
+func TestKernelVersionString(t *testing.T) {
+	// Just make sure it returns some string without panicking.
+	v := kernelVersionString()
+	_ = v
+}
+
+func TestFindLibcPathWithPID_ZeroPID(t *testing.T) {
+	got := FindLibcPathWithPID("", 0)
+	_ = got // result depends on system libs
+}
+
+func TestFindLibcPathWithPID_NonZeroPID(t *testing.T) {
+	// Use a PID that almost certainly doesn't exist.
+	got := FindLibcPathWithPID("", 99999)
+	_ = got
+}

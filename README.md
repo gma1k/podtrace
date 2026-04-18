@@ -86,6 +86,13 @@ Podtrace documentation is available in the [`doc/`](doc/) directory.
 - **Multiple Exporters**: Supports OpenTelemetry (OTLP), Jaeger, and Splunk HEC
 - **Sampling Support**: Configurable sampling rates to control export volume
 
+### Performance Profiling
+- **pprof & perf Integration**: Discovers and fetches heap, goroutine, and CPU profiles from target pod pprof HTTP endpoints
+- **On-demand Profiling Triggers**: Activate profiling via the `/profile/start` management endpoint or automatically when slow events exceed configurable thresholds
+- **CPU/Memory Profiling Correlation**: Ties BPF `SchedSwitch` stack traces to slow events, surfacing the exact goroutine and CPU stacks active during high-latency periods
+- **BPF ktime ↔ Wall-clock Alignment**: Derives a monotonic offset so kernel timestamps map accurately to wall time for precise correlation
+- **Profiling Section in Reports**: Correlation results are appended to both diagnose-mode and normal-mode reports
+
 ### Diagnostics
 - **Diagnose Mode**: Collects events for a specified duration and generates a comprehensive summary report
 

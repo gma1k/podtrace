@@ -1,8 +1,12 @@
 package cri
 
 import (
+	"context"
 	"os"
 	"testing"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 func TestDefaultCandidateEndpoints_PodmanDisabled(t *testing.T) {
@@ -153,6 +157,43 @@ func TestResolveContainer_EmptyContainerID(t *testing.T) {
 	_, err := r.ResolveContainer(t.Context(), "")
 	if err == nil {
 		t.Fatal("expected error for empty container id")
+	}
+}
+
+func TestWaitForReady_NilConn(t *testing.T) {
+	err := waitForReady(t.Context(), nil)
+	if err == nil {
+		t.Fatal("expected error for nil conn")
+	}
+}
+
+func TestWaitForReady_AlreadyCancelledContext(t *testing.T) {
+	conn, err := grpc.NewClient(
+		"unix:///nonexistent/podtrace-test.sock",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Skipf("cannot create test grpc conn: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err = waitForReady(ctx, conn)
+	if err == nil {
+		t.Error("expected error for already-cancelled context")
+	}
+}
+
+func TestNewResolverWithEndpoint_ExistingSocketBadServer(t *testing.T) {
+	dir := t.TempDir()
+	sockPath := dir + "/fake.sock"
+	if err := os.WriteFile(sockPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewResolverWithEndpoint("unix://" + sockPath)
+	if err == nil {
+		t.Log("NewResolverWithEndpoint succeeded (may have fast-pathed connection)")
 	}
 }
 

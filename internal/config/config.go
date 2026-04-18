@@ -119,6 +119,13 @@ var (
 	RedactCustomRules    = getEnvOrDefault("PODTRACE_REDACT_CUSTOM_RULES", "")
 	CriticalPathEnabled  = getEnvOrDefault("PODTRACE_CRITICAL_PATH", "true") == "true"
 	CriticalPathWindowMS = getIntEnvOrDefault("PODTRACE_CRITICAL_PATH_WINDOW_MS", 500)
+
+	// Profiling integration — pprof endpoint discovery, auto-trigger, and correlation.
+	ProfilingEnabled        = getEnvOrDefault("PODTRACE_PROFILING_ENABLED", "false") == "true"
+	ProfilingPprofPorts     = getEnvOrDefault("PODTRACE_PROFILING_PPROF_PORTS", "6060,8080,8081,9090,2345")
+	ProfilingAutoTriggerMS  = getFloatEnvOrDefault("PODTRACE_PROFILING_AUTO_TRIGGER_MS", DefaultProfilingAutoTriggerMS)
+	ProfilingDefaultDuration = getDurationEnvOrDefault("PODTRACE_PROFILING_DEFAULT_DURATION", DefaultProfilingDuration)
+	ProfilingMaxConcurrent  = getIntEnvOrDefault("PODTRACE_PROFILING_MAX_CONCURRENT", DefaultProfilingMaxConcurrent)
 )
 
 const (
@@ -177,6 +184,11 @@ const (
 	DefaultAlertWarnPct  = 80
 	DefaultAlertCritPct  = 90
 	DefaultAlertEmergPct = 95
+
+	// Profiling defaults.
+	DefaultProfilingAutoTriggerMS  = 500.0
+	DefaultProfilingDuration       = 30 * time.Second
+	DefaultProfilingMaxConcurrent  = 1
 )
 
 const (
@@ -403,9 +415,10 @@ func OTLPAllowInsecureNonLoopback() bool {
 	return os.Getenv("PODTRACE_OTLP_INSECURE") == "1"
 }
 
-// MetricsEnablePprof registers /debug/pprof/* when PODTRACE_METRICS_ENABLE_PPROF=1.
+// MetricsEnablePprof registers /debug/pprof/* when PODTRACE_METRICS_ENABLE_PPROF=1
+// or when profiling integration is enabled (--profiling / PODTRACE_PROFILING_ENABLED).
 func MetricsEnablePprof() bool {
-	return os.Getenv("PODTRACE_METRICS_ENABLE_PPROF") == "1"
+	return os.Getenv("PODTRACE_METRICS_ENABLE_PPROF") == "1" || ProfilingEnabled
 }
 
 // SplunkAlertAllowHTTP returns true when PODTRACE_ALERT_SPLUNK_ALLOW_HTTP=1,

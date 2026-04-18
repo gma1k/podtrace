@@ -25,6 +25,8 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     strategy:
       matrix:
         go-version: [1.25]
@@ -36,7 +38,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -48,7 +50,7 @@ jobs:
       # when go.mod uses go 1.25.x. Use a 2.x release built with Go 1.25+.
       - name: Run golangci-lint
         timeout-minutes: 5
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.7.2
           args: --timeout=5m
@@ -157,7 +159,7 @@ jobs:
         uses: codecov/codecov-action@v5
         if: hashFiles('coverage.out') != ''
         with:
-          file: ./coverage.out
+          files: ./coverage.out
           flags: unittests
           name: codecov-umbrella
           fail_ci_if_error: false
@@ -171,7 +173,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: stable
           cache: true
@@ -184,7 +186,7 @@ jobs:
           GOTOOLCHAIN=auto go test -bench=. -benchmem ./... | tee benchmark.txt || true
 
       - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         if: always()
         with:
           name: benchmark-results

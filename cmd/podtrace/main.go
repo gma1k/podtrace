@@ -15,14 +15,18 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
+	"strconv"
+
 	"github.com/podtrace/podtrace/internal/alerting"
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/diagnose"
 	"github.com/podtrace/podtrace/internal/ebpf"
+	tracerpkg "github.com/podtrace/podtrace/internal/ebpf/tracer"
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/internal/kubernetes"
 	"github.com/podtrace/podtrace/internal/logger"
 	"github.com/podtrace/podtrace/internal/metricsexporter"
+	"github.com/podtrace/podtrace/internal/profiling"
 	"github.com/podtrace/podtrace/internal/system"
 	"github.com/podtrace/podtrace/internal/tracing"
 	"github.com/podtrace/podtrace/internal/validation"
@@ -50,6 +54,7 @@ var (
 	tracingSplunkToken    string
 	tracingSampleRate     float64
 	showVersion           bool
+	enableProfiling       bool
 
 	resolverFactory func() (kubernetes.PodResolverInterface, error)
 	tracerFactory   func() (ebpf.TracerInterface, error)
@@ -99,6 +104,7 @@ func main() {
 	rootCmd.Flags().StringVar(&tracingSplunkToken, "tracing-splunk-token", "", "Splunk HEC token")
 	rootCmd.Flags().Float64Var(&tracingSampleRate, "tracing-sample-rate", config.DefaultTracingSampleRate, "Tracing sample rate (0.0-1.0)")
 	rootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, "Print version information")
+	rootCmd.Flags().BoolVar(&enableProfiling, "profiling", false, "Enable performance profiling: pprof endpoint discovery on the target pod, auto-trigger on latency spikes, and CPU/memory correlation in reports")
 
 	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
 		if logLevel != "" {
@@ -454,6 +460,25 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		}()
 	}
 
+	// Profiling handler — set up before tracer.Start() so management routes are ready.
+	var profilingHandler *profiling.Handler
+	if enableProfiling || config.ProfilingEnabled {
+		config.ProfilingEnabled = true // ensures MetricsEnablePprof() returns true
+		ports := parsePprofPorts(config.ProfilingPprofPorts)
+		if podInfo != nil && podInfo.PodIP != "" {
+			profilingHandler = profiling.NewHandler(podInfo.PodIP, ports)
+			go profilingHandler.Run(ctx, eventChan)
+		} else {
+			logger.Warn("Profiling requested but pod IP is not available; skipping pprof discovery")
+		}
+		// Wire profiling routes into the management HTTP server.
+		if profilingHandler != nil {
+			if setter, ok := tracer.(tracerpkg.ProfilingControllerSetter); ok {
+				setter.SetProfilingController(profilingHandler)
+			}
+		}
+	}
+
 	enrichedChan := eventChan
 
 	filteredChan := enrichedChan
@@ -482,17 +507,17 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	}
 
 	if diagnoseDuration != "" {
-		return runDiagnoseModeWithSource(ctx, filteredChan, diagnoseDuration, podInfo, enricher, eventsCorrelator, tracingManager, enableTracing, sourceIndex.Resolve)
+		return runDiagnoseModeWithSource(ctx, filteredChan, diagnoseDuration, podInfo, enricher, eventsCorrelator, tracingManager, enableTracing, sourceIndex.Resolve, profilingHandler)
 	}
 
-	return runNormalModeWithSource(ctx, filteredChan, podInfo, enricher, eventsCorrelator, tracingManager, enableTracing, sourceIndex.Resolve)
+	return runNormalModeWithSource(ctx, filteredChan, podInfo, enricher, eventsCorrelator, tracingManager, enableTracing, sourceIndex.Resolve, profilingHandler)
 }
 
 func runNormalMode(ctx context.Context, eventChan <-chan *events.Event, podInfo *kubernetes.PodInfo, enricher *kubernetes.ContextEnricher, eventsCorrelator *kubernetes.EventsCorrelator, tracingManager *tracing.Manager, enableTracing bool) error {
-	return runNormalModeWithSource(ctx, eventChan, podInfo, enricher, eventsCorrelator, tracingManager, enableTracing, nil)
+	return runNormalModeWithSource(ctx, eventChan, podInfo, enricher, eventsCorrelator, tracingManager, enableTracing, nil, nil)
 }
 
-func runNormalModeWithSource(ctx context.Context, eventChan <-chan *events.Event, podInfo *kubernetes.PodInfo, enricher *kubernetes.ContextEnricher, _ *kubernetes.EventsCorrelator, tracingManager *tracing.Manager, enableTracing bool, resolveSource func(*events.Event) *kubernetes.PodInfo) error {
+func runNormalModeWithSource(ctx context.Context, eventChan <-chan *events.Event, podInfo *kubernetes.PodInfo, enricher *kubernetes.ContextEnricher, _ *kubernetes.EventsCorrelator, tracingManager *tracing.Manager, enableTracing bool, resolveSource func(*events.Event) *kubernetes.PodInfo, profilingHandler *profiling.Handler) error {
 	logger.Info("Tracing started",
 		zap.Duration("update_interval", config.DefaultRealtimeUpdateInterval))
 
@@ -553,7 +578,11 @@ func runNormalModeWithSource(ctx context.Context, eventChan <-chan *events.Event
 			}
 			fmt.Println("\n=== Final Diagnostic Report ===")
 			fmt.Println()
+			finalDuration := diagnostician.EndTime().Sub(diagnostician.StartTime())
 			report := diagnostician.GenerateReport()
+			if profilingHandler != nil {
+				report += profilingHandler.GenerateSection(diagnostician.GetEvents(), finalDuration)
+			}
 			fmt.Println(report)
 			return nil
 		}
@@ -561,10 +590,10 @@ func runNormalModeWithSource(ctx context.Context, eventChan <-chan *events.Event
 }
 
 func runDiagnoseMode(ctx context.Context, eventChan <-chan *events.Event, durationStr string, podInfo *kubernetes.PodInfo, enricher *kubernetes.ContextEnricher, eventsCorrelator *kubernetes.EventsCorrelator, tracingManager *tracing.Manager, enableTracing bool) error {
-	return runDiagnoseModeWithSource(ctx, eventChan, durationStr, podInfo, enricher, eventsCorrelator, tracingManager, enableTracing, nil)
+	return runDiagnoseModeWithSource(ctx, eventChan, durationStr, podInfo, enricher, eventsCorrelator, tracingManager, enableTracing, nil, nil)
 }
 
-func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Event, durationStr string, podInfo *kubernetes.PodInfo, enricher *kubernetes.ContextEnricher, _ *kubernetes.EventsCorrelator, tracingManager *tracing.Manager, enableTracing bool, resolveSource func(*events.Event) *kubernetes.PodInfo) error {
+func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Event, durationStr string, podInfo *kubernetes.PodInfo, enricher *kubernetes.ContextEnricher, _ *kubernetes.EventsCorrelator, tracingManager *tracing.Manager, enableTracing bool, resolveSource func(*events.Event) *kubernetes.PodInfo, profilingHandler *profiling.Handler) error {
 	duration, err := time.ParseDuration(durationStr)
 	if err != nil {
 		return fmt.Errorf("invalid duration: %w", err)
@@ -592,6 +621,9 @@ func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Eve
 		case <-ctx.Done():
 			diagnostician.Finish()
 			report := diagnostician.GenerateReport()
+			if profilingHandler != nil {
+				report += profilingHandler.GenerateSection(diagnostician.GetEvents(), duration)
+			}
 			if exportFormat != "" {
 				return exportReport(report, exportFormat, diagnostician)
 			}
@@ -651,6 +683,9 @@ func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Eve
 		case <-timeout:
 			diagnostician.Finish()
 			report := diagnostician.GenerateReport()
+			if profilingHandler != nil {
+				report += profilingHandler.GenerateSection(diagnostician.GetEvents(), duration)
+			}
 			if exportFormat != "" {
 				return exportReport(report, exportFormat, diagnostician)
 			}
@@ -659,6 +694,9 @@ func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Eve
 		case <-ctx.Done():
 			diagnostician.Finish()
 			report := diagnostician.GenerateReport()
+			if profilingHandler != nil {
+				report += profilingHandler.GenerateSection(diagnostician.GetEvents(), duration)
+			}
 			if exportFormat != "" {
 				return exportReport(report, exportFormat, diagnostician)
 			}
@@ -892,6 +930,23 @@ func parseCSV(raw string) []string {
 		out = append(out, p)
 	}
 	return out
+}
+
+// parsePprofPorts parses a comma-separated list of port numbers from a config
+// string (e.g. "6060,8080,9090") and returns valid port integers.
+func parsePprofPorts(csv string) []int {
+	parts := parseCSV(csv)
+	ports := make([]int, 0, len(parts))
+	for _, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err == nil && n > 0 && n <= 65535 {
+			ports = append(ports, n)
+		}
+	}
+	if len(ports) == 0 {
+		return []int{6060, 8080, 8081, 9090, 2345}
+	}
+	return ports
 }
 
 func parsePodRef(podRef, defaultNamespace string) (namespace, podName string) {

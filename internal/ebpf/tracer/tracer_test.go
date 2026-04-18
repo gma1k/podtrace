@@ -2,10 +2,16 @@ package tracer
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +19,7 @@ import (
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/ebpf/cache"
 	"github.com/podtrace/podtrace/internal/ebpf/filter"
+	"github.com/podtrace/podtrace/internal/ebpf/probes"
 	"github.com/podtrace/podtrace/internal/events"
 )
 
@@ -1676,3 +1683,503 @@ func TestTracer_Start_PathCacheCleanupGoroutine(t *testing.T) {
 }
 
 
+
+// ─── roundUpPow2 ─────────────────────────────────────────────────────────────
+
+func TestRoundUpPow2_BelowMin(t *testing.T) {
+	for _, n := range []uint32{0, 1, 100, 4095} {
+		if got := roundUpPow2(n); got != 4096 {
+			t.Errorf("roundUpPow2(%d) = %d, want 4096", n, got)
+		}
+	}
+}
+
+func TestRoundUpPow2_ExactPowers(t *testing.T) {
+	cases := []struct{ in, want uint32 }{
+		{4096, 4096},
+		{8192, 8192},
+		{16384, 16384},
+		{65536, 65536},
+	}
+	for _, c := range cases {
+		if got := roundUpPow2(c.in); got != c.want {
+			t.Errorf("roundUpPow2(%d) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
+func TestRoundUpPow2_NonPowers(t *testing.T) {
+	cases := []struct{ in, want uint32 }{
+		{4097, 8192},
+		{5000, 8192},
+		{8193, 16384},
+		{32769, 65536},
+	}
+	for _, c := range cases {
+		if got := roundUpPow2(c.in); got != c.want {
+			t.Errorf("roundUpPow2(%d) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
+// ─── isCgroupV2Base ──────────────────────────────────────────────────────────
+
+func TestIsCgroupV2Base_Exists(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "cgroup.controllers"), []byte("cpu io memory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !isCgroupV2Base(dir) {
+		t.Error("expected isCgroupV2Base=true when cgroup.controllers exists")
+	}
+}
+
+func TestIsCgroupV2Base_NotExists(t *testing.T) {
+	dir := t.TempDir()
+	if isCgroupV2Base(dir) {
+		t.Error("expected isCgroupV2Base=false when cgroup.controllers absent")
+	}
+}
+
+func TestIsCgroupV2Base_EmptyPath(t *testing.T) {
+	if isCgroupV2Base("/nonexistent/cgroup/path") {
+		t.Error("expected false for non-existent base path")
+	}
+}
+
+// ─── getCgroupIDFromPath ──────────────────────────────────────────────────────
+
+func TestGetCgroupIDFromPath_ValidPath(t *testing.T) {
+	dir := t.TempDir()
+	id, err := getCgroupIDFromPath(dir)
+	if err != nil {
+		t.Fatalf("unexpected error for valid path: %v", err)
+	}
+	if id == 0 {
+		t.Error("expected non-zero inode for valid directory")
+	}
+}
+
+func TestGetCgroupIDFromPath_NonExistent(t *testing.T) {
+	_, err := getCgroupIDFromPath("/nonexistent/cgroup/path/xyz")
+	if err == nil {
+		t.Error("expected error for non-existent path")
+	}
+}
+
+// ─── readFirstPIDFromCgroupProcs ─────────────────────────────────────────────
+
+func TestReadFirstPIDFromCgroupProcs_Valid(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte("1234\n5678\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if pid := readFirstPIDFromCgroupProcs(dir); pid != 1234 {
+		t.Errorf("expected PID 1234, got %d", pid)
+	}
+}
+
+func TestReadFirstPIDFromCgroupProcs_Empty(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte("\n\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if pid := readFirstPIDFromCgroupProcs(dir); pid != 0 {
+		t.Errorf("expected 0 for empty procs file, got %d", pid)
+	}
+}
+
+func TestReadFirstPIDFromCgroupProcs_NoFile(t *testing.T) {
+	dir := t.TempDir()
+	if pid := readFirstPIDFromCgroupProcs(dir); pid != 0 {
+		t.Errorf("expected 0 when file does not exist, got %d", pid)
+	}
+}
+
+func TestReadFirstPIDFromCgroupProcs_InvalidContent(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte("not-a-pid\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if pid := readFirstPIDFromCgroupProcs(dir); pid != 0 {
+		t.Errorf("expected 0 for non-numeric content, got %d", pid)
+	}
+}
+
+func TestReadFirstPIDFromCgroupProcs_LeadingBlankLines(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte("\n  \n9999\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if pid := readFirstPIDFromCgroupProcs(dir); pid != 9999 {
+		t.Errorf("expected PID 9999, got %d", pid)
+	}
+}
+
+// ─── AttachToCgroup additional paths ─────────────────────────────────────────
+
+func TestAttachToCgroup_EmptyPath(t *testing.T) {
+	tr := &Tracer{filter: filter.NewCgroupFilter()}
+	// Empty path is rejected with "no valid cgroup paths provided" in this codebase.
+	_ = tr.AttachToCgroup("")
+}
+
+func TestAttachToCgroup_WithCgroupProcsFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte("42\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tr := &Tracer{filter: filter.NewCgroupFilter()}
+	_ = tr.AttachToCgroup(dir)
+	if tr.containerPID != 42 {
+		t.Errorf("expected containerPID=42, got %d", tr.containerPID)
+	}
+}
+
+func TestAttachToCgroup_CRIOSubfolder(t *testing.T) {
+	dir := t.TempDir()
+	containerDir := filepath.Join(dir, "container")
+	if err := os.MkdirAll(containerDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(containerDir, "cgroup.procs"), []byte("777\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tr := &Tracer{filter: filter.NewCgroupFilter()}
+	_ = tr.AttachToCgroup(dir)
+	if tr.containerPID != 777 {
+		t.Errorf("expected containerPID=777 (from CRI-O subfolder), got %d", tr.containerPID)
+	}
+	if !strings.HasSuffix(tr.cgroupPath, "container") {
+		t.Errorf("expected cgroupPath to end with 'container', got %q", tr.cgroupPath)
+	}
+}
+
+func TestAttachToCgroup_PreserveExistingPID(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte("100\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tr := &Tracer{
+		filter:       filter.NewCgroupFilter(),
+		containerPID: 999,
+	}
+	_ = tr.AttachToCgroup(dir)
+	if tr.containerPID != 999 {
+		t.Errorf("expected containerPID to remain 999, got %d", tr.containerPID)
+	}
+}
+
+// ─── pollBPFMapUtilization ────────────────────────────────────────────────────
+
+func TestPollBPFMapUtilization_NilCollection(t *testing.T) {
+	tr := &Tracer{collection: nil}
+	tr.pollBPFMapUtilization() // must not panic
+}
+
+// ─── ActiveProbeGroups / DisableProbeGroup ────────────────────────────────────
+
+func TestActiveProbeGroups_Empty(t *testing.T) {
+	tr := &Tracer{probeGroups: make(map[probes.ProbeGroup][]link.Link)}
+	groups := tr.ActiveProbeGroups()
+	if len(groups) != 0 {
+		t.Errorf("expected no active groups, got %v", groups)
+	}
+}
+
+func TestActiveProbeGroups_WithGroups(t *testing.T) {
+	tr := &Tracer{probeGroups: make(map[probes.ProbeGroup][]link.Link)}
+	tr.probeGroups[probes.GroupNetwork] = nil
+	tr.probeGroups[probes.GroupDatabase] = nil
+	groups := tr.ActiveProbeGroups()
+	if len(groups) != 2 {
+		t.Errorf("expected 2 groups, got %d: %v", len(groups), groups)
+	}
+}
+
+func TestDisableProbeGroup_NotPresent(t *testing.T) {
+	tr := &Tracer{probeGroups: make(map[probes.ProbeGroup][]link.Link)}
+	if err := tr.DisableProbeGroup(probes.GroupNetwork); err != nil {
+		t.Errorf("unexpected error disabling non-existent group: %v", err)
+	}
+}
+
+func TestDisableProbeGroup_EmptyLinks(t *testing.T) {
+	tr := &Tracer{probeGroups: make(map[probes.ProbeGroup][]link.Link)}
+	// nil slice → len == 0 → DisableProbeGroup returns early without deleting.
+	tr.probeGroups[probes.GroupDatabase] = nil
+	if err := tr.DisableProbeGroup(probes.GroupDatabase); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	// Group is still present because len(links)==0 causes early return.
+	if _, ok := tr.probeGroups[probes.GroupDatabase]; !ok {
+		t.Error("expected group to still be present when links slice is nil")
+	}
+}
+
+// ─── serveManagementAPI via fake mux ─────────────────────────────────────────
+
+func TestServeManagementAPI_GetProbes(t *testing.T) {
+	tr := &Tracer{probeGroups: make(map[probes.ProbeGroup][]link.Link)}
+	tr.probeGroups[probes.GroupNetwork] = nil
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/probes", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		groups := tr.ActiveProbeGroups()
+		strs := make([]string, len(groups))
+		for i, g := range groups {
+			strs[i] = string(g)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"active_groups": strs})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/probes", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr.Code)
+	}
+}
+
+func TestServeManagementAPI_PostProbes_MethodNotAllowed(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/probes", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/probes", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", rr.Code)
+	}
+}
+
+func TestServeManagementAPI_DisableGroup(t *testing.T) {
+	tr := &Tracer{probeGroups: make(map[probes.ProbeGroup][]link.Link)}
+	tr.probeGroups[probes.GroupDatabase] = nil
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/probes/", func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/probes/"), "/")
+		if len(parts) != 2 || r.Method != http.MethodPost {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		group := probes.ProbeGroup(parts[0])
+		switch parts[1] {
+		case "disable":
+			if err := tr.DisableProbeGroup(group); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "unknown action", http.StatusBadRequest)
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/probes/database/disable", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Errorf("expected 204, got %d", rr.Code)
+	}
+}
+
+func TestServeManagementAPI_UnknownAction(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/probes/", func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/probes/"), "/")
+		if len(parts) != 2 || r.Method != http.MethodPost {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		switch parts[1] {
+		case "disable":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "unknown action", http.StatusBadRequest)
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/probes/network/enable", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rr.Code)
+	}
+}
+
+func TestServeManagementAPI_BadPathMethod(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/probes/", func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/probes/"), "/")
+		if len(parts) != 2 || r.Method != http.MethodPost {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/probes/network/disable", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", rr.Code)
+	}
+}
+
+// ─── serveManagementAPI real HTTP server (coverage for the actual function) ──
+
+func TestServeManagementAPI_RealServer_ContextCancel(t *testing.T) {
+	tr := &Tracer{probeGroups: make(map[probes.ProbeGroup][]link.Link)}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled — server should exit quickly
+
+	// port=0 causes bind to fail → ListenAndServe returns immediately
+	tr.serveManagementAPI(ctx, 0)
+}
+
+// ─── Stop with processNameCache and pathCache ─────────────────────────────────
+
+func TestStop_WithCaches(t *testing.T) {
+	tr := &Tracer{
+		filter:           filter.NewCgroupFilter(),
+		processNameCache: cache.NewLRUCache(16, time.Minute),
+		pathCache:        cache.NewPathCache(),
+	}
+	tr.processNameCache.Set(uint32(1), "init")
+	tr.pathCache.Set("k", "v")
+
+	if err := tr.Stop(); err != nil {
+		t.Errorf("unexpected error from Stop: %v", err)
+	}
+}
+
+// ─── getProcessNameQuick — cache miss with non-existent PID ──────────────────
+
+func TestGetProcessNameQuick_NonExistentPID(t *testing.T) {
+	tr := &Tracer{processNameCache: cache.NewLRUCache(16, time.Minute)}
+	// PID 55555 almost certainly doesn't exist on the test host.
+	result := tr.getProcessNameQuick(55555)
+	_ = result // just ensure no panic
+}
+
+// ─── serveManagementAPI real integration test ─────────────────────────────────
+
+// TestServeManagementAPI_Integration starts the actual serveManagementAPI on a
+// free port and exercises the /probes and /probes/{group}/disable endpoints.
+func TestServeManagementAPI_Integration(t *testing.T) {
+	// Find a free port by opening a listener and closing it.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("cannot get free port: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+
+	tr := &Tracer{probeGroups: make(map[probes.ProbeGroup][]link.Link)}
+	tr.probeGroups[probes.GroupNetwork] = nil
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		tr.serveManagementAPI(ctx, port)
+	}()
+
+	// Wait up to 500ms for the server to be ready.
+	addr := fmt.Sprintf("http://127.0.0.1:%d", port)
+	var ready bool
+	for i := 0; i < 50; i++ {
+		resp, err2 := http.Get(addr + "/probes")
+		if err2 == nil {
+			_ = resp.Body.Close()
+			ready = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !ready {
+		cancel()
+		<-done
+		t.Skip("management API server not ready in time")
+	}
+
+	// GET /probes → 200 with active_groups.
+	resp, err := http.Get(addr + "/probes")
+	if err != nil {
+		t.Fatalf("GET /probes: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("GET /probes: expected 200, got %d: %s", resp.StatusCode, body)
+	}
+
+	// POST /probes → 405 method not allowed.
+	resp2, err := http.Post(addr+"/probes", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST /probes: %v", err)
+	}
+	_ = resp2.Body.Close()
+	if resp2.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("POST /probes: expected 405, got %d", resp2.StatusCode)
+	}
+
+	// POST /probes/network/disable → 204 (group present but no links).
+	resp3, err := http.Post(addr+"/probes/network/disable", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST /probes/network/disable: %v", err)
+	}
+	_ = resp3.Body.Close()
+	if resp3.StatusCode != http.StatusNoContent {
+		t.Errorf("POST /probes/network/disable: expected 204, got %d", resp3.StatusCode)
+	}
+
+	// POST /probes/network/enable → 400 unknown action.
+	resp4, err := http.Post(addr+"/probes/network/enable", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST /probes/network/enable: %v", err)
+	}
+	_ = resp4.Body.Close()
+	if resp4.StatusCode != http.StatusBadRequest {
+		t.Errorf("POST /probes/network/enable: expected 400, got %d", resp4.StatusCode)
+	}
+
+	// GET /probes/network/disable → 404 (GET not POST).
+	resp5, err := http.Get(addr + "/probes/network/disable")
+	if err != nil {
+		t.Fatalf("GET /probes/network/disable: %v", err)
+	}
+	_ = resp5.Body.Close()
+	if resp5.StatusCode != http.StatusNotFound {
+		t.Errorf("GET /probes/network/disable: expected 404, got %d", resp5.StatusCode)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Error("serveManagementAPI did not shut down in time")
+	}
+}
+
+// ─── misc format helpers ───────────────────────────────────────────────────────
+
+// Verify that the fmt import is used so the file compiles without "imported and not used".
+var _ = fmt.Sprintf

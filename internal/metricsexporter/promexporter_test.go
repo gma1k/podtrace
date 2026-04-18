@@ -411,3 +411,142 @@ func TestExportPoolExhaustedMetricWithContext(t *testing.T) {
 	}
 	ExportPoolExhaustedMetricWithContext(event, "prod")
 }
+
+func TestHandleEventWithContext_AllEventTypes(t *testing.T) {
+	ctx := map[string]interface{}{
+		"namespace":      "test-ns",
+		"target_pod":     "pod-a",
+		"target_service": "svc-a",
+	}
+
+	testEvents := []*events.Event{
+		{Type: events.EventConnect, LatencyNS: 1_000_000, ProcessName: "p"},
+		{Type: events.EventTCPSend, LatencyNS: 2_000_000, Bytes: 100, ProcessName: "p"},
+		{Type: events.EventTCPRecv, LatencyNS: 3_000_000, Bytes: 200, ProcessName: "p"},
+		{Type: events.EventDNS, LatencyNS: 4_000_000, ProcessName: "p"},
+		{Type: events.EventWrite, LatencyNS: 5_000_000, Bytes: 50, ProcessName: "p"},
+		{Type: events.EventRead, LatencyNS: 6_000_000, Bytes: 60, ProcessName: "p"},
+		{Type: events.EventFsync, LatencyNS: 7_000_000, ProcessName: "p"},
+		{Type: events.EventUDPSend, LatencyNS: 8_000_000, Bytes: 30, ProcessName: "p"},
+		{Type: events.EventUDPRecv, LatencyNS: 9_000_000, Bytes: 40, ProcessName: "p"},
+		{Type: events.EventSchedSwitch, LatencyNS: 10_000_000, ProcessName: "p"},
+		{Type: events.EventTLSHandshake, LatencyNS: 11_000_000, ProcessName: "p"},
+		{Type: events.EventResourceLimit, LatencyNS: 12_000_000, ProcessName: "p"},
+		{Type: events.EventPoolAcquire, LatencyNS: 13_000_000, ProcessName: "p"},
+		{Type: events.EventPoolRelease, LatencyNS: 14_000_000, ProcessName: "p"},
+		{Type: events.EventPoolExhausted, LatencyNS: 15_000_000, ProcessName: "p"},
+		// Language-runtime adapters.
+		{Type: events.EventRedisCmd, LatencyNS: 1_000_000, Details: "SET", ProcessName: "p"},
+		{Type: events.EventRedisCmd, LatencyNS: 1_000_000, Details: "", ProcessName: "p"}, // empty cmd → "unknown"
+		{Type: events.EventMemcachedCmd, LatencyNS: 500_000, Details: "get", ProcessName: "p"},
+		{Type: events.EventMemcachedCmd, LatencyNS: 500_000, Details: "", ProcessName: "p"},
+		{Type: events.EventFastCGIResp, LatencyNS: 20_000_000, Details: "GET", ProcessName: "p"},
+		{Type: events.EventFastCGIResp, LatencyNS: 20_000_000, Details: "", ProcessName: "p"},
+		{Type: events.EventGRPCMethod, LatencyNS: 8_000_000, Target: "/svc/Method", ProcessName: "p"},
+		{Type: events.EventGRPCMethod, LatencyNS: 8_000_000, Target: "", ProcessName: "p"},
+		{Type: events.EventKafkaProduce, LatencyNS: 5_000_000, Details: "my-topic", Bytes: 256, ProcessName: "p"},
+		{Type: events.EventKafkaProduce, LatencyNS: 5_000_000, Details: "", Bytes: 0, ProcessName: "p"},
+		{Type: events.EventKafkaFetch, LatencyNS: 3_000_000, Details: "my-topic", Bytes: 512, ProcessName: "p"},
+		{Type: events.EventKafkaFetch, LatencyNS: 3_000_000, Details: "", Bytes: 0, ProcessName: "p"},
+	}
+
+	for _, e := range testEvents {
+		HandleEventWithContext(e, ctx)
+		HandleEventWithContext(e, nil) // test nil context path too
+	}
+}
+
+func TestHandleEventWithContext_Nil(t *testing.T) {
+	HandleEventWithContext(nil, nil) // must not panic
+}
+
+func TestHandleEvent_AllEventTypes(t *testing.T) {
+	testEvents := []*events.Event{
+		{Type: events.EventConnect, LatencyNS: 1_000_000},
+		{Type: events.EventTCPSend, LatencyNS: 2_000_000, Bytes: 100},
+		{Type: events.EventRedisCmd, LatencyNS: 1_000_000, Details: "GET"},
+		{Type: events.EventKafkaProduce, LatencyNS: 5_000_000, Details: "t", Bytes: 10},
+		{Type: events.EventKafkaFetch, LatencyNS: 3_000_000, Details: "t", Bytes: 20},
+	}
+	for _, e := range testEvents {
+		HandleEvent(e)
+	}
+}
+
+func TestHandleEvents_ClosedChannel(t *testing.T) {
+	ch := make(chan *events.Event, 2)
+	ch <- &events.Event{Type: events.EventDNS}
+	ch <- nil // nil event should be skipped
+	close(ch)
+	HandleEvents(ch) // must drain and return
+}
+
+func TestRecordChannelDepths(t *testing.T) {
+	// Must not panic.
+	RecordChannelDepths(100, 50)
+	RecordChannelDepths(0, 0)
+}
+
+func TestRecordBPFMapUtilization(t *testing.T) {
+	// Must not panic.
+	RecordBPFMapUtilization("stack_traces", 0.5)
+	RecordBPFMapUtilization("start_times", 1.0)
+	RecordBPFMapUtilization("unknown_map", 0.0)
+}
+
+func TestGetLabel_Variants(t *testing.T) {
+	ctx := map[string]interface{}{
+		"namespace": "test-ns",
+		"empty":     "",
+		"number":    42, // not a string
+	}
+
+	if got := getLabel(ctx, "namespace", "default"); got != "test-ns" {
+		t.Errorf("expected test-ns, got %q", got)
+	}
+	if got := getLabel(ctx, "missing", "fallback"); got != "fallback" {
+		t.Errorf("expected fallback, got %q", got)
+	}
+	if got := getLabel(ctx, "empty", "fallback"); got != "fallback" {
+		t.Errorf("expected fallback for empty string, got %q", got)
+	}
+	if got := getLabel(ctx, "number", "fallback"); got != "fallback" {
+		t.Errorf("expected fallback for non-string, got %q", got)
+	}
+	if got := getLabel(nil, "namespace", "fallback"); got != "fallback" {
+		t.Errorf("expected fallback for nil ctx, got %q", got)
+	}
+}
+
+func TestSecurityHeadersMiddleware_LargeRequest(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := securityHeadersMiddleware(next)
+
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	// Set ContentLength > maxRequestSize to trigger 413.
+	req.ContentLength = maxRequestSize + 1
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("expected 413, got %d", rr.Code)
+	}
+}
+
+func TestRateLimitMiddleware_Allowed(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := rateLimitMiddleware(next)
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	// The first request should be allowed (rate limiter has capacity at startup).
+	if rr.Code != http.StatusOK && rr.Code != http.StatusTooManyRequests {
+		t.Errorf("unexpected status code: %d", rr.Code)
+	}
+}

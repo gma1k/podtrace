@@ -1,6 +1,7 @@
 package alerting
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -228,4 +229,43 @@ func TestSeverityLevel(t *testing.T) {
 	}
 }
 
+// TestAlert_Key_Nil covers the `if a == nil { return "" }` branch in Key().
+func TestAlert_Key_Nil(t *testing.T) {
+	var a *Alert
+	if got := a.Key(); got != "" {
+		t.Errorf("Key() on nil alert = %q, want empty string", got)
+	}
+}
 
+// TestAlert_Sanitize_Nil covers the `if a == nil { return }` branch in Sanitize().
+func TestAlert_Sanitize_Nil(t *testing.T) {
+	var a *Alert
+	a.Sanitize() // must not panic
+}
+
+// TestAlert_Sanitize_ManyRecommendations covers `len(a.Recommendations) > 10` truncation.
+func TestAlert_Sanitize_ManyRecommendations(t *testing.T) {
+	recs := make([]string, 15)
+	for i := range recs {
+		recs[i] = "recommendation"
+	}
+	a := &Alert{Recommendations: recs}
+	a.Sanitize()
+	if len(a.Recommendations) > 10 {
+		t.Errorf("expected Recommendations truncated to 10, got %d", len(a.Recommendations))
+	}
+}
+
+// TestAlert_Sanitize_LongRecommendation covers long individual recommendation truncation.
+func TestAlert_Sanitize_LongRecommendation(t *testing.T) {
+	a := &Alert{
+		Recommendations: []string{strings.Repeat("x", 600)},
+	}
+	a.Sanitize()
+	if len(a.Recommendations[0]) > 512 {
+		t.Errorf("expected recommendation truncated to ≤512, got %d", len(a.Recommendations[0]))
+	}
+	if !strings.HasSuffix(a.Recommendations[0], "...") {
+		t.Errorf("expected '...' suffix, got %q", a.Recommendations[0][len(a.Recommendations[0])-4:])
+	}
+}
