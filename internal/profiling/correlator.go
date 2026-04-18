@@ -2,6 +2,7 @@ package profiling
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -9,6 +10,13 @@ import (
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/events"
 )
+
+func safeInt64(v uint64) int64 {
+	if v > math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return int64(v)
+}
 
 // FrameCount holds a stack frame address/symbol and how many times it appeared
 // in SchedSwitch events during slow-operation windows.
@@ -108,7 +116,7 @@ func Correlate(
 			eventWall := BPFTimestampToWall(e.Timestamp)
 			slowWindows = append(slowWindows, window{
 				start: eventWall.Add(-50 * time.Millisecond),
-				end:   eventWall.Add(time.Duration(e.LatencyNS) + 50*time.Millisecond),
+				end:   eventWall.Add(time.Duration(safeInt64(e.LatencyNS)) + 50*time.Millisecond),
 			})
 		}
 	}
@@ -250,7 +258,7 @@ func GenerateSection(cr *CorrelatedResult, duration time.Duration) string {
 				e.TypeString(),
 				e.PID,
 				e.ProcessName,
-				time.Duration(e.LatencyNS),
+				time.Duration(safeInt64(e.LatencyNS)),
 				truncate(e.Target, 60))
 		}
 		sb.WriteString("\n")
@@ -330,7 +338,7 @@ func GenerateSection(cr *CorrelatedResult, duration time.Duration) string {
 	if len(cr.OOMEvents) > 0 {
 		fmt.Fprintf(&sb, "  OOM Kill events: %d\n", len(cr.OOMEvents))
 		for _, e := range cr.OOMEvents {
-			fmt.Fprintf(&sb, "    task=%s  mem=%s\n", e.Target, formatBytes(int64(e.Bytes)))
+			fmt.Fprintf(&sb, "    task=%s  mem=%s\n", e.Target, formatBytes(safeInt64(e.Bytes)))
 		}
 		sb.WriteString("\n")
 	}

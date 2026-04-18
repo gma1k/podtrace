@@ -1,6 +1,7 @@
 package profiling
 
 import (
+	"math"
 	"sync"
 	"time"
 
@@ -33,5 +34,8 @@ func GetClockOffset() int64 {
 // BPFTimestampToWall converts a BPF ktime_get_ns() timestamp (nanoseconds since
 // system boot, CLOCK_MONOTONIC) to a wall-clock time.Time.
 func BPFTimestampToWall(bpfNS uint64) time.Time {
+	if bpfNS > math.MaxInt64 {
+		bpfNS = math.MaxInt64
+	}
 	return time.Unix(0, int64(bpfNS)+GetClockOffset())
 }
