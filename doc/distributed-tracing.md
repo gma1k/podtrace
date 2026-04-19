@@ -9,7 +9,7 @@
 - **Trace Context Extraction**: Automatically extracts trace context from HTTP headers
 - **Event Correlation**: Groups events by trace ID to build complete request flows
 - **Request Flow Graphs**: Builds directed graphs showing service interactions
-- **Multiple Exporters**: Supports OpenTelemetry (OTLP), Jaeger, and Splunk HEC
+- **Multiple Exporters**: Supports OpenTelemetry (OTLP), Jaeger, Splunk HEC, DataDog, and Zipkin
 - **Sampling Support**: Configurable sampling rates to control export volume
 
 ## How It Works
@@ -146,6 +146,44 @@ export PODTRACE_TRACING_SPLUNK_ENDPOINT=https://splunk:8088/services/collector
 export PODTRACE_TRACING_SPLUNK_TOKEN=YOUR_HEC_TOKEN
 ```
 
+#### DataDog
+
+Export to a DataDog Agent (v0.4 traces API) or directly to the DataDog backend using an API key:
+
+```bash
+# Via local DataDog Agent (no API key required)
+./bin/podtrace -n production my-pod \
+  --tracing \
+  --tracing-datadog-endpoint http://datadog-agent:8126/v0.4/traces
+
+# Direct to DataDog backend (API key required)
+./bin/podtrace -n production my-pod \
+  --tracing \
+  --tracing-datadog-endpoint https://trace.agent.datadoghq.com/v0.4/traces \
+  --tracing-datadog-api-key YOUR_DD_API_KEY
+```
+
+**Environment Variables**:
+```bash
+export PODTRACE_DATADOG_ENDPOINT=http://datadog-agent:8126/v0.4/traces
+export PODTRACE_DATADOG_API_KEY=YOUR_DD_API_KEY   # optional, agent mode needs no key
+```
+
+#### Zipkin
+
+Export to a Zipkin server (v2 JSON API):
+
+```bash
+./bin/podtrace -n production my-pod \
+  --tracing \
+  --tracing-zipkin-endpoint http://zipkin:9411/api/v2/spans
+```
+
+**Environment Variable**:
+```bash
+export PODTRACE_ZIPKIN_ENDPOINT=http://zipkin:9411/api/v2/spans
+```
+
 ### Sampling
 
 Control the volume of exported traces with sampling:
@@ -177,6 +215,8 @@ You can enable multiple exporters simultaneously:
   --tracing-jaeger-endpoint http://jaeger:14268/api/traces \
   --tracing-splunk-endpoint https://splunk:8088/services/collector \
   --tracing-splunk-token YOUR_TOKEN \
+  --tracing-datadog-endpoint http://datadog-agent:8126/v0.4/traces \
+  --tracing-zipkin-endpoint http://zipkin:9411/api/v2/spans \
   --tracing-sample-rate 0.5
 ```
 
@@ -195,6 +235,9 @@ All tracing configuration can be set via:
 | `PODTRACE_TRACING_JAEGER_ENDPOINT` | Jaeger collector endpoint | - |
 | `PODTRACE_TRACING_SPLUNK_ENDPOINT` | Splunk HEC endpoint | - |
 | `PODTRACE_TRACING_SPLUNK_TOKEN` | Splunk HEC token | - |
+| `PODTRACE_DATADOG_ENDPOINT` | DataDog Agent traces endpoint | `http://localhost:8126/v0.4/traces` |
+| `PODTRACE_DATADOG_API_KEY` | DataDog API key (direct ingest only) | - |
+| `PODTRACE_ZIPKIN_ENDPOINT` | Zipkin v2 spans endpoint | `http://localhost:9411/api/v2/spans` |
 | `PODTRACE_TRACING_SAMPLE_RATE` | Sampling rate (0.0-1.0) | `1.0` |
 
 ### Command-Line Flags
@@ -206,6 +249,9 @@ All tracing configuration can be set via:
 | `--tracing-jaeger-endpoint` | Jaeger endpoint | - |
 | `--tracing-splunk-endpoint` | Splunk HEC endpoint | - |
 | `--tracing-splunk-token` | Splunk HEC token | - |
+| `--tracing-datadog-endpoint` | DataDog Agent endpoint | - |
+| `--tracing-datadog-api-key` | DataDog API key | - |
+| `--tracing-zipkin-endpoint` | Zipkin v2 endpoint | - |
 | `--tracing-sample-rate` | Sampling rate (0.0-1.0) | `1.0` |
 
 ## Request Flow Graphs
