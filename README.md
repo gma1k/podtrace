@@ -83,7 +83,7 @@ Podtrace documentation is available in the [`doc/`](doc/) directory.
 - **Trace Context Extraction**: Automatically extracts trace context from HTTP/HTTP2 headers and gRPC metadata
 - **Event Correlation**: Groups events by trace ID to build complete request flows across services
 - **Request Flow Graphs**: Builds directed graphs showing service interactions with latency and error metrics
-- **Multiple Exporters**: Supports OpenTelemetry (OTLP), Jaeger, Splunk HEC, DataDog, and Zipkin
+- **Multiple Exporters**: Supports OpenTelemetry (OTLP), Jaeger, Splunk HEC, Datadog, and Zipkin
 - **Sampling Support**: Configurable sampling rates to control export volume
 
 ### Performance Profiling
