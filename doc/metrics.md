@@ -4,6 +4,41 @@
 
 Podtrace exposes Prometheus metrics for integration with monitoring systems like Prometheus and Grafana.
 
+## Quick Reference
+
+All metrics are exported per process and per event type.
+
+| Metric | Description |
+|---|---|
+| `podtrace_rtt_seconds` | Histogram of TCP RTTs |
+| `podtrace_rtt_latest_seconds` | Most recent TCP RTT |
+| `podtrace_latency_seconds` | Histogram of TCP send/receive latency |
+| `podtrace_latency_latest_seconds` | Most recent TCP latency |
+| `podtrace_dns_latency_seconds_gauge` | Latest DNS query latency |
+| `podtrace_dns_latency_seconds_histogram` | Distribution of DNS query latencies |
+| `podtrace_fs_latency_seconds_gauge` | Latest file system operation latency |
+| `podtrace_fs_latency_seconds_histogram` | Distribution of file system operation latencies |
+| `podtrace_network_bytes_total` | Total bytes transferred over network (TCP/UDP) |
+| `podtrace_filesystem_bytes_total` | Total bytes transferred via filesystem ops |
+| `podtrace_cpu_block_seconds_gauge` | Latest CPU block time |
+| `podtrace_cpu_block_seconds_histogram` | Distribution of CPU block times |
+| `podtrace_resource_limit_bytes` | Resource limit in bytes (CPU/Memory/I/O) |
+| `podtrace_resource_usage_bytes` | Current resource usage in bytes |
+| `podtrace_resource_utilization_percent` | Resource utilization percentage |
+| `podtrace_resource_alert_level` | Resource alert level (0=none, 1=warning, 2=critical, 3=emergency) |
+| `podtrace_pool_acquires_total` | Total connection pool acquires |
+| `podtrace_pool_releases_total` | Total connection pool releases |
+| `podtrace_pool_exhausted_total` | Total pool exhaustion events |
+| `podtrace_pool_wait_time_seconds` | Histogram of pool wait times |
+| `podtrace_pool_connections` | Current number of connections in pool |
+| `podtrace_pool_utilization` | Pool utilization percentage |
+| `podtrace_redis_latency_seconds` | Distribution of Redis command latencies |
+| `podtrace_memcached_latency_seconds` | Distribution of Memcached operation latencies |
+| `podtrace_fastcgi_latency_seconds` | Distribution of FastCGI request latencies |
+| `podtrace_grpc_latency_seconds` | Distribution of gRPC method call latencies |
+| `podtrace_kafka_latency_seconds` | Distribution of Kafka produce/consume latencies |
+| `podtrace_kafka_bytes_total` | Total bytes in Kafka produce/consume operations |
+
 ## Enabling Metrics
 
 Metrics are enabled when you run Podtrace with the `--metrics` flag. By default, the metrics server starts on `127.0.0.1:3000`.
@@ -93,6 +128,65 @@ All metrics are labeled with:
 - Buckets: Exponential (0.0001s to ~52s)
 - Labels: `type`, `process_name`
 - Source: CPU scheduling events (sched_switch)
+
+### Connection Pool Metrics
+
+**`podtrace_pool_acquires_total`** (Counter)
+- Description: Total number of connection pool acquire attempts
+- Labels: `type`, `process_name`
+
+**`podtrace_pool_releases_total`** (Counter)
+- Description: Total number of connections returned to the pool
+- Labels: `type`, `process_name`
+
+**`podtrace_pool_exhausted_total`** (Counter)
+- Description: Total pool exhaustion events (acquire failed — pool full)
+- Labels: `type`, `process_name`
+
+**`podtrace_pool_wait_time_seconds`** (Histogram)
+- Description: Time spent waiting to acquire a connection from the pool
+- Buckets: Exponential (0.0001s to ~52s)
+- Labels: `type`, `process_name`
+
+**`podtrace_pool_connections`** (Gauge)
+- Description: Current number of active connections in the pool
+- Labels: `type`, `process_name`
+
+**`podtrace_pool_utilization`** (Gauge)
+- Description: Connection pool utilization as a percentage
+- Labels: `type`, `process_name`
+
+### Language-Runtime Adapter Metrics
+
+**`podtrace_redis_latency_seconds`** (Histogram)
+- Description: Distribution of Redis command latencies (hiredis uprobes)
+- Labels: `type`, `process_name`
+- Source: `redisCommand` / `redisCommandArgv` uprobes
+
+**`podtrace_memcached_latency_seconds`** (Histogram)
+- Description: Distribution of Memcached operation latencies (libmemcached uprobes)
+- Labels: `type`, `process_name`
+- Source: `memcached_get`, `memcached_set`, `memcached_delete` uprobes
+
+**`podtrace_fastcgi_latency_seconds`** (Histogram)
+- Description: Distribution of FastCGI request latencies (unix-socket kprobes, BTF-only)
+- Labels: `type`, `process_name`
+- Source: FastCGI request/response kprobes
+
+**`podtrace_grpc_latency_seconds`** (Histogram)
+- Description: Distribution of gRPC method call latencies
+- Labels: `type`, `process_name`
+- Source: `tcp_sendmsg` kprobe filtered by `PODTRACE_GRPC_PORT` (default 50051)
+
+**`podtrace_kafka_latency_seconds`** (Histogram)
+- Description: Distribution of Kafka produce and consume latencies (librdkafka uprobes)
+- Labels: `type`, `process_name`, `operation` (produce or fetch)
+- Source: `rd_kafka_produce`, `rd_kafka_consumer_poll` uprobes
+
+**`podtrace_kafka_bytes_total`** (Counter)
+- Description: Total bytes in Kafka produce/consume operations
+- Labels: `type`, `process_name`, `operation` (produce or fetch)
+- Use with `rate()` to get bytes/second throughput
 
 ## Prometheus Configuration
 

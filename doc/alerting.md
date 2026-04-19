@@ -13,44 +13,27 @@ The alerting system monitors:
 
 ## Quick Start
 
-### Enable Alerting
-
-Alerting is disabled by default. Enable it with:
+Alerting is disabled by default. Pick a channel below, set the variables, and run Podtrace — alerts fire automatically when issues are detected.
 
 ```bash
+# Webhook
 export PODTRACE_ALERTING_ENABLED=true
-```
-
-### Configure Notification Channel
-
-Choose one or more notification channels:
-
-#### Webhook
-
-```bash
 export PODTRACE_ALERT_WEBHOOK_URL=https://alerts.example.com/webhook
-```
+./bin/podtrace -n production my-pod
 
-#### Slack
-
-```bash
+# Slack
+export PODTRACE_ALERTING_ENABLED=true
 export PODTRACE_ALERT_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
 export PODTRACE_ALERT_SLACK_CHANNEL="#alerts"
-```
+./bin/podtrace -n production my-pod
 
-#### Splunk
-
-```bash
+# Splunk HEC (reuses the tracing Splunk config)
+export PODTRACE_ALERTING_ENABLED=true
 export PODTRACE_ALERT_SPLUNK_ENABLED=true
-```
-
-### Run Podtrace
-
-```bash
 ./bin/podtrace -n production my-pod
 ```
 
-Alerts will be sent automatically when issues are detected.
+Multiple channels can be active at the same time — set all relevant variables before running.
 
 ## Configuration
 

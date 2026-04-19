@@ -25,6 +25,8 @@ type Manager struct {
 	otlpExporter    *exporter.OTLPExporter
 	jaegerExporter  *exporter.JaegerExporter
 	splunkExporter  *exporter.SplunkExporter
+	datadogExporter *exporter.DataDogExporter
+	zipkinExporter  *exporter.ZipkinExporter
 	graphBuilder    *graph.GraphBuilder
 	exportInterval  time.Duration
 	cleanupInterval time.Duration
@@ -44,6 +46,8 @@ func NewManager() (*Manager, error) {
 	var otlpExporter *exporter.OTLPExporter
 	var jaegerExporter *exporter.JaegerExporter
 	var splunkExporter *exporter.SplunkExporter
+	var datadogExporter *exporter.DataDogExporter
+	var zipkinExporter *exporter.ZipkinExporter
 	var err error
 
 	if config.OTLPEndpoint != "" {
@@ -67,6 +71,20 @@ func NewManager() (*Manager, error) {
 		}
 	}
 
+	if config.DataDogEndpoint != "" {
+		datadogExporter, err = exporter.NewDataDogExporter(config.DataDogEndpoint, config.DataDogAPIKey, config.TracingSampleRate)
+		if err != nil {
+			logger.Warn("Failed to create DataDog exporter", zap.Error(err))
+		}
+	}
+
+	if config.ZipkinEndpoint != "" {
+		zipkinExporter, err = exporter.NewZipkinExporter(config.ZipkinEndpoint, config.TracingSampleRate)
+		if err != nil {
+			logger.Warn("Failed to create Zipkin exporter", zap.Error(err))
+		}
+	}
+
 	return &Manager{
 		enabled:         true,
 		extractor:       extractor,
@@ -74,6 +92,8 @@ func NewManager() (*Manager, error) {
 		otlpExporter:    otlpExporter,
 		jaegerExporter:  jaegerExporter,
 		splunkExporter:  splunkExporter,
+		datadogExporter: datadogExporter,
+		zipkinExporter:  zipkinExporter,
 		graphBuilder:    graphBuilder,
 		exportInterval:  5 * time.Second,
 		cleanupInterval: 1 * time.Minute,
@@ -236,6 +256,60 @@ func (m *Manager) exportTraces() {
 			}
 		}
 	}
+
+	if m.datadogExporter != nil {
+		if err := m.datadogExporter.ExportTraces(traces); err != nil {
+			logger.Warn("Failed to export traces to DataDog", zap.Error(err))
+			manager := alerting.GetGlobalManager()
+			if manager != nil {
+				alert := &alerting.Alert{
+					Severity:  alerting.SeverityWarning,
+					Title:     "DataDog Exporter Failure",
+					Message:   fmt.Sprintf("Failed to export traces to DataDog: %v", err),
+					Timestamp: time.Now(),
+					Source:    "exporter",
+					Context: map[string]interface{}{
+						"exporter": "datadog",
+						"endpoint": config.DataDogEndpoint,
+						"error":    err.Error(),
+					},
+					Recommendations: []string{
+						"Check DataDog agent endpoint connectivity",
+						"Verify DD-API-KEY if using direct ingest",
+						"Check network connectivity",
+					},
+				}
+				manager.SendAlert(alert)
+			}
+		}
+	}
+
+	if m.zipkinExporter != nil {
+		if err := m.zipkinExporter.ExportTraces(traces); err != nil {
+			logger.Warn("Failed to export traces to Zipkin", zap.Error(err))
+			manager := alerting.GetGlobalManager()
+			if manager != nil {
+				alert := &alerting.Alert{
+					Severity:  alerting.SeverityWarning,
+					Title:     "Zipkin Exporter Failure",
+					Message:   fmt.Sprintf("Failed to export traces to Zipkin: %v", err),
+					Timestamp: time.Now(),
+					Source:    "exporter",
+					Context: map[string]interface{}{
+						"exporter": "zipkin",
+						"endpoint": config.ZipkinEndpoint,
+						"error":    err.Error(),
+					},
+					Recommendations: []string{
+						"Check Zipkin endpoint connectivity",
+						"Verify endpoint configuration",
+						"Check network connectivity",
+					},
+				}
+				manager.SendAlert(alert)
+			}
+		}
+	}
 }
 
 func (m *Manager) GetRequestFlowGraph() *graph.RequestFlowGraph {
@@ -279,6 +353,18 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	if m.splunkExporter != nil {
 		if err := m.splunkExporter.Shutdown(ctx); err != nil {
 			logger.Warn("Failed to shutdown Splunk exporter", zap.Error(err))
+		}
+	}
+
+	if m.datadogExporter != nil {
+		if err := m.datadogExporter.Shutdown(ctx); err != nil {
+			logger.Warn("Failed to shutdown DataDog exporter", zap.Error(err))
+		}
+	}
+
+	if m.zipkinExporter != nil {
+		if err := m.zipkinExporter.Shutdown(ctx); err != nil {
+			logger.Warn("Failed to shutdown Zipkin exporter", zap.Error(err))
 		}
 	}
 

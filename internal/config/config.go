@@ -23,13 +23,15 @@ const (
 	DefaultOTLPEndpoint          = "http://localhost:4318"
 	DefaultJaegerEndpoint        = "http://localhost:14268/api/traces"
 	DefaultSplunkEndpoint        = "http://localhost:8088/services/collector"
+	DefaultDataDogEndpoint       = "http://localhost:8126/v0.4/traces"
+	DefaultZipkinEndpoint        = "http://localhost:9411/api/v2/spans"
 	DefaultAlertHTTPTimeout      = 10 * time.Second
 	DefaultAlertDedupWindow      = 5 * time.Minute
 	DefaultAlertRateLimitPerMin  = 10
 	DefaultAlertMaxRetries       = 3
 	DefaultAlertRetryBackoffBase = 1 * time.Second
 	DefaultAlertMaxPayloadSize   = 1024 * 1024
-	DefaultVersion               = "v0.9.0"
+	DefaultVersion               = "v0.10.0"
 )
 
 const (
@@ -56,6 +58,9 @@ var (
 	JaegerEndpoint            = getEnvOrDefault("PODTRACE_JAEGER_ENDPOINT", DefaultJaegerEndpoint)
 	SplunkEndpoint            = getEnvOrDefault("PODTRACE_SPLUNK_ENDPOINT", DefaultSplunkEndpoint)
 	SplunkToken               = getEnvOrDefault("PODTRACE_SPLUNK_TOKEN", "")
+	DataDogEndpoint           = getEnvOrDefault("PODTRACE_DATADOG_ENDPOINT", DefaultDataDogEndpoint)
+	DataDogAPIKey             = getEnvOrDefault("PODTRACE_DATADOG_API_KEY", "")
+	ZipkinEndpoint            = getEnvOrDefault("PODTRACE_ZIPKIN_ENDPOINT", DefaultZipkinEndpoint)
 	MaxTraceIDLength          = 32
 	MaxSpanIDLength           = 16
 	MaxTraceStateLength       = 512
