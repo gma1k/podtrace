@@ -1,0 +1,22 @@
+{{- if .Values.namespace.create }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "podtrace.systemNamespace" . }}
+  labels:
+    {{- include "podtrace.labels" . | nindent 4 }}
+    # podtrace-system must be a PSA "privileged" namespace because the
+    # agent DaemonSet and session Jobs run as root with CAP_BPF /
+    # CAP_SYS_ADMIN / CAP_PERFMON. User PodTrace / PodTraceSession CRs
+    # live in user namespaces; only the implementation pods land here.
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
+    {{- with .Values.namespace.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.namespace.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

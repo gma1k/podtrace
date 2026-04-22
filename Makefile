@@ -1,4 +1,5 @@
-.PHONY: all build clean test check-go test-unit test-integration test-bench coverage
+.PHONY: all build clean test check-go test-unit test-integration test-bench coverage \
+        generate manifests clientset envtest docker-build helm-lint helm-template operator-tools
 
 CLANG ?= clang
 LLC ?= llc
@@ -167,6 +168,88 @@ coverage: test-unit
 	@echo "Coverage report generated: coverage.html"
 	@echo "Coverage summary:"
 	$(GO) tool cover -func=coverage.out | tail -1
+
+# ------------------------------------------------------------------------------
+# Operator (Phase 0/1+) — CRD code generation, manifest generation, container
+# image. These targets are independent of the eBPF build; they operate on the
+# Go type definitions under ./api/v1alpha1 and on ./deploy/charts.
+# ------------------------------------------------------------------------------
+
+CONTROLLER_GEN_VERSION ?= v0.16.5
+CONTROLLER_GEN ?= $(shell go env GOPATH 2>/dev/null)/bin/controller-gen
+CRD_OUT_DIR ?= deploy/charts/podtrace/templates/crds
+BOILERPLATE ?= hack/boilerplate.go.txt
+
+IMAGE_REPO ?= ghcr.io/podtrace/podtrace
+IMAGE_TAG  ?= dev
+IMAGE      ?= $(IMAGE_REPO):$(IMAGE_TAG)
+
+# operator-tools installs controller-gen at a pinned version. Safe to run on
+# every invocation; the `go install` is a no-op if already present.
+operator-tools:
+	@GOBIN=$(dir $(CONTROLLER_GEN)) $(GO) install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION)
+
+# generate (re)emits api/v1alpha1/zz_generated.deepcopy.go from the type
+# definitions. Run after any api/ type change.
+generate: operator-tools
+	$(CONTROLLER_GEN) object:headerFile=$(BOILERPLATE) paths=./api/v1alpha1/...
+
+# clientset regenerates the typed Kubernetes clientset under pkg/client/.
+# Controller-runtime operators do not need this (client.Client covers CRUD),
+# but external tooling and hook scripts commonly expect a typed clientset.
+# The generated files are committed so consumers do not need codegen.
+CLIENT_GEN_VERSION ?= v0.34.2
+CLIENT_GEN ?= $(shell go env GOPATH 2>/dev/null)/bin/client-gen
+clientset:
+	@GOBIN=$(dir $(CLIENT_GEN)) $(GO) install k8s.io/code-generator/cmd/client-gen@$(CLIENT_GEN_VERSION)
+	$(CLIENT_GEN) \
+	  --go-header-file=$(BOILERPLATE) \
+	  --clientset-name=versioned \
+	  --input-base="" \
+	  --input=github.com/podtrace/podtrace/api/v1alpha1 \
+	  --output-dir=pkg/client/clientset \
+	  --output-pkg=github.com/podtrace/podtrace/pkg/client/clientset
+
+# manifests (re)emits CRD YAMLs under the Helm chart's templates/crds/. The
+# Helm toggle guards (`{{- if .Values.crds.install }}` and the `keep`
+# annotation conditional) are re-applied after regeneration; run
+# `make manifests` whenever CRD markers change.
+manifests: operator-tools
+	$(CONTROLLER_GEN) crd paths=./api/v1alpha1/... output:crd:artifacts:config=$(CRD_OUT_DIR)
+	@./hack/wrap-crds.sh $(CRD_OUT_DIR)
+	@# Emit the webhook manifest to hack/reference/ as a diff target: the
+	@# Helm template at templates/validating-webhook.yaml is hand-authored,
+	@# but must stay in sync with the paths/rules kubebuilder generates
+	@# from the +kubebuilder:webhook markers. CI compares the two.
+	@mkdir -p hack/reference
+	$(CONTROLLER_GEN) webhook paths=./api/v1alpha1/... output:webhook:artifacts:config=hack/reference
+
+# docker-build produces the container image used by the CLI, agent, operator,
+# and session Jobs. Override IMAGE_REPO / IMAGE_TAG to push to your registry.
+docker-build:
+	docker build \
+	  --build-arg VERSION=$(IMAGE_TAG) \
+	  --build-arg COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown) \
+	  -t $(IMAGE) .
+
+# envtest runs the CRD schema validation suite against a real
+# kube-apiserver + etcd managed by controller-runtime's envtest harness.
+# The harness binaries are downloaded on demand by setup-envtest. Gated
+# by the `envtest` build tag so `go test ./...` stays CI-friendly when
+# the binaries are absent.
+ENVTEST_K8S_VERSION ?= 1.30.x
+ENVTEST_BIN_DIR ?= $(shell go env GOPATH 2>/dev/null)/envtest-assets
+SETUP_ENVTEST ?= $(shell go env GOPATH 2>/dev/null)/bin/setup-envtest
+envtest:
+	@GOBIN=$(dir $(SETUP_ENVTEST)) $(GO) install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.19
+	KUBEBUILDER_ASSETS=$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir=$(ENVTEST_BIN_DIR) -p path) \
+	  $(GO) test -tags=envtest -count=1 -timeout 180s ./api/v1alpha1/...
+
+helm-lint:
+	helm lint deploy/charts/podtrace
+
+helm-template:
+	helm template podtrace deploy/charts/podtrace
 
 build-setup: build
 	@echo "Setting capabilities..."

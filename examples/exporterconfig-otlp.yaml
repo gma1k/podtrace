@@ -1,0 +1,33 @@
+# OTLP HTTP exporter sending traces to an in-cluster OpenTelemetry Collector.
+# Header values pull from a Secret in the same namespace (cross-namespace
+# Secret refs are rejected by the validating webhook).
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: otel-collector-auth
+  namespace: default
+type: Opaque
+stringData:
+  # Example: basic auth token for the collector behind an ingress.
+  authorization: "Bearer replace-me"
+---
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: prod-otlp
+  namespace: default
+spec:
+  type: otlp
+  samplePercent: 100
+  otlp:
+    endpoint: otel-collector.observability.svc.cluster.local:4318
+    protocol: http
+    insecure: false
+    headers:
+      - name: Authorization
+        valueFrom:
+          name: otel-collector-auth
+          key: authorization
+      - name: X-Service-Name
+        value: podtrace

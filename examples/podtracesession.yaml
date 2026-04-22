@@ -1,0 +1,24 @@
+# Bounded diagnose-mode trace: runs for 5 minutes over pods matching
+# app=api. The operator fans this out into one privileged Job per node
+# hosting a matched pod.
+apiVersion: podtrace.io/v1alpha1
+kind: PodTraceSession
+metadata:
+  name: api-diag-2026-04-22
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: api
+  duration: 5m
+  filters: [dns, net, fs]
+  exporterRef:
+    name: prod-otlp
+  samplePercent: 100
+  # Persist the session summary to a Secret (avoid ConfigMap for reports
+  # that may contain hostnames or request paths).
+  reportRef:
+    secret:
+      name: api-diag-2026-04-22-report
+  # TTL applied to the CR itself once all child Jobs finish.
+  ttlSecondsAfterFinished: 3600

@@ -1,0 +1,40 @@
+apiVersion: v2
+name: podtrace
+description: |
+  Podtrace — eBPF-based Kubernetes pod observability and diagnostics.
+
+  This chart installs the podtrace operator, its CustomResourceDefinitions,
+  and (in later releases) the tracer agent DaemonSet. The operator
+  reconciles PodTrace (continuous), PodTraceSession (bounded diagnose),
+  ExporterConfig, and TracerConfig resources.
+type: application
+kubeVersion: ">=1.28.0-0"
+
+# chart version — bumped per chart change, decoupled from appVersion.
+version: 0.1.0
+# appVersion tracks the podtrace binary release this chart targets.
+appVersion: "0.10.0"
+
+keywords:
+  - ebpf
+  - tracing
+  - observability
+  - kubernetes
+  - operator
+  - diagnostics
+
+home: https://github.com/podtrace/podtrace
+sources:
+  - https://github.com/podtrace/podtrace
+
+maintainers:
+  - name: podtrace maintainers
+    url: https://github.com/podtrace/podtrace
+
+icon: https://raw.githubusercontent.com/podtrace/podtrace/main/assets/logo.png
+
+annotations:
+  artifacthub.io/changes: |
+    - kind: added
+      description: "Initial chart with v1alpha1 CRDs (PodTrace, PodTraceSession, ExporterConfig, TracerConfig) and podtrace-system namespace scaffolding."
+  artifacthub.io/category: monitoring-logging

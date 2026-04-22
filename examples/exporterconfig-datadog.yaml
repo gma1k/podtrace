@@ -1,0 +1,25 @@
+# DataDog exporter with a Secret-backed API key. The Secret must live in
+# the same namespace as the ExporterConfig.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: datadog-api-key
+  namespace: default
+type: Opaque
+stringData:
+  api-key: "replace-with-real-key"
+---
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: prod-datadog
+  namespace: default
+spec:
+  type: datadog
+  samplePercent: 10
+  datadog:
+    site: datadoghq.com
+    apiKeySecretRef:
+      name: datadog-api-key
+      key: api-key
