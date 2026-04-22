@@ -1,0 +1,43 @@
+# TracerConfig is cluster-scoped: a single "default" config governs the
+# agent DaemonSet and the per-session Job template for the whole cluster.
+apiVersion: podtrace.io/v1alpha1
+kind: TracerConfig
+metadata:
+  name: default
+spec:
+  image: ghcr.io/podtrace/podtrace:0.10.0
+  imagePullPolicy: IfNotPresent
+  systemNamespace: podtrace-system
+  # Cap privileged Job pods per node to protect scheduling capacity.
+  maxConcurrentSessionsPerNode: 2
+  # BTFMode=auto prefers host /sys/kernel/btf/vmlinux, falls back to the
+  # stub types embedded in the image. Use "host" to hard-require BTF.
+  btfMode: auto
+
+  agent:
+    logLevel: info
+    eventBufferSize: 10000
+    statusReportInterval: 30s
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits:   { cpu: 1,    memory: 512Mi }
+
+  session:
+    ttlSecondsAfterFinished: 300
+    activeDeadlineSecondsOffset: 30
+    backoffLimit: 0
+    # Optional cluster-wide ceiling on PodTraceSession.spec.duration.
+    # Uncomment to enforce a 1-hour cap on diagnose runs.
+    # maxDuration: 1h
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits:   { cpu: 1,    memory: 512Mi }
+
+  # Schedule the DaemonSet and Session pods only on nodes that can run eBPF.
+  # Typical clusters do not need this; override when you have a mixed-OS
+  # node pool or a dedicated tracing node class.
+  # nodeSelector:
+  #   kubernetes.io/os: linux
+  tolerations:
+    - operator: Exists
+      effect: NoSchedule

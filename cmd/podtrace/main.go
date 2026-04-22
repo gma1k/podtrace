@@ -82,6 +82,8 @@ func main() {
 	}
 
 	rootCmd.AddCommand(newDiagnoseEnvCmd())
+	rootCmd.AddCommand(newAgentCmd())
+	rootCmd.AddCommand(newOperatorCmd())
 
 	rootCmd.Flags().StringVarP(&namespace, "namespace", "n", config.DefaultNamespace, "Kubernetes namespace")
 	rootCmd.Flags().StringVar(&namespacesCSV, "namespaces", "", "Comma-separated namespaces for multi-pod tracing (e.g., default,prod)")

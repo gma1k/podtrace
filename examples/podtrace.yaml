@@ -1,0 +1,19 @@
+# Continuous realtime tracing of every pod matching app=api in the
+# "default" namespace. Events flow to the referenced ExporterConfig.
+# The trace remains active until this resource is deleted.
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: api-continuous
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: api
+  filters: [dns, net, fs]
+  exporterRef:
+    name: prod-otlp
+  thresholds:
+    rttSpikeMs: 200
+    fsSlowMs: 50
+  samplePercent: 100

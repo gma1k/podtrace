@@ -1,0 +1,25 @@
+Podtrace installed — release {{ .Release.Name | quote }}.
+
+Installed resources
+-------------------
+{{- if .Values.crds.install }}
+  CRDs (podtrace.io/v1alpha1):
+    PodTrace          continuous realtime tracing
+    PodTraceSession   bounded diagnose-mode tracing
+    ExporterConfig    reusable trace exporter
+    TracerConfig      cluster-scoped infrastructure
+{{- end }}
+{{- if .Values.namespace.create }}
+  Namespace: {{ include "podtrace.systemNamespace" . }}
+{{- end }}
+
+Quick start
+-----------
+  kubectl get crd | grep podtrace.io
+  kubectl apply -f examples/exporterconfig-otlp.yaml
+  kubectl apply -f examples/podtrace.yaml
+  kubectl get podtrace -A
+
+Docs
+----
+  https://github.com/podtrace/podtrace

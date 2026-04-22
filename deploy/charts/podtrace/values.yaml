@@ -1,0 +1,152 @@
+# Default values for the podtrace chart.
+#
+# The schema is organized top-down:
+#   crds      CustomResourceDefinition installation
+#   image     container image shared by operator, agent and session Jobs
+#   namespace podtrace-system namespace management
+#   operator  Deployment that runs the controller-runtime manager
+#   agent     DaemonSet that runs the per-node tracer
+#   session   Job template used for PodTraceSession forensic runs
+#   webhook   validating webhook for the CRDs
+#   rbac      optional overrides for cluster/namespaced RBAC
+#   metrics   Prometheus ServiceMonitor / PodMonitor
+#
+# By default this chart installs the CRDs and the podtrace-system
+# namespace. The operator Deployment, agent DaemonSet, webhook, and
+# ServiceMonitors are off by default — enable them individually below
+# once the rest of your setup is ready (Secrets, cert-manager, etc.).
+
+# -- Install CustomResourceDefinitions. Disable to manage CRDs outside of
+# Helm (e.g. via a separate Kustomize overlay or GitOps pipeline).
+crds:
+  install: true
+  # -- Keep CRDs on `helm uninstall`. Protects custom resources from being
+  # orphaned/deleted. Managed via the `helm.sh/resource-policy: keep`
+  # annotation when true.
+  keep: true
+
+image:
+  # -- Container image repository for the podtrace binary.
+  repository: ghcr.io/podtrace/podtrace
+  # -- Image tag. Leave empty to use Chart.appVersion.
+  tag: ""
+  # -- Image pull policy.
+  pullPolicy: IfNotPresent
+  # -- Referenced by operator, agent and session pods via imagePullSecrets.
+  pullSecrets: []
+
+namespace:
+  # -- Create the podtrace-system namespace. Set to false when the namespace
+  # is managed externally (e.g. by a platform team).
+  create: true
+  # -- Name of the system namespace. Must be Pod-Security-Admission
+  # "privileged" because the agent DaemonSet and session Jobs run as root
+  # with CAP_BPF / CAP_SYS_ADMIN.
+  name: podtrace-system
+  # -- Additional namespace labels merged into the podtrace-system namespace.
+  labels: {}
+  # -- Additional namespace annotations.
+  annotations: {}
+
+operator:
+  # -- Render the operator Deployment.
+  enabled: false
+  replicas: 1
+  leaderElect: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  # -- Annotations applied to operator pods.
+  podAnnotations: {}
+  # -- Extra environment variables injected into the operator pod.
+  extraEnv: []
+
+agent:
+  # -- Render the agent DaemonSet.
+  enabled: false
+  # -- Resources applied to each agent pod. Default reservation is small; bump
+  # on noisy nodes with heavy network/syscall traffic.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+  # -- nodeSelector applied to the DaemonSet. Empty selector schedules on all nodes.
+  nodeSelector: {}
+  # -- Tolerations applied to the DaemonSet. Default tolerates typical control-plane taints.
+  tolerations:
+    - operator: Exists
+      effect: NoSchedule
+  # -- priorityClassName for the agent pods. Defaults to system-node-critical
+  # (availability-preserving). Set to an empty string to disable.
+  priorityClassName: system-node-critical
+  # -- Event buffer size per agent. Increase if DroppedEvents grows under load.
+  eventBufferSize: 10000
+  # -- Interval at which each agent patches status.nodeStatus on PodTrace resources.
+  statusReportInterval: 30s
+  # -- BTF resolution mode: auto | host | embedded.
+  btfMode: auto
+
+session:
+  # -- TTL applied to completed session Job pods.
+  ttlSecondsAfterFinished: 300
+  # -- activeDeadlineSeconds margin added to spec.duration.
+  activeDeadlineSecondsOffset: 30
+  # -- backoffLimit for session Jobs. 0 means fail fast (recommended).
+  backoffLimit: 0
+  # -- Cap on concurrent session Job pods per node.
+  maxConcurrentSessionsPerNode: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+webhook:
+  # -- Enable the validating webhook for CRDs. Requires the operator to
+  # be enabled as well — the webhook server runs inside the operator pod.
+  # When enabled without the operator, ValidatingWebhookConfiguration is
+  # installed but has no reachable backend.
+  enabled: false
+  # -- Port the webhook server listens on inside the operator pod.
+  port: 9443
+  # -- Certificate source: cert-manager | self-signed.
+  certSource: cert-manager
+  # -- cert-manager Issuer reference when certSource=cert-manager. The
+  # chart renders a Certificate and annotates the webhook with
+  # `cert-manager.io/inject-ca-from` pointing at the issued cert.
+  certManager:
+    issuerRef:
+      name: podtrace-selfsigned
+      kind: Issuer
+  # -- Inline CA bundle (base64-encoded PEM) used when certSource is NOT
+  # cert-manager. When set, every ValidatingWebhookConfiguration entry
+  # gets this caBundle literally. Unused when cert-manager injects it.
+  caBundle: ""
+
+rbac:
+  # -- Install ClusterRole / ClusterRoleBinding for the operator and agent.
+  # Disable to manage RBAC externally.
+  create: true
+
+metrics:
+  # -- Emit a ServiceMonitor for the operator and a PodMonitor for the agent.
+  serviceMonitor:
+    enabled: false
+    labels: {}
+    interval: 30s
+  podMonitor:
+    enabled: false
+    labels: {}
+    interval: 30s
