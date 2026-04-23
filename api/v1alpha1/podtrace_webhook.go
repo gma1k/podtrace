@@ -24,10 +24,8 @@ import (
 //     same namespace. This requires an API read and therefore only fits
 //     a webhook (CRD CEL rules cannot cross-object).
 //
-// The "duration forbidden on PodTrace" rule listed in the Phase-1 plan is
-// enforced structurally: PodTraceSpec does not declare a Duration field,
-// so the apiserver rejects unknown fields via the CRD schema before this
-// webhook fires.
+// PodTraceSpec does not declare a Duration field, so the apiserver
+// rejects unknown fields via the CRD schema before this webhook fires.
 type PodTraceCustomValidator struct {
 	Client client.Client
 }

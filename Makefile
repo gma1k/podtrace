@@ -244,7 +244,8 @@ SETUP_ENVTEST ?= $(shell go env GOPATH 2>/dev/null)/bin/setup-envtest
 envtest:
 	@GOBIN=$(dir $(SETUP_ENVTEST)) $(GO) install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.19
 	KUBEBUILDER_ASSETS=$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir=$(ENVTEST_BIN_DIR) -p path) \
-	  $(GO) test -tags=envtest -count=1 -timeout 180s ./api/v1alpha1/...
+	  $(GO) test -tags=envtest -count=1 -timeout 300s \
+	    ./api/v1alpha1/... ./internal/operator/... ./internal/agent/...
 
 helm-lint:
 	helm lint deploy/charts/podtrace

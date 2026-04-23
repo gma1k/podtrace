@@ -12,9 +12,9 @@ import (
 )
 
 // buildSessionJobSpec renders the Job spec for one node's slice of a
-// PodTraceSession. The Job invokes the existing `podtrace` CLI with
-// `--diagnose <duration>` so it works today without the Phase-3 agent
-// being present.
+// PodTraceSession. The Job invokes the standalone `podtrace` CLI with
+// `--diagnose <duration>`, so session execution does not depend on
+// the DaemonSet agent.
 //
 // Each Job is pinned to its node via nodeSelector on kubernetes.io/hostname,
 // because DaemonSet-style NodeAffinity would be overkill for a one-shot.

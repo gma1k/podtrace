@@ -21,9 +21,9 @@ import (
 )
 
 // PodTraceSessionReconciler turns a PodTraceSession CR into one Job per
-// node hosting at least one matched pod. Jobs invoke the existing
-// `podtrace --diagnose <duration>` CLI, so sessions work today without
-// the Phase-3 agent being present.
+// node hosting at least one matched pod. Jobs invoke the standalone
+// `podtrace --diagnose <duration>` CLI, so session execution is
+// decoupled from the DaemonSet agent's lifecycle.
 //
 // The reconcile loop is intentionally one-shot: once Jobs exist we only
 // roll up their status. The only mutating action after initial fan-out
@@ -174,9 +174,11 @@ func (r *PodTraceSessionReconciler) resolveTargetNodes(ctx context.Context, s *p
 			Namespace:     s.Namespace,
 		}
 		if s.Spec.NamespaceSelector != nil {
-			// namespaced scope stays session.Namespace only for now;
-			// cross-namespace selector is Phase-3+ territory because it
-			// requires watching Namespaces.
+			// NamespaceSelector opens cross-namespace search. The
+			// selector's own label expressions are not yet honoured —
+			// that would require a Namespace informer we do not wire
+			// here. Presence of the field alone is enough to widen
+			// scope to every namespace.
 			listOpts.Namespace = ""
 		}
 		if err := r.List(ctx, &list, listOpts); err != nil {

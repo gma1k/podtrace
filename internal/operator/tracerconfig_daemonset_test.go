@@ -76,7 +76,7 @@ func TestBuildAgentDaemonSetSpec_HostMounts(t *testing.T) {
 	spec := buildAgentDaemonSetSpec(tc(nil), "podtrace-system")
 	expected := map[string]string{
 		"bpf":    "/sys/fs/bpf",
-		"btf":    "/sys/kernel/btf/vmlinux",
+		"btf":    "/sys/kernel/btf",
 		"proc":   "/proc",
 		"cgroup": "/sys/fs/cgroup",
 	}
