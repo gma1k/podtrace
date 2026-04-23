@@ -1,5 +1,6 @@
 .PHONY: all build clean test check-go test-unit test-integration test-bench coverage \
-        generate manifests clientset envtest docker-build helm-lint helm-template operator-tools
+        generate manifests clientset envtest docker-build helm-lint helm-template operator-tools \
+        e2e-kind e2e-kind-cleanup
 
 CLANG ?= clang
 LLC ?= llc
@@ -247,6 +248,16 @@ envtest:
 
 helm-lint:
 	helm lint deploy/charts/podtrace
+
+# e2e-kind runs the Phase-2 smoke script against whatever kind cluster
+# the user's KUBECONFIG currently points at. The script is idempotent;
+# re-running it upgrades an existing release in place.
+e2e-kind:
+	test/e2e/kind-smoke.sh
+
+# e2e-kind-cleanup tears down the e2e release and sample namespace.
+e2e-kind-cleanup:
+	test/e2e/kind-smoke.sh cleanup
 
 helm-template:
 	helm template podtrace deploy/charts/podtrace

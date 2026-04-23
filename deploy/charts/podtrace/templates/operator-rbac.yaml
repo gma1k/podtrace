@@ -1,0 +1,76 @@
+{{- if and .Values.operator.enabled .Values.rbac.create }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "podtrace.fullname" . }}-operator
+  namespace: {{ include "podtrace.systemNamespace" . }}
+  labels:
+    {{- include "podtrace.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+---
+# ClusterRole for the operator. These permissions must match what the
+# reconcilers actually need — kept manually in sync with the kubebuilder
+# rbac markers in internal/operator/*_controller.go.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "podtrace.fullname" . }}-operator
+  labels:
+    {{- include "podtrace.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+rules:
+  # podtrace.io CRDs
+  - apiGroups: ["podtrace.io"]
+    resources: ["tracerconfigs", "podtraces", "podtracesessions", "exporterconfigs"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["podtrace.io"]
+    resources: ["tracerconfigs/status", "podtraces/status", "podtracesessions/status", "exporterconfigs/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["podtrace.io"]
+    resources: ["tracerconfigs/finalizers", "podtraces/finalizers", "podtracesessions/finalizers"]
+    verbs: ["update"]
+  # Owned workload resources
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Pod lookup (selector → node resolution in PodTraceSessionReconciler)
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  # System-namespace infrastructure: SAs, bundles (ConfigMap+Secret)
+  - apiGroups: [""]
+    resources: ["serviceaccounts", "configmaps", "secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Agent RBAC managed by TracerConfigReconciler
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles", "clusterrolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Events surface on operator errors
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # Leader election lease
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "podtrace.fullname" . }}-operator
+  labels:
+    {{- include "podtrace.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "podtrace.fullname" . }}-operator
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "podtrace.fullname" . }}-operator
+    namespace: {{ include "podtrace.systemNamespace" . }}
+{{- end }}

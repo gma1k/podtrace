@@ -166,6 +166,84 @@ func TestChart_NamespacePSALabels(t *testing.T) {
 	}
 }
 
+// TestChart_OperatorToggleRendersFullStack asserts that enabling the
+// operator pulls in the Deployment, SA, ClusterRole, ClusterRoleBinding,
+// and metrics Service — and that default (off) mode does not.
+func TestChart_OperatorToggleRendersFullStack(t *testing.T) {
+	off := renderChart(t)
+	on := renderChart(t, "operator.enabled=true")
+
+	offKinds := parseKinds(t, off)
+	onKinds := parseKinds(t, on)
+
+	if offKinds["Deployment"] != 0 {
+		t.Errorf("operator Deployment should not render with operator.enabled=false, got %d", offKinds["Deployment"])
+	}
+	for _, kind := range []string{"Deployment", "ServiceAccount", "ClusterRole", "ClusterRoleBinding", "Service"} {
+		if onKinds[kind] < 1 {
+			t.Errorf("operator.enabled=true: expected >=1 %s, got %d", kind, onKinds[kind])
+		}
+	}
+}
+
+// TestChart_WebhookRequiresOperatorToRender asserts that webhook
+// templates render only when BOTH operator AND webhook are enabled,
+// because the webhook server runs inside the operator Deployment.
+func TestChart_WebhookRequiresOperatorToRender(t *testing.T) {
+	webhookOnly := renderChart(t, "webhook.enabled=true")
+	both := renderChart(t, "operator.enabled=true", "webhook.enabled=true")
+
+	woKinds := parseKinds(t, webhookOnly)
+	bothKinds := parseKinds(t, both)
+
+	// Webhook-alone still renders the ValidatingWebhookConfiguration
+	// (the user may be managing the operator out-of-band) but the
+	// webhook Service only makes sense when the operator renders too.
+	if woKinds["Service"] > 0 {
+		t.Errorf("webhook-only should not render operator Services, got %d", woKinds["Service"])
+	}
+	if bothKinds["ValidatingWebhookConfiguration"] < 1 {
+		t.Error("operator+webhook: ValidatingWebhookConfiguration missing")
+	}
+	// Operator+webhook should render exactly two Services: metrics + webhook.
+	if bothKinds["Service"] != 2 {
+		t.Errorf("operator+webhook: expected 2 Services, got %d", bothKinds["Service"])
+	}
+}
+
+// TestChart_CertManagerCertificateConditional asserts the cert-manager
+// Certificate only renders when webhook is enabled AND certSource is
+// "cert-manager" (not self-signed or external).
+func TestChart_CertManagerCertificateConditional(t *testing.T) {
+	with := renderChart(t, "operator.enabled=true", "webhook.enabled=true")
+	withoutCM := renderChart(t, "operator.enabled=true", "webhook.enabled=true", "webhook.certSource=self-signed")
+
+	if !bytes.Contains(with, []byte("kind: Certificate")) {
+		t.Error("cert-manager default: Certificate should render")
+	}
+	if bytes.Contains(withoutCM, []byte("kind: Certificate")) {
+		t.Error("webhook.certSource=self-signed: Certificate should NOT render")
+	}
+}
+
+// TestChart_OperatorDeploymentSecurityContext locks in the unprivileged
+// operator runtime: non-root, read-only rootfs, no privilege escalation,
+// all caps dropped. A regression that loosens these would be a real
+// security finding, so it belongs in CI.
+func TestChart_OperatorDeploymentSecurityContext(t *testing.T) {
+	out := renderChart(t, "operator.enabled=true")
+	for _, marker := range []string{
+		"runAsNonRoot: true",
+		"readOnlyRootFilesystem: true",
+		"allowPrivilegeEscalation: false",
+		`drop: ["ALL"]`,
+	} {
+		if !bytes.Contains(out, []byte(marker)) {
+			t.Errorf("operator Deployment missing hardened securityContext marker: %q", marker)
+		}
+	}
+}
+
 // TestChart_SystemNamespaceOverride verifies the operator reads its
 // namespace from values.
 func TestChart_SystemNamespaceOverride(t *testing.T) {
