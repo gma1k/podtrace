@@ -1,0 +1,46 @@
+{{- if .Values.operator.enabled }}
+---
+# Metrics service — Prometheus ServiceMonitor target.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "podtrace.fullname" . }}-operator-metrics
+  namespace: {{ include "podtrace.systemNamespace" . }}
+  labels:
+    {{- include "podtrace.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    {{- include "podtrace.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+{{- if .Values.webhook.enabled }}
+---
+# Webhook service — referenced by the ValidatingWebhookConfiguration's
+# clientConfig.service block. Name matches podtrace.fullname-webhook so
+# the webhook template's service lookup lands here.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "podtrace.fullname" . }}-webhook
+  namespace: {{ include "podtrace.systemNamespace" . }}
+  labels:
+    {{- include "podtrace.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+spec:
+  type: ClusterIP
+  ports:
+    - name: webhook
+      port: 443
+      targetPort: webhook
+      protocol: TCP
+  selector:
+    {{- include "podtrace.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+{{- end }}
+{{- end }}

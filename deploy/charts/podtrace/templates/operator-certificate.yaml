@@ -1,0 +1,27 @@
+{{- if and .Values.operator.enabled .Values.webhook.enabled (eq .Values.webhook.certSource "cert-manager") }}
+---
+# cert-manager Certificate that issues the TLS material for the
+# ValidatingWebhookConfiguration. The validating-webhook template's
+# `cert-manager.io/inject-ca-from` annotation references THIS
+# Certificate by name; keep the two in sync.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "podtrace.fullname" . }}-serving-cert
+  namespace: {{ include "podtrace.systemNamespace" . }}
+  labels:
+    {{- include "podtrace.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+spec:
+  # DNS names match the webhook Service so TLS verification succeeds
+  # when the apiserver calls the webhook.
+  dnsNames:
+    - {{ include "podtrace.fullname" . }}-webhook.{{ include "podtrace.systemNamespace" . }}.svc
+    - {{ include "podtrace.fullname" . }}-webhook.{{ include "podtrace.systemNamespace" . }}.svc.cluster.local
+  # The Secret is mounted by the operator Deployment at
+  # /tmp/k8s-webhook-server/serving-certs (see operator-deployment.yaml).
+  secretName: {{ include "podtrace.fullname" . }}-webhook-tls
+  issuerRef:
+    name: {{ .Values.webhook.certManager.issuerRef.name }}
+    kind: {{ .Values.webhook.certManager.issuerRef.kind }}
+{{- end }}
