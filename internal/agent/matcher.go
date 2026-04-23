@@ -81,10 +81,10 @@ func buildPodRefIndex(pt *podtracev1alpha1.PodTrace) map[string]struct{} {
 
 // inNamespaceScope enforces the same "own-namespace-only unless
 // NamespaceSelector is set" rule the operator's session reconciler
-// uses. For Phase 3 a non-nil NamespaceSelector opens cross-namespace
-// matching; the NamespaceSelector's own expressions are deferred to a
-// future release (they require a Namespace informer which is not yet
-// wired on the agent).
+// uses. A non-nil NamespaceSelector opens cross-namespace matching;
+// the NamespaceSelector's own expressions are not yet honoured —
+// evaluating them would require a Namespace informer that is not
+// wired here.
 func inNamespaceScope(pt *podtracev1alpha1.PodTrace, p *corev1.Pod) bool {
 	if pt.Spec.NamespaceSelector != nil {
 		return true

@@ -12,11 +12,12 @@ import (
 // ChannelTargetSource used by the CR-backed agent (pushed snapshots from a
 // PodTrace reconciler on the agent side).
 //
-// The interface is intentionally identical to what callers of TargetRegistry
-// already consume: Start kicks off production, Updates returns a read-only
-// channel of full snapshots, Snapshot returns the latest known set without
-// blocking. Today only TargetRegistry satisfies this in production code;
-// ChannelTargetSource is the stable seam the Phase-3 agent will use.
+// The interface is intentionally identical to what callers of
+// TargetRegistry already consume: Start kicks off production, Updates
+// returns a read-only channel of full snapshots, Snapshot returns the
+// latest known set without blocking. ChannelTargetSource is the seam
+// CR-driven agents use when targets come from an external informer
+// rather than the pod informer baked into TargetRegistry.
 type TargetSource interface {
 	Start(ctx context.Context) error
 	Updates() <-chan []*PodInfo

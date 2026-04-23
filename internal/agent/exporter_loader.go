@@ -86,14 +86,14 @@ func LoadBundle(ctx context.Context, c client.Client, systemNamespace string, po
 }
 
 // BuildExporter turns a BundlePayload into a tracer.Exporter that
-// accepts []*events.Event. For Phase 3 this builds a minimal OTLP
-// event exporter; other bundle types return an explicit
+// accepts []*events.Event. Currently implements the OTLP backend only;
+// Jaeger/Zipkin/Splunk/DataDog bundles return an explicit
 // "not-yet-supported" error so the caller surfaces a clean Degraded
 // condition instead of silently dropping traces.
 //
-// Future phases will add Jaeger/Zipkin/Splunk/DataDog adapters; the
-// sole caller (the agent's reconcile loop) converts the error into a
-// per-CR NodeStatus.Message so the user sees it on kubectl describe.
+// The sole caller (the agent's reconcile loop) converts the error
+// into a per-CR NodeStatus.Message so the user sees it on
+// kubectl describe.
 func BuildExporter(payload *BundlePayload, crKey CRKey) (tracer.Exporter, error) {
 	if payload == nil {
 		return nil, fmt.Errorf("nil bundle payload")

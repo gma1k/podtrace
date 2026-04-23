@@ -171,7 +171,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			Filters:        filtersToSet(pt.Spec.Filters),
 			Exporter:       exporter,
 			BundleRevision: bundle.ResourceVer,
-			MatchedPods:    int32(len(matched)),
+			MatchedPods:    lenToInt32(len(matched)),
 		})
 		activeKeys[key] = struct{}{}
 	}
@@ -318,10 +318,9 @@ func resolveCgroupIDs(pods []*corev1.Pod) (map[uint64]struct{}, error) {
 
 // cgroupPathForContainer returns the best-effort /sys/fs/cgroup path
 // for a container inside a pod. The real CRI-aware resolver lives in
-// internal/kubernetes and is too heavy for the agent's hot path; for
-// Phase 3 we accept a slightly-lossy heuristic and rely on the
-// reconcile loop picking up a pod on a later tick once its cgroup
-// path materializes.
+// internal/kubernetes and is too heavy for the agent's hot path; the
+// heuristic here is slightly-lossy and relies on the reconcile loop
+// picking up a pod on a later tick once its cgroup path materializes.
 func cgroupPathForContainer(p *corev1.Pod, _ string) string {
 	// Systemd cgroup driver emits paths under
 	//   /sys/fs/cgroup/kubepods.slice/kubepods-<qos>.slice/kubepods-<qos>-pod<UID>.slice

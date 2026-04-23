@@ -43,19 +43,14 @@ func (e *recordingExporter) count() int {
 }
 
 // TestAgentEnvtest_TwoOverlappingCRs_ProduceScopedStreams is the
-// Phase-3 acceptance test. Per the plan's done-when:
+// multi-CR merge acceptance test. It asserts that applying two
+// PodTrace CRs with overlapping selectors on the same node produces:
 //
-//   "applying two PodTrace CRs with overlapping selectors on the same
-//    node produces one tracer process, both exporters receive their
-//    correctly-scoped events, and both CRs show healthy per-node status."
-//
-// This test covers all three assertions:
-//
-//  1. One tracer: a single Router/Engine pipeline services both CRs.
+//  1. One tracer: a single Router/Engine pipeline servicing both CRs.
 //  2. Correctly-scoped events: each recorder receives only the events
-//     its CR's filter/cgroup predicate matches — enforced by the
-//     existing Router unit tests, here we re-verify against real
-//     apiserver-backed CRRules.
+//     whose (cgroup, filter) tuple matches its CR. Router unit tests
+//     cover this in isolation; this test re-verifies against
+//     apiserver-backed CRRules to catch integration regressions.
 //  3. Healthy per-node status: the StatusWriter patches nodeStatus
 //     entries on both CRs with non-zero counters after dispatch.
 func TestAgentEnvtest_TwoOverlappingCRs_ProduceScopedStreams(t *testing.T) {
@@ -256,10 +251,10 @@ func TestAgentEnvtest_TwoOverlappingCRs_ProduceScopedStreams(t *testing.T) {
 }
 
 // TestAgentEnvtest_EngineNoopBackendDispatch covers the Engine+Router
-// integration: events pushed through a NoopBackend reach the
-// per-CR exporters via the RouterExporter. This is the "one tracer
-// process" half of the done-when criterion, demonstrated against a
-// real engine rather than direct Router.Export.
+// integration: events pushed through a NoopBackend reach the per-CR
+// exporters via the Router. Complements the acceptance test by
+// exercising the real engine loop rather than calling Router.Export
+// directly.
 func TestAgentEnvtest_EngineNoopBackendDispatch(t *testing.T) {
 	scheme, c := setupSharedEnvtest(t)
 	_ = scheme

@@ -52,13 +52,11 @@ type Options struct {
 	// this short; production leaves it at zero for the default.
 	StatusReportInterval time.Duration
 
-	// BackendFactory is the dependency injection point for tests. When
-	// nil the agent starts in "degraded" mode with a noop backend and
-	// logs a one-line warning — the DaemonSet pod stays Ready so
-	// cluster operators can inspect it, but no kernel-space tracing
-	// happens. Production will plug a real eBPF backend in here in a
-	// follow-up once kernel compatibility is validated on the target
-	// cluster. The test suite uses this to inject a fake backend.
+	// BackendFactory produces the TracerBackend the Engine will drive.
+	// When nil, the agent falls back to a noop backend and logs a
+	// one-line warning: the DaemonSet pod stays Ready so operators can
+	// inspect it via kubectl, but no kernel-space tracing happens.
+	// Tests inject a fake backend through this hook.
 	BackendFactory func() (tracer.TracerBackend, error)
 }
 
@@ -200,13 +198,9 @@ func newAgentScheme() (*runtime.Scheme, error) {
 }
 
 // buildBackend returns the TracerBackend for the agent. Precedence:
-//  1. opts.BackendFactory (tests)
-//  2. default noop backend (production — a real eBPF backend will plug
-//     in here in a follow-up)
-//
-// Returning an error from the real factory is not fatal: the agent
-// continues in degraded mode so cluster operators can kubectl describe
-// the pod and see why events are not flowing.
+// A non-nil factory that returns an error is not fatal: the agent
+// falls back to the noop backend so cluster operators can
+// kubectl describe the pod and see why events are not flowing.
 func buildBackend(opts Options, logger logr.Logger) (tracer.TracerBackend, error) {
 	if opts.BackendFactory == nil {
 		logger.Info("using noop tracer backend (real eBPF backend not yet wired)")
@@ -239,7 +233,7 @@ func serveMetrics(ctx context.Context, addr string, metrics *Metrics, logger log
 	}
 	go func() {
 		<-ctx.Done()
-		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(sctx)
 	}()

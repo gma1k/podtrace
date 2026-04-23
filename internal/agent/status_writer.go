@@ -77,7 +77,7 @@ func (w *StatusWriter) emitOnce(ctx context.Context) error {
 		entry := podtracev1alpha1.PodTraceNodeStatus{
 			Node:          w.NodeName,
 			Ready:         ready,
-			ActiveCgroups: int32(len(rule.CgroupIDs)),
+			ActiveCgroups: lenToInt32(len(rule.CgroupIDs)),
 			EventsTotal:   counters.Events,
 			DroppedEvents: counters.Dropped,
 			LastHeartbeat: metav1.NewTime(time.Now()),

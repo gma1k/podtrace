@@ -108,7 +108,8 @@ func (e *otlpEventExporter) Name() string { return e.name }
 // Export creates one span per event. This is a lossy compression of
 // the semantic trace graph a full Tracker would assemble, but it
 // faithfully captures "this event happened at this time with these
-// attributes" which is what the Phase-3 routing test validates.
+// attributes" — enough for the agent's routing guarantees to be
+// observable in an OTLP backend.
 func (e *otlpEventExporter) Export(ctx context.Context, batch []*events.Event) error {
 	if len(batch) == 0 {
 		return nil
@@ -118,11 +119,15 @@ func (e *otlpEventExporter) Export(ctx context.Context, batch []*events.Event) e
 		if ev == nil {
 			continue
 		}
-		startedAt := time.Unix(0, int64(ev.Timestamp))
+		// Kernel-provided uint64 fields (timestamp, latency, cgroup ID,
+		// byte counts) are narrowed to int64 via safeUint64ToInt64 to
+		// avoid the silent wrap-to-negative that would otherwise
+		// confuse any dashboard built against the OTel signed types.
+		startedAt := time.Unix(0, safeUint64ToInt64(ev.Timestamp))
 		if startedAt.IsZero() {
 			startedAt = time.Now()
 		}
-		endedAt := startedAt.Add(time.Duration(ev.LatencyNS))
+		endedAt := startedAt.Add(time.Duration(safeUint64ToInt64(ev.LatencyNS)))
 		if endedAt.Before(startedAt) {
 			endedAt = startedAt
 		}
@@ -131,11 +136,11 @@ func (e *otlpEventExporter) Export(ctx context.Context, batch []*events.Event) e
 		span.SetAttributes(
 			attribute.String("podtrace.event.type", eventTypeString(ev.Type)),
 			attribute.Int64("podtrace.event.pid", int64(ev.PID)),
-			attribute.Int64("podtrace.event.cgroup_id", int64(ev.CgroupID)),
+			attribute.Int64("podtrace.event.cgroup_id", safeUint64ToInt64(ev.CgroupID)),
 			attribute.String("podtrace.event.process", ev.ProcessName),
 			attribute.String("podtrace.event.target", ev.Target),
-			attribute.Int64("podtrace.event.bytes", int64(ev.Bytes)),
-			attribute.Int64("podtrace.event.latency_ns", int64(ev.LatencyNS)),
+			attribute.Int64("podtrace.event.bytes", safeUint64ToInt64(ev.Bytes)),
+			attribute.Int64("podtrace.event.latency_ns", safeUint64ToInt64(ev.LatencyNS)),
 			attribute.Int("podtrace.event.error", int(ev.Error)),
 		)
 		span.End(trace.WithTimestamp(endedAt))

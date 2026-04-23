@@ -74,8 +74,9 @@ func TestRouter_SnapshotAndFilterUnion(t *testing.T) {
 	}
 }
 
-// TestRouter_DispatchesByCgroupAndFilter is the heart of Phase 3:
-// overlapping CRs must produce correctly-scoped per-CR event streams.
+// TestRouter_DispatchesByCgroupAndFilter is the core routing
+// guarantee: overlapping CRs must produce correctly-scoped per-CR
+// event streams.
 func TestRouter_DispatchesByCgroupAndFilter(t *testing.T) {
 	expA := &recExp{name: "a"}
 	expB := &recExp{name: "b"}

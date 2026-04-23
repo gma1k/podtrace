@@ -83,7 +83,12 @@ func (s *ProbeServer) Run(ctx context.Context) error {
 	go func() {
 		defer close(shutdownDone)
 		<-ctx.Done()
-		sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		// WithoutCancel gives us a fresh context that inherits values
+		// (deadlines, tracing keys) from the original ctx without
+		// carrying its "Done" signal. We need the freshness because
+		// ctx just fired Done — graceful shutdown needs a positive
+		// timeout, not an already-cancelled context.
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(sctx)
 	}()
