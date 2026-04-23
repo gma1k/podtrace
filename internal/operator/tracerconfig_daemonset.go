@@ -38,7 +38,6 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 	}
 
 	hostPathType := corev1.HostPathDirectory
-	hostPathFileType := corev1.HostPathFile
 	priv := true
 	runAsRoot := int64(0)
 
@@ -153,7 +152,7 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 				}},
 				Volumes: []corev1.Volume{
 					{Name: "bpf", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/fs/bpf", Type: &hostPathType}}},
-					{Name: "btf", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/kernel/btf/vmlinux", Type: &hostPathFileType}}},
+					{Name: "btf", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/kernel/btf", Type: &hostPathType}}},
 					{Name: "proc", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/proc", Type: &hostPathType}}},
 					{Name: "cgroup", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/fs/cgroup", Type: &hostPathType}}},
 				},

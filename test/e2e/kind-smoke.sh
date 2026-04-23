@@ -174,9 +174,22 @@ main() {
 	wait_for "operator Deployment Ready" 120 \
 		"kubectl -n ${SYSTEM_NS} rollout status deploy/${RELEASE}-operator --timeout=60s"
 
-	# --- step 3: apply a TracerConfig; reconciler creates agent infra ---
-	log_info "applying TracerConfig"
-	kubectl apply -f "${root}/examples/tracerconfig.yaml"
+	log_info "applying TracerConfig (image override for kind-loaded dev tag)"
+	kubectl apply -f - <<EOF
+apiVersion: podtrace.io/v1alpha1
+kind: TracerConfig
+metadata:
+  name: default
+spec:
+  image: ghcr.io/podtrace/podtrace:dev
+  imagePullPolicy: Never
+  systemNamespace: ${SYSTEM_NS}
+  maxConcurrentSessionsPerNode: 2
+  btfMode: auto
+  tolerations:
+    - operator: Exists
+      effect: NoSchedule
+EOF
 
 	wait_for "TracerConfig reconciled to current generation" 60 \
 		tracerconfig_converged
@@ -271,12 +284,35 @@ EOF
 	wait_for "exporter bundle ConfigMap landed in ${SYSTEM_NS}" 60 \
 		"kubectl -n ${SYSTEM_NS} get cm -l podtrace.io/component=exporter-bundle -o name | grep -q configmap"
 
-	# --- step 9: print a summary for humans -----------------------------
-	log_info "phase-2 smoke passed — cluster state snapshot follows"
+	wait_for "at least one agent pod Ready" 120 \
+		"[[ \$(kubectl -n ${SYSTEM_NS} get pods -l podtrace.io/component=agent --field-selector=status.phase=Running -o json | jq '.items | map(select(.status.containerStatuses[]?.ready == true)) | length') -ge 1 ]]"
+
+	log_info "creating second overlapping PodTrace (proves multi-CR merge)"
+	kubectl -n "${SAMPLE_NS}" apply -f - <<EOF
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: smoke-continuous-b
+spec:
+  selector:
+    matchLabels:
+      app: smoke-target
+  filters: [fs, proc]
+  exporterRef:
+    name: prod-otlp
+EOF
+
+	wait_for "both PodTrace CRs report per-node status" 120 \
+		"[[ \$(kubectl -n ${SAMPLE_NS} get podtraces -o json | jq '[.items[] | select((.status.nodeStatus // []) | length > 0)] | length') -eq 2 ]]"
+
+	# --- step 11: print a summary for humans ----------------------------
+	log_info "phase-2+3 smoke passed — cluster state snapshot follows"
 	echo
 	kubectl get tracerconfig
 	echo
 	kubectl -n "${SAMPLE_NS}" get podtrace,podtracesession,exporterconfig
+	echo
+	kubectl -n "${SAMPLE_NS}" get podtrace -o jsonpath='{range .items[*]}{.metadata.name}: nodeStatus={range .status.nodeStatus[*]}{.node}(ready={.ready},events={.eventsTotal}){end}{"\n"}{end}'
 	echo
 	kubectl -n "${SYSTEM_NS}" get deploy,daemonset,job,cm -l app.kubernetes.io/part-of=podtrace
 }
