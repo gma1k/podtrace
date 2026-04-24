@@ -12,6 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/podtrace/podtrace/internal/operator"
+	"github.com/podtrace/podtrace/pkg/exporter/bundle"
 )
 
 func TestLoadBundle_OTLPLiteral(t *testing.T) {
@@ -44,7 +45,7 @@ func TestLoadBundle_OTLPLiteral(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadBundle: %v", err)
 	}
-	if payload.Type != "otlp" || payload.Endpoint != "otel:4318" {
+	if payload.Type != bundle.TypeOTLP || payload.Endpoint != "otel:4318" {
 		t.Errorf("payload wrong: %+v", payload)
 	}
 	if payload.Sample != 0.5 {
@@ -126,7 +127,7 @@ func TestBuildExporter_UnsupportedTypeReturnsDescriptiveError(t *testing.T) {
 	cases := []string{"jaeger", "zipkin", "splunk", "datadog"}
 	for _, ty := range cases {
 		t.Run(ty, func(t *testing.T) {
-			_, err := BuildExporter(&BundlePayload{Type: ty}, CRKey{"ns", "n"})
+			_, err := BuildExporter(&BundlePayload{Type: bundle.Type(ty)}, CRKey{"ns", "n"})
 			if err == nil {
 				t.Fatalf("expected not-yet-implemented error for %q", ty)
 			}

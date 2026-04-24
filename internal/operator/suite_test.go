@@ -179,6 +179,26 @@ func ensureDefaultTracerConfig(t *testing.T, c client.Client) {
 	}
 }
 
+func ensureExporterConfig(t *testing.T, c client.Client, namespace, name string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ec := &podtracev1alpha1.ExporterConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec: podtracev1alpha1.ExporterConfigSpec{
+			Type: podtracev1alpha1.ExporterTypeOTLP,
+			OTLP: &podtracev1alpha1.OTLPExporter{
+				Endpoint: "otel:4318",
+				Protocol: podtracev1alpha1.OTLPProtocolHTTP,
+			},
+		},
+	}
+	err := c.Create(ctx, ec)
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		t.Fatalf("create ExporterConfig %s/%s: %v", namespace, name, err)
+	}
+}
+
 // locateCRDPath reuses the stripHelmDirectives technique from the
 // api/v1alpha1 envtest — the CRD YAMLs under deploy/charts/podtrace are
 // wrapped with `{{- if .Values.crds.install }}` which plain YAML loaders

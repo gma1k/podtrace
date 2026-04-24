@@ -51,6 +51,16 @@ func AgentDaemonSetName() string { return "podtrace-agent" }
 // AgentServiceAccountName is the ServiceAccount the agent DaemonSet runs as.
 func AgentServiceAccountName() string { return "podtrace-agent" }
 
+func SessionServiceAccountName() string { return "podtrace-session" }
+
+func SessionReportRoleName(sessionUID types.UID) string {
+	return "podtrace-session-report-" + shortUID(sessionUID)
+}
+
+func SessionReportRoleBindingName(sessionUID types.UID) string {
+	return "podtrace-session-report-" + shortUID(sessionUID)
+}
+
 // AgentClusterRoleName is the ClusterRole granting the agent read access to
 // PodTrace CRs cluster-wide and status-patch on the same.
 func AgentClusterRoleName() string { return "podtrace-agent" }
@@ -79,26 +89,12 @@ func SessionJobName(sessionUID types.UID, nodeName string) string {
 	return raw
 }
 
-// ExporterBundleName returns the ConfigMap/Secret name maintained by the
-// operator in the system namespace for an ExporterConfig. Agents read
-// these bundles instead of the original Secrets so their RBAC stays
-// scoped to podtrace-system only.
-//
-// Format: pt-bundle-<exporterconfig-uid>. Namespace is always
-// TracerConfig.spec.systemNamespace (default "podtrace-system").
 func ExporterBundleName(exporterUID types.UID) string {
 	return "pt-bundle-" + shortUID(exporterUID)
 }
 
-// BundleAnnotationSourceRef is an annotation the operator puts on every
-// bundle ConfigMap/Secret pointing back at the ExporterConfig that owns
-// it (namespace/name). Used for audit and for reverse lookup when the
-// ExporterConfig is deleted.
 const BundleAnnotationSourceRef = "podtrace.io/exporterconfig-ref"
 
-// ManagedObjectMeta returns the common ObjectMeta applied to every
-// operator-managed resource (DaemonSet, Job, RBAC, Service, bundles).
-// Callers augment with owner refs and optional extra labels.
 func ManagedObjectMeta(name, namespace, component string, extraLabels map[string]string) metav1.ObjectMeta {
 	labels := map[string]string{
 		LabelManagedBy: ManagedByValue,
@@ -125,9 +121,6 @@ func shortUID(uid types.UID) string {
 	return s
 }
 
-// sanitiseDNS replaces characters that are not valid in DNS-1123 labels
-// with '-'. Node names can legally contain characters like '.' which
-// Kubernetes rejects in object names.
 func sanitiseDNS(in string) string {
 	b := make([]byte, 0, len(in))
 	for _, r := range in {

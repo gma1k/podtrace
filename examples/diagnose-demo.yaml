@@ -1,0 +1,106 @@
+# ----------------------------------------------------------------------------
+# Diagnose-mode end-to-end demo.
+#
+# Drops a chatty curl workload into a fresh namespace and runs a
+# PodTraceSession against it. When the session completes (about 30s
+# later) you can inspect:
+#
+#   kubectl -n podtrace-demo get podtracesession diag-demo -o yaml
+#     → .status.phase == Completed
+#     → .status.summary.totalEvents > 0
+#     → .status.jobs[].eventCount > 0
+#
+#   kubectl -n podtrace-demo get cm diag-demo-report
+#     → .data["report.txt"] carries the full human-readable report
+#
+# Prereqs:
+#   1. Helm chart installed (helm install podtrace ./deploy/charts/podtrace)
+#   2. A TracerConfig named "default" exists (apply examples/tracerconfig.yaml,
+#      then kubectl patch it to set .spec.image to your loaded image)
+#
+# Usage:
+#   kubectl apply -f examples/diagnose-demo.yaml
+#   kubectl -n podtrace-demo rollout status deploy/chatty --timeout=60s
+#   kubectl -n podtrace-demo get podtracesession diag-demo -w
+#
+# Clean up:
+#   kubectl delete namespace podtrace-demo
+# ----------------------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: podtrace-demo
+---
+# ExporterConfig points at a collector Service in the "observability"
+# namespace. Bring your own collector or point this at any OTLP endpoint
+# (an unreachable one is tolerated — Phase 4's reportRef sink still
+# records the full report in a ConfigMap even if OTLP delivery fails).
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: demo-otlp
+  namespace: podtrace-demo
+spec:
+  type: otlp
+  otlp:
+    endpoint: otel-collector.observability:4318
+    protocol: http
+    insecure: true
+---
+# Chatty workload: one pod issuing a DNS lookup + HTTPS connect every
+# second. Plenty of network and filesystem events for the diagnose run
+# to observe, without external credentials.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chatty
+  namespace: podtrace-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chatty
+  template:
+    metadata:
+      labels:
+        app: chatty
+    spec:
+      containers:
+        - name: curl
+          image: curlimages/curl:latest
+          command:
+            - sh
+            - -c
+            - |
+              while true; do
+                curl -sS -o /dev/null https://kubernetes.io || true
+                sleep 1
+              done
+---
+# The bounded diagnose session. Apply second (or apply alongside — the
+# session controller stays Pending until chatty's pod reaches Running).
+#
+# Flags worth noting:
+#   * filters: [dns, net] — scoped to the two event categories the
+#     workload generates; omit to capture everything.
+#   * duration: 30s — enough to see a handful of HTTPS round-trips.
+#   * reportRef.configMap — Phase 4's CLI self-upload path lands the
+#     full human-readable report in this ConfigMap when the session
+#     completes. Switch to `secret: { name: … }` if the report may
+#     carry sensitive hostnames/payloads.
+apiVersion: podtrace.io/v1alpha1
+kind: PodTraceSession
+metadata:
+  name: diag-demo
+  namespace: podtrace-demo
+spec:
+  selector:
+    matchLabels:
+      app: chatty
+  duration: 30s
+  filters: [dns, net]
+  exporterRef:
+    name: demo-otlp
+  reportRef:
+    configMap:
+      name: diag-demo-report

@@ -108,7 +108,7 @@ $(BPF_OBJ): $(VMLINUX_GEN) bpf/podtrace.bpf.c bpf/*.h bpf/network.c bpf/filesyst
 
 build: $(BPF_OBJ)
 	@mkdir -p bin
-	$(GO) build -o $(BINARY) ./cmd/podtrace
+	$(GO) build -tags embed_bpf -o $(BINARY) ./cmd/podtrace
 
 clean:
 	rm -f $(BPF_OBJ)

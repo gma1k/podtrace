@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -47,6 +48,10 @@ func TestExamples_RoundTrip(t *testing.T) {
 		"TracerConfig":    false,
 		"Secret":          false,
 	}
+	supportingKinds := map[string]bool{
+		"Namespace":  true,
+		"Deployment": true,
+	}
 
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
@@ -71,11 +76,12 @@ func TestExamples_RoundTrip(t *testing.T) {
 					t.Fatalf("doc[%d] decode: %v", i, err)
 				}
 				kind := obj.GetObjectKind().GroupVersionKind().Kind
-				if _, known := expectedKinds[kind]; !known {
+				if _, ok := expectedKinds[kind]; ok {
+					expectedKinds[kind] = true
+				} else if !supportingKinds[kind] {
 					t.Errorf("doc[%d] unexpected kind %q", i, kind)
 					continue
 				}
-				expectedKinds[kind] = true
 
 				if err := validateStructuralNotEmpty(obj, kind); err != nil {
 					t.Errorf("doc[%d] %s: %v", i, kind, err)
@@ -187,6 +193,17 @@ func validateStructuralNotEmpty(obj runtime.Object, kind string) error {
 	case *corev1.Secret:
 		if o.Name == "" {
 			return fmt.Errorf("metadata.name empty")
+		}
+	case *corev1.Namespace:
+		if o.Name == "" {
+			return fmt.Errorf("metadata.name empty")
+		}
+	case *appsv1.Deployment:
+		if o.Name == "" {
+			return fmt.Errorf("metadata.name empty")
+		}
+		if len(o.Spec.Template.Spec.Containers) == 0 {
+			return fmt.Errorf("spec.template.spec.containers empty")
 		}
 	default:
 		return fmt.Errorf("no structural check for kind %q (%T)", kind, o)

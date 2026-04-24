@@ -68,7 +68,8 @@ type Thresholds struct {
 // Exactly one sink should be set.
 type ReportReference struct {
 	// ConfigMap in the same namespace as the session. The operator will
-	// create/update it with the report payload.
+	// create/update it with the report payload. Use this sink for small
+	// reports; ConfigMaps are capped at 1MiB of data by etcd.
 	// +optional
 	ConfigMap *corev1.LocalObjectReference `json:"configMap,omitempty"`
 
@@ -76,4 +77,30 @@ type ReportReference struct {
 	// report may contain sensitive hostnames/paths/payloads.
 	// +optional
 	Secret *corev1.LocalObjectReference `json:"secret,omitempty"`
+
+	// ObjectStore uploads the report to a cloud bucket (s3, gs, az). Use
+	// this sink for reports that may exceed the 1MiB ConfigMap/Secret
+	// limit. Rejected by the validating webhook in v1alpha1 — the
+	// schema is reserved so clients can adopt it without a CRD bump
+	// later.
+	// +optional
+	ObjectStore *ObjectStoreReference `json:"objectStore,omitempty"`
+}
+
+// ObjectStoreReference names a cloud-storage destination for a session
+// report. The credentials secret, when set, must live in the same
+// namespace as the session and is consumed by the session Job pod via
+// vendor SDK default-credential-provider chains (IRSA, workload
+// identity, static access keys, etc.).
+type ObjectStoreReference struct {
+	// URI of the destination, e.g. "s3://bucket/path/" or "gs://bucket/path/".
+	// +kubebuilder:validation:Required
+	URI string `json:"uri"`
+
+	// CredentialsSecretRef names a Secret in the session's namespace
+	// whose keys the uploader reads (e.g. "access_key_id",
+	// "secret_access_key"). Implementation-specific — interpretation is
+	// left to the CLI uploader.
+	// +optional
+	CredentialsSecretRef *corev1.LocalObjectReference `json:"credentialsSecretRef,omitempty"`
 }

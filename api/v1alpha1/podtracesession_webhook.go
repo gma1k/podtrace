@@ -67,5 +67,36 @@ func (v *PodTraceSessionCustomValidator) validate(ctx context.Context, s *PodTra
 	if err := resolveExporterRef(ctx, v.Client, s.Namespace, s.Spec.ExporterRef.Name); err != nil {
 		return nil, err
 	}
+	if err := validateReportRef(s.Spec.ReportRef); err != nil {
+		return nil, err
+	}
 	return nil, nil
+}
+
+// validateReportRef enforces the sink-exclusivity rule and rejects
+// object-store references at v1alpha1. The CRD schema carries
+// ObjectStore so clients can adopt the field ahead of the upload path
+// going live, but sessions that set it today are rejected — anything
+// else would silently drop the artifact.
+func validateReportRef(ref *ReportReference) error {
+	if ref == nil {
+		return nil
+	}
+	set := 0
+	if ref.ConfigMap != nil {
+		set++
+	}
+	if ref.Secret != nil {
+		set++
+	}
+	if ref.ObjectStore != nil {
+		set++
+	}
+	if set > 1 {
+		return fmt.Errorf("spec.reportRef: at most one of configMap, secret, objectStore may be set")
+	}
+	if ref.ObjectStore != nil {
+		return fmt.Errorf("spec.reportRef.objectStore is reserved and not yet supported in v1alpha1")
+	}
+	return nil
 }

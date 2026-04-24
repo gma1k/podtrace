@@ -1,0 +1,66 @@
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: validating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-podtrace-io-v1alpha1-exporterconfig
+  failurePolicy: Fail
+  name: vexporterconfig.podtrace.io
+  rules:
+  - apiGroups:
+    - podtrace.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - exporterconfigs
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-podtrace-io-v1alpha1-podtrace
+  failurePolicy: Fail
+  name: vpodtrace.podtrace.io
+  rules:
+  - apiGroups:
+    - podtrace.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - podtraces
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-podtrace-io-v1alpha1-podtracesession
+  failurePolicy: Fail
+  name: vpodtracesession.podtrace.io
+  rules:
+  - apiGroups:
+    - podtrace.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - podtracesessions
+  sideEffects: None

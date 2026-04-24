@@ -50,6 +50,7 @@ func TestPodTraceSessionReconciler_EnvtestFanOutByNode(t *testing.T) {
 	defer cancel()
 
 	ensureDefaultTracerConfig(t, c)
+	ensureExporterConfig(t, c, ns, "prod-otlp")
 
 	// Pods on two distinct nodes matching app=api.
 	createPodOnNode(t, c, ns, "api-a", "node-a", map[string]string{"app": "api"})
@@ -118,6 +119,7 @@ func TestPodTraceSessionReconciler_EnvtestStatusReflectsJobCompletion(t *testing
 	defer cancel()
 
 	ensureDefaultTracerConfig(t, c)
+	ensureExporterConfig(t, c, ns, "prod-otlp")
 	createPodOnNode(t, c, ns, "only", "node-x", map[string]string{"app": "one"})
 	session := &podtracev1alpha1.PodTraceSession{
 		ObjectMeta: metav1.ObjectMeta{Name: "one-diag", Namespace: ns},

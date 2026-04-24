@@ -58,8 +58,16 @@ func cleanupPodTraceChildren(ctx context.Context, c client.Client, pt *podtracev
 	return nil
 }
 
-// cleanupPodTraceSessionChildren deletes the per-node Jobs this
-// PodTraceSession owns across namespaces. Called on CR deletion.
+// cleanupPodTraceSessionChildren deletes all resources this PodTraceSession
+// owns across namespaces:
+//
+//   - per-node Jobs in the system namespace
+//   - exporter bundle ConfigMap + optional Secret in the system namespace
+//   - per-session Role + RoleBinding in the user namespace
+//
+// Called on CR deletion via the shared FinalizerCleanup finalizer.
+// Each delete is NotFound-idempotent so repeated cleanup passes do
+// not error.
 func cleanupPodTraceSessionChildren(ctx context.Context, c client.Client, s *podtracev1alpha1.PodTraceSession, systemNS string) error {
 	var jobs batchv1.JobList
 	if err := c.List(ctx, &jobs, client.InNamespace(systemNS), client.MatchingLabels{
@@ -79,6 +87,22 @@ func cleanupPodTraceSessionChildren(ctx context.Context, c client.Client, s *pod
 		if err := c.Delete(ctx, j, &client.DeleteOptions{PropagationPolicy: &policy}); err != nil && !apierrors.IsNotFound(err) {
 			return fmt.Errorf("delete Job %s/%s: %w", j.Namespace, j.Name, err)
 		}
+	}
+
+	// Session-scoped exporter bundle lives in the system namespace.
+	bundleName := SessionBundleName(s.UID)
+	for _, obj := range []client.Object{
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: bundleName, Namespace: systemNS}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: bundleName, Namespace: systemNS}},
+	} {
+		if err := c.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete session bundle %T: %w", obj, err)
+		}
+	}
+
+	// Per-session Role + RoleBinding in the user namespace.
+	if err := cleanupSessionReportRBAC(ctx, c, s); err != nil {
+		return err
 	}
 	return nil
 }
