@@ -27,3 +27,18 @@ kubectl apply -f examples/podtracesession.yaml
 | [exporterconfig-datadog.yaml](exporterconfig-datadog.yaml) | DataDog exporter with a Secret-backed API key. |
 | [podtrace.yaml](podtrace.yaml) | Continuous tracing of pods matching `app=api`. |
 | [podtracesession.yaml](podtracesession.yaml) | Bounded 5-minute diagnose of the same selector. |
+| [diagnose-demo.yaml](diagnose-demo.yaml) | Self-contained end-to-end demo: a curl workload plus a 30s session with a `reportRef` ConfigMap sink. One `kubectl apply -f` away from a populated `.status.summary`. |
+
+## Quick end-to-end on kind
+
+Once the chart is installed and a `default` TracerConfig exists pointing at your loaded image:
+
+```sh
+kubectl apply -f examples/diagnose-demo.yaml
+kubectl -n podtrace-demo rollout status deploy/chatty --timeout=60s
+kubectl -n podtrace-demo get podtracesession diag-demo -w      # wait for Completed
+kubectl -n podtrace-demo get podtracesession diag-demo \
+  -o jsonpath='{.status.summary}{"\n"}'                        # event counts
+kubectl -n podtrace-demo get cm diag-demo-report \
+  -o jsonpath='{.data.report\.txt}'                            # full report
+```

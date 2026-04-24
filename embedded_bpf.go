@@ -1,5 +1,5 @@
-package podtrace
+//go:build !embed_bpf
 
-import _ "embed"
+package podtrace
 
 var EmbeddedPodtraceBPFObj []byte

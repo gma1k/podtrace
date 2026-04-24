@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -11,25 +10,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/podtrace/podtrace/internal/operator"
+	"github.com/podtrace/podtrace/pkg/exporter/bundle"
 	"github.com/podtrace/podtrace/pkg/tracer"
 )
 
-// BundlePayload is the agent-side view of an exporter bundle as
-// reconciled by the operator into podtrace-system. It mirrors the
-// ConfigMap keys documented in internal/operator/exporter_bundle.go;
-// kept as a simple struct so tests can construct one without a client.
-type BundlePayload struct {
-	Type        string // otlp | jaeger | zipkin | splunk | datadog
-	Endpoint    string
-	Protocol    string            // otlp: http | grpc
-	Insecure    bool              // otlp
-	Site        string            // datadog
-	Sample      float64           // 0.0 - 1.0
-	Headers     map[string]string // otlp literal headers
-	HeaderName  string            // otlp secret-backed header name (maps to Credential)
-	Credential  []byte            // secret material referenced by the bundle (opaque)
-	ResourceVer string            // ConfigMap ResourceVersion for dedup
-}
+// BundlePayload is an alias for bundle.Payload so existing agent callers
+// keep their familiar type name. New code should import
+// pkg/exporter/bundle directly.
+type BundlePayload = bundle.Payload
 
 // LoadBundle reads the ConfigMap+optional-Secret pair the operator
 // maintains in systemNamespace for the given PodTrace UID, and returns
@@ -44,32 +32,11 @@ func LoadBundle(ctx context.Context, c client.Client, systemNamespace string, po
 		return nil, fmt.Errorf("get bundle ConfigMap: %w", err)
 	}
 
-	payload := &BundlePayload{
-		Type:        cm.Data["type"],
-		Endpoint:    cm.Data["endpoint"],
-		Protocol:    cm.Data["protocol"],
-		Site:        cm.Data["site"],
-		HeaderName:  cm.Data["header_secret_name"],
-		ResourceVer: cm.ResourceVersion,
+	payload, err := bundle.FromConfigMapData(cm.Data)
+	if err != nil {
+		return nil, fmt.Errorf("parse bundle ConfigMap: %w", err)
 	}
-	if v := cm.Data["insecure"]; v != "" {
-		payload.Insecure = v == "true"
-	}
-	if v := cm.Data["sample_percent"]; v != "" {
-		// percent → 0-1 float for the existing OTel samplers.
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 && n <= 100 {
-			payload.Sample = float64(n) / 100.0
-		}
-	}
-	for k, v := range cm.Data {
-		const prefix = "headers."
-		if len(k) > len(prefix) && k[:len(prefix)] == prefix {
-			if payload.Headers == nil {
-				payload.Headers = map[string]string{}
-			}
-			payload.Headers[k[len(prefix):]] = v
-		}
-	}
+	payload.ResourceVer = cm.ResourceVersion
 
 	// Credential Secret is only present when the exporter needed one
 	// (Splunk HEC token, DataDog API key, or an OTLP Secret-backed
@@ -77,7 +44,7 @@ func LoadBundle(ctx context.Context, c client.Client, systemNamespace string, po
 	// payload — valid for credential-less exporters like Jaeger/Zipkin.
 	var sec corev1.Secret
 	if err := c.Get(ctx, types.NamespacedName{Name: name, Namespace: systemNamespace}, &sec); err == nil {
-		payload.Credential = sec.Data["credential"]
+		payload.Credential = sec.Data[bundle.CredentialKey]
 	} else if !apierrors.IsNotFound(err) {
 		return nil, fmt.Errorf("get bundle Secret: %w", err)
 	}
@@ -99,9 +66,9 @@ func BuildExporter(payload *BundlePayload, crKey CRKey) (tracer.Exporter, error)
 		return nil, fmt.Errorf("nil bundle payload")
 	}
 	switch payload.Type {
-	case "otlp":
+	case bundle.TypeOTLP:
 		return newOTLPEventExporter(crKey, payload)
-	case "jaeger", "zipkin", "splunk", "datadog":
+	case bundle.TypeJaeger, bundle.TypeZipkin, bundle.TypeSplunk, bundle.TypeDataDog:
 		return nil, fmt.Errorf("exporter type %q not yet implemented in agent mode", payload.Type)
 	default:
 		return nil, fmt.Errorf("unknown exporter type %q", payload.Type)

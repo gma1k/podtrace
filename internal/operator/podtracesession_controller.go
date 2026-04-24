@@ -41,6 +41,9 @@ type PodTraceSessionReconciler struct {
 // +kubebuilder:rbac:groups=podtrace.io,resources=exporterconfigs,verbs=get;list;watch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core,resources=configmaps;secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile fans a PodTraceSession out into per-node Jobs, then rolls
 // Job status back into PodTraceSession.status.
@@ -95,6 +98,36 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	tc := r.resolveTracerConfig(ctx)
+	systemNS := systemNamespaceForSession(tc, r.SystemNamespace)
+
+	var ec podtracev1alpha1.ExporterConfig
+	ecKey := types.NamespacedName{Namespace: session.Namespace, Name: session.Spec.ExporterRef.Name}
+	if err := r.Get(ctx, ecKey, &ec); err != nil {
+		if apierrors.IsNotFound(err) {
+			r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "ExporterNotFound",
+				fmt.Sprintf("ExporterConfig %s not found", ecKey))
+			_ = r.Status().Update(ctx, &session)
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		}
+		return ctrl.Result{}, fmt.Errorf("get ExporterConfig: %w", err)
+	}
+	if err := ensureSessionExporterBundle(ctx, r.Client, &session, &ec, systemNS); err != nil {
+		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "BundleSync", err.Error())
+		_ = r.Status().Update(ctx, &session)
+		return ctrl.Result{}, err
+	}
+
+	if err := ensureSessionServiceAccount(ctx, r.Client, systemNS); err != nil {
+		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "SessionSA", err.Error())
+		_ = r.Status().Update(ctx, &session)
+		return ctrl.Result{}, err
+	}
+	if err := ensureSessionReportRBAC(ctx, r.Client, &session, systemNS); err != nil {
+		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "SessionRBAC", err.Error())
+		_ = r.Status().Update(ctx, &session)
+		return ctrl.Result{}, err
+	}
+
 	cap := effectiveMaxConcurrentSessionsPerNode(tc)
 
 	if cap > 0 {
@@ -122,6 +155,10 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	session.Status.Jobs = makeSessionJobRefs(jobs)
 	session.Status.Phase = computeSessionPhase(jobs)
 	session.Status.ObservedGeneration = session.Generation
+
+	if err := populateSessionSummaries(ctx, r.Client, &session, jobs); err != nil {
+		return ctrl.Result{}, err
+	}
 	if session.Status.StartTime == nil && anyJobStarted(jobs) {
 		now := metav1.Now()
 		session.Status.StartTime = &now

@@ -61,6 +61,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     go build \
       -trimpath \
+      -tags embed_bpf \
       -ldflags "-s -w -X github.com/podtrace/podtrace/internal/config.Version=${VERSION} -X github.com/podtrace/podtrace/internal/config.Commit=${COMMIT}" \
       -o /out/podtrace \
       ./cmd/podtrace

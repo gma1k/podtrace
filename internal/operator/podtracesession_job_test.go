@@ -125,6 +125,79 @@ func TestBuildSessionJobSpec_CoreInvariants(t *testing.T) {
 	if spec.Template.Spec.Containers[0].Image != "ghcr.io/podtrace/podtrace:test" {
 		t.Errorf("image: %q", spec.Template.Spec.Containers[0].Image)
 	}
+	if spec.Template.Spec.ServiceAccountName != SessionServiceAccountName() {
+		t.Errorf("SA=%q want %q", spec.Template.Spec.ServiceAccountName, SessionServiceAccountName())
+	}
+	// Main container must carry the operator-supplied session flags so
+	// the CLI knows where to load the exporter bundle and emit
+	// artifacts.
+	args := strings.Join(spec.Template.Spec.Containers[0].Args, " ")
+	if !strings.Contains(args, "--exporter-from-file /etc/podtrace/exporter/bundle.yaml") {
+		t.Errorf("missing --exporter-from-file: %v", spec.Template.Spec.Containers[0].Args)
+	}
+	if !strings.Contains(args, "--summary-file /var/run/podtrace/summary.json") {
+		t.Errorf("missing --summary-file: %v", spec.Template.Spec.Containers[0].Args)
+	}
+	if !strings.Contains(args, "--termination-message-path /dev/termination-log") {
+		t.Errorf("missing --termination-message-path: %v", spec.Template.Spec.Containers[0].Args)
+	}
+	// Mount count sanity: bpf, btf, proc, cgroup, exporter, exporter-credential, rundir = 7.
+	if n := len(spec.Template.Spec.Containers[0].VolumeMounts); n != 7 {
+		t.Errorf("main container mounts=%d want 7", n)
+	}
+	// Sidecar must not be present when TracerConfig.Session.SidecarUploader is false.
+	if len(spec.Template.Spec.InitContainers) != 0 {
+		t.Errorf("sidecar should be disabled by default: %d init containers", len(spec.Template.Spec.InitContainers))
+	}
+}
+
+func TestBuildSessionJobSpec_SidecarOptedIn(t *testing.T) {
+	tc := &podtracev1alpha1.TracerConfig{
+		Spec: podtracev1alpha1.TracerConfigSpec{
+			Image: "ghcr.io/podtrace/podtrace:test",
+			Session: podtracev1alpha1.SessionRuntimeSpec{
+				SidecarUploader: true,
+			},
+		},
+	}
+	s := newSession(func(s *podtracev1alpha1.PodTraceSession) {
+		s.Spec.ReportRef = &podtracev1alpha1.ReportReference{
+			ConfigMap: &corev1.LocalObjectReference{Name: "rpt"},
+		}
+	})
+	spec := buildSessionJobSpec(s, tc, "node-a")
+
+	if len(spec.Template.Spec.InitContainers) != 1 {
+		t.Fatalf("sidecar not emitted: %d init containers", len(spec.Template.Spec.InitContainers))
+	}
+	side := spec.Template.Spec.InitContainers[0]
+	if side.Name != "report-uploader" {
+		t.Errorf("sidecar name=%q", side.Name)
+	}
+	if side.RestartPolicy == nil || *side.RestartPolicy != corev1.ContainerRestartPolicyAlways {
+		t.Errorf("sidecar restartPolicy must be Always: %+v", side.RestartPolicy)
+	}
+	argsStr := strings.Join(side.Args, " ")
+	if !strings.Contains(argsStr, "report-uploader") || !strings.Contains(argsStr, "--report-to configmap/default/rpt") {
+		t.Errorf("sidecar args wrong: %v", side.Args)
+	}
+}
+
+func TestBuildSessionJobSpec_SidecarSuppressedWithoutReportRef(t *testing.T) {
+	// Even when SidecarUploader is on, there is nothing to upload
+	// without a report sink — the sidecar must be suppressed.
+	tc := &podtracev1alpha1.TracerConfig{
+		Spec: podtracev1alpha1.TracerConfigSpec{
+			Image: "ghcr.io/podtrace/podtrace:test",
+			Session: podtracev1alpha1.SessionRuntimeSpec{
+				SidecarUploader: true,
+			},
+		},
+	}
+	spec := buildSessionJobSpec(newSession(nil), tc, "node-a")
+	if len(spec.Template.Spec.InitContainers) != 0 {
+		t.Errorf("sidecar should be suppressed without reportRef: %d", len(spec.Template.Spec.InitContainers))
+	}
 }
 
 func TestComputeSessionPhase_Transitions(t *testing.T) {

@@ -56,6 +56,14 @@ var (
 	showVersion           bool
 	enableProfiling       bool
 
+	// Session-mode flags. These are set by the operator when it builds a
+	// session Job's argv; end users do not typically set them. They all
+	// default to empty/disabled, preserving existing CLI behavior.
+	exporterFromFile        string
+	summaryFile             string
+	terminationMessagePath  string
+	reportTo                string
+
 	resolverFactory func() (kubernetes.PodResolverInterface, error)
 	tracerFactory   func() (ebpf.TracerInterface, error)
 	exitFunc        func(int)
@@ -84,6 +92,7 @@ func main() {
 	rootCmd.AddCommand(newDiagnoseEnvCmd())
 	rootCmd.AddCommand(newAgentCmd())
 	rootCmd.AddCommand(newOperatorCmd())
+	rootCmd.AddCommand(newReportUploaderCmd())
 
 	rootCmd.Flags().StringVarP(&namespace, "namespace", "n", config.DefaultNamespace, "Kubernetes namespace")
 	rootCmd.Flags().StringVar(&namespacesCSV, "namespaces", "", "Comma-separated namespaces for multi-pod tracing (e.g., default,prod)")
@@ -107,6 +116,10 @@ func main() {
 	rootCmd.Flags().Float64Var(&tracingSampleRate, "tracing-sample-rate", config.DefaultTracingSampleRate, "Tracing sample rate (0.0-1.0)")
 	rootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, "Print version information")
 	rootCmd.Flags().BoolVar(&enableProfiling, "profiling", false, "Enable performance profiling: pprof endpoint discovery on the target pod, auto-trigger on latency spikes, and CPU/memory correlation in reports")
+	rootCmd.Flags().StringVar(&exporterFromFile, "exporter-from-file", "", "Load exporter config from a YAML file (set by the operator for session Jobs)")
+	rootCmd.Flags().StringVar(&summaryFile, "summary-file", "", "Write a JSON summary of diagnose results to this path when diagnose completes")
+	rootCmd.Flags().StringVar(&terminationMessagePath, "termination-message-path", "", "Write a compact summary JSON to this path so Kubernetes surfaces it in pod status")
+	rootCmd.Flags().StringVar(&reportTo, "report-to", "", "Upload the full diagnose report to a sink: kind/namespace/name (kind is configmap|secret)")
 
 	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
 		if logLevel != "" {
@@ -125,6 +138,16 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	if showVersion {
 		fmt.Println(config.GetVersion())
 		return nil
+	}
+
+	// --exporter-from-file populates the same config.* globals the other
+	// tracing flags do, so it runs before the tracing manager is built.
+	// A parse error aborts — the operator-mounted bundle is the only
+	// source of exporter endpoint/credential in session Jobs.
+	if exporterFromFile != "" {
+		if err := applyExporterFromFile(exporterFromFile); err != nil {
+			return fmt.Errorf("load --exporter-from-file: %w", err)
+		}
 	}
 
 	if enableTracing {
@@ -626,6 +649,7 @@ func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Eve
 			if profilingHandler != nil {
 				report += profilingHandler.GenerateSection(diagnostician.GetEvents(), duration)
 			}
+			finalizeDiagnoseOutputs(ctx, report, diagnostician)
 			if exportFormat != "" {
 				return exportReport(report, exportFormat, diagnostician)
 			}
@@ -688,6 +712,7 @@ func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Eve
 			if profilingHandler != nil {
 				report += profilingHandler.GenerateSection(diagnostician.GetEvents(), duration)
 			}
+			finalizeDiagnoseOutputs(ctx, report, diagnostician)
 			if exportFormat != "" {
 				return exportReport(report, exportFormat, diagnostician)
 			}
@@ -699,6 +724,7 @@ func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Eve
 			if profilingHandler != nil {
 				report += profilingHandler.GenerateSection(diagnostician.GetEvents(), duration)
 			}
+			finalizeDiagnoseOutputs(ctx, report, diagnostician)
 			if exportFormat != "" {
 				return exportReport(report, exportFormat, diagnostician)
 			}

@@ -174,7 +174,8 @@ spec:
                   configMap:
                     description: |-
                       ConfigMap in the same namespace as the session. The operator will
-                      create/update it with the report payload.
+                      create/update it with the report payload. Use this sink for small
+                      reports; ConfigMaps are capped at 1MiB of data by etcd.
                     properties:
                       name:
                         default: ""
@@ -187,6 +188,39 @@ spec:
                         type: string
                     type: object
                     x-kubernetes-map-type: atomic
+                  objectStore:
+                    description: |-
+                      ObjectStore uploads the report to a cloud bucket (s3, gs, az). Use
+                      this sink for reports that may exceed the 1MiB ConfigMap/Secret
+                      limit. Rejected by the validating webhook in v1alpha1 — the
+                      schema is reserved so clients can adopt it without a CRD bump
+                      later.
+                    properties:
+                      credentialsSecretRef:
+                        description: |-
+                          CredentialsSecretRef names a Secret in the session's namespace
+                          whose keys the uploader reads (e.g. "access_key_id",
+                          "secret_access_key"). Implementation-specific — interpretation is
+                          left to the CLI uploader.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      uri:
+                        description: URI of the destination, e.g. "s3://bucket/path/"
+                          or "gs://bucket/path/".
+                        type: string
+                    required:
+                    - uri
+                    type: object
                   secret:
                     description: |-
                       Secret in the same namespace as the session. Prefer this sink when the

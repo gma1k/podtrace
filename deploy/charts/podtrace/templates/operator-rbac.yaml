@@ -20,10 +20,12 @@ metadata:
     {{- include "podtrace.labels" . | nindent 4 }}
     app.kubernetes.io/component: operator
 rules:
-  # podtrace.io CRDs
+  # podtrace.io CRDs. delete is required for TTL-driven cleanup of
+  # expired PodTraceSession resources (sessionTTL on terminal phase)
+  # and for agent-driven removal of stale PodTrace entries.
   - apiGroups: ["podtrace.io"]
     resources: ["tracerconfigs", "podtraces", "podtracesessions", "exporterconfigs"]
-    verbs: ["get", "list", "watch", "update", "patch"]
+    verbs: ["get", "list", "watch", "update", "patch", "delete"]
   - apiGroups: ["podtrace.io"]
     resources: ["tracerconfigs/status", "podtraces/status", "podtracesessions/status", "exporterconfigs/status"]
     verbs: ["get", "update", "patch"]
@@ -48,6 +50,9 @@ rules:
   # Agent RBAC managed by TracerConfigReconciler
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles", "clusterrolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # Events surface on operator errors
   - apiGroups: [""]

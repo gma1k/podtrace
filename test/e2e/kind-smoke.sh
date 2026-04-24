@@ -242,7 +242,7 @@ EOF
 	kubectl -n "${SAMPLE_NS}" rollout status deploy/smoke-target --timeout=60s
 
 	# --- step 6: session targeting the sample workload via label -------
-	log_info "creating sample PodTraceSession"
+	log_info "creating sample PodTraceSession with reportRef sink"
 	kubectl -n "${SAMPLE_NS}" apply -f - <<EOF
 apiVersion: podtrace.io/v1alpha1
 kind: PodTraceSession
@@ -256,16 +256,25 @@ spec:
   filters: [dns, net]
   exporterRef:
     name: prod-otlp
+  reportRef:
+    configMap:
+      name: smoke-report
 EOF
 
 	# --- step 7: per-node Job landed under podtrace-system --------------
 	wait_for "session Job created in ${SYSTEM_NS}" 60 \
 		"kubectl -n ${SYSTEM_NS} get jobs -l podtrace.io/session=smoke -o name | grep -q job"
 
-	# --- step 8: continuous PodTrace drives the bundle-sync reconciler --
-	# Bundles are owned by PodTrace (continuous mode), not PodTraceSession;
-	# applying a PodTrace here exercises the bundle-sync path and proves
-	# PodTraceReconciler is wired.
+	# --- step 7a: session bundle and per-session RBAC landed ------------
+	wait_for "session exporter bundle ConfigMap in ${SYSTEM_NS}" 60 \
+		"kubectl -n ${SYSTEM_NS} get cm -l podtrace.io/session=smoke -o name | grep -q configmap"
+	wait_for "session ServiceAccount podtrace-session" 60 \
+		"kubectl -n ${SYSTEM_NS} get sa podtrace-session"
+	wait_for "per-session Role in ${SAMPLE_NS}" 60 \
+		"kubectl -n ${SAMPLE_NS} get role -l podtrace.io/session=smoke -o name | grep -q role"
+	wait_for "per-session RoleBinding in ${SAMPLE_NS}" 60 \
+		"kubectl -n ${SAMPLE_NS} get rolebinding -l podtrace.io/session=smoke -o name | grep -q rolebinding"
+
 	log_info "creating continuous PodTrace (exercises bundle sync)"
 	kubectl -n "${SAMPLE_NS}" apply -f - <<EOF
 apiVersion: podtrace.io/v1alpha1

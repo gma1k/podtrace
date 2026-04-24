@@ -74,6 +74,8 @@ type SessionRuntimeSpec struct {
 	// this TracerConfig. If unset, no cap is enforced by the operator.
 	// +optional
 	MaxDuration *metav1.Duration `json:"maxDuration,omitempty"`
+
+	SidecarUploader bool `json:"sidecarUploader,omitempty"`
 }
 
 // TracerConfigSpec configures the tracer infrastructure. It is cluster-scoped
