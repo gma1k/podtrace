@@ -1,0 +1,112 @@
+name: Chainsaw e2e
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "api/v1alpha1/**"
+      - "cmd/podtrace/**"
+      - "internal/operator/**"
+      - "internal/agent/**"
+      - "deploy/charts/podtrace/**"
+      - "test/chainsaw/**"
+      - "Makefile"
+      - "Dockerfile"
+      - ".github/workflows/chainsaw.yml"
+  pull_request:
+    branches: ["**"]
+    paths:
+      - "api/v1alpha1/**"
+      - "cmd/podtrace/**"
+      - "internal/operator/**"
+      - "internal/agent/**"
+      - "deploy/charts/podtrace/**"
+      - "test/chainsaw/**"
+      - "Makefile"
+      - "Dockerfile"
+      - ".github/workflows/chainsaw.yml"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  chainsaw:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: Install kind
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: podtrace-chainsaw
+          config: ./test/chainsaw/kind-config.yaml
+          version: v0.24.0
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.0
+
+      - name: Install chainsaw
+        run: |
+          go install github.com/kyverno/chainsaw@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Install BPF toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang llvm libbpf-dev libelf-dev make pkg-config
+          # bpftool is part of linux-tools; pin to the running kernel.
+          sudo apt-get install -y "linux-tools-$(uname -r)" || \
+            sudo apt-get install -y linux-tools-generic
+
+      - name: Build podtrace image
+        run: |
+          make docker-build IMAGE_TAG=ci
+          kind load docker-image ghcr.io/podtrace/podtrace:ci \
+            --name podtrace-chainsaw
+
+      - name: Install operator via Helm
+        run: |
+          kubectl create namespace podtrace-system --dry-run=client -o yaml | kubectl apply -f -
+          kubectl label namespace podtrace-system \
+            pod-security.kubernetes.io/enforce=privileged \
+            pod-security.kubernetes.io/audit=privileged \
+            pod-security.kubernetes.io/warn=privileged \
+            --overwrite
+
+          helm install podtrace deploy/charts/podtrace \
+            --namespace podtrace-system \
+            --set namespace.create=false \
+            --set operator.enabled=true \
+            --set image.repository=ghcr.io/podtrace/podtrace \
+            --set image.tag=ci \
+            --set image.pullPolicy=Never \
+            --wait --timeout 180s
+
+          for i in $(seq 1 60); do
+            if kubectl -n podtrace-system get ds podtrace-agent >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          kubectl -n podtrace-system rollout status ds/podtrace-agent --timeout=180s
+
+      - name: Run chainsaw suite
+        run: make chainsaw
+
+      - name: Dump cluster state on failure
+        if: failure()
+        run: |
+          kubectl get nodes -o wide || true
+          kubectl -n podtrace-system get pods,ds,deploy,cm,secret 2>&1 || true
+          kubectl -n podtrace-system describe pods 2>&1 | tail -200 || true
+          kubectl -n podtrace-system logs deploy/podtrace-operator --tail=200 || true

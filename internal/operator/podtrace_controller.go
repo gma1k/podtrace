@@ -12,7 +12,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
 )
@@ -125,14 +127,36 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 }
 
 func (r *PodTraceReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// No Owns() here: bundles live in a different namespace than the
-	// PodTrace, so Kubernetes rejects ownerReferences. Cleanup goes
-	// through FinalizerCleanup; see finalizer.go.
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("podtrace").
 		For(&podtracev1alpha1.PodTrace{}).
+		Watches(
+			&podtracev1alpha1.ExporterConfig{},
+			handler.EnqueueRequestsFromMapFunc(r.exporterConfigToPodTraces),
+		).
 		WithOptions(defaultControllerOptions()).
 		Complete(r)
+}
+
+func (r *PodTraceReconciler) exporterConfigToPodTraces(ctx context.Context, obj client.Object) []reconcile.Request {
+	ec, ok := obj.(*podtracev1alpha1.ExporterConfig)
+	if !ok {
+		return nil
+	}
+	var list podtracev1alpha1.PodTraceList
+	if err := r.List(ctx, &list, client.InNamespace(ec.Namespace)); err != nil {
+		return nil
+	}
+	var reqs []reconcile.Request
+	for i := range list.Items {
+		pt := &list.Items[i]
+		if pt.Spec.ExporterRef.Name == ec.Name {
+			reqs = append(reqs, reconcile.Request{
+				NamespacedName: client.ObjectKey{Namespace: pt.Namespace, Name: pt.Name},
+			})
+		}
+	}
+	return reqs
 }
 
 // syncExporterBundle creates / updates the per-PodTrace ConfigMap+Secret

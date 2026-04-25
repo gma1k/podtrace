@@ -1,13 +1,10 @@
-{{- if .Values.crds.install }}
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.16.5
-    {{- if .Values.crds.keep }}
     helm.sh/resource-policy: keep
-    {{- end }}
   name: tracerconfigs.podtrace.io
 spec:
   group: podtrace.io
@@ -1341,4 +1338,3 @@ spec:
     storage: true
     subresources:
       status: {}
-{{- end }}

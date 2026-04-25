@@ -84,11 +84,6 @@ func (r *TracerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	r.setCondition(&tc, ConditionDegraded, metav1.ConditionFalse, "Reconciled", "")
 
 	if err := r.Status().Update(ctx, &tc); err != nil {
-		// Conflict: the TracerConfig was mutated between our Get and
-		// our Status().Update (often controller-runtime itself writing
-		// ownerReferences on child adoption). Re-queue rather than
-		// surfacing the race as a terminal error — the next reconcile
-		// reads the fresh resourceVersion and succeeds.
 		if apierrors.IsConflict(err) {
 			return ctrl.Result{Requeue: true}, nil
 		}
@@ -108,6 +103,8 @@ func (r *TracerConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.ServiceAccount{}).
 		Owns(&rbacv1.ClusterRole{}).
 		Owns(&rbacv1.ClusterRoleBinding{}).
+		Owns(&rbacv1.Role{}).
+		Owns(&rbacv1.RoleBinding{}).
 		WithEventFilter(predicate.Or(
 			predicate.GenerationChangedPredicate{},
 			predicate.LabelChangedPredicate{},
@@ -167,6 +164,45 @@ func (r *TracerConfigReconciler) ensureAgentRBAC(ctx context.Context, tc *podtra
 	}); err != nil {
 		return fmt.Errorf("ClusterRoleBinding: %w", err)
 	}
+
+	// Bundles (ConfigMap + Secret) live in systemNS. Granting the
+	// agent SA cluster-wide configmap/secret read would be a needless
+	// blast-radius expansion — agents only ever read bundles in their
+	// own system namespace. A namespaced Role keeps the grant scoped.
+	role := &rbacv1.Role{
+		ObjectMeta: ManagedObjectMeta(AgentBundleRoleName(), systemNS, ComponentAgent, nil),
+	}
+	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, role, func() error {
+		role.Labels = mergeLabels(role.Labels, map[string]string{LabelManagedBy: ManagedByValue, LabelComponent: ComponentAgent})
+		role.Rules = []rbacv1.PolicyRule{{
+			APIGroups: []string{""},
+			Resources: []string{"configmaps", "secrets"},
+			Verbs:     []string{"get", "list", "watch"},
+		}}
+		return controllerutil.SetControllerReference(tc, role, r.Scheme)
+	}); err != nil {
+		return fmt.Errorf("agent bundle Role: %w", err)
+	}
+
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: ManagedObjectMeta(AgentBundleRoleBindingName(), systemNS, ComponentAgent, nil),
+	}
+	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, rb, func() error {
+		rb.Labels = mergeLabels(rb.Labels, map[string]string{LabelManagedBy: ManagedByValue, LabelComponent: ComponentAgent})
+		rb.RoleRef = rbacv1.RoleRef{
+			APIGroup: rbacv1.GroupName,
+			Kind:     "Role",
+			Name:     AgentBundleRoleName(),
+		}
+		rb.Subjects = []rbacv1.Subject{{
+			Kind:      rbacv1.ServiceAccountKind,
+			Name:      AgentServiceAccountName(),
+			Namespace: systemNS,
+		}}
+		return controllerutil.SetControllerReference(tc, rb, r.Scheme)
+	}); err != nil {
+		return fmt.Errorf("agent bundle RoleBinding: %w", err)
+	}
 	return nil
 }
 
@@ -192,19 +228,8 @@ func (r *TracerConfigReconciler) ensureAgentDaemonSet(ctx context.Context, tc *p
 	return ds, nil
 }
 
-// agentClusterRoleRules returns the minimum RBAC the agent needs:
-//
-//   - List/watch PodTrace cluster-wide (so it can merge CRs on its node)
-//   - Patch PodTrace/status (so it can write its per-node status entry)
-//   - Read Pods cluster-wide (to resolve selectors against pod labels;
-//     scoped narrower if operators later introduce per-namespace agents)
-//   - Read ConfigMap/Secret only inside systemNS (exporter bundles)
-//   - Create/patch Events (surface attach failures back to operators)
-//
-// The rules are intentionally over-scoped for PodTrace reads because the
-// SharedInformer list-watches cluster-wide; restricting to a namespace
-// breaks the multi-namespace selector story.
 func agentClusterRoleRules(systemNS string) []rbacv1.PolicyRule {
+	_ = systemNS
 	return []rbacv1.PolicyRule{
 		{
 			APIGroups: []string{"podtrace.io"},
@@ -225,16 +250,6 @@ func agentClusterRoleRules(systemNS string) []rbacv1.PolicyRule {
 			APIGroups: []string{""},
 			Resources: []string{"events"},
 			Verbs:     []string{"create", "patch"},
-		},
-		// Bundles live in systemNS; agent reads them via a namespaced
-		// request. ClusterRole is still used for simplicity — a
-		// RoleBinding per agent pod would add deploy complexity for no
-		// practical security gain given the rest of the scope.
-		{
-			APIGroups:     []string{""},
-			Resources:     []string{"configmaps", "secrets"},
-			Verbs:         []string{"get", "list", "watch"},
-			ResourceNames: []string{}, // namespace scoping applied by agent's code; cluster-level rule is broad
 		},
 	}
 }

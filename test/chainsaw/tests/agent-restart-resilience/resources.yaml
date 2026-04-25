@@ -1,0 +1,40 @@
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: restart-otlp
+spec:
+  type: otlp
+  otlp:
+    endpoint: otel-collector:4318
+    protocol: http
+    insecure: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: restart-target
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: restart-target
+  template:
+    metadata:
+      labels:
+        app: restart-target
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.9
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: restart-pt
+spec:
+  selector:
+    matchLabels:
+      app: restart-target
+  filters: [dns, net]
+  exporterRef:
+    name: restart-otlp

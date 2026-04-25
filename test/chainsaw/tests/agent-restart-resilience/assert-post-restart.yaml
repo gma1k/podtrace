@@ -1,0 +1,7 @@
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: restart-pt
+status:
+  observedGeneration: 1
+  (conditions[?type == 'Reconciled'].status | [0]): "True"

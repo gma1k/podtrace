@@ -1,0 +1,52 @@
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: shared-otlp
+spec:
+  type: otlp
+  otlp:
+    endpoint: otel-collector:4318
+    protocol: http
+    insecure: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shared-target
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shared-target
+  template:
+    metadata:
+      labels:
+        app: shared-target
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.9
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: shared-pt-a
+spec:
+  selector:
+    matchLabels:
+      app: shared-target
+  filters: [dns, net]
+  exporterRef:
+    name: shared-otlp
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: shared-pt-b
+spec:
+  selector:
+    matchLabels:
+      app: shared-target
+  filters: [fs, proc]
+  exporterRef:
+    name: shared-otlp

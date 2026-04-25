@@ -1,0 +1,135 @@
+# PodTrace — continuous tracing CR
+
+`PodTrace` declares a continuous tracing intent against a set of pods. The
+operator creates an exporter bundle in `podtrace-system`, the agent
+DaemonSet matches the selector, and per-node status entries roll up into
+the CR's `.status.nodeStatus` array.
+
+> **Current status (honest):** The control plane is fully functional —
+> matching, bundle sync, multi-CR merging, per-node status writes all
+> work. **Event emission to the configured exporter is stubbed** in the
+> agent's continuous path (NoopBackend); no spans reach the exporter
+> today. For a working end-to-end trace including event flow, use
+> [PodTraceSession](crd-podtracesession.md). The plumbing for real
+> events through this path is upcoming work.
+
+## Minimal example
+
+```yaml
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: prod-otlp
+  namespace: my-app
+spec:
+  type: otlp
+  otlp:
+    endpoint: otel-collector.observability:4318
+    protocol: http
+    insecure: true
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: watch-api
+  namespace: my-app
+spec:
+  selector:
+    matchLabels:
+      app: api
+  filters: [dns, net]
+  exporterRef:
+    name: prod-otlp
+```
+
+## Spec reference
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `selector` | LabelSelector | one of selector/podRefs | Pods labeled to trace. Empty selector is rejected. |
+| `podRefs` | `[{namespace, name}]` | one of selector/podRefs | Explicit pod list. Cross-namespace allowed. |
+| `namespaceSelector` | LabelSelector | optional | Widens `selector` across namespaces. Field's expressions are not yet evaluated; presence alone enables cluster-wide search. |
+| `filters` | `[dns,net,fs,cpu,proc]` | optional | Empty = all categories. |
+| `exporterRef.name` | string | required | Names an `ExporterConfig` in the same namespace. |
+| `paused` | bool | optional | Stop emitting events without deleting the CR. |
+| `samplePercent` | int 0-100 | optional | Sample rate forwarded to the exporter. |
+| `thresholds` | object | optional | Override anomaly-detection knobs (errorRate, RTT spike, FS slow). |
+
+## Status reference
+
+| Field | Notes |
+|---|---|
+| `phase` | Aggregate state derived from per-node reports. |
+| `matchedPods` | Sum of `activeCgroups` across all reporting nodes. |
+| `nodeStatus[]` | One entry per node hosting a matched pod. Each carries `node`, `ready`, `activeCgroups`, `eventsTotal`, `droppedEvents`, `lastHeartbeat`, `message`. |
+| `conditions` | Standard Kubernetes condition objects. `Ready=True` once at least one node reports healthy. `Degraded=True` on bundle sync errors. `Paused` mirrors `spec.paused`. |
+| `observedGeneration` | Most recent generation reconciled. |
+
+## Multi-CR merging on shared targets
+
+Two `PodTrace` CRs targeting overlapping pods produce **one** tracer
+process per node. The agent merges:
+
+- **CgroupIDs** — union, so the kernel-side filter admits any matched pod.
+- **Filters** — union, so the agent emits any event type any CR cares about.
+- **Exporters** — per-CR dispatch table, so each CR's events land on its
+  own exporter (router filters by event type per CR).
+
+Result: overlapping CRs share kernel resources, do not double-trace, and
+each independently reports `eventsTotal` on its own `nodeStatus`.
+
+## Common operations
+
+```bash
+# Apply
+kubectl apply -f my-podtrace.yaml
+
+# Watch reconcile
+kubectl get podtraces.podtrace.io -A -w
+
+# Inspect per-node rollup
+kubectl get podtrace watch-api -n my-app -o jsonpath='{range .status.nodeStatus[*]}{.node}: ready={.ready} events={.eventsTotal}{"\n"}{end}'
+
+# Pause without deleting
+kubectl patch podtrace watch-api -n my-app --type=merge -p '{"spec":{"paused":true}}'
+
+# Resume
+kubectl patch podtrace watch-api -n my-app --type=merge -p '{"spec":{"paused":false}}'
+
+# Delete (finalizer cleans up the bundle in podtrace-system)
+kubectl delete podtrace watch-api -n my-app
+```
+
+## RBAC
+
+Continuous CRs do not require any extra user-namespace RBAC beyond what
+the operator's ClusterRole already grants. The exporter `Secret` (when
+the bundle has credentials) lives in the user namespace and the operator
+reads it during reconcile; agents only read the operator-materialized
+bundle in `podtrace-system`.
+
+## Troubleshooting
+
+**`status.nodeStatus` is empty:** The agent DaemonSet hasn't reported
+yet, OR no node has a matched pod. Check:
+
+```bash
+kubectl get pods -n my-app -l <your-selector>
+kubectl -n podtrace-system get pods -l podtrace.io/component=agent
+```
+
+**`Degraded=True ExporterNotFound`:** The named ExporterConfig isn't in
+the same namespace. Cross-namespace exporter references are not allowed.
+
+**`Degraded=True BundleSync`:** The operator failed to materialize the
+exporter bundle in `podtrace-system`. Likely a missing user-namespace
+Secret referenced by the ExporterConfig. Check the operator log.
+
+**Events stay at zero:** Expected today — see status note at the top.
+For real eBPF-active tracing, use a [PodTraceSession](crd-podtracesession.md).
+
+## Related
+
+- [crd-podtracesession.md](crd-podtracesession.md) — bounded diagnose CR (the live event path)
+- [crd-exporterconfig.md](crd-exporterconfig.md) — exporter setup
+- [operator.md](operator.md) — operator architecture

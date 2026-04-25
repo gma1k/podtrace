@@ -36,6 +36,11 @@ func helmAvailable(t *testing.T) string {
 // to render fails the test.
 func renderChart(t *testing.T, setFlags ...string) []byte {
 	t.Helper()
+	return renderChartWithAPIVersions(t, nil, setFlags...)
+}
+
+func renderChartWithAPIVersions(t *testing.T, apiVersions []string, setFlags ...string) []byte {
+	t.Helper()
 	helm := helmAvailable(t)
 
 	chartDir := chartDir(t)
@@ -43,6 +48,9 @@ func renderChart(t *testing.T, setFlags ...string) []byte {
 	args := []string{"template", "podtrace", chartDir}
 	for _, f := range setFlags {
 		args = append(args, "--set", f)
+	}
+	for _, av := range apiVersions {
+		args = append(args, "--api-versions", av)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd := exec.Command(helm, args...)
@@ -54,8 +62,24 @@ func renderChart(t *testing.T, setFlags ...string) []byte {
 	return stdout.Bytes()
 }
 
-// chartDir locates the Helm chart by walking up from cwd until it finds
-// a go.mod (repo root marker), then joining chartSubPath.
+func renderChartIncludeCRDs(t *testing.T, setFlags ...string) []byte {
+	t.Helper()
+	helm := helmAvailable(t)
+
+	args := []string{"template", "podtrace", chartDir(t), "--include-crds"}
+	for _, f := range setFlags {
+		args = append(args, "--set", f)
+	}
+	var stdout, stderr bytes.Buffer
+	cmd := exec.Command(helm, args...)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("helm template --include-crds %v: %v\nstderr: %s", args, err, stderr.String())
+	}
+	return stdout.Bytes()
+}
+
 func chartDir(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -76,19 +100,13 @@ func chartDir(t *testing.T) string {
 	return ""
 }
 
-// TestChart_DefaultValues renders the chart with stock values and asserts
-// that exactly the expected resources appear. Any new template that ships
-// "on by default" must be either explicitly added to this assertion or
-// gated behind a Values toggle.
 func TestChart_DefaultValues(t *testing.T) {
 	out := renderChart(t)
 	resources := parseKinds(t, out)
 
-	// Expect: 4 CRDs + 1 Namespace.
-	wantCRDs := 4
-	gotCRDs := resources["CustomResourceDefinition"]
-	if gotCRDs != wantCRDs {
-		t.Errorf("CRDs rendered: got %d want %d", gotCRDs, wantCRDs)
+	// Default render does NOT include CRDs (they live under crds/).
+	if resources["CustomResourceDefinition"] != 0 {
+		t.Errorf("default `helm template` should skip crds/; got %d", resources["CustomResourceDefinition"])
 	}
 	if resources["Namespace"] != 1 {
 		t.Errorf("Namespace count: got %d want 1", resources["Namespace"])
@@ -99,32 +117,21 @@ func TestChart_DefaultValues(t *testing.T) {
 	}
 }
 
-// TestChart_CRDsCanBeDisabled asserts the crds.install toggle actually
-// suppresses all four CRDs.
-func TestChart_CRDsCanBeDisabled(t *testing.T) {
-	out := renderChart(t, "crds.install=false")
+func TestChart_CRDsRenderedWithIncludeFlag(t *testing.T) {
+	out := renderChartIncludeCRDs(t)
 	resources := parseKinds(t, out)
-	if resources["CustomResourceDefinition"] != 0 {
-		t.Errorf("crds.install=false still rendered %d CRDs", resources["CustomResourceDefinition"])
-	}
-	// Namespace should still render.
-	if resources["Namespace"] != 1 {
-		t.Errorf("Namespace missing with crds disabled")
+	if resources["CustomResourceDefinition"] != 4 {
+		t.Errorf("expected 4 CRDs from crds/, got %d", resources["CustomResourceDefinition"])
 	}
 }
 
-// TestChart_KeepAnnotationToggle asserts the keep annotation only
-// appears when crds.keep is true. When false, helm uninstall will clean
-// up the CRDs too.
-func TestChart_KeepAnnotationToggle(t *testing.T) {
-	withKeep := renderChart(t, "crds.keep=true")
-	withoutKeep := renderChart(t, "crds.keep=false")
-
-	if !bytes.Contains(withKeep, []byte("helm.sh/resource-policy: keep")) {
-		t.Error("crds.keep=true did not produce the keep annotation")
-	}
-	if bytes.Contains(withoutKeep, []byte("helm.sh/resource-policy: keep")) {
-		t.Error("crds.keep=false still produced the keep annotation")
+func TestChart_CRDsCarryKeepAnnotation(t *testing.T) {
+	out := renderChartIncludeCRDs(t)
+	// Each CRD should carry the annotation. We expect one occurrence
+	// per CRD (4 total).
+	count := bytes.Count(out, []byte("helm.sh/resource-policy: keep"))
+	if count < 4 {
+		t.Errorf("keep annotation count: got %d want >= 4 (one per CRD)", count)
 	}
 }
 
@@ -253,8 +260,166 @@ func TestChart_SystemNamespaceOverride(t *testing.T) {
 	}
 }
 
-// parseKinds decodes a multi-document YAML blob and returns a count of
-// resources by Kind.
+// TestChart_TracerConfigRenderedWhenOperatorEnabled asserts the chart's
+// default behavior: enabling the operator also creates a TracerConfig
+// CR so the agent DaemonSet comes up without manual `kubectl apply`.
+func TestChart_TracerConfigRenderedWhenOperatorEnabled(t *testing.T) {
+	out := renderChart(t, "operator.enabled=true")
+	if !bytes.Contains(out, []byte("kind: TracerConfig")) {
+		t.Fatal("operator.enabled=true should render a default TracerConfig")
+	}
+	// Image, systemNamespace, and session caps must reflect values.yaml
+	// so the chart produces a self-consistent install.
+	for _, marker := range []string{
+		"name: default",
+		`systemNamespace: "podtrace-system"`,
+		"maxConcurrentSessionsPerNode: 2",
+		`priorityClassName: "system-node-critical"`,
+	} {
+		if !bytes.Contains(out, []byte(marker)) {
+			t.Errorf("rendered TracerConfig missing %q", marker)
+		}
+	}
+}
+
+func TestChart_TracerConfigSuppressedWhenDisabled(t *testing.T) {
+	out := renderChart(t, "operator.enabled=true", "tracerConfig.create=false")
+	if n := parseKinds(t, out)["TracerConfig"]; n != 0 {
+		t.Errorf("tracerConfig.create=false should not render a TracerConfig, got %d", n)
+	}
+}
+
+// TestChart_TracerConfigPropagatesValues asserts that values.yaml
+// fields the user expects to flow into the rendered TracerConfig
+// actually do — bumping eventBufferSize via --set must surface in
+// the CR or the agent DaemonSet would fall back to defaults silently.
+func TestChart_TracerConfigPropagatesValues(t *testing.T) {
+	out := renderChart(t,
+		"operator.enabled=true",
+		"agent.eventBufferSize=20000",
+		"agent.statusReportInterval=15s",
+		"session.ttlSecondsAfterFinished=900",
+		"tracerConfig.sidecarUploader=true",
+	)
+	for _, marker := range []string{
+		"eventBufferSize: 20000",
+		`statusReportInterval: "15s"`,
+		"ttlSecondsAfterFinished: 900",
+		"sidecarUploader: true",
+	} {
+		if !bytes.Contains(out, []byte(marker)) {
+			t.Errorf("rendered TracerConfig missing %q", marker)
+		}
+	}
+}
+
+// TestChart_ServiceMonitorToggle verifies the ServiceMonitor renders
+// only when explicitly enabled and only with the operator on, and
+// that the rendered shape targets the operator's metrics Service.
+func TestChart_ServiceMonitorToggle(t *testing.T) {
+	off := renderChartWithAPIVersions(t, []string{"monitoring.coreos.com/v1"}, "operator.enabled=true")
+	on := renderChartWithAPIVersions(t, []string{"monitoring.coreos.com/v1"},
+		"operator.enabled=true",
+		"metrics.serviceMonitor.enabled=true",
+		"metrics.serviceMonitor.interval=1m",
+	)
+
+	if bytes.Contains(off, []byte("kind: ServiceMonitor")) {
+		t.Error("ServiceMonitor should not render when toggle is off")
+	}
+	if !bytes.Contains(on, []byte("kind: ServiceMonitor")) {
+		t.Fatal("metrics.serviceMonitor.enabled=true should render a ServiceMonitor")
+	}
+	for _, marker := range []string{
+		"port: metrics",
+		"interval: 1m",
+		"path: /metrics",
+		"app.kubernetes.io/component: operator",
+	} {
+		if !bytes.Contains(on, []byte(marker)) {
+			t.Errorf("ServiceMonitor missing %q", marker)
+		}
+	}
+}
+
+// TestChart_PodMonitorToggle verifies the agent PodMonitor renders
+// only when enabled and selects pods by the operator-applied
+// component label.
+func TestChart_PodMonitorToggle(t *testing.T) {
+	off := renderChartWithAPIVersions(t, []string{"monitoring.coreos.com/v1"})
+	on := renderChartWithAPIVersions(t, []string{"monitoring.coreos.com/v1"}, "metrics.podMonitor.enabled=true")
+
+	if bytes.Contains(off, []byte("kind: PodMonitor")) {
+		t.Error("PodMonitor should not render when toggle is off")
+	}
+	if !bytes.Contains(on, []byte("kind: PodMonitor")) {
+		t.Fatal("metrics.podMonitor.enabled=true should render a PodMonitor")
+	}
+	for _, marker := range []string{
+		"podtrace.io/managed-by: podtrace-operator",
+		"podtrace.io/component: agent",
+		"port: metrics",
+		"path: /metrics",
+	} {
+		if !bytes.Contains(on, []byte(marker)) {
+			t.Errorf("PodMonitor missing %q", marker)
+		}
+	}
+}
+
+// TestChart_ExporterConfigExampleToggle asserts the optional starter
+// ExporterConfig only renders when explicitly enabled. Default off
+// keeps the chart from polluting random user namespaces with example
+// resources.
+func TestChart_ExporterConfigExampleToggle(t *testing.T) {
+	off := renderChart(t, "operator.enabled=true")
+	on := renderChart(t,
+		"operator.enabled=true",
+		"examples.exporterconfig.enabled=true",
+		"examples.exporterconfig.namespace=demo",
+		"examples.exporterconfig.endpoint=otel:4318",
+	)
+	if n := parseKinds(t, off)["ExporterConfig"]; n != 0 {
+		t.Errorf("ExporterConfig should not render when example toggle is off, got %d", n)
+	}
+	if parseKinds(t, on)["ExporterConfig"] < 1 {
+		t.Fatal("examples.exporterconfig.enabled=true should render an ExporterConfig")
+	}
+	for _, marker := range []string{
+		"namespace: demo",
+		`endpoint: "otel:4318"`,
+		"type: otlp",
+	} {
+		if !bytes.Contains(on, []byte(marker)) {
+			t.Errorf("example ExporterConfig missing %q", marker)
+		}
+	}
+}
+
+func TestChart_MonitoringTemplatesAreNoopWithoutCRDs(t *testing.T) {
+	out := renderChart(t,
+		"operator.enabled=true",
+		"metrics.serviceMonitor.enabled=true",
+		"metrics.podMonitor.enabled=true",
+	)
+	if bytes.Contains(out, []byte("kind: ServiceMonitor")) {
+		t.Error("ServiceMonitor should not render without monitoring.coreos.com/v1 CRD")
+	}
+	if bytes.Contains(out, []byte("kind: PodMonitor")) {
+		t.Error("PodMonitor should not render without monitoring.coreos.com/v1 CRD")
+	}
+}
+
+func TestChart_OperatorClusterRoleHasRoleAndRoleBindingVerbs(t *testing.T) {
+	out := renderChart(t, "operator.enabled=true")
+	if !bytes.Contains(out, []byte(`resources: ["roles", "rolebindings"]`)) {
+		t.Error("operator ClusterRole missing roles/rolebindings rule")
+	}
+	if !bytes.Contains(out, []byte(`["get", "list", "watch", "create", "update", "patch", "delete"]`)) {
+		t.Error("operator ClusterRole missing required verbs on roles/rolebindings")
+	}
+}
+
 func parseKinds(t *testing.T, raw []byte) map[string]int {
 	t.Helper()
 	out := map[string]int{}

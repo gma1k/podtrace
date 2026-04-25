@@ -1,0 +1,33 @@
+{{- if .Values.metrics.podMonitor.enabled }}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+---
+# Agent pods are labeled `podtrace.io/component=agent` by the operator
+# (see internal/operator/naming.go), so this PodMonitor selects them
+# directly without going through a Service — DaemonSets do not need
+# one.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "podtrace.fullname" . }}-agent
+  namespace: {{ include "podtrace.systemNamespace" . }}
+  labels:
+    {{- include "podtrace.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+    {{- with .Values.metrics.podMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      podtrace.io/managed-by: podtrace-operator
+      podtrace.io/component: agent
+  namespaceSelector:
+    matchNames:
+      - {{ include "podtrace.systemNamespace" . }}
+  podMetricsEndpoints:
+    - port: metrics
+      path: {{ .Values.metrics.podMonitor.path | default "/metrics" }}
+      interval: {{ .Values.metrics.podMonitor.interval | default "30s" }}
+      scheme: http
+{{- end }}
+{{- end }}

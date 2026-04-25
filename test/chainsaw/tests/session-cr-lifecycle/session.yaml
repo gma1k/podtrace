@@ -1,0 +1,15 @@
+apiVersion: podtrace.io/v1alpha1
+kind: PodTraceSession
+metadata:
+  name: session-diag
+spec:
+  selector:
+    matchLabels:
+      app: session-target
+  duration: 30s
+  filters: [dns, net]
+  exporterRef:
+    name: session-otlp
+  reportRef:
+    configMap:
+      name: session-report

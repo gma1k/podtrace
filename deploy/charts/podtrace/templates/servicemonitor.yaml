@@ -1,0 +1,39 @@
+{{- if and .Values.operator.enabled .Values.metrics.serviceMonitor.enabled }}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+---
+# Prometheus ServiceMonitor for the operator's controller-runtime
+# metrics endpoint. Gated on the prometheus-operator's
+# monitoring.coreos.com/v1 CRD being installed: enabling the toggle
+# on a cluster without it would otherwise hard-fail `helm install`.
+# When the CRD is absent the template silently skips, leaving the
+# toggle a no-op so users can flip it on safely as part of a
+# layered install (chart first, prometheus-operator later).
+#
+# The Service this targets is rendered by operator-service.yaml
+# (`<release>-operator-metrics`) and exposes port `metrics` (8080).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "podtrace.fullname" . }}-operator
+  namespace: {{ include "podtrace.systemNamespace" . }}
+  labels:
+    {{- include "podtrace.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+    {{- with .Values.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "podtrace.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: operator
+  namespaceSelector:
+    matchNames:
+      - {{ include "podtrace.systemNamespace" . }}
+  endpoints:
+    - port: metrics
+      path: {{ .Values.metrics.serviceMonitor.path | default "/metrics" }}
+      interval: {{ .Values.metrics.serviceMonitor.interval | default "30s" }}
+      scheme: http
+{{- end }}
+{{- end }}

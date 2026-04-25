@@ -1,0 +1,48 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: exporter-credential-rotation
+spec:
+  description: |
+    When an upstream Secret referenced by an ExporterConfig is updated,
+    the operator must re-read it and refresh the bundle Secret in
+    podtrace-system. Verifies the operator's credential refresh path.
+
+    SCOPE: control-plane only. Without a mock OTLP receiver this test
+    cannot assert the rotated credential reaches the wire. When a
+    receiver harness lands (Phase 7+), extend this test to capture
+    request headers pre/post rotation and compare.
+  timeouts:
+    apply: 30s
+    assert: 60s
+  steps:
+    - name: setup
+      try:
+        - apply:
+            file: ./resources.yaml
+        - assert:
+            file: ./assert-initial-credential.yaml
+
+    - name: rotate-credential
+      try:
+        - patch:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: dd-creds
+              stringData:
+                api_key: rotated-key
+        - patch:
+            resource:
+              apiVersion: podtrace.io/v1alpha1
+              kind: ExporterConfig
+              metadata:
+                name: rotation-dd
+                annotations:
+                  podtrace.io/rotated-at: "now"
+
+    - name: bundle-carries-new-credential
+      try:
+        - assert:
+            file: ./assert-rotated-credential.yaml

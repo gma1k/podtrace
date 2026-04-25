@@ -2,23 +2,51 @@ Podtrace installed — release {{ .Release.Name | quote }}.
 
 Installed resources
 -------------------
-{{- if .Values.crds.install }}
-  CRDs (podtrace.io/v1alpha1):
+  CRDs (podtrace.io/v1alpha1) — installed from the chart's crds/ directory
+                                (Helm always installs these before templates):
     PodTrace          continuous realtime tracing
     PodTraceSession   bounded diagnose-mode tracing
     ExporterConfig    reusable trace exporter
     TracerConfig      cluster-scoped infrastructure
-{{- end }}
 {{- if .Values.namespace.create }}
-  Namespace: {{ include "podtrace.systemNamespace" . }}
+  Namespace: {{ include "podtrace.systemNamespace" . }}  (PSA enforce=privileged)
+{{- end }}
+{{- if .Values.operator.enabled }}
+  Operator:  Deployment {{ include "podtrace.fullname" . }}-operator (replicas: {{ .Values.operator.replicas }})
+{{- end }}
+{{- if and .Values.operator.enabled .Values.tracerConfig.create }}
+  TracerConfig: {{ .Values.tracerConfig.name | default "default" }}
+                → drives the agent DaemonSet (one pod per node)
+                → drives session Job runtime defaults
+{{- end }}
+{{- if and .Values.operator.enabled .Values.metrics.serviceMonitor.enabled }}
+  ServiceMonitor: scrapes operator /metrics every {{ .Values.metrics.serviceMonitor.interval }}
+{{- end }}
+{{- if .Values.metrics.podMonitor.enabled }}
+  PodMonitor:     scrapes agent /metrics every {{ .Values.metrics.podMonitor.interval }}
+{{- end }}
+{{- if .Values.examples.exporterconfig.enabled }}
+  ExporterConfig (example): {{ .Values.examples.exporterconfig.namespace }}/{{ .Values.examples.exporterconfig.name | default "starter-otlp" }}
 {{- end }}
 
 Quick start
 -----------
-  kubectl get crd | grep podtrace.io
-  kubectl apply -f examples/exporterconfig-otlp.yaml
-  kubectl apply -f examples/podtrace.yaml
-  kubectl get podtrace -A
+{{- if and .Values.operator.enabled .Values.tracerConfig.create }}
+  # Verify infrastructure
+  kubectl -n {{ include "podtrace.systemNamespace" . }} get tracerconfig,daemonset,pods
+
+  # Run an end-to-end trace against any pod
+  kubectl apply -f examples/diagnose-demo.yaml
+  kubectl -n podtrace-demo get podtracesession diag-demo -w
+  kubectl -n podtrace-demo get cm diag-demo-report -o jsonpath='{.data.report\.txt}'
+{{- else if .Values.operator.enabled }}
+  # Operator is running but no TracerConfig is rendered. Apply one to
+  # bring up the agent DaemonSet:
+  kubectl apply -f examples/tracerconfig.yaml
+{{- else }}
+  # CRDs are installed. Enable the operator to start managing resources:
+  helm upgrade {{ .Release.Name }} {{ .Chart.Name }} --reuse-values --set operator.enabled=true
+{{- end }}
 
 Docs
 ----

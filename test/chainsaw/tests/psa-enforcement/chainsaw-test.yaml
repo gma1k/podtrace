@@ -1,0 +1,46 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: psa-enforcement
+spec:
+  description: |
+    PSA enforce=privileged on podtrace-system admits agent-style
+    privileged pods (privileged + CAP_BPF + hostPID). The same pod
+    spec must be rejected in a PSA-restricted namespace, proving the
+    chart's privileged label is doing real work.
+
+    This test does NOT install via the chart — it directly probes
+    the apiserver's PSA admission with a synthetic privileged pod.
+  timeouts:
+    apply: 30s
+    assert: 30s
+  steps:
+    - name: privileged-namespace-admits
+      try:
+        - apply:
+            file: ./privileged-pod-system.yaml
+        - assert:
+            file: ./assert-system-pod-admitted.yaml
+      finally:
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Pod
+              name: psa-probe
+              namespace: podtrace-system
+
+    - name: restricted-namespace-rejects
+      try:
+        - apply:
+            file: ./restricted-namespace.yaml
+        - apply:
+            file: ./privileged-pod-restricted.yaml
+            expect:
+              - check:
+                  ($error != null): true
+      finally:
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Namespace
+              name: psa-restricted-probe

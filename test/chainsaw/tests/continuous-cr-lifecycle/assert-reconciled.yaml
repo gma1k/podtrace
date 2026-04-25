@@ -1,0 +1,7 @@
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: lifecycle-pt
+status:
+  observedGeneration: 2
+  (conditions[?type == 'Reconciled'].status | [0]): "True"
