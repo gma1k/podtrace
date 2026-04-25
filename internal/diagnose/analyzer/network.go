@@ -5,6 +5,7 @@ import (
 
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/events"
+	"github.com/podtrace/podtrace/internal/safeconv"
 )
 
 func AnalyzeTCP(events []*events.Event, rttSpikeThreshold float64) (avgRTT, maxRTT float64, spikes int, p50, p95, p99 float64, errors int, totalBytes, avgBytes, peakBytes uint64) {
@@ -29,7 +30,7 @@ func AnalyzeTCP(events []*events.Event, rttSpikeThreshold float64) (avgRTT, maxR
 		if e.Error < 0 && e.Error != -config.EAGAIN {
 			errors++
 		}
-		if e.Bytes > 0 && e.Bytes < uint64(config.MaxBytesForBandwidth) {
+		if e.Bytes > 0 && e.Bytes < safeconv.Int64ToUint64(config.MaxBytesForBandwidth) {
 			totalBytes += e.Bytes
 			if e.Bytes > peakBytes {
 				peakBytes = e.Bytes

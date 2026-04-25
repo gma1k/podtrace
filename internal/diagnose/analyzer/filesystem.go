@@ -5,6 +5,7 @@ import (
 
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/events"
+	"github.com/podtrace/podtrace/internal/safeconv"
 )
 
 func AnalyzeFS(events []*events.Event, fsSlowThreshold float64) (avgLatency, maxLatency float64, slowOps int, p50, p95, p99 float64, totalBytes, avgBytes uint64) {
@@ -24,7 +25,7 @@ func AnalyzeFS(events []*events.Event, fsSlowThreshold float64) (avgLatency, max
 		if latencyMs > fsSlowThreshold {
 			slowOps++
 		}
-		if e.Bytes > 0 && e.Bytes < uint64(config.MaxBytesForBandwidth) {
+		if e.Bytes > 0 && e.Bytes < safeconv.Int64ToUint64(config.MaxBytesForBandwidth) {
 			totalBytes += e.Bytes
 		}
 	}

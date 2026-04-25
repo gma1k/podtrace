@@ -126,7 +126,7 @@ func ensureSystemNamespace(t *testing.T, c client.Client) string {
 func locateCRDPath(t *testing.T) string {
 	t.Helper()
 	dir := findRepoRoot(t)
-	src := filepath.Join(dir, "deploy", "charts", "podtrace", "templates", "crds")
+	src := filepath.Join(dir, "deploy", "charts", "podtrace", "crds")
 	dst := t.TempDir()
 	entries, err := os.ReadDir(src)
 	if err != nil {

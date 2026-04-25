@@ -21,7 +21,22 @@ import (
 	"github.com/podtrace/podtrace/internal/ebpf/filter"
 	"github.com/podtrace/podtrace/internal/ebpf/probes"
 	"github.com/podtrace/podtrace/internal/events"
+	"github.com/podtrace/podtrace/internal/sysfs"
 )
+
+// useCgroupBase points the cgroup root at dir for the duration of the
+// test. Required because sysfs.CgroupReadFile rejects paths outside
+// config.CgroupBasePath.
+func useCgroupBase(t *testing.T, dir string) {
+	t.Helper()
+	original := config.CgroupBasePath
+	config.CgroupBasePath = dir
+	sysfs.ResetForTesting()
+	t.Cleanup(func() {
+		config.CgroupBasePath = original
+		sysfs.ResetForTesting()
+	})
+}
 
 func TestTracer_AttachToCgroup(t *testing.T) {
 	tracer := &Tracer{
@@ -1770,11 +1785,16 @@ func TestGetCgroupIDFromPath_NonExistent(t *testing.T) {
 // ─── readFirstPIDFromCgroupProcs ─────────────────────────────────────────────
 
 func TestReadFirstPIDFromCgroupProcs_Valid(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte("1234\n5678\n"), 0o644); err != nil {
+	base := t.TempDir()
+	useCgroupBase(t, base)
+	pod := filepath.Join(base, "pod-1")
+	if err := os.MkdirAll(pod, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if pid := readFirstPIDFromCgroupProcs(dir); pid != 1234 {
+	if err := os.WriteFile(filepath.Join(pod, "cgroup.procs"), []byte("1234\n5678\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if pid := readFirstPIDFromCgroupProcs(pod); pid != 1234 {
 		t.Errorf("expected PID 1234, got %d", pid)
 	}
 }
@@ -1807,11 +1827,16 @@ func TestReadFirstPIDFromCgroupProcs_InvalidContent(t *testing.T) {
 }
 
 func TestReadFirstPIDFromCgroupProcs_LeadingBlankLines(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte("\n  \n9999\n"), 0o644); err != nil {
+	base := t.TempDir()
+	useCgroupBase(t, base)
+	pod := filepath.Join(base, "pod-1")
+	if err := os.MkdirAll(pod, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if pid := readFirstPIDFromCgroupProcs(dir); pid != 9999 {
+	if err := os.WriteFile(filepath.Join(pod, "cgroup.procs"), []byte("\n  \n9999\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if pid := readFirstPIDFromCgroupProcs(pod); pid != 9999 {
 		t.Errorf("expected PID 9999, got %d", pid)
 	}
 }
@@ -1825,20 +1850,27 @@ func TestAttachToCgroup_EmptyPath(t *testing.T) {
 }
 
 func TestAttachToCgroup_WithCgroupProcsFile(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte("42\n"), 0o644); err != nil {
+	base := t.TempDir()
+	useCgroupBase(t, base)
+	pod := filepath.Join(base, "pod-1")
+	if err := os.MkdirAll(pod, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pod, "cgroup.procs"), []byte("42\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	tr := &Tracer{filter: filter.NewCgroupFilter()}
-	_ = tr.AttachToCgroup(dir)
+	_ = tr.AttachToCgroup(pod)
 	if tr.containerPID != 42 {
 		t.Errorf("expected containerPID=42, got %d", tr.containerPID)
 	}
 }
 
 func TestAttachToCgroup_CRIOSubfolder(t *testing.T) {
-	dir := t.TempDir()
-	containerDir := filepath.Join(dir, "container")
+	base := t.TempDir()
+	useCgroupBase(t, base)
+	pod := filepath.Join(base, "pod-1")
+	containerDir := filepath.Join(pod, "container")
 	if err := os.MkdirAll(containerDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1846,7 +1878,7 @@ func TestAttachToCgroup_CRIOSubfolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	tr := &Tracer{filter: filter.NewCgroupFilter()}
-	_ = tr.AttachToCgroup(dir)
+	_ = tr.AttachToCgroup(pod)
 	if tr.containerPID != 777 {
 		t.Errorf("expected containerPID=777 (from CRI-O subfolder), got %d", tr.containerPID)
 	}
@@ -1856,15 +1888,20 @@ func TestAttachToCgroup_CRIOSubfolder(t *testing.T) {
 }
 
 func TestAttachToCgroup_PreserveExistingPID(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte("100\n"), 0o644); err != nil {
+	base := t.TempDir()
+	useCgroupBase(t, base)
+	pod := filepath.Join(base, "pod-1")
+	if err := os.MkdirAll(pod, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pod, "cgroup.procs"), []byte("100\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	tr := &Tracer{
 		filter:       filter.NewCgroupFilter(),
 		containerPID: 999,
 	}
-	_ = tr.AttachToCgroup(dir)
+	_ = tr.AttachToCgroup(pod)
 	if tr.containerPID != 999 {
 		t.Errorf("expected containerPID to remain 999, got %d", tr.containerPID)
 	}

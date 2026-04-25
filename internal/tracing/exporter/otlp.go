@@ -17,6 +17,7 @@ import (
 
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/diagnose/tracker"
+	"github.com/podtrace/podtrace/internal/safeconv"
 )
 
 type OTLPExporter struct {
@@ -182,7 +183,7 @@ func (e *OTLPExporter) exportSpan(ctx context.Context, span *tracker.Span, _ *tr
 			trace.WithTimestamp(event.TimestampTime()),
 			trace.WithAttributes(
 				attribute.String("target", event.Target),
-				attribute.Int64("latency_ns", int64(event.LatencyNS)),
+				attribute.Int64("latency_ns", safeconv.Uint64ToInt64(event.LatencyNS)),
 			),
 		)
 	}

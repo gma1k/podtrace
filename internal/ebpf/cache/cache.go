@@ -2,12 +2,12 @@ package cache
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/metricsexporter"
+	"github.com/podtrace/podtrace/internal/procfs"
 	"github.com/podtrace/podtrace/internal/validation"
 )
 
@@ -41,8 +41,9 @@ func GetProcessNameQuick(pid uint32) string {
 
 	name := ""
 
-	cmdlinePath := fmt.Sprintf("%s/%d/cmdline", config.ProcBasePath, pid)
-	if cmdline, err := os.ReadFile(cmdlinePath); err == nil {
+	pidStr := fmt.Sprintf("%d", pid)
+
+	if cmdline, err := procfs.ReadFile(pidStr + "/cmdline"); err == nil {
 		parts := strings.Split(string(cmdline), "\x00")
 		if len(parts) > 0 && parts[0] != "" {
 			name = parts[0]
@@ -53,8 +54,7 @@ func GetProcessNameQuick(pid uint32) string {
 	}
 
 	if name == "" {
-		statPath := fmt.Sprintf("%s/%d/stat", config.ProcBasePath, pid)
-		if data, err := os.ReadFile(statPath); err == nil {
+		if data, err := procfs.ReadFile(pidStr + "/stat"); err == nil {
 			statStr := string(data)
 			start := strings.Index(statStr, "(")
 			end := strings.LastIndex(statStr, ")")
@@ -65,8 +65,7 @@ func GetProcessNameQuick(pid uint32) string {
 	}
 
 	if name == "" {
-		commPath := fmt.Sprintf("%s/%d/comm", config.ProcBasePath, pid)
-		if data, err := os.ReadFile(commPath); err == nil {
+		if data, err := procfs.ReadFile(pidStr + "/comm"); err == nil {
 			name = strings.TrimSpace(string(data))
 		}
 	}

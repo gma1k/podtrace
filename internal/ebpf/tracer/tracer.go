@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"os/signal"
@@ -27,6 +28,8 @@ import (
 	"github.com/podtrace/podtrace/internal/analysis/criticalpath"
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/ebpf/cache"
+	"github.com/podtrace/podtrace/internal/procfs"
+	"github.com/podtrace/podtrace/internal/sysfs"
 	"github.com/podtrace/podtrace/internal/ebpf/filter"
 	"github.com/podtrace/podtrace/internal/ebpf/loader"
 	"github.com/podtrace/podtrace/internal/ebpf/parser"
@@ -140,12 +143,21 @@ func NewTracer() (*Tracer, error) {
 	}
 
 	// Patch ring buffer size (must be power-of-2 multiple of page size).
-	rbSize := roundUpPow2(uint32(config.RingBufferSizeKB * 1024))
+	// ClampUint32 keeps the int → uint32 narrowing safe even if a
+	// pathological PODTRACE_RING_BUFFER_SIZE_KB overflows when multiplied
+	// by 1024.
+	rbBytes := config.RingBufferSizeKB
+	if rbBytes > 0 && rbBytes <= math.MaxInt/1024 {
+		rbBytes *= 1024
+	} else {
+		rbBytes = config.DefaultRingBufferSizeKB * 1024
+	}
+	rbSize := roundUpPow2(config.ClampUint32(rbBytes))
 	if m, ok := spec.Maps["events"]; ok {
 		m.MaxEntries = rbSize
 	}
 	// Patch hash map sizes.
-	hashSize := uint32(config.BPFHashMapSize)
+	hashSize := config.ClampUint32(config.BPFHashMapSize)
 	for name, m := range spec.Maps {
 		if m.Type == ebpf.Hash {
 			spec.Maps[name].MaxEntries = hashSize
@@ -168,12 +180,15 @@ func NewTracer() (*Tracer, error) {
 		return nil, NewCollectionError(err)
 	}
 
-	// Initialize configurable alert thresholds in the BPF map.
+	// Initialize configurable alert thresholds in the BPF map. The
+	// AlertX values are pre-clamped to [0, 100] in config.go;
+	// ClampUint32 here is a no-op for valid configs and makes the
+	// narrowing locally verifiable to static analyzers.
 	if threshMap, ok := coll.Maps["alert_thresholds"]; ok && threshMap != nil {
 		thresholds := []uint32{
-			uint32(config.AlertWarnPct),
-			uint32(config.AlertCritPct),
-			uint32(config.AlertEmergPct),
+			config.ClampUint32(config.AlertWarnPct),
+			config.ClampUint32(config.AlertCritPct),
+			config.ClampUint32(config.AlertEmergPct),
 		}
 		for i, v := range thresholds {
 			k := uint32(i)
@@ -336,7 +351,11 @@ func (t *Tracer) syncTargetCgroupMap() error {
 }
 
 func readFirstPIDFromCgroupProcs(cgroupPath string) uint32 {
-	data, err := os.ReadFile(filepath.Join(cgroupPath, "cgroup.procs"))
+	rel, ok := sysfs.CgroupRelative(cgroupPath)
+	if !ok {
+		return 0
+	}
+	data, err := sysfs.CgroupReadFile(filepath.Join(rel, "cgroup.procs"))
 	if err != nil {
 		return 0
 	}
@@ -751,8 +770,9 @@ func (t *Tracer) getProcessNameQuick(pid uint32) string {
 
 	name := ""
 
-	cmdlinePath := fmt.Sprintf("%s/%d/cmdline", config.ProcBasePath, pid)
-	if cmdline, err := os.ReadFile(cmdlinePath); err == nil {
+	pidStr := fmt.Sprintf("%d", pid)
+
+	if cmdline, err := procfs.ReadFile(pidStr + "/cmdline"); err == nil {
 		parts := strings.Split(string(cmdline), "\x00")
 		if len(parts) > 0 && parts[0] != "" {
 			name = parts[0]
@@ -763,8 +783,7 @@ func (t *Tracer) getProcessNameQuick(pid uint32) string {
 	}
 
 	if name == "" {
-		statPath := fmt.Sprintf("%s/%d/stat", config.ProcBasePath, pid)
-		if data, err := os.ReadFile(statPath); err == nil {
+		if data, err := procfs.ReadFile(pidStr + "/stat"); err == nil {
 			statStr := string(data)
 			start := strings.Index(statStr, "(")
 			end := strings.LastIndex(statStr, ")")
@@ -775,8 +794,7 @@ func (t *Tracer) getProcessNameQuick(pid uint32) string {
 	}
 
 	if name == "" {
-		commPath := fmt.Sprintf("%s/%d/comm", config.ProcBasePath, pid)
-		if data, err := os.ReadFile(commPath); err == nil {
+		if data, err := procfs.ReadFile(pidStr + "/comm"); err == nil {
 			name = strings.TrimSpace(string(data))
 		}
 	}

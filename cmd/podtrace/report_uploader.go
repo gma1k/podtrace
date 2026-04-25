@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/podtrace/podtrace/internal/hostfs"
 )
 
 func newReportUploaderCmd() *cobra.Command {
@@ -92,7 +94,7 @@ func waitForFile(ctx context.Context, path string, interval time.Duration) error
 }
 
 func uploadIfPresent(ctx context.Context, opts reportUploaderOptions) error {
-	raw, err := os.ReadFile(opts.ReportFile) // #nosec G304 -- path comes from a flag, intentional.
+	raw, err := hostfs.ReadFile(opts.ReportFile)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil

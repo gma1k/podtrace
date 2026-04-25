@@ -14,6 +14,7 @@ import (
 	"github.com/podtrace/podtrace/internal/diagnose/profiling"
 	"github.com/podtrace/podtrace/internal/diagnose/tracker"
 	"github.com/podtrace/podtrace/internal/events"
+	"github.com/podtrace/podtrace/internal/safeconv"
 )
 
 type Diagnostician interface {
@@ -267,7 +268,7 @@ func analyzeUDPEvents(allUDP []*events.Event) ([]float64, float64, int, uint64, 
 		if e.Error < 0 {
 			errors++
 		}
-		if e.Bytes > 0 && e.Bytes < uint64(config.MaxBytesForBandwidth) {
+		if e.Bytes > 0 && e.Bytes < safeconv.Int64ToUint64(config.MaxBytesForBandwidth) {
 			totalBytes += e.Bytes
 			if e.Bytes > peakBytes {
 				peakBytes = e.Bytes
@@ -327,7 +328,7 @@ func analyzeHTTPEvents(allHTTP []*events.Event) ([]float64, float64, uint64) {
 		latencyMs := float64(e.LatencyNS) / float64(config.NSPerMS)
 		latencies = append(latencies, latencyMs)
 		totalLatency += latencyMs
-		if e.Bytes > 0 && e.Bytes < uint64(config.MaxBytesForBandwidth) {
+		if e.Bytes > 0 && e.Bytes < safeconv.Int64ToUint64(config.MaxBytesForBandwidth) {
 			totalBytes += e.Bytes
 		}
 	}
@@ -657,7 +658,7 @@ func GenerateResourceSection(d Diagnostician) string {
 
 	for _, e := range resourceEvents {
 		resourceType := e.TCPState
-		utilization := uint32(e.Error)
+		utilization := safeconv.Int32ToUint32(e.Error)
 		usage := e.Bytes
 
 		stats, ok := resourceStats[resourceType]

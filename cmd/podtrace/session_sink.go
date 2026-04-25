@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/podtrace/podtrace/internal/diagnose"
+	"github.com/podtrace/podtrace/internal/hostfs"
 	"github.com/podtrace/podtrace/internal/logger"
 	"go.uber.org/zap"
 )
@@ -145,7 +146,7 @@ func writeSummaryFile(path string, summary SessionSummary) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600) // #nosec G306,G703 -- path is an operator-supplied flag; 0600 is correct for a summary file consumed inside the pod.
+	return hostfs.WriteFile(path, data, 0o600)
 }
 
 // writeTerminationMessage writes a compact JSON encoding of the summary
@@ -161,7 +162,7 @@ func writeTerminationMessage(path string, summary SessionSummary) error {
 	if len(data) > maxTerminationBytes {
 		return fmt.Errorf("summary JSON %d bytes exceeds 4KB termination message limit", len(data))
 	}
-	return os.WriteFile(path, data, 0o600) // #nosec G306,G703 -- path is an operator-supplied flag; kubelet reads this via the container runtime, 0600 is appropriate.
+	return hostfs.WriteFile(path, data, 0o600)
 }
 
 // uploadReport parses a report-to spec of the form "kind/namespace/name"

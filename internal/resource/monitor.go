@@ -20,6 +20,7 @@ import (
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/internal/logger"
 	"github.com/podtrace/podtrace/internal/metricsexporter"
+	"github.com/podtrace/podtrace/internal/sysfs"
 )
 
 const (
@@ -504,7 +505,11 @@ func isCgroupV2(cgroupPath string) (bool, error) {
 }
 
 func readCgroupFile(path string) (string, error) {
-	file, err := os.Open(path)
+	rel, ok := sysfs.CgroupRelative(path)
+	if !ok {
+		return "", fmt.Errorf("cgroup path %q is not under %s", path, config.CgroupBasePath)
+	}
+	file, err := sysfs.CgroupOpen(rel)
 	if err != nil {
 		return "", err
 	}

@@ -15,6 +15,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
+
+	"github.com/podtrace/podtrace/internal/safeconv"
 )
 
 type ContainerInfo struct {
@@ -213,7 +215,7 @@ func (r *Resolver) ResolveContainer(ctx context.Context, containerID string) (*C
 
 		if info.PID == 0 {
 			if pid, ok := findJSONInt(obj, pidFieldPaths); ok && pid > 0 {
-				info.PID = uint32(pid)
+				info.PID = safeconv.Int64ToUint32(pid)
 			}
 		}
 		if info.CgroupsPath == "" {
