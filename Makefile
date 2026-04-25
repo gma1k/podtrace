@@ -1,5 +1,6 @@
 .PHONY: all build clean test check-go test-unit test-integration test-bench coverage \
         generate manifests clientset envtest docker-build helm-lint helm-template operator-tools \
+        chainsaw chainsaw-tools \
         e2e-kind e2e-kind-cleanup
 
 CLANG ?= clang
@@ -259,6 +260,21 @@ e2e-kind:
 # e2e-kind-cleanup tears down the e2e release and sample namespace.
 e2e-kind-cleanup:
 	test/e2e/kind-smoke.sh cleanup
+
+# chainsaw runs the declarative e2e suite under test/chainsaw/. Expects
+# a working operator install (run e2e-kind first) and the chainsaw CLI
+# on PATH. Each test case creates its own namespace, so they can run
+# in parallel against the same cluster.
+CHAINSAW ?= $(shell command -v chainsaw 2>/dev/null)
+CHAINSAW_VERSION ?= latest
+chainsaw-tools:
+	@if [ -z "$(CHAINSAW)" ]; then \
+	  echo "Installing chainsaw@$(CHAINSAW_VERSION)..."; \
+	  $(GO) install github.com/kyverno/chainsaw@$(CHAINSAW_VERSION); \
+	fi
+
+chainsaw: chainsaw-tools
+	$(or $(CHAINSAW),chainsaw) test --test-dir test/chainsaw/tests
 
 helm-template:
 	helm template podtrace deploy/charts/podtrace

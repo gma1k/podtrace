@@ -284,3 +284,95 @@ Podtrace tries both the default cgroup root and `/sys/fs/cgroup/systemd` when re
 - **Host cgroup and proc** mounted and `PODTRACE_CGROUP_BASE` / `PODTRACE_PROC_BASE` set (see above); otherwise you get no events when running in a container.
 - Kubernetes API access (for pod resolution).
 - eBPF capabilities: `SYS_ADMIN`, `BPF`.
+
+## Operator install via Helm
+
+For the CRD-driven workflows (continuous `PodTrace`, bounded
+`PodTraceSession`), install the operator alongside the binary. The
+chart ships under `deploy/charts/podtrace/`.
+
+### Quick install
+
+```bash
+helm install podtrace deploy/charts/podtrace \
+  --namespace podtrace-system \
+  --create-namespace \
+  --set operator.enabled=true \
+  --set image.tag=<version>
+```
+
+This single command:
+
+- Renders the four CRDs (`TracerConfig`, `PodTrace`, `PodTraceSession`, `ExporterConfig`).
+- Creates `podtrace-system` with PSA `enforce: privileged` (the agent DaemonSet and session Jobs need this; user namespaces stay restricted).
+- Deploys the operator (unprivileged, single replica with leader election).
+- Installs operator ClusterRole + agent RBAC (cluster-scoped ClusterRole + namespaced Role for bundle reads in `podtrace-system`).
+- Renders a `default` `TracerConfig`, which the operator picks up and uses to roll out the `podtrace-agent` DaemonSet on every node.
+
+### Verify
+
+```bash
+kubectl -n podtrace-system get deploy,ds,pods
+kubectl get tracerconfig default
+kubectl -n podtrace-system get pods -l podtrace.io/component=agent -o wide
+```
+
+You should see the operator Deployment Ready, the DaemonSet with one
+pod per node, and `tracerconfig/default` present.
+
+### Common overrides
+
+```bash
+# Restrict the agent to nodes labeled podtrace.io/enabled=true
+helm upgrade podtrace deploy/charts/podtrace \
+  --reuse-values \
+  --set 'agent.nodeSelector.podtrace\.io/enabled=true'
+
+# Bump per-agent event buffer
+helm upgrade podtrace deploy/charts/podtrace \
+  --reuse-values --set agent.eventBufferSize=50000
+
+# Enable Prometheus monitoring (no-op without prometheus-operator)
+helm upgrade podtrace deploy/charts/podtrace \
+  --reuse-values \
+  --set metrics.serviceMonitor.enabled=true \
+  --set metrics.podMonitor.enabled=true
+
+# Disable the chart-rendered TracerConfig (you author your own)
+helm upgrade podtrace deploy/charts/podtrace \
+  --reuse-values --set tracerConfig.create=false
+```
+
+### Webhook TLS
+
+Validating webhooks require TLS. The chart's default
+(`webhook.certSource=cert-manager`) renders a `Certificate` that
+issues serving certs and annotates the `ValidatingWebhookConfiguration`
+with `cert-manager.io/inject-ca-from`. Requires cert-manager already
+installed.
+
+For air-gapped clusters without cert-manager, switch to
+`webhook.certSource=self-signed` and supply `webhook.caBundle` /
+`webhook.tls` directly.
+
+### kind quick start
+
+On a kind cluster, mark the test image as locally loaded so kubelet
+doesn't try to pull from a registry:
+
+```bash
+make docker-build IMAGE_TAG=dev
+kind load docker-image ghcr.io/podtrace/podtrace:dev
+
+helm install podtrace deploy/charts/podtrace \
+  --namespace podtrace-system \
+  --create-namespace \
+  --set operator.enabled=true \
+  --set image.repository=ghcr.io/podtrace/podtrace \
+  --set image.tag=dev \
+  --set image.pullPolicy=Never
+```
+
+See [operator.md](operator.md) for the architectural picture and
+[crd-podtracesession.md](crd-podtracesession.md) for an end-to-end
+trace example after install.

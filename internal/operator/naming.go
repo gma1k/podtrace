@@ -68,19 +68,12 @@ func AgentClusterRoleName() string { return "podtrace-agent" }
 // AgentClusterRoleBindingName binds AgentClusterRoleName to AgentServiceAccountName.
 func AgentClusterRoleBindingName() string { return "podtrace-agent" }
 
-// OperatorWebhookServiceName is the Service fronting the webhook server
-// inside the operator Deployment. Referenced by the
-// ValidatingWebhookConfiguration rendered by the Helm chart.
+func AgentBundleRoleName() string { return "podtrace-agent-bundles" }
+
+func AgentBundleRoleBindingName() string { return "podtrace-agent-bundles" }
+
 func OperatorWebhookServiceName() string { return "podtrace-webhook" }
 
-// SessionJobName returns the deterministic Job name for a PodTraceSession
-// on a specific node. Keeping it deterministic makes
-// PodTraceSessionReconciler's fan-out idempotent — re-reconciling never
-// produces a second Job on the same node.
-//
-// Format: pts-<session-uid>-<node-hash>, truncated to 63 chars. Using
-// the session UID (not name) is mandatory because session names collide
-// across namespaces but UIDs never do.
 func SessionJobName(sessionUID types.UID, nodeName string) string {
 	raw := fmt.Sprintf("pts-%s-%s", shortUID(sessionUID), sanitiseDNS(nodeName))
 	if len(raw) > 63 {

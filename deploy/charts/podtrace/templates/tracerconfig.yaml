@@ -1,0 +1,60 @@
+{{- if and .Values.operator.enabled .Values.tracerConfig.create }}
+---
+# Default TracerConfig — populates the cluster-wide tracing fleet
+# configuration the operator's reconcilers read on startup. Without
+# this CR the operator runs but never creates an agent DaemonSet.
+#
+# The values below mirror values.yaml (image, agent.*, session.*,
+# scheduling) so `helm install --set image.tag=...` is the only step
+# needed to bring up a working trace fleet end-to-end.
+apiVersion: podtrace.io/v1alpha1
+kind: TracerConfig
+metadata:
+  name: {{ .Values.tracerConfig.name | default "default" }}
+  labels:
+    {{- include "podtrace.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tracerconfig
+spec:
+  image: {{ include "podtrace.image" . | quote }}
+  imagePullPolicy: {{ .Values.image.pullPolicy }}
+  {{- with .Values.image.pullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  systemNamespace: {{ include "podtrace.systemNamespace" . | quote }}
+  maxConcurrentSessionsPerNode: {{ .Values.session.maxConcurrentSessionsPerNode }}
+  {{- if .Values.agent.btfMode }}
+  btfMode: {{ .Values.agent.btfMode }}
+  {{- end }}
+  {{- with .Values.agent.nodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.agent.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  agent:
+    {{- with .Values.agent.resources }}
+    resources:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- if .Values.agent.priorityClassName }}
+    priorityClassName: {{ .Values.agent.priorityClassName | quote }}
+    {{- end }}
+    {{- if .Values.agent.eventBufferSize }}
+    eventBufferSize: {{ .Values.agent.eventBufferSize }}
+    {{- end }}
+    {{- if .Values.agent.statusReportInterval }}
+    statusReportInterval: {{ .Values.agent.statusReportInterval | quote }}
+    {{- end }}
+  session:
+    {{- with .Values.session.resources }}
+    resources:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    ttlSecondsAfterFinished: {{ .Values.session.ttlSecondsAfterFinished }}
+    activeDeadlineSecondsOffset: {{ .Values.session.activeDeadlineSecondsOffset }}
+    backoffLimit: {{ .Values.session.backoffLimit }}
+    sidecarUploader: {{ .Values.tracerConfig.sidecarUploader }}
+{{- end }}

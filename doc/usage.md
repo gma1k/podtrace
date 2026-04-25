@@ -1,5 +1,17 @@
 # Usage Guide
 
+> This guide covers the standalone CLI binary. For declarative,
+> Kubernetes-native tracing via Custom Resources (continuous
+> `PodTrace` or bounded `PodTraceSession`), see:
+>
+> - **[Operator overview](operator.md)** — architecture and helm install
+> - **[PodTrace CR](crd-podtrace.md)** — continuous tracing
+> - **[PodTraceSession CR](crd-podtracesession.md)** — bounded diagnose
+> - **[Migration guide](migration.md)** — translating CLI invocations to CRs
+>
+> The CLI and the operator are not mutually exclusive — the operator
+> runs the same binary internally for session Jobs.
+
 ## Basic Usage
 
 ### Real-time Tracing

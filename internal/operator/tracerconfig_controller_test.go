@@ -82,6 +82,30 @@ func TestTracerConfigReconciler_EnvtestLifecycle(t *testing.T) {
 		t.Errorf("ClusterRoleBinding subjects wrong: %+v", crb.Subjects)
 	}
 
+	if hasRule(&cr, "", "configmaps") || hasRule(&cr, "", "secrets") {
+		t.Errorf("ClusterRole leaks cluster-wide configmap/secret read: %+v", cr.Rules)
+	}
+
+	var bundleRole rbacv1.Role
+	if err := c.Get(ctx, types.NamespacedName{Name: AgentBundleRoleName(), Namespace: systemNS}, &bundleRole); err != nil {
+		t.Fatalf("agent bundle Role missing in %s: %v", systemNS, err)
+	}
+	if !ruleHas(bundleRole.Rules, "", "configmaps") || !ruleHas(bundleRole.Rules, "", "secrets") {
+		t.Errorf("agent bundle Role missing configmap/secret rules: %+v", bundleRole.Rules)
+	}
+
+	var bundleRB rbacv1.RoleBinding
+	if err := c.Get(ctx, types.NamespacedName{Name: AgentBundleRoleBindingName(), Namespace: systemNS}, &bundleRB); err != nil {
+		t.Fatalf("agent bundle RoleBinding missing: %v", err)
+	}
+	if bundleRB.RoleRef.Kind != "Role" || bundleRB.RoleRef.Name != AgentBundleRoleName() {
+		t.Errorf("bundle RoleBinding.roleRef wrong: %+v", bundleRB.RoleRef)
+	}
+	if len(bundleRB.Subjects) != 1 || bundleRB.Subjects[0].Name != AgentServiceAccountName() ||
+		bundleRB.Subjects[0].Namespace != systemNS {
+		t.Errorf("bundle RoleBinding.subjects wrong: %+v", bundleRB.Subjects)
+	}
+
 	// --- Phase: delete ---------------------------------------------------
 	if err := c.Delete(ctx, tcObj); err != nil {
 		t.Fatalf("delete TracerConfig: %v", err)
@@ -105,7 +129,11 @@ func ownedByTracerConfig(meta *metav1.ObjectMeta, tcName string) bool {
 }
 
 func hasRule(cr *rbacv1.ClusterRole, apiGroup, resource string) bool {
-	for _, r := range cr.Rules {
+	return ruleHas(cr.Rules, apiGroup, resource)
+}
+
+func ruleHas(rules []rbacv1.PolicyRule, apiGroup, resource string) bool {
+	for _, r := range rules {
 		ag := false
 		for _, g := range r.APIGroups {
 			if g == apiGroup {

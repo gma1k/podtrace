@@ -1,0 +1,43 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: session-cr-lifecycle
+spec:
+  description: |
+    End-to-end PodTraceSession run against a real chatty workload:
+      1. Apply ExporterConfig + Deployment + PodTraceSession (30s duration).
+      2. Operator fans out one Job per node hosting a matched pod.
+      3. Job runs the embedded eBPF tracer, captures events, writes
+         a termination message and patches the reportRef ConfigMap.
+      4. Session reaches phase=Completed, status.summary populated,
+         status.jobs[].eventCount > 0.
+  timeouts:
+    apply: 30s
+    assert: 120s
+    delete: 60s
+    cleanup: 120s
+  steps:
+    - name: setup-workload
+      try:
+        - apply:
+            file: ./resources.yaml
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: chatty
+              status:
+                readyReplicas: 1
+
+    - name: apply-session
+      try:
+        - apply:
+            file: ./session.yaml
+        - assert:
+            file: ./assert-completed.yaml
+
+    - name: report-artifact
+      try:
+        - assert:
+            file: ./assert-report.yaml

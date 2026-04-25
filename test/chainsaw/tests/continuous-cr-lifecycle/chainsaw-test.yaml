@@ -1,0 +1,47 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: continuous-cr-lifecycle
+spec:
+  description: |
+    Verifies the full PodTrace CR lifecycle:
+      1. Create — operator materializes a bundle ConfigMap in podtrace-system,
+         CR reaches Reconciled=True.
+      2. Update — patching spec.filters re-reconciles cleanly without
+         orphaning the bundle.
+      3. Delete — the FinalizerCleanup finalizer fires and reaps the
+         bundle ConfigMap and Secret in podtrace-system.
+  timeouts:
+    apply: 30s
+    assert: 60s
+    delete: 60s
+  steps:
+    - name: setup
+      try:
+        - apply:
+            file: ./resources.yaml
+        - assert:
+            file: ./assert-bundle.yaml
+
+    - name: update-filters
+      try:
+        - patch:
+            resource:
+              apiVersion: podtrace.io/v1alpha1
+              kind: PodTrace
+              metadata:
+                name: lifecycle-pt
+              spec:
+                filters: [dns, net, fs]
+        - assert:
+            file: ./assert-reconciled.yaml
+
+    - name: delete-cr
+      try:
+        - delete:
+            ref:
+              apiVersion: podtrace.io/v1alpha1
+              kind: PodTrace
+              name: lifecycle-pt
+        - error:
+            file: ./error-bundle-still-present.yaml

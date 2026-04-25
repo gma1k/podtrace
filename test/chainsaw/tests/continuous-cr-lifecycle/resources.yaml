@@ -1,0 +1,22 @@
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: lifecycle-otlp
+spec:
+  type: otlp
+  otlp:
+    endpoint: otel-collector:4318
+    protocol: http
+    insecure: true
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: lifecycle-pt
+spec:
+  selector:
+    matchLabels:
+      app: lifecycle-target
+  filters: [dns, net]
+  exporterRef:
+    name: lifecycle-otlp

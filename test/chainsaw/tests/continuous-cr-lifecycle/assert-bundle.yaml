@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: podtrace-system
+  labels:
+    podtrace.io/managed-by: podtrace-operator
+    podtrace.io/component: exporter-bundle
+    podtrace.io/exporter-config: lifecycle-otlp
+data:
+  type: otlp
+  endpoint: otel-collector:4318
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: lifecycle-pt
+status:
+  (conditions[?type == 'Reconciled'].status | [0]): "True"

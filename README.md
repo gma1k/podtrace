@@ -26,6 +26,111 @@ By combining system-level details, application-layer insights, and real-time eve
 
 Podtrace documentation is available in the [`doc/`](doc/) directory.
 
+## Three usage patterns
+
+Podtrace ships one binary that runs in three modes. Pick the one that
+fits your workflow:
+
+### 1. Standalone CLI binary
+
+Best for ad-hoc, interactive debugging from a workstation or a
+privileged debug pod.
+
+```bash
+# Realtime trace
+./bin/podtrace -n production my-pod
+
+# Bounded diagnose with a JSON report
+./bin/podtrace -n production my-pod --diagnose 30s --export json > report.json
+```
+
+Full reference: [doc/usage.md](doc/usage.md).
+
+### 2. Continuous tracing via the `PodTrace` CR
+
+Best for long-running observability: have the operator watch a
+selector cluster-wide and stream events through an agent DaemonSet.
+
+```yaml
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata: { name: prod-otlp, namespace: my-app }
+spec:
+  type: otlp
+  otlp: { endpoint: otel-collector.observability:4318, protocol: http, insecure: true }
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata: { name: watch-api, namespace: my-app }
+spec:
+  selector: { matchLabels: { app: api } }
+  filters: [dns, net]
+  exporterRef: { name: prod-otlp }
+```
+
+```bash
+kubectl apply -f trace.yaml
+kubectl get podtraces.podtrace.io watch-api -n my-app -o yaml
+```
+
+> Control plane works today (matching, RBAC, status, multi-CR merge).
+> Event flow through the agent to the exporter is upcoming work — for
+> real eBPF event capture today, use pattern 3 below.
+
+Full reference: [doc/crd-podtrace.md](doc/crd-podtrace.md).
+
+### 3. Bounded diagnose via the `PodTraceSession` CR
+
+Best for repeatable, GitOps-driven diagnose runs that produce a
+shareable report artifact. Equivalent to the CLI's `--diagnose` mode
+but operator-managed and multi-tenant.
+
+```yaml
+apiVersion: podtrace.io/v1alpha1
+kind: PodTraceSession
+metadata: { name: diag-api, namespace: my-app }
+spec:
+  selector: { matchLabels: { app: api } }
+  duration: 30s
+  filters: [dns, net]
+  exporterRef: { name: prod-otlp }
+  reportRef:
+    configMap: { name: api-diag-report }
+```
+
+```bash
+kubectl apply -f session.yaml
+kubectl get podtracesession diag-api -n my-app -w   # wait for Completed
+kubectl get cm api-diag-report -n my-app -o jsonpath='{.data.report\.txt}' | less
+```
+
+This path runs the same eBPF stack the CLI uses, but as a per-node
+privileged Job. Results land in three parallel channels:
+
+- `status.summary` — aggregated event counts
+- `status.jobs[].eventCount` — per-node breakdown
+- `reportRef.configMap` (or `.secret`) — full human-readable report
+
+Full reference: [doc/crd-podtracesession.md](doc/crd-podtracesession.md).
+
+### Install the operator
+
+```bash
+helm install podtrace deploy/charts/podtrace \
+  --namespace podtrace-system \
+  --create-namespace \
+  --set operator.enabled=true \
+  --set image.tag=<version>
+```
+
+See [doc/installation.md](doc/installation.md) for prerequisites and
+[doc/operator.md](doc/operator.md) for architecture.
+
+### Coming from the CLI
+
+If you're already a CLI user and want a translation table from the CLI
+to CRs, see [doc/migration.md](doc/migration.md).
+
 ## Features
 
 ### Network Tracing

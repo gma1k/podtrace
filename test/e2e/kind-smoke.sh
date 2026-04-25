@@ -168,28 +168,12 @@ main() {
 		--set operator.enabled=true \
 		--set image.repository=ghcr.io/podtrace/podtrace \
 		--set image.tag=dev \
+		--set image.pullPolicy=Never \
 		--wait --timeout 120s
 
 	# --- step 2: operator Deployment becomes Ready ----------------------
 	wait_for "operator Deployment Ready" 120 \
 		"kubectl -n ${SYSTEM_NS} rollout status deploy/${RELEASE}-operator --timeout=60s"
-
-	log_info "applying TracerConfig (image override for kind-loaded dev tag)"
-	kubectl apply -f - <<EOF
-apiVersion: podtrace.io/v1alpha1
-kind: TracerConfig
-metadata:
-  name: default
-spec:
-  image: ghcr.io/podtrace/podtrace:dev
-  imagePullPolicy: Never
-  systemNamespace: ${SYSTEM_NS}
-  maxConcurrentSessionsPerNode: 2
-  btfMode: auto
-  tolerations:
-    - operator: Exists
-      effect: NoSchedule
-EOF
 
 	wait_for "TracerConfig reconciled to current generation" 60 \
 		tracerconfig_converged
@@ -197,6 +181,8 @@ EOF
 	assert_resource_exists daemonset podtrace-agent "${SYSTEM_NS}"
 	assert_resource_exists serviceaccount podtrace-agent "${SYSTEM_NS}"
 	assert_resource_exists clusterrole podtrace-agent
+	assert_resource_exists role podtrace-agent-bundles "${SYSTEM_NS}"
+	assert_resource_exists rolebinding podtrace-agent-bundles "${SYSTEM_NS}"
 	assert_resource_exists clusterrolebinding podtrace-agent
 
 	# --- step 4: user-namespace resources -------------------------------

@@ -1,0 +1,39 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: agent-restart-resilience
+spec:
+  concurrent: false
+  description: |
+    Restart the agent DaemonSet; existing PodTrace CRs must stay
+    Reconciled and the per-node status array reappears post-restart.
+
+    SCOPE: control-plane only. The agent's continuous path uses
+    NoopBackend today, so this test does NOT assert event continuity
+    (no events flow through the agent regardless of restart). When
+    the real eBPF backend is wired into the agent's event loop
+    (Phase 5+), this test should be extended to compare event counts
+    pre/post restart.
+  timeouts:
+    apply: 30s
+    assert: 120s
+  steps:
+    - name: setup
+      try:
+        - apply:
+            file: ./resources.yaml
+        - assert:
+            file: ./assert-initial-ready.yaml
+
+    - name: rollout-restart-agent
+      try:
+        - script:
+            content: |
+              set -euo pipefail
+              kubectl -n podtrace-system rollout restart ds/podtrace-agent
+              kubectl -n podtrace-system rollout status ds/podtrace-agent --timeout=120s
+
+    - name: cr-still-reconciled
+      try:
+        - assert:
+            file: ./assert-post-restart.yaml
