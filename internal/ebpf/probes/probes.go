@@ -13,7 +13,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/podtrace/podtrace/internal/config"
+	"github.com/podtrace/podtrace/internal/hostfs"
+	"github.com/podtrace/podtrace/internal/ldsoconf"
 	"github.com/podtrace/podtrace/internal/logger"
+	"github.com/podtrace/podtrace/internal/procfs"
 )
 
 // mandatoryProbes must all attach successfully; failure returns an actionable error.
@@ -556,35 +559,13 @@ func getMuslLibcNames() []string {
 }
 
 func findLibcViaLdSoConf() string {
-	searchPaths := config.GetDefaultLibSearchPaths()
-
-	if data, err := os.ReadFile(config.GetLdSoConfPath()); err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" && !strings.HasPrefix(line, "#") {
-				searchPaths = append(searchPaths, line)
-			}
-		}
-	}
-
-	if matches, err := filepath.Glob(config.GetLdSoConfDPattern()); err == nil {
-		for _, confFile := range matches {
-			if data, err := os.ReadFile(confFile); err == nil {
-				for _, line := range strings.Split(string(data), "\n") {
-					line = strings.TrimSpace(line)
-					if line != "" && !strings.HasPrefix(line, "#") {
-						searchPaths = append(searchPaths, line)
-					}
-				}
-			}
-		}
-	}
+	searchPaths := append(config.GetDefaultLibSearchPaths(), ldsoconf.SearchPaths()...)
 
 	libcNames := getMuslLibcNames()
 	for _, searchPath := range searchPaths {
 		for _, libcName := range libcNames {
 			path := filepath.Join(searchPath, libcName)
-			if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			if hostfs.IsRegularFile(path) {
 				return path
 			}
 		}
@@ -593,8 +574,7 @@ func findLibcViaLdSoConf() string {
 }
 
 func findLibcViaProcessMaps(pid uint32) string {
-	mapsPath := fmt.Sprintf("%s/%d/maps", config.ProcBasePath, pid)
-	data, err := os.ReadFile(mapsPath)
+	data, err := procfs.ReadFile(fmt.Sprintf("%d/maps", pid))
 	if err != nil {
 		return ""
 	}
@@ -604,7 +584,7 @@ func findLibcViaProcessMaps(pid uint32) string {
 			parts := strings.Fields(line)
 			if len(parts) >= 6 {
 				path := parts[5]
-				if info, err := os.Stat(path); err == nil && !info.IsDir() {
+				if hostfs.IsRegularFile(path) {
 					return path
 				}
 			}
@@ -614,8 +594,7 @@ func findLibcViaProcessMaps(pid uint32) string {
 }
 
 func findLibcViaProcessMapsProcRoot(pid uint32) string {
-	mapsPath := fmt.Sprintf("%s/%d/maps", config.ProcBasePath, pid)
-	data, err := os.ReadFile(mapsPath)
+	data, err := procfs.ReadFile(fmt.Sprintf("%d/maps", pid))
 	if err != nil {
 		return ""
 	}
@@ -651,10 +630,10 @@ func fileInProcRoot(pid uint32, containerPath string) string {
 	}
 	procRoot := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "root")
 	hostPath := filepath.Join(procRoot, strings.TrimPrefix(containerPath, "/"))
-	if info, err := os.Stat(hostPath); err == nil && !info.IsDir() {
+	if hostfs.IsRegularFile(hostPath) {
 		return hostPath
 	}
-	if info, err := os.Stat(containerPath); err == nil && !info.IsDir() {
+	if hostfs.IsRegularFile(containerPath) {
 		return containerPath
 	}
 	return ""
@@ -676,8 +655,7 @@ func findContainerProcess(containerID string) uint32 {
 			continue
 		}
 
-		cgroupPath := filepath.Join(config.ProcBasePath, pidStr, "cgroup")
-		if data, err := os.ReadFile(cgroupPath); err == nil {
+		if data, err := procfs.ReadFile(pidStr + "/cgroup"); err == nil {
 			if strings.Contains(string(data), containerID) {
 				var pid uint32
 				if _, err := fmt.Sscanf(pidStr, "%d", &pid); err == nil {
@@ -725,8 +703,7 @@ func findGoBinaryInProcess(pid uint32) string {
 }
 
 func findGoBinaryViaProcessMaps(pid uint32) string {
-	mapsPath := fmt.Sprintf("%s/%d/maps", config.ProcBasePath, pid)
-	data, err := os.ReadFile(mapsPath)
+	data, err := procfs.ReadFile(fmt.Sprintf("%d/maps", pid))
 	if err != nil {
 		logger.Debug("Failed to read process maps", zap.Uint32("pid", pid), zap.Error(err))
 		return ""
@@ -745,12 +722,12 @@ func findGoBinaryViaProcessMaps(pid uint32) string {
 					}
 
 					hostPath := filepath.Join(procRootPath, strings.TrimPrefix(binaryPath, "/"))
-					if info, err := os.Stat(hostPath); err == nil && !info.IsDir() {
+					if hostfs.IsRegularFile(hostPath) {
 						logger.Debug("Found binary via process maps", zap.Uint32("pid", pid), zap.String("container_path", binaryPath), zap.String("host_path", hostPath))
 						return hostPath
 					}
 
-					if info, err := os.Stat(binaryPath); err == nil && !info.IsDir() {
+					if hostfs.IsRegularFile(binaryPath) {
 						logger.Debug("Found binary via process maps (direct)", zap.Uint32("pid", pid), zap.String("path", binaryPath))
 						return binaryPath
 					}
@@ -764,8 +741,7 @@ func findGoBinaryViaProcessMaps(pid uint32) string {
 func findGoBinaryInContainer(containerID string, pid uint32) string {
 	procRootPath := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "root")
 
-	cmdlinePath := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "cmdline")
-	if cmdlineData, err := os.ReadFile(cmdlinePath); err == nil {
+	if cmdlineData, err := procfs.ReadFile(fmt.Sprintf("%d/cmdline", pid)); err == nil {
 		cmdline := string(cmdlineData)
 		if len(cmdline) > 0 {
 			parts := strings.Split(cmdline, "\x00")
@@ -773,7 +749,7 @@ func findGoBinaryInContainer(containerID string, pid uint32) string {
 				binaryPath := parts[0]
 				if filepath.IsAbs(binaryPath) {
 					hostPath := filepath.Join(procRootPath, strings.TrimPrefix(binaryPath, "/"))
-					if info, err := os.Stat(hostPath); err == nil && !info.IsDir() {
+					if hostfs.IsRegularFile(hostPath) {
 						logger.Debug("Found binary via cmdline", zap.Uint32("pid", pid), zap.String("cmdline_path", binaryPath), zap.String("host_path", hostPath))
 						return hostPath
 					}
@@ -782,8 +758,7 @@ func findGoBinaryInContainer(containerID string, pid uint32) string {
 		}
 	}
 
-	commPath := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "comm")
-	if commData, err := os.ReadFile(commPath); err == nil {
+	if commData, err := procfs.ReadFile(fmt.Sprintf("%d/comm", pid)); err == nil {
 		commName := strings.TrimSpace(string(commData))
 		if commName != "" {
 			commonPaths := []string{
@@ -796,7 +771,7 @@ func findGoBinaryInContainer(containerID string, pid uint32) string {
 			}
 			for _, relPath := range commonPaths {
 				hostPath := filepath.Join(procRootPath, strings.TrimPrefix(relPath, "/"))
-				if info, err := os.Stat(hostPath); err == nil && !info.IsDir() {
+				if hostfs.IsRegularFile(hostPath) {
 					logger.Debug("Found binary via comm name", zap.Uint32("pid", pid), zap.String("comm", commName), zap.String("path", hostPath))
 					return hostPath
 				}
@@ -981,34 +956,12 @@ func findDBLibsViaLdconfig(libNames []string) []string {
 
 func findDBLibsViaLdSoConf(libNames []string) []string {
 	var paths []string
-	searchPaths := config.GetDefaultLibSearchPaths()
-
-	if data, err := os.ReadFile(config.GetLdSoConfPath()); err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" && !strings.HasPrefix(line, "#") {
-				searchPaths = append(searchPaths, line)
-			}
-		}
-	}
-
-	if matches, err := filepath.Glob(config.GetLdSoConfDPattern()); err == nil {
-		for _, confFile := range matches {
-			if data, err := os.ReadFile(confFile); err == nil {
-				for _, line := range strings.Split(string(data), "\n") {
-					line = strings.TrimSpace(line)
-					if line != "" && !strings.HasPrefix(line, "#") {
-						searchPaths = append(searchPaths, line)
-					}
-				}
-			}
-		}
-	}
+	searchPaths := append(config.GetDefaultLibSearchPaths(), ldsoconf.SearchPaths()...)
 
 	for _, searchPath := range searchPaths {
 		for _, libName := range libNames {
 			path := filepath.Join(searchPath, libName)
-			if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			if hostfs.IsRegularFile(path) {
 				paths = append(paths, path)
 			}
 		}
@@ -1053,8 +1006,7 @@ func getArchitectureDBPaths(libNames []string) []string {
 
 func findDBLibsViaProcessMaps(pid uint32, libNames []string) []string {
 	var paths []string
-	mapsPath := fmt.Sprintf("%s/%d/maps", config.ProcBasePath, pid)
-	data, err := os.ReadFile(mapsPath)
+	data, err := procfs.ReadFile(fmt.Sprintf("%d/maps", pid))
 	if err != nil {
 		return paths
 	}
@@ -1065,7 +1017,7 @@ func findDBLibsViaProcessMaps(pid uint32, libNames []string) []string {
 				parts := strings.Fields(line)
 				if len(parts) >= 6 {
 					path := parts[5]
-					if info, err := os.Stat(path); err == nil && !info.IsDir() {
+					if hostfs.IsRegularFile(path) {
 						paths = append(paths, path)
 					}
 				}
@@ -1077,8 +1029,7 @@ func findDBLibsViaProcessMaps(pid uint32, libNames []string) []string {
 
 func findDBLibsViaProcessMapsProcRoot(pid uint32, libNames []string) []string {
 	var paths []string
-	mapsPath := fmt.Sprintf("%s/%d/maps", config.ProcBasePath, pid)
-	data, err := os.ReadFile(mapsPath)
+	data, err := procfs.ReadFile(fmt.Sprintf("%d/maps", pid))
 	if err != nil {
 		return paths
 	}
@@ -1256,8 +1207,7 @@ func FindLibcInContainer(containerID string) []string {
 
 func findTLSLibsViaProcessMaps(pid uint32, libPatterns []string) []string {
 	var paths []string
-	mapsPath := fmt.Sprintf("%s/%d/maps", config.ProcBasePath, pid)
-	data, err := os.ReadFile(mapsPath)
+	data, err := procfs.ReadFile(fmt.Sprintf("%d/maps", pid))
 	if err != nil {
 		return paths
 	}
@@ -1268,7 +1218,7 @@ func findTLSLibsViaProcessMaps(pid uint32, libPatterns []string) []string {
 				parts := strings.Fields(line)
 				if len(parts) >= 6 {
 					path := parts[5]
-					if info, err := os.Stat(path); err == nil && !info.IsDir() {
+					if hostfs.IsRegularFile(path) {
 						paths = append(paths, path)
 					}
 				}
@@ -1280,8 +1230,7 @@ func findTLSLibsViaProcessMaps(pid uint32, libPatterns []string) []string {
 
 func findTLSLibsViaProcessMapsProcRoot(pid uint32, libPatterns []string) []string {
 	var paths []string
-	mapsPath := fmt.Sprintf("%s/%d/maps", config.ProcBasePath, pid)
-	data, err := os.ReadFile(mapsPath)
+	data, err := procfs.ReadFile(fmt.Sprintf("%d/maps", pid))
 	if err != nil {
 		return paths
 	}
@@ -1413,29 +1362,7 @@ func findTLSLibsViaLdconfig(libPatterns []string) []string {
 
 func findTLSLibsViaLdSoConf(libPatterns []string) []string {
 	var paths []string
-	searchPaths := config.GetDefaultLibSearchPaths()
-
-	if data, err := os.ReadFile(config.GetLdSoConfPath()); err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" && !strings.HasPrefix(line, "#") {
-				searchPaths = append(searchPaths, line)
-			}
-		}
-	}
-
-	if matches, err := filepath.Glob(config.GetLdSoConfDPattern()); err == nil {
-		for _, confFile := range matches {
-			if data, err := os.ReadFile(confFile); err == nil {
-				for _, line := range strings.Split(string(data), "\n") {
-					line = strings.TrimSpace(line)
-					if line != "" && !strings.HasPrefix(line, "#") {
-						searchPaths = append(searchPaths, line)
-					}
-				}
-			}
-		}
-	}
+	searchPaths := append(config.GetDefaultLibSearchPaths(), ldsoconf.SearchPaths()...)
 
 	libPatternsLower := make([]string, len(libPatterns))
 	for i, p := range libPatterns {
@@ -1443,10 +1370,7 @@ func findTLSLibsViaLdSoConf(libPatterns []string) []string {
 	}
 
 	for _, searchPath := range searchPaths {
-		err := filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() {
-				return nil
-			}
+		_ = hostfs.WalkRegular(searchPath, func(path string, info os.FileInfo) error {
 			baseName := strings.ToLower(filepath.Base(path))
 			for _, pattern := range libPatternsLower {
 				if strings.Contains(baseName, pattern) {
@@ -1456,9 +1380,6 @@ func findTLSLibsViaLdSoConf(libPatterns []string) []string {
 			}
 			return nil
 		})
-		if err != nil {
-			continue
-		}
 	}
 	return paths
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/podtrace/podtrace/internal/config"
+	"github.com/podtrace/podtrace/internal/safeconv"
 )
 
 func sanitizeString(s string) string {
@@ -88,11 +89,11 @@ type Event struct {
 }
 
 func (e *Event) Latency() time.Duration {
-	return time.Duration(e.LatencyNS) * time.Nanosecond
+	return time.Duration(safeconv.Uint64ToInt64(e.LatencyNS)) * time.Nanosecond
 }
 
 func (e *Event) TimestampTime() time.Time {
-	return time.Unix(0, int64(e.Timestamp))
+	return time.Unix(0, safeconv.Uint64ToInt64(e.Timestamp))
 }
 
 func (e *Event) TypeString() string {
@@ -371,7 +372,10 @@ func formatEventMessage(e *Event, realtime bool) string {
 		if target == "" {
 			target = "file"
 		}
-		fd := int64(e.Bytes)
+		// Bytes is polymorphic for FS events: either a byte count or
+		// a sign-encoded FD (high bit set means "no FD"). Bit-preserve
+		// the reinterpretation rather than saturate.
+		fd := safeconv.Uint64BitsToInt64(e.Bytes)
 		if e.Error != 0 {
 			return fmt.Sprintf("[FS] open() %s failed: error %d", sanitizeString(target), e.Error)
 		}
@@ -387,7 +391,10 @@ func formatEventMessage(e *Event, realtime bool) string {
 		return fmt.Sprintf("[FS] open() %s took %.2fms", sanitizeString(target), latencyMs)
 
 	case EventClose:
-		fd := int64(e.Bytes)
+		// Bytes is polymorphic for FS events: either a byte count or
+		// a sign-encoded FD (high bit set means "no FD"). Bit-preserve
+		// the reinterpretation rather than saturate.
+		fd := safeconv.Uint64BitsToInt64(e.Bytes)
 		if fd >= 0 {
 			return fmt.Sprintf("[FS] close() fd=%d", fd)
 		}
@@ -403,7 +410,14 @@ func formatEventMessage(e *Event, realtime bool) string {
 		return fmt.Sprintf("[TLS] error: %d", e.Error)
 
 	case EventResourceLimit:
-		utilization := uint32(e.Error)
+		// e.Error carries the utilization percentage for this event
+		// type. Compare in plain int — both sides are bounded ([0, 100]
+		// by domain for utilization, and AlertX is pre-clamped to
+		// [0, 100] in config). No narrowing conversion required.
+		utilization := int(e.Error)
+		if utilization < 0 {
+			return ""
+		}
 		resourceType := e.TCPState
 
 		var resourceName string
@@ -419,16 +433,14 @@ func formatEventMessage(e *Event, realtime bool) string {
 		}
 
 		var severity string
-		emergPct := uint32(config.AlertEmergPct)
-		critPct := uint32(config.AlertCritPct)
-		warnPct := uint32(config.AlertWarnPct)
-		if utilization >= emergPct {
+		switch {
+		case utilization >= config.AlertEmergPct:
 			severity = "EMERGENCY"
-		} else if utilization >= critPct {
+		case utilization >= config.AlertCritPct:
 			severity = "CRITICAL"
-		} else if utilization >= warnPct {
+		case utilization >= config.AlertWarnPct:
 			severity = "WARNING"
-		} else {
+		default:
 			return ""
 		}
 

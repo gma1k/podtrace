@@ -16,7 +16,10 @@ import (
 
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/cri"
+	"github.com/podtrace/podtrace/internal/hostfs"
 	"github.com/podtrace/podtrace/internal/logger"
+	"github.com/podtrace/podtrace/internal/procfs"
+	"github.com/podtrace/podtrace/internal/sysfs"
 	"github.com/podtrace/podtrace/internal/validation"
 	"go.uber.org/zap"
 )
@@ -52,14 +55,14 @@ func NewPodResolver() (*PodResolver, error) {
 			sudoUser := os.Getenv("SUDO_USER")
 			if sudoUser != "" {
 				homePath := filepath.Join("/home", sudoUser, ".kube", "config")
-				if _, err := os.Stat(homePath); err == nil {
+				if _, err := hostfs.Stat(homePath); err == nil {
 					loadingRules.ExplicitPath = homePath
 				}
 			}
 			if loadingRules.ExplicitPath == "" {
 				if home := os.Getenv("HOME"); home != "" && home != "/root" {
 					homePath := filepath.Join(home, ".kube", "config")
-					if _, err := os.Stat(homePath); err == nil {
+					if _, err := hostfs.Stat(homePath); err == nil {
 						loadingRules.ExplicitPath = homePath
 					}
 				}
@@ -237,8 +240,7 @@ func readKubeletCgroupFlag() string {
 			continue
 		}
 
-		commPath := filepath.Join(procPath, pid, "comm")
-		comm, err := os.ReadFile(commPath)
+		comm, err := procfs.ReadFile(pid + "/comm")
 		if err != nil {
 			continue
 		}
@@ -246,8 +248,7 @@ func readKubeletCgroupFlag() string {
 			continue
 		}
 
-		cmdlinePath := filepath.Join(procPath, pid, "cmdline")
-		data, err := os.ReadFile(cmdlinePath)
+		data, err := procfs.ReadFile(pid + "/cmdline")
 		if err != nil {
 			continue
 		}
@@ -284,6 +285,34 @@ func readKubeletCgroupFlag() string {
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+// statCgroupDir returns true when path resolves to anything (file or
+// dir) under the configured cgroup base. The check goes through
+// sysfs.CgroupStat so the operation is os.Root-scoped rather than a
+// raw os.Stat on a tainted path.
+func statCgroupDir(path string) bool {
+	rel, ok := sysfs.CgroupRelative(path)
+	if !ok {
+		return false
+	}
+	_, err := sysfs.CgroupStat(rel)
+	return err == nil
+}
+
+// statCgroupDirHasProcs is statCgroupDir plus a check that
+// "<dir>/cgroup.procs" exists — used to confirm the directory is the
+// terminal cgroup leaf rather than an intermediate slice.
+func statCgroupDirHasProcs(path string) bool {
+	rel, ok := sysfs.CgroupRelative(path)
+	if !ok {
+		return false
+	}
+	if _, err := sysfs.CgroupStat(rel); err != nil {
+		return false
+	}
+	_, err := sysfs.CgroupStat(filepath.Join(rel, "cgroup.procs"))
+	return err == nil
 }
 
 func resolveCgroupPathCRI(ctx context.Context, containerID string) (string, error) {
@@ -515,8 +544,7 @@ func findCgroupPathFromProc(containerID string) (string, error) {
 			continue
 		}
 
-		cgroupFile := filepath.Join(procPath, pidStr, "cgroup")
-		data, err := os.ReadFile(cgroupFile)
+		data, err := procfs.ReadFile(pidStr + "/cgroup")
 		if err != nil {
 			continue
 		}
@@ -537,22 +565,17 @@ func findCgroupPathFromProc(containerID string) (string, error) {
 				cgroupPath := strings.TrimPrefix(line, "0::")
 				if cgroupPath == "" || cgroupPath == "/" {
 					for _, root := range cgroupRootCandidates() {
-						fullPath := root
-						if _, err := os.Stat(fullPath); err == nil {
-							if _, err := os.Stat(filepath.Join(fullPath, "cgroup.procs")); err == nil {
-								foundPath = fullPath
-								break
-							}
+						if statCgroupDirHasProcs(root) {
+							foundPath = root
+							break
 						}
 					}
 				} else {
 					for _, root := range cgroupRootCandidates() {
 						fullPath := filepath.Join(root, strings.TrimPrefix(cgroupPath, "/"))
-						if _, err := os.Stat(fullPath); err == nil {
-							if _, err := os.Stat(filepath.Join(fullPath, "cgroup.procs")); err == nil {
-								foundPath = fullPath
-								break
-							}
+						if statCgroupDirHasProcs(fullPath) {
+							foundPath = fullPath
+							break
 						}
 					}
 				}
@@ -563,7 +586,7 @@ func findCgroupPathFromProc(containerID string) (string, error) {
 					if cgroupPath != "" && cgroupPath != "/" {
 						for _, root := range cgroupRootCandidates() {
 							fullPath := filepath.Join(root, strings.TrimPrefix(cgroupPath, "/"))
-							if _, err := os.Stat(fullPath); err == nil {
+							if statCgroupDir(fullPath) {
 								foundPath = fullPath
 								break
 							}

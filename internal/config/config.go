@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -31,7 +32,7 @@ const (
 	DefaultAlertMaxRetries       = 3
 	DefaultAlertRetryBackoffBase = 1 * time.Second
 	DefaultAlertMaxPayloadSize   = 1024 * 1024
-	DefaultVersion               = "v0.10.0"
+	DefaultVersion               = "v0.11.0"
 )
 
 const (
@@ -110,9 +111,11 @@ var (
 	BPFHashMapSize   = getIntEnvOrDefault("PODTRACE_BPF_HASH_MAP_SIZE", DefaultBPFHashMapSize)
 
 	// Alert threshold percentages written into the alert_thresholds BPF map.
-	AlertWarnPct  = getIntEnvOrDefault("PODTRACE_ALERT_WARN_PCT", DefaultAlertWarnPct)
-	AlertCritPct  = getIntEnvOrDefault("PODTRACE_ALERT_CRIT_PCT", DefaultAlertCritPct)
-	AlertEmergPct = getIntEnvOrDefault("PODTRACE_ALERT_EMERG_PCT", DefaultAlertEmergPct)
+	// Clamped to [0, 100] so the int → uint32 narrowing at the BPF call
+	// sites is provably safe; see ClampPct for why.
+	AlertWarnPct  = ClampPct(getIntEnvOrDefault("PODTRACE_ALERT_WARN_PCT", DefaultAlertWarnPct))
+	AlertCritPct  = ClampPct(getIntEnvOrDefault("PODTRACE_ALERT_CRIT_PCT", DefaultAlertCritPct))
+	AlertEmergPct = ClampPct(getIntEnvOrDefault("PODTRACE_ALERT_EMERG_PCT", DefaultAlertEmergPct))
 
 	// Optional HTTP management port for runtime probe group control (0 = disabled).
 	ManagementPort = getIntEnvOrDefault("PODTRACE_MANAGEMENT_PORT", 0)
@@ -356,6 +359,43 @@ func getIntEnvOrDefault(key string, defaultValue int) int {
 		}
 	}
 	return defaultValue
+}
+
+// ClampPct clamps an integer percentage into the [0, 100] range.
+//
+// Why: AlertWarnPct/CritPct/EmergPct are sourced from operator-supplied
+// env vars and later narrowed to uint32 when written to the BPF
+// alert_thresholds map. Without an upper bound, a misconfigured value
+// like 4294967296 would silently wrap to 0 and cause every event to
+// trip an alert. The bound also makes the int → uint32 conversion at
+// the call sites provably safe (CodeQL/gosec G115 false-positives go
+// away because the value is now constrained by a constant).
+func ClampPct(pct int) int {
+	if pct < 0 {
+		return 0
+	}
+	if pct > 100 {
+		return 100
+	}
+	return pct
+}
+
+// ClampUint32 clamps a non-negative int into the [0, math.MaxUint32]
+// range and returns it as uint32. Negative values become 0.
+//
+// Used for BPF map sizes (BPFHashMapSize, RingBufferSizeKB*1024) which
+// are read as int via getIntEnvOrDefault but consumed as uint32 by the
+// cilium/ebpf API. Without this clamp, a configuration value above
+// math.MaxUint32 would wrap to a small map size and the BPF load could
+// silently use the wrong capacity.
+func ClampUint32(v int) uint32 {
+	if v < 0 {
+		return 0
+	}
+	if v > math.MaxUint32 {
+		return math.MaxUint32
+	}
+	return uint32(v)
 }
 
 func getInt64EnvOrDefault(key string, defaultValue int64) int64 {

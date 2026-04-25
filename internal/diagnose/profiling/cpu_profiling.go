@@ -2,7 +2,6 @@ package profiling
 
 import (
 	"fmt"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/diagnose/tracker"
 	"github.com/podtrace/podtrace/internal/events"
+	"github.com/podtrace/podtrace/internal/procfs"
 )
 
 func GenerateCPUUsageReport(events []*events.Event, duration time.Duration) string {
@@ -118,8 +118,7 @@ type cpuTimeInfo struct {
 }
 
 func getProcessCPUTime(pid uint32) cpuTimeInfo {
-	statPath := fmt.Sprintf("%s/%d/stat", config.ProcBasePath, pid)
-	data, err := os.ReadFile(statPath)
+	data, err := procfs.ReadFile(fmt.Sprintf("%d/stat", pid))
 	if err != nil {
 		return cpuTimeInfo{}
 	}
@@ -133,8 +132,7 @@ func getProcessCPUTime(pid uint32) cpuTimeInfo {
 	stime, _ := strconv.ParseUint(fields[14], 10, 64)
 
 	clockTicks := uint64(100)
-	auxvPath := fmt.Sprintf("%s/self/auxv", config.ProcBasePath)
-	if data, err := os.ReadFile(auxvPath); err == nil {
+	if data, err := procfs.ReadFile("self/auxv"); err == nil {
 		for i := 0; i < len(data)-8; i += 16 {
 			key := uint64(data[i]) | uint64(data[i+1])<<8 | uint64(data[i+2])<<16 | uint64(data[i+3])<<24 |
 				uint64(data[i+4])<<32 | uint64(data[i+5])<<40 | uint64(data[i+6])<<48 | uint64(data[i+7])<<56

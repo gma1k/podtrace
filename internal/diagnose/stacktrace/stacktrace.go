@@ -3,7 +3,6 @@ package stacktrace
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -11,6 +10,9 @@ import (
 
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/events"
+	"github.com/podtrace/podtrace/internal/hostfs"
+	"github.com/podtrace/podtrace/internal/procfs"
+	"github.com/podtrace/podtrace/internal/safeconv"
 )
 
 type Diagnostician interface {
@@ -41,8 +43,15 @@ func (r *stackResolver) resolve(ctx context.Context, pid uint32, addr uint64) st
 	if r.cache == nil {
 		r.cache = make(map[string]string)
 	}
-	exePath, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+	exePath, err := procfs.Readlink(fmt.Sprintf("%d/exe", pid))
 	if err != nil || exePath == "" {
+		return fmt.Sprintf("0x%x", addr)
+	}
+	// Reject pathological symlink targets (relative paths, ".."
+	// segments) before passing to addr2line. The kernel won't emit
+	// these for /proc/<pid>/exe in practice, but the explicit check
+	// makes the exec invocation provably safe.
+	if _, err := hostfs.Stat(exePath); err != nil {
 		return fmt.Sprintf("0x%x", addr)
 	}
 	key := exePath + "|" + fmt.Sprintf("%x", addr)
@@ -51,7 +60,16 @@ func (r *stackResolver) resolve(ctx context.Context, pid uint32, addr uint64) st
 	}
 	timeoutCtx, cancel := context.WithTimeout(ctx, config.DefaultAddr2lineTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(timeoutCtx, "addr2line", "-e", exePath, fmt.Sprintf("%#x", addr))
+	addr2lineBin, err := exec.LookPath("addr2line")
+	if err != nil {
+		v := fmt.Sprintf("%s@0x%x", filepath.Base(exePath), addr)
+		r.cache[key] = v
+		return v
+	}
+	// addr2lineBin is exec.LookPath-resolved; exePath was just
+	// validated by hostfs.Stat (absolute, no traversal); address is a
+	// formatted hex literal. All exec inputs are constrained.
+	cmd := exec.CommandContext(timeoutCtx, addr2lineBin, "-e", exePath, fmt.Sprintf("%#x", addr)) // #nosec G204 -- LookPath-resolved binary; exePath validated via hostfs.Stat; address is %#x-formatted
 	out, err := cmd.Output()
 	if err != nil {
 		v := fmt.Sprintf("%s@0x%x", filepath.Base(exePath), addr)
@@ -88,7 +106,7 @@ func GenerateStackTraceSectionWithContext(d Diagnostician, ctx context.Context) 
 		if len(e.Stack) == 0 {
 			continue
 		}
-		if e.LatencyNS < uint64(config.MinLatencyForStackNS) && e.Type != events.EventLockContention && e.Type != events.EventDBQuery {
+		if e.LatencyNS < safeconv.Int64ToUint64(config.MinLatencyForStackNS) && e.Type != events.EventLockContention && e.Type != events.EventDBQuery {
 			continue
 		}
 		processed++

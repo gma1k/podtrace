@@ -13,7 +13,7 @@ kubeVersion: ">=1.28.0-0"
 # chart version — bumped per chart change, decoupled from appVersion.
 version: 0.1.0
 # appVersion tracks the podtrace binary release this chart targets.
-appVersion: "0.10.0"
+appVersion: "0.11.0"
 
 keywords:
   - ebpf

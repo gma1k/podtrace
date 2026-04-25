@@ -1,6 +1,7 @@
 package tracker
 
 import (
+	"strconv"
 	"sync"
 	"time"
 
@@ -117,7 +118,11 @@ func (tt *TraceTracker) findOrCreateSpan(trace *Trace, event *events.Event) *Spa
 		span.Attributes["process.name"] = event.ProcessName
 	}
 	if event.PID > 0 {
-		span.Attributes["process.pid"] = string(rune(event.PID))
+		// Format the PID as its decimal text representation. The
+		// previous string(rune(...)) produced a single Unicode code
+		// point per PID, which was unreadable and silently broken
+		// for PIDs above 0x10FFFF.
+		span.Attributes["process.pid"] = strconv.FormatUint(uint64(event.PID), 10)
 	}
 	if event.Target != "" {
 		span.Attributes["target"] = event.Target

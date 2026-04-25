@@ -7,8 +7,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/events"
+	"github.com/podtrace/podtrace/internal/sysfs"
 )
+
+// useCgroupBase points the cgroup root at base for the duration of
+// the test. Required because readCgroupFile and the V1/V2 readers go
+// through sysfs.Cgroup* which scope reads to config.CgroupBasePath.
+func useCgroupBase(t *testing.T, base string) {
+	t.Helper()
+	original := config.CgroupBasePath
+	config.CgroupBasePath = base
+	sysfs.ResetForTesting()
+	t.Cleanup(func() {
+		config.CgroupBasePath = original
+		sysfs.ResetForTesting()
+	})
+}
 
 func TestNewResourceMonitor(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -310,6 +326,7 @@ func TestParseIOStat(t *testing.T) {
 
 func TestReadCgroupFile(t *testing.T) {
 	tmpDir := t.TempDir()
+	useCgroupBase(t, tmpDir)
 	testFile := filepath.Join(tmpDir, "test-file")
 	content := "test content\n"
 
@@ -361,6 +378,7 @@ func TestParseIOV1(t *testing.T) {
 
 func TestResourceMonitor_ReadLimitsV2(t *testing.T) {
 	tmpDir := t.TempDir()
+	useCgroupBase(t, tmpDir)
 	cgroupPath := filepath.Join(tmpDir, "test-cgroup")
 	if err := os.MkdirAll(cgroupPath, 0755); err != nil {
 		t.Fatalf("Failed to create test cgroup dir: %v", err)
@@ -449,6 +467,7 @@ func TestResourceMonitor_ReadLimitsV2(t *testing.T) {
 
 func TestResourceMonitor_ReadLimitsV1(t *testing.T) {
 	tmpDir := t.TempDir()
+	useCgroupBase(t, tmpDir)
 	cgroupPath := filepath.Join(tmpDir, "test-cgroup")
 	if err := os.MkdirAll(cgroupPath, 0755); err != nil {
 		t.Fatalf("Failed to create test cgroup dir: %v", err)
@@ -888,6 +907,7 @@ func TestResourceMonitor_UpdateUsageV1_ErrorReadingFiles(t *testing.T) {
 
 func TestResourceMonitor_UpdateUsageV1_WithLimits(t *testing.T) {
 	tmpDir := t.TempDir()
+	useCgroupBase(t, tmpDir)
 	cgroupPath := filepath.Join(tmpDir, "test-cgroup")
 	if err := os.MkdirAll(cgroupPath, 0755); err != nil {
 		t.Fatalf("Failed to create test cgroup dir: %v", err)
@@ -946,6 +966,7 @@ func TestResourceMonitor_UpdateUsageV1_WithLimits(t *testing.T) {
 
 func TestResourceMonitor_UpdateUsageV2_WithLimits(t *testing.T) {
 	tmpDir := t.TempDir()
+	useCgroupBase(t, tmpDir)
 	cgroupPath := filepath.Join(tmpDir, "test-cgroup")
 	if err := os.MkdirAll(cgroupPath, 0755); err != nil {
 		t.Fatalf("Failed to create test cgroup dir: %v", err)
@@ -1053,6 +1074,7 @@ func TestResourceMonitor_UpdateUsageV1_NoLimits(t *testing.T) {
 
 func TestResourceMonitor_ReadLimitsV2_UnlimitedCPU(t *testing.T) {
 	tmpDir := t.TempDir()
+	useCgroupBase(t, tmpDir)
 	cgroupPath := filepath.Join(tmpDir, "test-cgroup")
 	if err := os.MkdirAll(cgroupPath, 0755); err != nil {
 		t.Fatalf("Failed to create test cgroup dir: %v", err)
@@ -1664,6 +1686,7 @@ func TestResourceMonitor_UpdateResourceUsage(t *testing.T) {
 
 func TestResourceMonitor_GetLimits_WithData(t *testing.T) {
 	tmpDir := t.TempDir()
+	useCgroupBase(t, tmpDir)
 	cgroupPath := filepath.Join(tmpDir, "test-cgroup")
 	if err := os.MkdirAll(cgroupPath, 0755); err != nil {
 		t.Fatalf("Failed to create test cgroup dir: %v", err)
@@ -1810,6 +1833,7 @@ func TestCheckAlerts_WithMaxLimitBytes(t *testing.T) {
 
 func TestReadCgroupFile_WithContent_Extra(t *testing.T) {
 	dir := t.TempDir()
+	useCgroupBase(t, dir)
 	f := filepath.Join(dir, "memory.max")
 	if err := os.WriteFile(f, []byte("1073741824\n"), 0o644); err != nil {
 		t.Fatal(err)

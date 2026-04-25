@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/podtrace/podtrace/internal/config"
+	"github.com/podtrace/podtrace/internal/hostfs"
 	"github.com/podtrace/podtrace/pkg/exporter/bundle"
 )
 
@@ -19,7 +20,7 @@ import (
 // header) may arrive in a sibling file or an environment variable; we
 // read both sources.
 func applyExporterFromFile(path string) error {
-	raw, err := os.ReadFile(path) // #nosec G304 -- path comes from a CLI flag, intentional caller-supplied path.
+	raw, err := hostfs.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read exporter file: %w", err)
 	}
@@ -34,7 +35,7 @@ func applyExporterFromFile(path string) error {
 	if envCred := os.Getenv("PODTRACE_EXPORTER_CREDENTIAL"); envCred != "" {
 		p.Credential = []byte(envCred)
 	} else if credPath := os.Getenv("PODTRACE_EXPORTER_CREDENTIAL_FILE"); credPath != "" {
-		cred, err := os.ReadFile(credPath) // #nosec G304,G703 -- operator-supplied credential path via env var.
+		cred, err := hostfs.ReadFile(credPath)
 		switch {
 		case err == nil:
 			p.Credential = cred

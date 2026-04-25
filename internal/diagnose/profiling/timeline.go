@@ -6,6 +6,7 @@ import (
 
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/events"
+	"github.com/podtrace/podtrace/internal/safeconv"
 )
 
 type TimelineBucket struct {
@@ -30,7 +31,7 @@ func AnalyzeTimeline(events []*events.Event, startTime time.Time, duration time.
 	buckets := make([]int, numBuckets)
 
 	for _, e := range events {
-		eventTime := time.Unix(0, int64(e.Timestamp))
+		eventTime := time.Unix(0, safeconv.Uint64ToInt64(e.Timestamp))
 		elapsed := eventTime.Sub(startTime)
 		bucketIndex := int(elapsed / bucketDuration)
 		if bucketIndex >= numBuckets {
@@ -81,7 +82,7 @@ func DetectBursts(events []*events.Event, startTime time.Time, duration time.Dur
 		windowEnd := windowStart.Add(windowDuration)
 		count := 0
 		for _, e := range events {
-			eventTime := time.Unix(0, int64(e.Timestamp))
+			eventTime := time.Unix(0, safeconv.Uint64ToInt64(e.Timestamp))
 			if eventTime.After(windowStart) && eventTime.Before(windowEnd) {
 				count++
 			}
@@ -128,7 +129,7 @@ func AnalyzeConnectionPattern(connectEvents []*events.Event, startTime, endTime 
 		windowEnd := windowStart.Add(windowDuration)
 		count := 0
 		for _, e := range connectEvents {
-			eventTime := time.Unix(0, int64(e.Timestamp))
+			eventTime := time.Unix(0, safeconv.Uint64ToInt64(e.Timestamp))
 			if eventTime.After(windowStart) && eventTime.Before(windowEnd) {
 				count++
 			}
@@ -223,7 +224,7 @@ func AnalyzeIOPattern(tcpEvents []*events.Event, startTime time.Time, duration t
 		windowEnd := windowStart.Add(windowDuration)
 		count := 0
 		for _, e := range tcpEvents {
-			eventTime := time.Unix(0, int64(e.Timestamp))
+			eventTime := time.Unix(0, safeconv.Uint64ToInt64(e.Timestamp))
 			if eventTime.After(windowStart) && eventTime.Before(windowEnd) {
 				count++
 			}

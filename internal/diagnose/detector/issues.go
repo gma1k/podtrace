@@ -53,9 +53,14 @@ func DetectIssues(allEvents []*events.Event, errorRateThreshold, rttSpikeThresho
 	var resourceAlerts = make(map[string]int)
 	for _, e := range allEvents {
 		if e.Type == events.EventResourceLimit {
-			utilization := uint32(e.Error)
+			// e.Error is int32 carrying the utilization percentage;
+			// negative values are non-physical and skipped.
+			if e.Error < 0 {
+				continue
+			}
+			utilization := int(e.Error)
 			resourceType := e.TCPState
-			
+
 			var resourceName string
 			switch resourceType {
 			case 0:
@@ -67,10 +72,10 @@ func DetectIssues(allEvents []*events.Event, errorRateThreshold, rttSpikeThresho
 			default:
 				resourceName = "Resource"
 			}
-			
+
 			key := resourceName
-			if current, ok := resourceAlerts[key]; !ok || utilization > uint32(current) {
-				resourceAlerts[key] = int(utilization)
+			if current, ok := resourceAlerts[key]; !ok || utilization > current {
+				resourceAlerts[key] = utilization
 			}
 		}
 	}

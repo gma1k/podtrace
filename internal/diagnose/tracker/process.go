@@ -2,11 +2,11 @@ package tracker
 
 import (
 	"fmt"
-	"os"
 	"sort"
 	"strings"
-	"github.com/podtrace/podtrace/internal/config"
+
 	"github.com/podtrace/podtrace/internal/events"
+	"github.com/podtrace/podtrace/internal/procfs"
 	"github.com/podtrace/podtrace/internal/validation"
 )
 
@@ -66,10 +66,10 @@ func getProcessNameFromProc(pid uint32) string {
 		return ""
 	}
 
+	pidStr := fmt.Sprintf("%d", pid)
 	name := ""
 
-	statPath := fmt.Sprintf("%s/%d/stat", config.ProcBasePath, pid)
-	if data, err := os.ReadFile(statPath); err == nil {
+	if data, err := procfs.ReadFile(pidStr + "/stat"); err == nil {
 		statStr := string(data)
 		start := strings.Index(statStr, "(")
 		end := strings.LastIndex(statStr, ")")
@@ -79,15 +79,13 @@ func getProcessNameFromProc(pid uint32) string {
 	}
 
 	if name == "" {
-		commPath := fmt.Sprintf("%s/%d/comm", config.ProcBasePath, pid)
-		if data, err := os.ReadFile(commPath); err == nil {
+		if data, err := procfs.ReadFile(pidStr + "/comm"); err == nil {
 			name = strings.TrimSpace(string(data))
 		}
 	}
 
 	if name == "" {
-		cmdlinePath := fmt.Sprintf("%s/%d/cmdline", config.ProcBasePath, pid)
-		if cmdline, err := os.ReadFile(cmdlinePath); err == nil {
+		if cmdline, err := procfs.ReadFile(pidStr + "/cmdline"); err == nil {
 			parts := strings.Split(string(cmdline), "\x00")
 			if len(parts) > 0 && parts[0] != "" {
 				name = parts[0]
@@ -99,8 +97,7 @@ func getProcessNameFromProc(pid uint32) string {
 	}
 
 	if name == "" {
-		exePath := fmt.Sprintf("%s/%d/exe", config.ProcBasePath, pid)
-		if link, err := os.Readlink(exePath); err == nil {
+		if link, err := procfs.Readlink(pidStr + "/exe"); err == nil {
 			if idx := strings.LastIndex(link, "/"); idx >= 0 {
 				name = link[idx+1:]
 			} else {
@@ -110,8 +107,7 @@ func getProcessNameFromProc(pid uint32) string {
 	}
 
 	if name == "" {
-		statusPath := fmt.Sprintf("%s/%d/status", config.ProcBasePath, pid)
-		if data, err := os.ReadFile(statusPath); err == nil {
+		if data, err := procfs.ReadFile(pidStr + "/status"); err == nil {
 			lines := strings.Split(string(data), "\n")
 			for _, line := range lines {
 				if strings.HasPrefix(line, "Name:") {
