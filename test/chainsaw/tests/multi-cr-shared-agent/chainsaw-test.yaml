@@ -27,7 +27,7 @@ spec:
       try:
         - script:
             content: |
-              set -euo pipefail
+              set -eu
               nodes=$(kubectl get nodes --no-headers | wc -l)
               agents=$(kubectl -n podtrace-system get pods \
                 -l podtrace.io/component=agent --no-headers | wc -l)

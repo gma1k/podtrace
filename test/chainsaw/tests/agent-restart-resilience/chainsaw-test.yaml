@@ -29,7 +29,7 @@ spec:
       try:
         - script:
             content: |
-              set -euo pipefail
+              set -eu
               kubectl -n podtrace-system rollout restart ds/podtrace-agent
               kubectl -n podtrace-system rollout status ds/podtrace-agent --timeout=120s
 
