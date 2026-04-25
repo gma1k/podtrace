@@ -62,8 +62,24 @@ func renderChartWithAPIVersions(t *testing.T, apiVersions []string, setFlags ...
 	return stdout.Bytes()
 }
 
-// chartDir locates the Helm chart by walking up from cwd until it finds
-// a go.mod (repo root marker), then joining chartSubPath.
+func renderChartIncludeCRDs(t *testing.T, setFlags ...string) []byte {
+	t.Helper()
+	helm := helmAvailable(t)
+
+	args := []string{"template", "podtrace", chartDir(t), "--include-crds"}
+	for _, f := range setFlags {
+		args = append(args, "--set", f)
+	}
+	var stdout, stderr bytes.Buffer
+	cmd := exec.Command(helm, args...)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("helm template --include-crds %v: %v\nstderr: %s", args, err, stderr.String())
+	}
+	return stdout.Bytes()
+}
+
 func chartDir(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -84,19 +100,13 @@ func chartDir(t *testing.T) string {
 	return ""
 }
 
-// TestChart_DefaultValues renders the chart with stock values and asserts
-// that exactly the expected resources appear. Any new template that ships
-// "on by default" must be either explicitly added to this assertion or
-// gated behind a Values toggle.
 func TestChart_DefaultValues(t *testing.T) {
 	out := renderChart(t)
 	resources := parseKinds(t, out)
 
-	// Expect: 4 CRDs + 1 Namespace.
-	wantCRDs := 4
-	gotCRDs := resources["CustomResourceDefinition"]
-	if gotCRDs != wantCRDs {
-		t.Errorf("CRDs rendered: got %d want %d", gotCRDs, wantCRDs)
+	// Default render does NOT include CRDs (they live under crds/).
+	if resources["CustomResourceDefinition"] != 0 {
+		t.Errorf("default `helm template` should skip crds/; got %d", resources["CustomResourceDefinition"])
 	}
 	if resources["Namespace"] != 1 {
 		t.Errorf("Namespace count: got %d want 1", resources["Namespace"])
@@ -107,32 +117,21 @@ func TestChart_DefaultValues(t *testing.T) {
 	}
 }
 
-// TestChart_CRDsCanBeDisabled asserts the crds.install toggle actually
-// suppresses all four CRDs.
-func TestChart_CRDsCanBeDisabled(t *testing.T) {
-	out := renderChart(t, "crds.install=false")
+func TestChart_CRDsRenderedWithIncludeFlag(t *testing.T) {
+	out := renderChartIncludeCRDs(t)
 	resources := parseKinds(t, out)
-	if resources["CustomResourceDefinition"] != 0 {
-		t.Errorf("crds.install=false still rendered %d CRDs", resources["CustomResourceDefinition"])
-	}
-	// Namespace should still render.
-	if resources["Namespace"] != 1 {
-		t.Errorf("Namespace missing with crds disabled")
+	if resources["CustomResourceDefinition"] != 4 {
+		t.Errorf("expected 4 CRDs from crds/, got %d", resources["CustomResourceDefinition"])
 	}
 }
 
-// TestChart_KeepAnnotationToggle asserts the keep annotation only
-// appears when crds.keep is true. When false, helm uninstall will clean
-// up the CRDs too.
-func TestChart_KeepAnnotationToggle(t *testing.T) {
-	withKeep := renderChart(t, "crds.keep=true")
-	withoutKeep := renderChart(t, "crds.keep=false")
-
-	if !bytes.Contains(withKeep, []byte("helm.sh/resource-policy: keep")) {
-		t.Error("crds.keep=true did not produce the keep annotation")
-	}
-	if bytes.Contains(withoutKeep, []byte("helm.sh/resource-policy: keep")) {
-		t.Error("crds.keep=false still produced the keep annotation")
+func TestChart_CRDsCarryKeepAnnotation(t *testing.T) {
+	out := renderChartIncludeCRDs(t)
+	// Each CRD should carry the annotation. We expect one occurrence
+	// per CRD (4 total).
+	count := bytes.Count(out, []byte("helm.sh/resource-policy: keep"))
+	if count < 4 {
+		t.Errorf("keep annotation count: got %d want >= 4 (one per CRD)", count)
 	}
 }
 

@@ -2,13 +2,12 @@ Podtrace installed — release {{ .Release.Name | quote }}.
 
 Installed resources
 -------------------
-{{- if .Values.crds.install }}
-  CRDs (podtrace.io/v1alpha1):
+  CRDs (podtrace.io/v1alpha1) — installed from the chart's crds/ directory
+                                (Helm always installs these before templates):
     PodTrace          continuous realtime tracing
     PodTraceSession   bounded diagnose-mode tracing
     ExporterConfig    reusable trace exporter
     TracerConfig      cluster-scoped infrastructure
-{{- end }}
 {{- if .Values.namespace.create }}
   Namespace: {{ include "podtrace.systemNamespace" . }}  (PSA enforce=privileged)
 {{- end }}

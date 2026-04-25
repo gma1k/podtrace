@@ -1,45 +1,47 @@
-{{- if .Values.crds.install }}
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.16.5
-    {{- if .Values.crds.keep }}
     helm.sh/resource-policy: keep
-    {{- end }}
-  name: podtraces.podtrace.io
+  name: podtracesessions.podtrace.io
 spec:
   group: podtrace.io
   names:
     categories:
     - podtrace
-    kind: PodTrace
-    listKind: PodTraceList
-    plural: podtraces
+    kind: PodTraceSession
+    listKind: PodTraceSessionList
+    plural: podtracesessions
     shortNames:
-    - pt
-    singular: podtrace
+    - pts
+    singular: podtracesession
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.matchedPods
-      name: Matched
-      type: integer
-    - jsonPath: .status.conditions[?(@.type=="Ready")].status
-      name: Ready
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.duration
+      name: Duration
       type: string
     - jsonPath: .spec.exporterRef.name
       name: Exporter
       type: string
+    - jsonPath: .status.summary.totalEvents
+      name: Events
+      type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: PodTrace is a continuous realtime eBPF trace over a dynamic set
-          of pods.
+        description: |-
+          PodTraceSession is a bounded, diagnose-mode trace. Running a session
+          creates one privileged Job per node hosting a matched pod, each invoking
+          `podtrace --diagnose <duration>` against the local subset.
         properties:
           apiVersion:
             description: |-
@@ -60,16 +62,17 @@ spec:
             type: object
           spec:
             description: |-
-              PodTraceSpec defines a continuous, realtime tracing intent over a set of pods.
-              PodTrace is the continuous-observability counterpart of PodTraceSession: it
-              has no bounded duration and remains active until the resource is deleted or
-              paused. Agents on each node watch PodTrace resources and feed matching pods
-              into their local tracer.
+              PodTraceSessionSpec defines a bounded diagnose-mode trace. The operator
+              reconciles this into one privileged Job per node hosting matched pods.
             properties:
               containerName:
+                description: ContainerName restricts tracing to a specific container.
+                type: string
+              duration:
                 description: |-
-                  ContainerName restricts tracing to a specific container within each
-                  matched pod. If empty, the first container is used.
+                  Duration is the total wall-clock time the session should run. Required.
+                  Format: Go duration, e.g. "30s", "5m". Maximum is enforced by the
+                  operator against TracerConfig.spec.session.maxDuration.
                 type: string
               exporterRef:
                 description: ExporterRef names an ExporterConfig in the same namespace.
@@ -81,9 +84,8 @@ spec:
                 - name
                 type: object
               filters:
-                description: |-
-                  Filters restricts the event categories captured. When empty, all
-                  categories are captured.
+                description: Filters restricts the event categories captured. When
+                  empty, all are captured.
                 items:
                   description: EventFilter enumerates the event categories podtrace
                     can capture.
@@ -98,7 +100,7 @@ spec:
               namespaceSelector:
                 description: |-
                   NamespaceSelector scopes the Selector across namespaces. When unset
-                  the selector is evaluated within the PodTrace's own namespace only.
+                  the selector is evaluated within the session's own namespace only.
                 properties:
                   matchExpressions:
                     description: matchExpressions is a list of label selector requirements.
@@ -143,10 +145,6 @@ spec:
                     type: object
                 type: object
                 x-kubernetes-map-type: atomic
-              paused:
-                description: Paused suspends tracing for this resource without deleting
-                  it.
-                type: boolean
               podRefs:
                 description: PodRefs explicitly enumerates target pods.
                 items:
@@ -164,6 +162,79 @@ spec:
                   - name
                   type: object
                 type: array
+              reportRef:
+                description: |-
+                  ReportRef points at where the diagnose report summary should be persisted.
+                  If unset, only the exporter receives events and the session status
+                  retains a small inline summary.
+                properties:
+                  configMap:
+                    description: |-
+                      ConfigMap in the same namespace as the session. The operator will
+                      create/update it with the report payload. Use this sink for small
+                      reports; ConfigMaps are capped at 1MiB of data by etcd.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  objectStore:
+                    description: |-
+                      ObjectStore uploads the report to a cloud bucket (s3, gs, az). Use
+                      this sink for reports that may exceed the 1MiB ConfigMap/Secret
+                      limit. Rejected by the validating webhook in v1alpha1 — the
+                      schema is reserved so clients can adopt it without a CRD bump
+                      later.
+                    properties:
+                      credentialsSecretRef:
+                        description: |-
+                          CredentialsSecretRef names a Secret in the session's namespace
+                          whose keys the uploader reads (e.g. "access_key_id",
+                          "secret_access_key"). Implementation-specific — interpretation is
+                          left to the CLI uploader.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      uri:
+                        description: URI of the destination, e.g. "s3://bucket/path/"
+                          or "gs://bucket/path/".
+                        type: string
+                    required:
+                    - uri
+                    type: object
+                  secret:
+                    description: |-
+                      Secret in the same namespace as the session. Prefer this sink when the
+                      report may contain sensitive hostnames/paths/payloads.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                type: object
               samplePercent:
                 description: SamplePercent sets the sampling rate for exported traces,
                   0-100.
@@ -172,9 +243,8 @@ spec:
                 minimum: 0
                 type: integer
               selector:
-                description: |-
-                  Selector picks target pods by label. Mutually exclusive with PodRefs;
-                  exactly one of the two must be set.
+                description: Selector picks target pods by label. Mutually exclusive
+                  with PodRefs.
                 properties:
                   matchExpressions:
                     description: matchExpressions is a list of label selector requirements.
@@ -220,7 +290,7 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
               thresholds:
-                description: Thresholds override the agent's default anomaly-detection
+                description: Thresholds override the session's default anomaly-detection
                   settings.
                 properties:
                   errorRatePercent:
@@ -246,16 +316,27 @@ spec:
                     minimum: 0
                     type: integer
                 type: object
+              ttlSecondsAfterFinished:
+                description: |-
+                  TTLSecondsAfterFinished cleans up the session resource after completion.
+                  If unset, the operator default applies.
+                format: int32
+                minimum: 0
+                type: integer
             required:
+            - duration
             - exporterRef
             type: object
           status:
-            description: PodTraceStatus reflects the observed state of a PodTrace.
+            description: PodTraceSessionStatus reflects the observed state of a PodTraceSession.
             properties:
+              completionTime:
+                description: CompletionTime is set when all child Jobs have finished.
+                format: date-time
+                type: string
               conditions:
-                description: |-
-                  Conditions is the latest available observations of the PodTrace state.
-                  Common types: Ready, Reconciled, Paused, Degraded.
+                description: Conditions is the latest available observations of session
+                  state.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -314,60 +395,44 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              matchedPods:
-                description: MatchedPods is the total number of pods currently matched
-                  across all nodes.
-                format: int32
-                type: integer
-              nodeStatus:
-                description: |-
-                  NodeStatus aggregates per-node agent reports. Agents patch their own
-                  entry every StatusReportInterval (see TracerConfig).
+              jobs:
+                description: Jobs lists the per-node Job children managed by this
+                  session.
                 items:
-                  description: PodTraceNodeStatus reports one agent's view of this
-                    PodTrace.
+                  description: SessionJobRef describes a child Job created by the
+                    session reconciler.
                   properties:
-                    activeCgroups:
-                      description: ActiveCgroups is the count of cgroups the agent
-                        is currently tracing for this PodTrace.
-                      format: int32
-                      type: integer
-                    droppedEvents:
-                      description: |-
-                        DroppedEvents counts events that were produced by the kernel but could
-                        not be forwarded to an exporter (buffer full or exporter backpressure).
-                      format: int64
-                      type: integer
-                    eventsTotal:
-                      description: |-
-                        EventsTotal is the cumulative number of events captured by this agent
-                        for this PodTrace since the agent last started.
-                      format: int64
-                      type: integer
-                    lastHeartbeat:
-                      description: LastHeartbeat is the time this entry was last updated
-                        by its agent.
+                    completed:
+                      description: Completed indicates whether the Job has finished
+                        (success or failure).
+                      type: boolean
+                    completionTime:
+                      description: CompletionTime of the Job's pod, if finished.
                       format: date-time
                       type: string
+                    eventCount:
+                      description: EventCount is the number of events this Job's tracer
+                        reported.
+                      format: int64
+                      type: integer
                     message:
-                      description: Message provides human-readable detail, typically
-                        an error cause when Ready is false.
+                      description: Message carries Job-level error text when Completed
+                        is true and the Job failed.
+                      type: string
+                    name:
+                      description: Name of the Job resource.
                       type: string
                     node:
-                      description: Node is the name of the node reporting this status.
-                        Unique within the array.
+                      description: Node the Job is pinned to. Unique within the array.
                       type: string
-                    ready:
-                      description: Ready indicates the agent has successfully attached
-                        to the local matched cgroups.
-                      type: boolean
+                    startTime:
+                      description: StartTime of the Job's pod.
+                      format: date-time
+                      type: string
                   required:
-                  - activeCgroups
-                  - droppedEvents
-                  - eventsTotal
-                  - lastHeartbeat
+                  - completed
+                  - name
                   - node
-                  - ready
                   type: object
                 type: array
                 x-kubernetes-list-map-keys:
@@ -375,13 +440,52 @@ spec:
                 x-kubernetes-list-type: map
               observedGeneration:
                 description: ObservedGeneration is the most recent generation observed
-                  for this PodTrace.
+                  for this session.
                 format: int64
                 type: integer
+              phase:
+                description: Phase is the high-level state of the session.
+                enum:
+                - Pending
+                - Running
+                - Completed
+                - Failed
+                type: string
+              startTime:
+                description: StartTime is set when the first child Job enters Running.
+                format: date-time
+                type: string
+              summary:
+                description: Summary is a compact per-category event roll-up for this
+                  session.
+                properties:
+                  cpuEvents:
+                    format: int64
+                    type: integer
+                  dnsEvents:
+                    format: int64
+                    type: integer
+                  errorsDetected:
+                    format: int32
+                    type: integer
+                  fsEvents:
+                    format: int64
+                    type: integer
+                  netEvents:
+                    format: int64
+                    type: integer
+                  procEvents:
+                    format: int64
+                    type: integer
+                  totalEvents:
+                    format: int64
+                    type: integer
+                required:
+                - totalEvents
+                type: object
             type: object
         type: object
     served: true
     storage: true
     subresources:
       status: {}
-{{- end }}

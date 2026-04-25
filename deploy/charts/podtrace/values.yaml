@@ -16,11 +16,9 @@
 # ServiceMonitors are off by default — enable them individually below
 # once the rest of your setup is ready (Secrets, cert-manager, etc.).
 
-# -- Install CustomResourceDefinitions. Disable to manage CRDs outside of
-# Helm (e.g. via a separate Kustomize overlay or GitOps pipeline).
 crds:
-  install: true
-  keep: true
+  install: true   # DEPRECATED: no-op. Use `helm install --skip-crds` instead.
+  keep: true      # DEPRECATED: no-op. CRDs always carry helm.sh/resource-policy: keep.
 
 image:
   repository: ghcr.io/podtrace/podtrace
