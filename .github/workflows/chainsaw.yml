@@ -94,7 +94,12 @@ jobs:
             --set image.pullPolicy=Never \
             --wait --timeout 180s
 
-          # Verify the agent DaemonSet rolled out before the suite runs.
+          for i in $(seq 1 60); do
+            if kubectl -n podtrace-system get ds podtrace-agent >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
           kubectl -n podtrace-system rollout status ds/podtrace-agent --timeout=180s
 
       - name: Run chainsaw suite
