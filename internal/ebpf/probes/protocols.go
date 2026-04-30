@@ -165,6 +165,7 @@ func AttachFastCGIProbes(coll *ebpf.Collection) []link.Link {
 	for progName, kp := range kprobeMap {
 		prog := coll.Programs[progName]
 		if prog == nil {
+			logger.Debug("FastCGI program not present in collection", zap.String("prog", progName))
 			continue
 		}
 		var l link.Link

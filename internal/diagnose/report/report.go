@@ -745,8 +745,319 @@ func GenerateApplicationTracing(d Diagnostician, duration time.Duration) string 
 	report += formatBursts(allEvents, d.StartTime(), duration)
 	report += formatConnectionPatterns(d, duration)
 	report += formatIOPatterns(d, duration)
+	report += formatFastCGIActivity(d, duration)
 
 	return report
+}
+
+func formatFastCGIActivity(d Diagnostician, duration time.Duration) string {
+	reqs := d.FilterEvents(events.EventFastCGIReq)
+	resps := d.FilterEvents(events.EventFastCGIResp)
+	if len(reqs) == 0 && len(resps) == 0 {
+		return ""
+	}
+
+	trimURI := func(uri string) string {
+		for i := 0; i < len(uri); i++ {
+			c := uri[i]
+			if c <= 0x20 || c >= 0x7F {
+				return uri[:i]
+			}
+		}
+		return uri
+	}
+	trimMethod := func(m string) string {
+		for i := 0; i < len(m); i++ {
+			c := m[i]
+			if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {
+				return m[:i]
+			}
+		}
+		return m
+	}
+
+	var result string
+	result += "FastCGI Activity:\n"
+	if len(reqs) > 0 {
+		reqRate := d.CalculateRate(len(reqs), duration)
+		result += fmt.Sprintf("  Requests:  %d (%.1f/sec)\n", len(reqs), reqRate)
+	}
+	if len(resps) > 0 {
+		respRate := d.CalculateRate(len(resps), duration)
+		result += fmt.Sprintf("  Responses: %d (%.1f/sec)\n", len(resps), respRate)
+	}
+
+	// --- Method breakdown -------------------------------------------------
+	methodCounts := map[string]int{}
+	for _, e := range reqs {
+		if e == nil {
+			continue
+		}
+		m := trimMethod(e.Details)
+		if m == "" {
+			m = "?"
+		}
+		methodCounts[m]++
+	}
+	if len(methodCounts) > 0 {
+		type methodKV struct {
+			method string
+			count  int
+		}
+		ms := make([]methodKV, 0, len(methodCounts))
+		for m, c := range methodCounts {
+			ms = append(ms, methodKV{m, c})
+		}
+		sort.Slice(ms, func(i, j int) bool {
+			if ms[i].count != ms[j].count {
+				return ms[i].count > ms[j].count
+			}
+			return ms[i].method < ms[j].method
+		})
+		result += "  Methods:\n"
+		for _, m := range ms {
+			result += fmt.Sprintf("    %s: %d\n", m.method, m.count)
+		}
+	}
+
+	// --- Per-worker (PID) breakdown --------------------------------------
+	type workerStat struct {
+		pid   uint32
+		name  string
+		count int
+	}
+	workerMap := map[uint32]*workerStat{}
+	for _, e := range reqs {
+		if e == nil {
+			continue
+		}
+		w, ok := workerMap[e.PID]
+		if !ok {
+			w = &workerStat{pid: e.PID, name: e.ProcessName}
+			workerMap[e.PID] = w
+		}
+		if w.name == "" && e.ProcessName != "" {
+			w.name = e.ProcessName
+		}
+		w.count++
+	}
+	if len(workerMap) > 0 {
+		workers := make([]*workerStat, 0, len(workerMap))
+		for _, w := range workerMap {
+			workers = append(workers, w)
+		}
+		sort.Slice(workers, func(i, j int) bool {
+			if workers[i].count != workers[j].count {
+				return workers[i].count > workers[j].count
+			}
+			return workers[i].pid < workers[j].pid
+		})
+		result += "  Workers:\n"
+		for i, w := range workers {
+			if i >= config.TopProcessesLimit {
+				break
+			}
+			name := w.name
+			if name == "" {
+				name = "unknown"
+			}
+			result += fmt.Sprintf("    PID %d (%s): %d req\n", w.pid, name, w.count)
+		}
+	}
+
+	// --- Per-URI stats with percentiles + errors -------------------------
+	type uriStat struct {
+		uri       string
+		method    string
+		count     int
+		latencies []uint64
+		appErrors int
+	}
+	byURI := map[string]*uriStat{}
+	for _, e := range reqs {
+		if e == nil {
+			continue
+		}
+		uri := trimURI(e.Target)
+		if uri == "" {
+			uri = "/"
+		}
+		method := trimMethod(e.Details)
+		s, ok := byURI[uri]
+		if !ok {
+			s = &uriStat{uri: uri, method: method}
+			byURI[uri] = s
+		}
+		s.count++
+		if s.method == "" {
+			s.method = method
+		}
+	}
+	for _, e := range resps {
+		if e == nil {
+			continue
+		}
+		uri := trimURI(e.Target)
+		if uri == "" {
+			uri = "/"
+		}
+		s, ok := byURI[uri]
+		if !ok {
+			s = &uriStat{uri: uri}
+			byURI[uri] = s
+		}
+		s.latencies = append(s.latencies, uint64(e.LatencyNS))
+		if e.Error != 0 {
+			s.appErrors++
+		}
+	}
+
+	pctMs := func(sorted []uint64, p int) float64 {
+		if len(sorted) == 0 {
+			return 0
+		}
+		idx := (len(sorted) * p) / 100
+		if idx >= len(sorted) {
+			idx = len(sorted) - 1
+		}
+		return float64(sorted[idx]) / 1e6
+	}
+
+	stats := make([]*uriStat, 0, len(byURI))
+	for _, s := range byURI {
+		sort.Slice(s.latencies, func(i, j int) bool { return s.latencies[i] < s.latencies[j] })
+		stats = append(stats, s)
+	}
+	sort.Slice(stats, func(i, j int) bool {
+		if stats[i].count != stats[j].count {
+			return stats[i].count > stats[j].count
+		}
+		return stats[i].uri < stats[j].uri
+	})
+
+	result += "  Top URIs:\n"
+	for i, s := range stats {
+		if i >= config.TopProcessesLimit {
+			break
+		}
+		method := s.method
+		if method == "" {
+			method = "REQ"
+		}
+		line := fmt.Sprintf("    - %s %s: %d req", method, s.uri, s.count)
+		if len(s.latencies) > 0 {
+			line += fmt.Sprintf(", p50=%.2fms, p95=%.2fms, p99=%.2fms, max=%.2fms",
+				pctMs(s.latencies, 50), pctMs(s.latencies, 95),
+				pctMs(s.latencies, 99), pctMs(s.latencies, 100))
+		}
+		if s.appErrors > 0 {
+			line += fmt.Sprintf(", errors=%d", s.appErrors)
+		}
+		result += line + "\n"
+	}
+
+	// --- Latency histogram (overall responses) ---------------------------
+	if len(resps) > 0 {
+		var sub1, sub10, sub100, plus int
+		for _, e := range resps {
+			if e == nil {
+				continue
+			}
+			ms := float64(e.LatencyNS) / 1e6
+			switch {
+			case ms < 1:
+				sub1++
+			case ms < 10:
+				sub10++
+			case ms < 100:
+				sub100++
+			default:
+				plus++
+			}
+		}
+		total := len(resps)
+		pct := func(n int) float64 { return 100 * float64(n) / float64(total) }
+		result += "  Latency distribution:\n"
+		result += fmt.Sprintf("    <1ms:     %d (%5.1f%%)\n", sub1, pct(sub1))
+		result += fmt.Sprintf("    1-10ms:   %d (%5.1f%%)\n", sub10, pct(sub10))
+		result += fmt.Sprintf("    10-100ms: %d (%5.1f%%)\n", sub100, pct(sub100))
+		result += fmt.Sprintf("    >100ms:   %d (%5.1f%%)\n", plus, pct(plus))
+	}
+
+	// --- Recent samples (last N events, newest first) --------------------
+	type sample struct {
+		ts     uint64
+		pid    uint32
+		method string
+		uri    string
+		latNS  uint64
+		status int32
+		isResp bool
+	}
+	samples := make([]sample, 0, len(reqs)+len(resps))
+	for _, e := range reqs {
+		if e == nil {
+			continue
+		}
+		samples = append(samples, sample{
+			ts:     e.Timestamp,
+			pid:    e.PID,
+			method: trimMethod(e.Details),
+			uri:    trimURI(e.Target),
+		})
+	}
+	for _, e := range resps {
+		if e == nil {
+			continue
+		}
+		samples = append(samples, sample{
+			ts:     e.Timestamp,
+			pid:    e.PID,
+			uri:    trimURI(e.Target),
+			latNS:  uint64(e.LatencyNS),
+			status: e.Error,
+			isResp: true,
+		})
+	}
+	if len(samples) > 0 {
+		// Newest first.
+		sort.Slice(samples, func(i, j int) bool { return samples[i].ts > samples[j].ts })
+
+		// Render timestamps relative to the oldest sample so they're
+		// human-readable regardless of whether ev.Timestamp came from
+		// CLOCK_MONOTONIC or wall-clock — both clocks advance at the
+		// same rate so the deltas are meaningful either way.
+		oldest := samples[len(samples)-1].ts
+
+		const sampleLimit = 10
+		n := sampleLimit
+		if len(samples) < n {
+			n = len(samples)
+		}
+		result += "  Recent events:\n"
+		for i := 0; i < n; i++ {
+			s := samples[i]
+			uri := s.uri
+			if uri == "" {
+				uri = "/"
+			}
+			deltaSec := float64(s.ts-oldest) / 1e9
+			if s.isResp {
+				result += fmt.Sprintf("    +%6.2fs  pid=%-7d  RESP  %-24s  %.2fms  status=%d\n",
+					deltaSec, s.pid, uri, float64(s.latNS)/1e6, s.status)
+			} else {
+				method := s.method
+				if method == "" {
+					method = "REQ"
+				}
+				result += fmt.Sprintf("    +%6.2fs  pid=%-7d  %-4s  %s\n",
+					deltaSec, s.pid, method, uri)
+			}
+		}
+	}
+
+	result += "\n"
+	return result
 }
 
 func formatProcessActivity(allEvents []*events.Event) string {

@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
+	"k8s.io/klog/v2"
 
 	"strconv"
 
@@ -77,6 +80,20 @@ func init() {
 		return ebpf.NewTracer()
 	}
 	exitFunc = os.Exit
+
+	// client-go's informers retry on RBAC denials at klog ERROR level
+	// every few seconds; in narrow per-session SA contexts (where
+	// cluster-scope list/watch is intentionally denied) those retries
+	// are expected and just spam stderr. Route klog into its own flagset
+	// so we don't conflict with cobra, lower its verbosity to fatal-only,
+	// and silence the writer.
+	klogFlags := flag.NewFlagSet("klog", flag.ContinueOnError)
+	klog.InitFlags(klogFlags)
+	_ = klogFlags.Set("logtostderr", "false")
+	_ = klogFlags.Set("alsologtostderr", "false")
+	_ = klogFlags.Set("stderrthreshold", "FATAL")
+	_ = klogFlags.Set("v", "0")
+	klog.SetOutput(io.Discard)
 }
 
 func main() {
@@ -762,7 +779,8 @@ func filterEvents(ctx context.Context, in <-chan *events.Event, out chan<- *even
 			switch {
 			case filterMap["dns"] && event.Type == events.EventDNS:
 				shouldInclude = true
-			case filterMap["net"] && (event.Type == events.EventConnect || event.Type == events.EventTCPSend || event.Type == events.EventTCPRecv):
+			case filterMap["net"] && (event.Type == events.EventConnect || event.Type == events.EventTCPSend || event.Type == events.EventTCPRecv ||
+				event.Type == events.EventFastCGIReq || event.Type == events.EventFastCGIResp):
 				shouldInclude = true
 			case filterMap["fs"] && (event.Type == events.EventRead || event.Type == events.EventWrite || event.Type == events.EventFsync):
 				shouldInclude = true
