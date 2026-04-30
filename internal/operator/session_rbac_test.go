@@ -143,8 +143,13 @@ func TestBuildSessionReportRules_IncludesPodReads(t *testing.T) {
 	if !hasRuleFor(rules, "pods", "list") {
 		t.Errorf("missing pods:list: %+v", rules)
 	}
-	if hasRuleFor(rules, "events", "get") {
-		t.Errorf("session Role must not grant events:get (operator cannot escalate): %+v", rules)
+	if !hasRuleFor(rules, "events", "watch") {
+		t.Errorf("missing events:watch (events correlator needs it): %+v", rules)
+	}
+	for _, verb := range []string{"create", "patch", "update", "delete"} {
+		if hasRuleFor(rules, "events", verb) {
+			t.Errorf("session Role must not grant events:%s (read-only): %+v", verb, rules)
+		}
 	}
 	// Without reportRef, the rule set must not grant any configmap/
 	// secret verbs — those need a resourceNames-scoped rule that only

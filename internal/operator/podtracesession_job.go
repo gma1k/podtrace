@@ -124,6 +124,13 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 			Name:  "PODTRACE_EXPORTER_CREDENTIAL_FILE",
 			Value: "/etc/podtrace/exporter-credential/credential",
 		},
+		// Critical-path windowing fires every 500ms; for short bounded
+		// sessions it just floods logs. Operators wanting it can override.
+		{Name: "PODTRACE_CRITICAL_PATH", Value: "false"},
+		// Sessions typically point at internal cluster collectors that
+		// don't terminate TLS. Skip the cleartext-http guard so a
+		// missing/unreachable OTLP endpoint isn't a noisy startup warn.
+		{Name: "PODTRACE_OTLP_INSECURE", Value: "1"},
 	}
 
 	mainContainer := corev1.Container{

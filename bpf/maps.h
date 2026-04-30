@@ -174,6 +174,22 @@ struct {
 	__type(value, u64);  /* msghdr pointer cast to u64 */
 } recvmsg_args SEC(".maps");
 
+/* Pending FastCGI PARAMS body — populated when a worker reads an
+ * 8-byte PARAMS record header in one recvmsg, consumed when the
+ * matching content_len-byte body arrives in the next recvmsg.
+ * Keyed by (tgid<<32|tid). LRU keeps it bounded under churn even if
+ * a body never arrives (worker died, request aborted).            */
+struct fcgi_pending {
+	u32 request_id;
+	u32 expected_body_bytes;
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u64);
+	__type(value, struct fcgi_pending);
+} fastcgi_pending SEC(".maps");
+
 /* Redis: pid<<32|tid → first word of redisCommand format string */
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);

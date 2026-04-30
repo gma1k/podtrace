@@ -31,25 +31,44 @@
 
 #ifdef PODTRACE_VMLINUX_FROM_BTF
 
-/* Read the first `buf_size` bytes from the first iovec of a msghdr.
- * Returns 0 on success, negative on failure. */
+static __always_inline void *msghdr_user_base(struct msghdr *msg, u64 *avail)
+{
+	if (!msg)
+		return NULL;
+	u8 it = BPF_CORE_READ(msg, msg_iter.iter_type);
+	if (it == ITER_UBUF) {
+		void *ubuf = (void *)BPF_CORE_READ(msg, msg_iter.ubuf);
+		size_t count = BPF_CORE_READ(msg, msg_iter.count);
+		size_t off = BPF_CORE_READ(msg, msg_iter.iov_offset);
+		if (avail)
+			*avail = count;
+		if (!ubuf)
+			return NULL;
+		return (u8 *)ubuf + off;
+	}
+	if (it == ITER_IOVEC) {
+		const struct iovec *iov = BPF_CORE_READ(msg, msg_iter.__iov);
+		if (!iov)
+			return NULL;
+		struct iovec iov_entry;
+		if (bpf_probe_read_kernel(&iov_entry, sizeof(iov_entry), iov) != 0)
+			return NULL;
+		if (avail)
+			*avail = iov_entry.iov_len;
+		return iov_entry.iov_base;
+	}
+	return NULL;
+}
+
 static __always_inline int read_msghdr_data(struct msghdr *msg, void *buf, u32 buf_size)
 {
-	if (!msg || !buf || buf_size == 0)
+	if (!buf || buf_size == 0)
 		return -1;
-
-	const struct iovec *iov = BPF_CORE_READ(msg, msg_iter.__iov);
-	if (!iov)
+	u64 avail = 0;
+	void *base = msghdr_user_base(msg, &avail);
+	if (!base || avail < buf_size)
 		return -1;
-
-	struct iovec iov_entry;
-	if (bpf_probe_read_kernel(&iov_entry, sizeof(iov_entry), iov) != 0)
-		return -1;
-
-	if (!iov_entry.iov_base || iov_entry.iov_len < buf_size)
-		return -1;
-
-	return bpf_probe_read_user(buf, buf_size, iov_entry.iov_base);
+	return bpf_probe_read_user(buf, buf_size, base);
 }
 
 /* -----------------------------------------------------------------------
@@ -67,16 +86,46 @@ int kprobe_unix_stream_recvmsg(struct pt_regs *ctx)
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_key(pid, tid);
 
-	u64 msg_ptr = (u64)PT_REGS_PARM2(ctx);
-	bpf_map_update_elem(&recvmsg_args, &key, &msg_ptr, BPF_ANY);
+	struct msghdr *msg = (struct msghdr *)PT_REGS_PARM2(ctx);
+	u64 user_ptr = 0;
+	if (msg) {
+		u8 it = BPF_CORE_READ(msg, msg_iter.iter_type);
+		if (it == ITER_UBUF) {
+			user_ptr = (u64)BPF_CORE_READ(msg, msg_iter.ubuf);
+		} else if (it == ITER_IOVEC) {
+			const struct iovec *iov = BPF_CORE_READ(msg, msg_iter.__iov);
+			if (iov) {
+				struct iovec iov_entry;
+				if (bpf_probe_read_kernel(&iov_entry, sizeof(iov_entry), iov) == 0)
+					user_ptr = (u64)iov_entry.iov_base;
+			}
+		}
+	}
+	if (user_ptr)
+		bpf_map_update_elem(&recvmsg_args, &key, &user_ptr, BPF_ANY);
 	return 0;
 }
 
 /* -----------------------------------------------------------------------
- * kretprobe/unix_stream_recvmsg — parse FastCGI PARAMS record
+ * kretprobe/unix_stream_recvmsg -- parse FastCGI PARAMS record
  * -----------------------------------------------------------------------
- * After the recvmsg returns, the buffer has been filled.
- * Look for FCGI_PARAMS (type=4) and extract REQUEST_URI / REQUEST_METHOD.
+ * Three layouts, all handled below:
+ *
+ *   A. PARAMS header + body in one recvmsg buffer.
+ *      Detected by hdr[1]=FCGI_PARAMS at buffer[0] AND rc_bytes > 8.
+ *      Scan params at offset 8.
+ *
+ *   B. BEGIN_REQUEST(16) + PARAMS header + body in one recvmsg.
+ *      Detected by hdr[1]=FCGI_BEGIN_REQUEST AND hdr[17]=FCGI_PARAMS
+ *      AND rc_bytes >= 24+content. Scan params at offset 24.
+ *
+ *   C. PHP-FPM / libfcgi split reads:
+ *        recvmsg #1 = 8 bytes:  PARAMS header alone -- stash state.
+ *        recvmsg #2 = N bytes:  PARAMS body -- replay state, scan
+ *                               buffer at offset 0, emit, drop state.
+ *      Stale state is bounded by the LRU cap on `fastcgi_pending`
+ *      (1024 entries) so an aborted request can't pin memory; a
+ *      stray non-matching second read just drops the entry.
  */
 SEC("kretprobe/unix_stream_recvmsg")
 int kretprobe_unix_stream_recvmsg(struct pt_regs *ctx)
@@ -85,30 +134,72 @@ int kretprobe_unix_stream_recvmsg(struct pt_regs *ctx)
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_key(pid, tid);
 
-	u64 *msg_ptr_stored = bpf_map_lookup_elem(&recvmsg_args, &key);
-	if (!msg_ptr_stored) return 0;
-	u64 msg_ptr = *msg_ptr_stored;
+	u64 *user_ptr_stored = bpf_map_lookup_elem(&recvmsg_args, &key);
+	if (!user_ptr_stored) return 0;
+	u64 user_ptr = *user_ptr_stored;
 	bpf_map_delete_elem(&recvmsg_args, &key);
 
-	if (PT_REGS_RC(ctx) <= 0) return 0;
+	long rc_bytes = (long)PT_REGS_RC(ctx);
+	if (rc_bytes <= 0 || !user_ptr) return 0;
 
-	struct msghdr *msg = (struct msghdr *)msg_ptr;
-	u8 hdr[FCGI_HEADER_LEN];
-	if (read_msghdr_data(msg, hdr, FCGI_HEADER_LEN) != 0)
+	u16 request_id;
+	u16 content_len;
+	u32 params_buf_offset;
+
+	struct fcgi_pending *pending = bpf_map_lookup_elem(&fastcgi_pending, &key);
+	if (pending) {
+		struct fcgi_pending p = *pending;
+		bpf_map_delete_elem(&fastcgi_pending, &key);
+		if (p.expected_body_bytes != 0 && (u32)rc_bytes == p.expected_body_bytes) {
+			request_id = (u16)p.request_id;
+			/* Cap to FCGI_PARAMS_SCAN_LEN; trailing padding bytes
+			 * (the size mismatch we account for here) live past
+			 * the NV pairs and don't enter the scan window. */
+			content_len = p.expected_body_bytes > FCGI_PARAMS_SCAN_LEN
+				? FCGI_PARAMS_SCAN_LEN
+				: (u16)p.expected_body_bytes;
+			params_buf_offset = 0;
+			goto emit_params;
+		}
+	}
+
+	u8 hdr[24] = {};
+	u32 read_size = rc_bytes >= 24 ? 24 : (rc_bytes >= FCGI_HEADER_LEN ? FCGI_HEADER_LEN : 0);
+	if (read_size == 0)
+		return 0;
+	if (bpf_probe_read_user(hdr, read_size, (void *)user_ptr) != 0)
 		return 0;
 
-	/* Validate FastCGI version and record type */
 	if (hdr[0] != FCGI_VERSION_1)
 		return 0;
-	if (hdr[1] != FCGI_PARAMS)
-		return 0;
 
-	u16 request_id = ((u16)hdr[2] << 8) | hdr[3];
-	u16 content_len = ((u16)hdr[4] << 8) | hdr[5];
+	if (hdr[1] == FCGI_PARAMS) {
+		request_id  = ((u16)hdr[2] << 8) | hdr[3];
+		content_len = ((u16)hdr[4] << 8) | hdr[5];
+		params_buf_offset = FCGI_HEADER_LEN;
+
+		if ((u32)rc_bytes == FCGI_HEADER_LEN && content_len > 0) {
+			u8 padding_len = hdr[6];
+			struct fcgi_pending p = {
+				.request_id = request_id,
+				.expected_body_bytes = (u32)content_len + (u32)padding_len,
+			};
+			bpf_map_update_elem(&fastcgi_pending, &key, &p, BPF_ANY);
+			return 0;
+		}
+	} else if (hdr[1] == FCGI_BEGIN_REQUEST && read_size >= 24 &&
+	           hdr[16] == FCGI_VERSION_1 && hdr[17] == FCGI_PARAMS) {
+		request_id  = ((u16)hdr[18] << 8) | hdr[19];
+		content_len = ((u16)hdr[20] << 8) | hdr[21];
+		params_buf_offset = 16 + FCGI_HEADER_LEN;
+	} else {
+		return 0;
+	}
 	if (content_len == 0)
 		return 0;
 
-	/* FastCGI request key: lower 32 bits = requestId */
+emit_params: ;
+
 	u64 req_key = get_key(pid, tid) ^ (u64)request_id;
 
 	struct event *e = get_event_buf();
@@ -118,21 +209,14 @@ int kretprobe_unix_stream_recvmsg(struct pt_regs *ctx)
 	u8 params[FCGI_PARAMS_SCAN_LEN] = {};
 	u32 scan_len = content_len < FCGI_PARAMS_SCAN_LEN ? content_len : FCGI_PARAMS_SCAN_LEN;
 
-	const struct iovec *iov = BPF_CORE_READ(msg, msg_iter.__iov);
-	if (!iov) return 0;
-
-	struct iovec iov_entry;
-	if (bpf_probe_read_kernel(&iov_entry, sizeof(iov_entry), iov) != 0)
-		return 0;
-
-	/* Params start after the 8-byte header */
-	u8 *params_base = (u8 *)iov_entry.iov_base + FCGI_HEADER_LEN;
+	/* params_buf_offset already accounts for whichever layout fired:
+	 *   A (PARAMS at 0)         -> offset = 8
+	 *   B (BEGIN+PARAMS at 16)  -> offset = 24
+	 *   C (body alone)          -> offset = 0  */
+	u8 *params_base = (u8 *)user_ptr + params_buf_offset;
 	if (bpf_probe_read_user(params, scan_len & 0xFF, params_base) != 0)
 		return 0;
 
-	/* Linear scan: find "REQUEST_URI" (11 bytes) in the params buffer.
-	 * In FastCGI NV format, name comes first. After "REQUEST_URI" we skip
-	 * the NV length bytes and find the value (the URI starts with '/'). */
 	u8 found_uri = 0, found_method = 0;
 	u32 i;
 
@@ -146,13 +230,6 @@ int kretprobe_unix_stream_recvmsg(struct pt_regs *ctx)
 			    params[i+4] == 'E' && params[i+5] == 'S' && params[i+6] == 'T' &&
 			    params[i+7] == '_' && params[i+8] == 'U' && params[i+9] == 'R' &&
 			    params[i+10] == 'I') {
-				/* Scan forward for the '/' that starts the URI value.
-				 * In FastCGI NV format, value-length bytes are 1 or 4 bytes
-				 * wide, so '/' is always within 5 bytes of the name end.
-				 * Bounding this inner loop is critical: the outer loop can
-				 * run up to FCGI_PARAMS_SCAN_LEN times, and nested unbounded
-				 * loops exceed the BPF verifier's 1M instruction limit on
-				 * Linux 6.x kernels. */
 				u32 j;
 				for (j = i + 11; j < i + 16 && j + 1 < FCGI_PARAMS_SCAN_LEN; j++) {
 					if (params[j] == '/') {
@@ -223,13 +300,7 @@ int kretprobe_unix_stream_recvmsg(struct pt_regs *ctx)
 	return 0;
 }
 
-/* -----------------------------------------------------------------------
- * kprobe/unix_stream_sendmsg — detect FastCGI END_REQUEST (php-fpm → nginx)
- * -----------------------------------------------------------------------
- * Signature: int unix_stream_sendmsg(struct socket *sock, struct msghdr *msg,
- *                                     size_t total_len)
- * PARM2 = struct msghdr *msg
- */
+
 SEC("kprobe/unix_stream_sendmsg")
 int kprobe_unix_stream_sendmsg(struct pt_regs *ctx)
 {
@@ -237,23 +308,44 @@ int kprobe_unix_stream_sendmsg(struct pt_regs *ctx)
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 
 	struct msghdr *msg = (struct msghdr *)PT_REGS_PARM2(ctx);
-	u8 hdr[FCGI_HEADER_LEN + 8] = {};  /* header + END_REQUEST body */
-	if (read_msghdr_data(msg, hdr, sizeof(hdr)) != 0)
+	if (!msg) return 0;
+
+	void *user_base = msghdr_user_base(msg, NULL);
+	if (!user_base) return 0;
+
+	const u32 FCGI_MAX_RECORD_BODY = 8 * 1024;
+	u32 offset = 0;
+	u8 hdr[16] = {};
+	u8 found_end = 0;
+	u16 request_id = 0;
+	u32 app_status = 0;
+
+	#pragma unroll
+	for (int k = 0; k < 4; k++) {
+		if (bpf_probe_read_user(hdr, sizeof(hdr), (u8 *)user_base + offset) != 0)
+			break;
+		if (hdr[0] != FCGI_VERSION_1)
+			break;
+		u16 content_len = ((u16)hdr[4] << 8) | hdr[5];
+		u8 padding_len = hdr[6];
+		if (hdr[1] == FCGI_END_REQUEST) {
+			request_id = ((u16)hdr[2] << 8) | hdr[3];
+			app_status = ((u32)hdr[8] << 24) | ((u32)hdr[9] << 16) |
+			             ((u32)hdr[10] << 8) | hdr[11];
+			found_end = 1;
+			break;
+		}
+		if (content_len > FCGI_MAX_RECORD_BODY)
+			break;
+		offset += FCGI_HEADER_LEN + (u32)content_len + (u32)padding_len;
+	}
+	if (!found_end)
 		return 0;
 
-	/* Must be FastCGI version 1 and END_REQUEST (type 3) */
-	if (hdr[0] != FCGI_VERSION_1|| hdr[1] != FCGI_END_REQUEST)
-		return 0;
-
-	u16 request_id = ((u16)hdr[2] << 8) | hdr[3];
 	u64 req_key = get_key(pid, tid) ^ (u64)request_id;
 
 	struct fastcgi_req *req = bpf_map_lookup_elem(&fastcgi_reqs, &req_key);
 	if (!req) return 0;
-
-	/* END_REQUEST body (8 bytes): [0-3]=appStatus (big-endian), [4]=protocolStatus */
-	u32 app_status = ((u32)hdr[8] << 24) | ((u32)hdr[9] << 16) |
-	                 ((u32)hdr[10] << 8) | hdr[11];
 
 	struct event *e = get_event_buf();
 	if (!e) {

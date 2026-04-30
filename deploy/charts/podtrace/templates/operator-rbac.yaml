@@ -54,10 +54,16 @@ rules:
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["roles", "rolebindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # Events surface on operator errors
+  # Events surface on operator errors. The read verbs are needed so the
+  # operator can grant `events.watch` to per-session ServiceAccounts —
+  # without them Kubernetes RBAC blocks the grant as escalation, and the
+  # diagnose CLI's Kubernetes-events correlator can't start.
   - apiGroups: [""]
     resources: ["events"]
-    verbs: ["create", "patch"]
+    verbs: ["get", "list", "watch", "create", "patch"]
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
   # Leader election lease
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]

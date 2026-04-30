@@ -55,7 +55,12 @@ ENV BPF_GOARCH=${TARGETARCH} \
 # runtime BTF from the node kernel at pod start.
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    make bpf/podtrace.bpf.o
+    if [ -s bpf/podtrace.bpf.o ]; then \
+        touch bpf/podtrace.bpf.o; \
+        echo "Reusing prebuilt BPF object from build context"; \
+    else \
+        make bpf/podtrace.bpf.o; \
+    fi
 
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
