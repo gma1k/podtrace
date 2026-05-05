@@ -1,0 +1,34 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "simple",
+  "include-component-in-tag": false,
+  "include-v-in-tag": true,
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": false,
+  "packages": {
+    ".": {
+      "package-name": "podtrace",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "deploy/charts/podtrace/Chart.yaml"
+        }
+      ],
+      "changelog-sections": [
+        { "type": "feat",     "section": "Added" },
+        { "type": "fix",      "section": "Fixed" },
+        { "type": "perf",     "section": "Changed" },
+        { "type": "revert",   "section": "Changed" },
+        { "type": "refactor", "section": "Changed" },
+        { "type": "chore",    "section": "Changed", "hidden": true },
+        { "type": "docs",     "section": "Changed", "hidden": true },
+        { "type": "style",    "section": "Changed", "hidden": true },
+        { "type": "test",     "section": "Changed", "hidden": true },
+        { "type": "build",    "section": "Changed", "hidden": true },
+        { "type": "ci",       "section": "Changed", "hidden": true },
+        { "type": "security", "section": "Security" }
+      ]
+    }
+  }
+}
