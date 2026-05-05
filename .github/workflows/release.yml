@@ -76,7 +76,7 @@ jobs:
           provenance: mode=max
           sbom: true
 
-      - uses: sigstore/cosign-installer@v3
+      - uses: sigstore/cosign-installer@v4.1.1
         with:
           cosign-release: ${{ env.COSIGN_VERSION }}
 
@@ -125,7 +125,7 @@ jobs:
           fi
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
-      - uses: sigstore/cosign-installer@v3
+      - uses: sigstore/cosign-installer@v4.1.1
         with:
           cosign-release: ${{ env.COSIGN_VERSION }}
 
