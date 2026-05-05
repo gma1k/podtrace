@@ -101,11 +101,11 @@ jobs:
         with:
           version: ${{ env.HELM_VERSION }}
 
-      - name: Helm registry login
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" \
-            | helm registry login ${{ env.REGISTRY }} \
-                -u ${{ github.actor }} --password-stdin
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - id: package
         name: Lint, package, push
