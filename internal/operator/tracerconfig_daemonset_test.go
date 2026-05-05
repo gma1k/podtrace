@@ -13,7 +13,7 @@ func tc(mod func(*podtracev1alpha1.TracerConfig)) *podtracev1alpha1.TracerConfig
 	t := &podtracev1alpha1.TracerConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "default"},
 		Spec: podtracev1alpha1.TracerConfigSpec{
-			Image: "ghcr.io/podtrace/podtrace:test",
+			Image: "ghcr.io/gma1k/podtrace:test",
 		},
 	}
 	if mod != nil {

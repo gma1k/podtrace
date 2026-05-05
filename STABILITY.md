@@ -46,7 +46,7 @@ Three artifacts version on three different cadences:
 | Artifact | Versioning | Where | Cadence |
 |---|---|---|---|
 | Operator + agent + CLI binary | Semver, single tag | Git tag `vX.Y.Z` | Coupled — one tag, one binary |
-| Container image | Mirrors binary tag | `ghcr.io/podtrace/podtrace:vX.Y.Z` (when published) | Same as binary |
+| Container image | Mirrors binary tag | `ghcr.io/gma1k/podtrace:vX.Y.Z` (when published) | Same as binary |
 | Helm chart | Semver, independent | `Chart.yaml.version` | Bumps per chart change; `appVersion` always tracks the binary |
 | CRDs (`podtrace.io/vN`) | Kubernetes API conventions | Bumped only on breaking schema change | Independent of binary version |
 

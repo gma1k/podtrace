@@ -39,7 +39,7 @@ export PATH=$PATH:/usr/local/go/bin
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/podtrace/podtrace.git
+git clone https://github.com/gma1k/podtrace.git
 cd podtrace
 ```
 
@@ -362,13 +362,13 @@ doesn't try to pull from a registry:
 
 ```bash
 make docker-build IMAGE_TAG=dev
-kind load docker-image ghcr.io/podtrace/podtrace:dev
+kind load docker-image ghcr.io/gma1k/podtrace:dev
 
 helm install podtrace deploy/charts/podtrace \
   --namespace podtrace-system \
   --create-namespace \
   --set operator.enabled=true \
-  --set image.repository=ghcr.io/podtrace/podtrace \
+  --set image.repository=ghcr.io/gma1k/podtrace \
   --set image.tag=dev \
   --set image.pullPolicy=Never
 ```

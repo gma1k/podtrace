@@ -408,7 +408,7 @@ func TestEnvtest_TracerConfigIsClusterScoped(t *testing.T) {
 	tc := &podtracev1alpha1.TracerConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "default"},
 		Spec: podtracev1alpha1.TracerConfigSpec{
-			Image: "ghcr.io/podtrace/podtrace:test",
+			Image: "ghcr.io/gma1k/podtrace:test",
 		},
 	}
 	// TracerConfig is cluster-scoped; supplying a namespace at Create

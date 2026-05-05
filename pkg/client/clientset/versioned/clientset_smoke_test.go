@@ -71,7 +71,7 @@ func TestClientset_CreateListGet_RoundTrip(t *testing.T) {
 	// TracerConfig is cluster-scoped.
 	tc := &podtracev1alpha1.TracerConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "default"},
-		Spec:       podtracev1alpha1.TracerConfigSpec{Image: "ghcr.io/podtrace/podtrace:test"},
+		Spec:       podtracev1alpha1.TracerConfigSpec{Image: "ghcr.io/gma1k/podtrace:test"},
 	}
 	if _, err := cs.PodtraceV1alpha1().TracerConfigs().Create(ctx, tc, metav1.CreateOptions{}); err != nil {
 		t.Fatalf("create TracerConfig: %v", err)

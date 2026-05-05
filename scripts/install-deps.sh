@@ -229,7 +229,7 @@ main() {
 		echo ""
 		echo "Manual install — required packages:"
 		echo "  clang, llvm, libbpf-dev (or libbpf-devel), linux-headers, bpftool, Go 1.24+"
-		echo "  See https://github.com/podtrace/podtrace for details."
+		echo "  See https://github.com/gma1k/podtrace for details."
 		exit 1
 		;;
 	esac

@@ -9,7 +9,7 @@ independently runnable.
 
 - A running Kubernetes cluster reachable via the current `KUBECONFIG`
   (kind is the expected target).
-- Image `ghcr.io/podtrace/podtrace:dev` loaded into the cluster
+- Image `ghcr.io/gma1k/podtrace:dev` loaded into the cluster
   (`make docker-build IMAGE_TAG=dev && kind load docker-image …`).
 - The operator already installed via Helm with the chart-rendered
   defaults (the smoke script `test/e2e/kind-smoke.sh` does this).

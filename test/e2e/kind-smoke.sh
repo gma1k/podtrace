@@ -166,7 +166,7 @@ main() {
 		--namespace "${SYSTEM_NS}" \
 		--set namespace.create=false \
 		--set operator.enabled=true \
-		--set image.repository=ghcr.io/podtrace/podtrace \
+		--set image.repository=ghcr.io/gma1k/podtrace \
 		--set image.tag=dev \
 		--set image.pullPolicy=Never \
 		--wait --timeout 120s
