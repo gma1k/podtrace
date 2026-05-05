@@ -14,7 +14,7 @@ not replacing the CLI.
 |---|---|---|---|
 | Quick interactive trace from a workstation | ✅ | | |
 | Ad-hoc debugging by cluster admin | ✅ | | |
-| Streaming events to a backend you can already see | ✅ | (when Phase 5+ lands events) | |
+| Streaming events to a backend you can already see | ✅ |
 | Bounded diagnose with an artifact to share | ⚠️ requires manual export | | ✅ |
 | Repeatable trace runs from CI / GitOps | | | ✅ |
 | Multi-tenant: app team triggers a trace, no cluster admin | | | ✅ |
