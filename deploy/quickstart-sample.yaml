@@ -1,0 +1,86 @@
+# Quickstart demo workload + diagnose session.
+#
+# Concatenated to the chart-rendered operator manifest by release.yml to
+# produce dist/quickstart.yaml on each tagged release. End users can
+# then apply the combined file in a single command:
+#
+#   kubectl apply -f https://github.com/gma1k/podtrace/releases/latest/download/quickstart.yaml
+#
+# After the operator becomes Ready, the PodTraceSession runs for 30s
+# against the nginx Deployment and writes a human-readable report to
+# the nginx-trace-report ConfigMap in the podtrace-demo namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: podtrace-demo
+  labels:
+    app.kubernetes.io/managed-by: podtrace-quickstart
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: podtrace-demo
+  labels:
+    app: nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+# OTLP exporter pointing at a localhost collector — replace the endpoint
+# with your own OTLP receiver to ship traces externally. The session
+# still produces a ConfigMap report regardless of whether traces reach
+# this endpoint.
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: demo-otlp
+  namespace: podtrace-demo
+spec:
+  type: otlp
+  otlp:
+    endpoint: localhost:4318
+    protocol: http
+    insecure: true
+---
+# 30-second diagnose session against the nginx pod. Inspect the result:
+#
+#   kubectl get podtracesession demo-trace -n podtrace-demo
+#   kubectl get cm nginx-trace-report -n podtrace-demo \
+#     -o jsonpath='{.data.report\.txt}'
+apiVersion: podtrace.io/v1alpha1
+kind: PodTraceSession
+metadata:
+  name: demo-trace
+  namespace: podtrace-demo
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  duration: 30s
+  filters: [dns, net, fs]
+  exporterRef:
+    name: demo-otlp
+  reportRef:
+    configMap:
+      name: nginx-trace-report
+  ttlSecondsAfterFinished: 600
