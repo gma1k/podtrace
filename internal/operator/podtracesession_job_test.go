@@ -94,7 +94,7 @@ func TestBuildSessionJobSpec_CoreInvariants(t *testing.T) {
 	backoff := int32(0)
 	tc := &podtracev1alpha1.TracerConfig{
 		Spec: podtracev1alpha1.TracerConfigSpec{
-			Image: "ghcr.io/podtrace/podtrace:test",
+			Image: "ghcr.io/gma1k/podtrace:test",
 			Session: podtracev1alpha1.SessionRuntimeSpec{
 				TTLSecondsAfterFinished:     &ttl,
 				BackoffLimit:                &backoff,
@@ -122,7 +122,7 @@ func TestBuildSessionJobSpec_CoreInvariants(t *testing.T) {
 		t.Errorf("restartPolicy=%v want Never", spec.Template.Spec.RestartPolicy)
 	}
 	// Image propagated
-	if spec.Template.Spec.Containers[0].Image != "ghcr.io/podtrace/podtrace:test" {
+	if spec.Template.Spec.Containers[0].Image != "ghcr.io/gma1k/podtrace:test" {
 		t.Errorf("image: %q", spec.Template.Spec.Containers[0].Image)
 	}
 	if spec.Template.Spec.ServiceAccountName != SessionServiceAccountName() {
@@ -154,7 +154,7 @@ func TestBuildSessionJobSpec_CoreInvariants(t *testing.T) {
 func TestBuildSessionJobSpec_SidecarOptedIn(t *testing.T) {
 	tc := &podtracev1alpha1.TracerConfig{
 		Spec: podtracev1alpha1.TracerConfigSpec{
-			Image: "ghcr.io/podtrace/podtrace:test",
+			Image: "ghcr.io/gma1k/podtrace:test",
 			Session: podtracev1alpha1.SessionRuntimeSpec{
 				SidecarUploader: true,
 			},
@@ -188,7 +188,7 @@ func TestBuildSessionJobSpec_SidecarSuppressedWithoutReportRef(t *testing.T) {
 	// without a report sink — the sidecar must be suppressed.
 	tc := &podtracev1alpha1.TracerConfig{
 		Spec: podtracev1alpha1.TracerConfigSpec{
-			Image: "ghcr.io/podtrace/podtrace:test",
+			Image: "ghcr.io/gma1k/podtrace:test",
 			Session: podtracev1alpha1.SessionRuntimeSpec{
 				SidecarUploader: true,
 			},

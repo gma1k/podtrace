@@ -27,7 +27,7 @@ func TestTracerConfigReconciler_EnvtestLifecycle(t *testing.T) {
 	tcObj := &podtracev1alpha1.TracerConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "lifecycle"},
 		Spec: podtracev1alpha1.TracerConfigSpec{
-			Image:           "ghcr.io/podtrace/podtrace:test",
+			Image:           "ghcr.io/gma1k/podtrace:test",
 			SystemNamespace: systemNS,
 		},
 	}

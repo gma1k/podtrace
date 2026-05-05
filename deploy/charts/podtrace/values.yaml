@@ -21,7 +21,7 @@ crds:
   keep: true      # DEPRECATED: no-op. CRDs always carry helm.sh/resource-policy: keep.
 
 image:
-  repository: ghcr.io/podtrace/podtrace
+  repository: ghcr.io/gma1k/podtrace
   tag: ""
   pullPolicy: IfNotPresent
   pullSecrets: []

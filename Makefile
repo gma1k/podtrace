@@ -182,7 +182,7 @@ CONTROLLER_GEN ?= $(shell go env GOPATH 2>/dev/null)/bin/controller-gen
 CRD_OUT_DIR ?= deploy/charts/podtrace/crds
 BOILERPLATE ?= hack/boilerplate.go.txt
 
-IMAGE_REPO ?= ghcr.io/podtrace/podtrace
+IMAGE_REPO ?= ghcr.io/gma1k/podtrace
 IMAGE_TAG  ?= dev
 IMAGE      ?= $(IMAGE_REPO):$(IMAGE_TAG)
 

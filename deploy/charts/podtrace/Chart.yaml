@@ -24,15 +24,15 @@ keywords:
   - operator
   - diagnostics
 
-home: https://github.com/podtrace/podtrace
+home: https://github.com/gma1k/podtrace
 sources:
-  - https://github.com/podtrace/podtrace
+  - https://github.com/gma1k/podtrace
 
 maintainers:
   - name: podtrace maintainers
-    url: https://github.com/podtrace/podtrace
+    url: https://github.com/gma1k/podtrace
 
-icon: https://raw.githubusercontent.com/podtrace/podtrace/main/assets/logo.png
+icon: https://raw.githubusercontent.com/gma1k/podtrace/main/assets/logo.png
 
 annotations:
   artifacthub.io/changes: |

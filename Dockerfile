@@ -76,7 +76,7 @@ FROM gcr.io/distroless/static-debian12:nonroot AS runtime
 
 LABEL org.opencontainers.image.title="podtrace" \
       org.opencontainers.image.description="eBPF-based troubleshooting tool for Kubernetes pods (CLI, agent, operator)" \
-      org.opencontainers.image.source="https://github.com/podtrace/podtrace" \
+      org.opencontainers.image.source="https://github.com/gma1k/podtrace" \
       org.opencontainers.image.licenses="Apache-2.0"
 
 COPY --from=builder /out/podtrace /usr/local/bin/podtrace
