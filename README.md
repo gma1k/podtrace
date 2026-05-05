@@ -115,16 +115,36 @@ Full reference: [doc/crd-podtracesession.md](doc/crd-podtracesession.md).
 
 ### Install the operator
 
+The fastest path is the published Helm chart in GHCR — no clone, no
+build toolchain:
+
 ```bash
-helm install podtrace deploy/charts/podtrace \
-  --namespace podtrace-system \
-  --create-namespace \
-  --set operator.enabled=true \
-  --set image.tag=<version>
+helm install podtrace oci://ghcr.io/gma1k/charts/podtrace \
+  --namespace podtrace-system --create-namespace
 ```
 
-See [doc/installation.md](doc/installation.md) for prerequisites and
-[doc/operator.md](doc/operator.md) for architecture.
+Or apply the bundled quickstart manifest (operator + CRDs + a sample
+diagnose session against an nginx workload) in one shot:
+
+```bash
+kubectl apply -f https://github.com/gma1k/podtrace/releases/latest/download/quickstart.yaml
+```
+
+Verify the image was built by this repository (cosign keyless):
+
+```bash
+cosign verify ghcr.io/gma1k/podtrace:latest \
+  --certificate-identity-regexp 'https://github.com/gma1k/podtrace/.+' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+For prerequisites, supported kernels, and per-distro notes see
+[doc/installation.md](doc/installation.md) and
+[doc/compatibility.md](doc/compatibility.md). For chart values and
+operator architecture see [doc/operator.md](doc/operator.md).
+
+Building from source (for contributors or air-gapped clusters) is
+covered below under [Building](#building).
 
 ### Coming from the CLI
 
