@@ -10,6 +10,13 @@ Going forward, releases are managed by [release-please](https://github.com/googl
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 Entries below `v0.12.0` were back-filled from git history.
 
+## [0.11.1](https://github.com/gma1k/podtrace/compare/v0.11.0...v0.11.1) (2026-05-05)
+
+
+### Fixed
+
+* use docker/login-action in chart job so cosign sign can authenticate ([#82](https://github.com/gma1k/podtrace/issues/82)) ([5f1b5b6](https://github.com/gma1k/podtrace/commit/5f1b5b62e9f63b06f02c08d2faa9760b7bf53225))
+
 ## [Unreleased]
 
 ## [0.11.0] - 2026-04-25
