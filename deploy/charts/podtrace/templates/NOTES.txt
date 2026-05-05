@@ -50,4 +50,4 @@ Quick start
 
 Docs
 ----
-  https://github.com/podtrace/podtrace
+  https://github.com/gma1k/podtrace
