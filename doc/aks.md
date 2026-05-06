@@ -13,7 +13,20 @@ since AKS 1.25+. All standard node pools support BPF kprobes.
 | Container runtime | containerd | containerd |
 | Cgroup driver | systemd | systemd |
 
-## Build
+## Install
+
+For most AKS deployments, install the published Helm chart:
+
+```bash
+helm install podtrace oci://ghcr.io/gma1k/charts/podtrace --version 0.1.0 \
+  --namespace podtrace-system --create-namespace \
+  --set operator.enabled=true
+```
+
+See [installation.md](installation.md) for the full install guide,
+cosign verification, and quickstart manifest.
+
+## Build (from source, for contributors)
 
 ```bash
 sudo ./scripts/install-deps.sh   # Debian/Ubuntu path

@@ -11,9 +11,9 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sys/unix"
 
-	podtrace "github.com/podtrace/podtrace"
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/cri"
+	"github.com/podtrace/podtrace/internal/ebpf/embedded"
 	"github.com/podtrace/podtrace/internal/ebpf/loader"
 )
 
@@ -65,7 +65,7 @@ func collectEnvReport() envReport {
 		CRIEndpointEnv: os.Getenv("PODTRACE_CRI_ENDPOINT"),
 		CRICandidates:  cri.DefaultCandidateEndpoints(),
 		BPFObjectPath:  config.BPFObjectPath,
-		BPFEmbedded:    len(podtrace.EmbeddedPodtraceBPFObj) > 0,
+		BPFEmbedded:    len(embedded.EmbeddedPodtraceBPFObj) > 0,
 	}
 
 	var u unix.Utsname

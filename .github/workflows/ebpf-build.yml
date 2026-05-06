@@ -60,16 +60,19 @@ jobs:
 
       - name: Compile eBPF program
         run: |
-          make bpf/podtrace.bpf.o BPF_GOARCH=${{ matrix.goarch }}
+          make internal/ebpf/embedded/podtrace.${{ matrix.goarch }}.bpf.o BPF_GOARCH=${{ matrix.goarch }}
           echo "eBPF object compiled via Makefile (arch=${{ matrix.bpf_arch }})"
 
       - name: Build Go binary
         run: GOTOOLCHAIN=auto GOARCH=${{ matrix.goarch }} go build -o bin/podtrace ./cmd/podtrace
 
+      - name: Run embed smoke test
+        run: GOTOOLCHAIN=auto GOARCH=${{ matrix.goarch }} go test -tags embed_bpf ./internal/ebpf/embedded/...
+
       - name: List outputs
         run: |
           echo "=== eBPF object (arch=${{ matrix.bpf_arch }}) ==="
-          ls -lh bpf/podtrace.bpf.o
+          ls -lh internal/ebpf/embedded/podtrace.*.bpf.o
           echo "=== Go binary (goarch=${{ matrix.goarch }}) ==="
           ls -lh bin/podtrace
           file bin/podtrace

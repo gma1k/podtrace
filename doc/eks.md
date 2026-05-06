@@ -13,7 +13,20 @@
 
 **Fargate does not support BPF kprobes.** Use EC2 node groups.
 
-## Build
+## Install
+
+For most EKS deployments, install the published Helm chart:
+
+```bash
+helm install podtrace oci://ghcr.io/gma1k/charts/podtrace --version 0.1.0 \
+  --namespace podtrace-system --create-namespace \
+  --set operator.enabled=true
+```
+
+See [installation.md](installation.md) for the full install guide,
+cosign verification, and quickstart manifest.
+
+## Build (from source, for contributors)
 
 ```bash
 sudo ./scripts/install-deps.sh   # auto-detects AL2/AL2023 → dnf

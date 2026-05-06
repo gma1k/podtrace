@@ -11,7 +11,20 @@
 
 **GKE Autopilot does not support BPF kprobes.** Use Standard node pools.
 
-## Build
+## Install
+
+For most GKE Standard deployments, install the published Helm chart:
+
+```bash
+helm install podtrace oci://ghcr.io/gma1k/charts/podtrace --version 0.1.0 \
+  --namespace podtrace-system --create-namespace \
+  --set operator.enabled=true
+```
+
+See [installation.md](installation.md) for the full install guide,
+cosign verification, and quickstart manifest.
+
+## Build (from source, for contributors)
 
 Build on any Linux machine with kernel 5.8+ or cross-compile:
 

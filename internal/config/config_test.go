@@ -1,12 +1,21 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestDefaultBPFObjectPath(t *testing.T) {
+	want := fmt.Sprintf("internal/ebpf/embedded/podtrace.%s.bpf.o", runtime.GOARCH)
+	if got := DefaultBPFObjectPath(); got != want {
+		t.Errorf("DefaultBPFObjectPath() = %q, want %q", got, want)
+	}
+}
 
 func TestGetEnvOrDefault(t *testing.T) {
 	key := "TEST_ENV_VAR"

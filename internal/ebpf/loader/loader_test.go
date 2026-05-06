@@ -36,7 +36,7 @@ func TestLoadPodtrace_DefaultPathFallsBackToEmbedded(t *testing.T) {
 		t.Fatalf("Chdir: %v", err)
 	}
 
-	config.BPFObjectPath = "bpf/podtrace.bpf.o"
+	config.BPFObjectPath = config.DefaultBPFObjectPath()
 	spec, err := LoadPodtrace()
 	if err != nil {
 		t.Skipf("BPF object not available in test environment: %v", err)
