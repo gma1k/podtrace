@@ -212,8 +212,7 @@ jobs:
         working-directory: release
         run: |
           cosign sign-blob --yes \
-            --output-signature checksums.txt.sig \
-            --output-certificate checksums.txt.pem \
+            --bundle checksums.txt.bundle.json \
             checksums.txt
 
       - name: Attach tarballs + checksums + signature to GitHub Release
@@ -222,7 +221,6 @@ jobs:
           files: |
             release/podtrace_*.tar.gz
             release/checksums.txt
-            release/checksums.txt.sig
-            release/checksums.txt.pem
+            release/checksums.txt.bundle.json
           fail_on_unmatched_files: true
           prerelease: ${{ startsWith(github.ref_name, 'test') || contains(github.ref_name, '-') }}
