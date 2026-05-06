@@ -85,7 +85,7 @@ jobs:
       - name: Build eBPF C
         if: matrix.language == 'cpp'
         run: |
-          make bpf/podtrace.bpf.o BPF_GOARCH=amd64
+          make internal/ebpf/embedded/podtrace.amd64.bpf.o BPF_GOARCH=amd64
 
       - name: Analyze
         uses: github/codeql-action/analyze@v4

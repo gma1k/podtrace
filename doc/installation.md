@@ -1,5 +1,58 @@
 # Installation
 
+## Install
+
+The fastest path uses the published OCI Helm chart in GHCR — no clone,
+no build toolchain.
+
+### Helm chart (recommended)
+
+```bash
+helm install podtrace oci://ghcr.io/gma1k/charts/podtrace --version 0.1.0 \
+  --namespace podtrace-system --create-namespace \
+  --set operator.enabled=true
+```
+
+The chart installs CRDs, namespace, operator, agent DaemonSet, and a
+default `TracerConfig`. See [operator.md](operator.md) for what each
+piece does.
+
+### Quickstart manifest (one-shot)
+
+A pre-rendered manifest including a sample workload + a 30s
+`PodTraceSession` is attached to every GitHub Release:
+
+```bash
+kubectl apply -f https://github.com/gma1k/podtrace/releases/latest/download/quickstart.yaml
+```
+
+After ~45s, `kubectl get podtracesession demo-trace -n podtrace-demo`
+should show `phase: Completed`.
+
+### Verifying signatures (cosign keyless)
+
+Every released image and chart is signed via cosign keyless OIDC,
+recorded in the public Rekor transparency log. Verify before running:
+
+```bash
+cosign verify ghcr.io/gma1k/podtrace:0.11.0 \
+  --certificate-identity-regexp 'https://github.com/gma1k/podtrace/.+' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+The image also ships an SBOM and SLSA provenance attestation:
+
+```bash
+cosign download attestation ghcr.io/gma1k/podtrace:0.11.0 \
+  --predicate-type https://spdx.dev/Document | jq .
+```
+
+### Building from source
+
+If you need a custom build (development, air-gapped clusters, or
+unsupported architectures), the rest of this document covers the
+toolchain setup and build steps.
+
 ## Prerequisites
 
 ### System Requirements
@@ -68,8 +121,11 @@ make build
 ```
 
 This will:
-- Compile the eBPF program (`bpf/podtrace.bpf.c`) to `bpf/podtrace.bpf.o`
-- Build the Go binary to `bin/podtrace`
+- Compile the eBPF program (`bpf/podtrace.bpf.c`) to a per-arch object at
+  `internal/ebpf/embedded/podtrace.<arch>.bpf.o` (e.g.
+  `internal/ebpf/embedded/podtrace.amd64.bpf.o`)
+- Build the Go binary to `bin/podtrace`, embedding the per-arch BPF object
+  via the `embed_bpf` build tag
 
 ### 4. Set Capabilities (Optional)
 
@@ -292,6 +348,16 @@ For the CRD-driven workflows (continuous `PodTrace`, bounded
 chart ships under `deploy/charts/podtrace/`.
 
 ### Quick install
+
+For a public release, prefer the OCI chart (no clone needed):
+
+```bash
+helm install podtrace oci://ghcr.io/gma1k/charts/podtrace --version 0.1.0 \
+  --namespace podtrace-system --create-namespace \
+  --set operator.enabled=true
+```
+
+For a custom build of this checkout:
 
 ```bash
 helm install podtrace deploy/charts/podtrace \

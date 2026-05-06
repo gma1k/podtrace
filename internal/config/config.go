@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -252,7 +253,7 @@ const (
 var (
 	CgroupBasePath     = getEnvOrDefault("PODTRACE_CGROUP_BASE", "/sys/fs/cgroup")
 	ProcBasePath       = getEnvOrDefault("PODTRACE_PROC_BASE", "/proc")
-	BPFObjectPath      = getEnvOrDefault("PODTRACE_BPF_OBJECT", "bpf/podtrace.bpf.o")
+	BPFObjectPath      = getEnvOrDefault("PODTRACE_BPF_OBJECT", DefaultBPFObjectPath())
 	BTFFilePath        = getEnvOrDefault("PODTRACE_BTF_FILE", "")
 	DockerBasePath     = getEnvOrDefault("PODTRACE_DOCKER_BASE", DockerContainersPath)
 	ContainerdBasePath = getEnvOrDefault("PODTRACE_CONTAINERD_BASE", "/var/lib/containerd")
@@ -261,6 +262,10 @@ var (
 
 func SetCgroupBasePath(path string) {
 	CgroupBasePath = path
+}
+
+func DefaultBPFObjectPath() string {
+	return fmt.Sprintf("internal/ebpf/embedded/podtrace.%s.bpf.o", runtime.GOARCH)
 }
 
 func SetProcBasePath(path string) {

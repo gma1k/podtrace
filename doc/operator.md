@@ -61,6 +61,16 @@ Three reconcilers, each owning one CRD:
 
 ## Install via Helm
 
+For a public release:
+
+```bash
+helm install podtrace oci://ghcr.io/gma1k/charts/podtrace --version 0.1.0 \
+  --namespace podtrace-system --create-namespace \
+  --set operator.enabled=true
+```
+
+For a custom build of this checkout:
+
 ```bash
 helm install podtrace deploy/charts/podtrace \
   --namespace podtrace-system \

@@ -357,7 +357,7 @@ go test ./test/... -v
 1. **Check compilation**:
    ```bash
    clang -O2 -g -target bpf -D__TARGET_ARCH_x86 -mcpu=v3 \
-         -Ibpf -I. -c bpf/podtrace.bpf.c -o bpf/podtrace.bpf.o
+         -Ibpf -I. -c bpf/podtrace.bpf.c -o internal/ebpf/embedded/podtrace.amd64.bpf.o
    ```
 
 2. **Check kernel logs**:

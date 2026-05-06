@@ -8,7 +8,7 @@ LLC ?= llc
 # Prefer /usr/local/go/bin/go if available (newer Go versions), otherwise use system go
 GO ?= $(shell if [ -f /usr/local/go/bin/go ]; then echo /usr/local/go/bin/go; else echo go; fi)
 BPF_SRC = bpf/podtrace.bpf.c bpf/network.c bpf/filesystem.c bpf/cpu.c bpf/memory.c
-BPF_OBJ = bpf/podtrace.bpf.o
+BPF_OBJ = internal/ebpf/embedded/podtrace.$(BPF_GOARCH).bpf.o
 BPF_GEN_DIR = bpf/.generated
 VMLINUX_GEN = $(BPF_GEN_DIR)/vmlinux.h
 BINARY = bin/podtrace
@@ -112,7 +112,7 @@ build: $(BPF_OBJ)
 	$(GO) build -tags embed_bpf -o $(BINARY) ./cmd/podtrace
 
 clean:
-	rm -f $(BPF_OBJ)
+	rm -f internal/ebpf/embedded/podtrace.*.bpf.o
 	rm -f $(BINARY)
 	rm -rf bin
 	rm -f coverage.out coverage.html

@@ -300,7 +300,7 @@ The eBPF program is compiled with:
 
 ```bash
 clang -O2 -g -target bpf -D__TARGET_ARCH_x86 -mcpu=v3 \
-      -Ibpf -I. -c bpf/podtrace.bpf.c -o bpf/podtrace.bpf.o
+      -Ibpf -I. -c bpf/podtrace.bpf.c -o internal/ebpf/embedded/podtrace.amd64.bpf.o
 ```
 
 Note: The eBPF code is now modular. `podtrace.bpf.c` includes all modules:

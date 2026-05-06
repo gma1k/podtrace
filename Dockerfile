@@ -40,26 +40,18 @@ ARG TARGETOS=linux
 ARG VERSION=dev
 ARG COMMIT=unknown
 
-# The Makefile derives BPF_GOARCH from `go env GOARCH`; override to match the
-# image's target platform so cross-builds produce a BPF object with the
-# correct __TARGET_ARCH_* define (pt_regs layout differs across architectures).
 ENV BPF_GOARCH=${TARGETARCH} \
     CGO_ENABLED=0 \
     GOOS=${TARGETOS} \
     GOARCH=${TARGETARCH}
 
-# Build the BPF object first. When bpftool or /sys/kernel/btf/vmlinux is
-# unavailable (always true inside image builders), the Makefile falls back
-# to the committed bpf/vmlinux.h stub. That is CO-RE-correct for the probes
-# that rely on stub-defined types; gRPC/FastCGI iov_iter probes pick up
-# runtime BTF from the node kernel at pod start.
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    if [ -s bpf/podtrace.bpf.o ]; then \
-        touch bpf/podtrace.bpf.o; \
+    if [ -s internal/ebpf/embedded/podtrace.${BPF_GOARCH}.bpf.o ]; then \
+        touch internal/ebpf/embedded/podtrace.${BPF_GOARCH}.bpf.o; \
         echo "Reusing prebuilt BPF object from build context"; \
     else \
-        make bpf/podtrace.bpf.o; \
+        make internal/ebpf/embedded/podtrace.${BPF_GOARCH}.bpf.o; \
     fi
 
 RUN --mount=type=cache,target=/root/.cache/go-build \
