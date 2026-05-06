@@ -10,6 +10,13 @@ Going forward, releases are managed by [release-please](https://github.com/googl
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 Entries below `v0.12.0` were back-filled from git history.
 
+## [0.11.1](https://github.com/gma1k/podtrace/compare/v0.11.0...v0.11.1) (2026-05-06)
+
+
+### Changed
+
+* per-arch BPF objects under internal/ebpf/embedded and sync docs ([#84](https://github.com/gma1k/podtrace/issues/84)) ([470ee82](https://github.com/gma1k/podtrace/commit/470ee82c8fc8eb13ff015dabb3030f49123c572e))
+
 ## [Unreleased]
 
 ## [0.11.0] - 2026-04-25
