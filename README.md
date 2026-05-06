@@ -34,17 +34,27 @@ fits your workflow:
 ### 1. Standalone CLI binary
 
 Best for ad-hoc, interactive debugging from a workstation or a
-privileged debug pod.
+privileged debug pod. Install via signed tarball:
+
+```bash
+curl -fsSL https://github.com/gma1k/podtrace/releases/latest/download/podtrace_linux_amd64.tar.gz \
+  | tar xz -C /usr/local/bin podtrace
+```
+
+Then:
 
 ```bash
 # Realtime trace
-./bin/podtrace -n production my-pod
+podtrace -n production my-pod
 
 # Bounded diagnose with a JSON report
-./bin/podtrace -n production my-pod --diagnose 30s --export json > report.json
+podtrace -n production my-pod --diagnose 30s --export json > report.json
 ```
 
-Full reference: [doc/usage.md](doc/usage.md).
+For other platforms (linux/arm64, darwin/amd64, darwin/arm64) and
+cosign-verifiable installs, see
+[doc/installation.md#install-the-cli](doc/installation.md#install-the-cli).
+Full CLI reference: [doc/usage.md](doc/usage.md).
 
 ### 2. Continuous tracing via the `PodTrace` CR
 

@@ -111,10 +111,55 @@ build: $(BPF_OBJ)
 	@mkdir -p bin
 	$(GO) build -tags embed_bpf -o $(BINARY) ./cmd/podtrace
 
+# Release: produce cross-arch tarballs for linux+darwin × amd64+arm64.
+# Each binary embeds the per-arch BPF object via the embed_bpf tag.
+RELEASE_DIR ?= release
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+MODULE = github.com/podtrace/podtrace
+RELEASE_TARGETS = linux-amd64 linux-arm64 darwin-amd64 darwin-arm64
+
+.PHONY: release release-bpf-objects
+
+release-bpf-objects:
+	$(MAKE) internal/ebpf/embedded/podtrace.amd64.bpf.o BPF_GOARCH=amd64
+	$(MAKE) internal/ebpf/embedded/podtrace.arm64.bpf.o BPF_GOARCH=arm64
+
+release: release-bpf-objects
+	@rm -rf $(RELEASE_DIR)
+	@mkdir -p $(RELEASE_DIR)
+	@for tgt in $(RELEASE_TARGETS); do \
+	  os=$${tgt%%-*}; arch=$${tgt##*-}; \
+	  echo ">>> Building podtrace for $$os/$$arch (VERSION=$(VERSION))"; \
+	  staging="$(RELEASE_DIR)/staging-$$os-$$arch"; \
+	  mkdir -p "$$staging"; \
+	  GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 \
+	    $(GO) build -trimpath -tags=embed_bpf \
+	      -ldflags "-s -w \
+	        -X $(MODULE)/internal/config.Version=$(VERSION) \
+	        -X $(MODULE)/internal/config.Commit=$(COMMIT)" \
+	      -o "$$staging/podtrace" ./cmd/podtrace; \
+	  cp LICENSE README.md CHANGELOG.md "$$staging/"; \
+	  ( cd "$(RELEASE_DIR)" && \
+	    tar --sort=name --owner=root:0 --group=root:0 \
+	        -czf "podtrace_$$os""_""$$arch.tar.gz" \
+	        -C "staging-$$os-$$arch" \
+	        podtrace LICENSE README.md CHANGELOG.md ); \
+	  rm -rf "$$staging"; \
+	done
+	cd $(RELEASE_DIR) && sha256sum podtrace_*.tar.gz > checksums.txt
+	@echo ""
+	@echo "=== Tarballs ==="
+	@ls -lh $(RELEASE_DIR)/podtrace_*.tar.gz
+	@echo ""
+	@echo "=== checksums.txt ==="
+	@cat $(RELEASE_DIR)/checksums.txt
+
 clean:
 	rm -f internal/ebpf/embedded/podtrace.*.bpf.o
 	rm -f $(BINARY)
 	rm -rf bin
+	rm -rf $(RELEASE_DIR)
 	rm -f coverage.out coverage.html
 	rm -rf "$(BPF_GEN_DIR)"
 

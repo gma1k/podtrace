@@ -47,6 +47,63 @@ cosign download attestation ghcr.io/gma1k/podtrace:0.11.0 \
   --predicate-type https://spdx.dev/Document | jq .
 ```
 
+### Install the CLI
+
+For workstation use (interactive `podtrace` invocations from a laptop
+or CI runner), separate from the cluster operator install above. Each
+release ships signed tarballs for linux + macOS × amd64 + arm64:
+
+```bash
+# Linux amd64
+curl -fsSL https://github.com/gma1k/podtrace/releases/latest/download/podtrace_linux_amd64.tar.gz \
+  | tar xz -C /usr/local/bin podtrace
+
+# Linux arm64
+curl -fsSL https://github.com/gma1k/podtrace/releases/latest/download/podtrace_linux_arm64.tar.gz \
+  | tar xz -C /usr/local/bin podtrace
+
+# macOS Apple Silicon
+curl -fsSL https://github.com/gma1k/podtrace/releases/latest/download/podtrace_darwin_arm64.tar.gz \
+  | tar xz -C /usr/local/bin podtrace
+
+# macOS Intel
+curl -fsSL https://github.com/gma1k/podtrace/releases/latest/download/podtrace_darwin_amd64.tar.gz \
+  | tar xz -C /usr/local/bin podtrace
+```
+
+`podtrace --version` should report the tag you installed.
+
+#### Verify the tarball signature (cosign keyless + sha256sum)
+
+The release pipeline signs `checksums.txt` via cosign keyless and
+records the signing event in the [public Rekor transparency log](https://search.sigstore.dev/).
+Trust chain: signature → checksums file → tarball.
+
+```bash
+cd $(mktemp -d)
+
+# Pull checksums + signature + signing certificate
+for f in checksums.txt checksums.txt.sig checksums.txt.pem; do
+  curl -fsSLO https://github.com/gma1k/podtrace/releases/latest/download/$f
+done
+
+# Verify the signature was produced by a workflow in gma1k/podtrace
+cosign verify-blob \
+  --signature checksums.txt.sig \
+  --certificate checksums.txt.pem \
+  --certificate-identity-regexp 'https://github.com/gma1k/podtrace/.+' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  checksums.txt
+
+# Verify the tarball matches the (now-trusted) checksum
+curl -fsSLO https://github.com/gma1k/podtrace/releases/latest/download/podtrace_linux_amd64.tar.gz
+sha256sum -c checksums.txt --ignore-missing
+```
+
+If the cosign verify step succeeds, the certificate's `--certificate-identity-regexp`
+field proves the tarball was built by a workflow run inside the
+`gma1k/podtrace` repository — not by a third party.
+
 ### Building from source
 
 If you need a custom build (development, air-gapped clusters, or
