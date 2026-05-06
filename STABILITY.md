@@ -64,6 +64,18 @@ While we are at `v0.x`:
 - Helm chart values: same rule. Minors may rename or restructure values;
   patches will not.
 
+### How releases get versioned (pre-1.0)
+
+While Podtrace at `v0.x`, release-please bumps **patch** for both
+`feat:` and `fix:` (and `refactor:`/`perf:`). The minor digit only
+moves when a commit explicitly carries a `BREAKING CHANGE:` footer (or
+when a maintainer overrides the next version via release-please's
+`Release-As: 0.X.0` footer). This makes the minor bump a deliberate
+opt-in rather than a side effect of every new feature.
+
+After `v1.0.0`, the standard semver rules apply: `feat:` bumps minor,
+`BREAKING CHANGE:` bumps major.
+
 ### Path to `v1beta1`
 
 A CRD graduates from `v1alpha1` to `v1beta1` when **all** of the following
