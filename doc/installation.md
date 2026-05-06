@@ -77,20 +77,19 @@ curl -fsSL https://github.com/gma1k/podtrace/releases/latest/download/podtrace_d
 
 The release pipeline signs `checksums.txt` via cosign keyless and
 records the signing event in the [public Rekor transparency log](https://search.sigstore.dev/).
-Trust chain: signature → checksums file → tarball.
+Trust chain: sigstore bundle → checksums file → tarball.
 
 ```bash
 cd $(mktemp -d)
 
-# Pull checksums + signature + signing certificate
-for f in checksums.txt checksums.txt.sig checksums.txt.pem; do
+# Pull checksums + sigstore bundle
+for f in checksums.txt checksums.txt.bundle.json; do
   curl -fsSLO https://github.com/gma1k/podtrace/releases/latest/download/$f
 done
 
 # Verify the signature was produced by a workflow in gma1k/podtrace
 cosign verify-blob \
-  --signature checksums.txt.sig \
-  --certificate checksums.txt.pem \
+  --bundle checksums.txt.bundle.json \
   --certificate-identity-regexp 'https://github.com/gma1k/podtrace/.+' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   checksums.txt
