@@ -10,6 +10,13 @@ Going forward, releases are managed by [release-please](https://github.com/googl
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 Entries below `v0.12.0` were back-filled from git history.
 
+## [0.11.2](https://github.com/gma1k/podtrace/compare/v0.11.1...v0.11.2) (2026-05-06)
+
+
+### Added
+
+* **cli:** add Make-based release pipeline for signed multi-platform tarballs ([#87](https://github.com/gma1k/podtrace/issues/87)) ([4fbd4b9](https://github.com/gma1k/podtrace/commit/4fbd4b9ea0fabf48aafb6ec3ca1cfacf03a11c59))
+
 ## [0.11.1](https://github.com/gma1k/podtrace/compare/v0.11.0...v0.11.1) (2026-05-06)
 
 
