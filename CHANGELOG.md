@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to podtrace are recorded here.
+All notable changes to Podtrace are recorded here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
@@ -8,7 +8,6 @@ under the rules described in [STABILITY.md](STABILITY.md).
 
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
-Entries below `v0.12.0` were back-filled from git history.
 
 ## [0.11.3](https://github.com/gma1k/podtrace/compare/v0.11.2...v0.11.3) (2026-05-07)
 
