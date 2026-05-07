@@ -695,64 +695,95 @@ func TestGetSplunkToken(t *testing.T) {
 
 func TestGetVersion(t *testing.T) {
 	key := "PODTRACE_VERSION"
-	originalValue := os.Getenv(key)
+	originalEnv := os.Getenv(key)
+	originalVersion := Version
+	originalReadVCS := readVCSRevision
 	defer func() {
-		if originalValue != "" {
-			_ = os.Setenv(key, originalValue)
+		if originalEnv != "" {
+			_ = os.Setenv(key, originalEnv)
 		} else {
 			_ = os.Unsetenv(key)
 		}
-		Version = getEnvOrDefault("PODTRACE_VERSION", DefaultVersion)
+		Version = originalVersion
+		readVCSRevision = originalReadVCS
 	}()
 
-	t.Run("default version", func(t *testing.T) {
+	t.Run("dev fallback when no VCS info available", func(t *testing.T) {
 		_ = os.Unsetenv(key)
-		Version = getEnvOrDefault("PODTRACE_VERSION", DefaultVersion)
-		result := GetVersion()
-		if result != DefaultVersion {
-			t.Errorf("Expected %q, got %q", DefaultVersion, result)
+		Version = "dev"
+		readVCSRevision = func() string { return "" }
+		if got := GetVersion(); got != "dev" {
+			t.Errorf("Expected %q, got %q", "dev", got)
 		}
 	})
 
-	t.Run("env version set", func(t *testing.T) {
+	t.Run("dev-<sha> fallback when VCS info is available", func(t *testing.T) {
+		_ = os.Unsetenv(key)
+		Version = "dev"
+		readVCSRevision = func() string { return "abc1234" }
+		if got, want := GetVersion(), "dev-abc1234"; got != want {
+			t.Errorf("Expected %q, got %q", want, got)
+		}
+	})
+
+	t.Run("ldflags-injected version with no env override", func(t *testing.T) {
+		_ = os.Unsetenv(key)
+		Version = "v0.11.2"
+		readVCSRevision = func() string { return "abc1234" } // ignored when Version != "dev"
+		if got := GetVersion(); got != "v0.11.2" {
+			t.Errorf("Expected %q, got %q", "v0.11.2", got)
+		}
+	})
+
+	t.Run("env version overrides ldflags-injected", func(t *testing.T) {
 		_ = os.Setenv(key, "v0.8.0")
-		Version = getEnvOrDefault("PODTRACE_VERSION", DefaultVersion)
-		result := GetVersion()
-		if result != "v0.8.0" {
-			t.Errorf("Expected %q, got %q", "v0.8.0", result)
+		Version = "v0.11.2"
+		if got := GetVersion(); got != "v0.8.0" {
+			t.Errorf("Expected %q, got %q", "v0.8.0", got)
+		}
+	})
+
+	t.Run("env version overrides dev fallback (skipping VCS lookup)", func(t *testing.T) {
+		_ = os.Setenv(key, "v0.7.0")
+		Version = "dev"
+		readVCSRevision = func() string {
+			t.Errorf("readVCSRevision should not be called when env override is set")
+			return "abc1234"
+		}
+		if got := GetVersion(); got != "v0.7.0" {
+			t.Errorf("Expected %q, got %q", "v0.7.0", got)
 		}
 	})
 }
 
 func TestGetUserAgent(t *testing.T) {
 	key := "PODTRACE_VERSION"
-	originalValue := os.Getenv(key)
+	originalEnv := os.Getenv(key)
+	originalVersion := Version
+	originalReadVCS := readVCSRevision
 	defer func() {
-		if originalValue != "" {
-			_ = os.Setenv(key, originalValue)
+		if originalEnv != "" {
+			_ = os.Setenv(key, originalEnv)
 		} else {
 			_ = os.Unsetenv(key)
 		}
-		Version = getEnvOrDefault("PODTRACE_VERSION", DefaultVersion)
+		Version = originalVersion
+		readVCSRevision = originalReadVCS
 	}()
 
 	t.Run("default user agent", func(t *testing.T) {
 		_ = os.Unsetenv(key)
-		Version = getEnvOrDefault("PODTRACE_VERSION", DefaultVersion)
-		result := GetUserAgent()
-		expected := "Podtrace/" + DefaultVersion
-		if result != expected {
-			t.Errorf("Expected %q, got %q", expected, result)
+		Version = "dev"
+		readVCSRevision = func() string { return "" }
+		if got, want := GetUserAgent(), "Podtrace/dev"; got != want {
+			t.Errorf("Expected %q, got %q", want, got)
 		}
 	})
 
 	t.Run("env version user agent", func(t *testing.T) {
 		_ = os.Setenv(key, "v0.9.0")
-		Version = getEnvOrDefault("PODTRACE_VERSION", DefaultVersion)
-		result := GetUserAgent()
-		expected := "Podtrace/v0.9.0"
-		if result != expected {
-			t.Errorf("Expected %q, got %q", expected, result)
+		if got, want := GetUserAgent(), "Podtrace/v0.9.0"; got != want {
+			t.Errorf("Expected %q, got %q", want, got)
 		}
 	})
 }

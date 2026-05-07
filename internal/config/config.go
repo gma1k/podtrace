@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -33,7 +34,6 @@ const (
 	DefaultAlertMaxRetries       = 3
 	DefaultAlertRetryBackoffBase = 1 * time.Second
 	DefaultAlertMaxPayloadSize   = 1024 * 1024
-	DefaultVersion               = "v0.11.0"
 )
 
 const (
@@ -105,7 +105,6 @@ var (
 	MaxBytesForBandwidth      = getInt64EnvOrDefault("PODTRACE_MAX_BYTES_FOR_BANDWIDTH", DefaultMaxBytesForBandwidth)
 	EventSamplingRate         = getIntEnvOrDefault("PODTRACE_EVENT_SAMPLING_RATE", DefaultEventSamplingRate)
 	ContainerPID              = getIntEnvOrDefault("PODTRACE_CONTAINER_PID", DefaultContainerPID)
-	Version                   = getEnvOrDefault("PODTRACE_VERSION", DefaultVersion)
 
 	// BPF resource tuning — applied to the CollectionSpec before loading.
 	RingBufferSizeKB = getIntEnvOrDefault("PODTRACE_RING_BUFFER_SIZE_KB", DefaultRingBufferSizeKB)
@@ -451,12 +450,39 @@ func GetSplunkToken() string {
 	return ""
 }
 
+var (
+	Version = "dev"
+	Commit  = "unknown"
+)
+
+var readVCSRevision = func() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	for _, s := range info.Settings {
+		if s.Key == "vcs.revision" && len(s.Value) >= 7 {
+			return s.Value[:7]
+		}
+	}
+	return ""
+}
+
 func GetVersion() string {
-	return Version
+	if v := os.Getenv("PODTRACE_VERSION"); v != "" {
+		return v
+	}
+	if Version != "dev" {
+		return Version
+	}
+	if rev := readVCSRevision(); rev != "" {
+		return "dev-" + rev
+	}
+	return "dev"
 }
 
 func GetUserAgent() string {
-	return "Podtrace/" + Version
+	return "Podtrace/" + GetVersion()
 }
 
 // OTLPAllowInsecureNonLoopback returns true when PODTRACE_OTLP_INSECURE=1,
