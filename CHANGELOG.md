@@ -10,6 +10,13 @@ Going forward, releases are managed by [release-please](https://github.com/googl
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 Entries below `v0.12.0` were back-filled from git history.
 
+## [0.11.3](https://github.com/gma1k/podtrace/compare/v0.11.2...v0.11.3) (2026-05-07)
+
+
+### Fixed
+
+* **build:** wire ldflags version injection through config and Makefile, add community files ([#90](https://github.com/gma1k/podtrace/issues/90)) ([c33e451](https://github.com/gma1k/podtrace/commit/c33e451c3fcb3bb9385fde2aca53ad363f683721))
+
 ## [0.11.2](https://github.com/gma1k/podtrace/compare/v0.11.1...v0.11.2) (2026-05-06)
 
 
