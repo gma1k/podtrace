@@ -140,7 +140,7 @@ diagnose session against an nginx workload) in one shot:
 kubectl apply -f https://github.com/gma1k/podtrace/releases/latest/download/quickstart.yaml
 ```
 
-Verify the image was built by this repository (cosign keyless):
+Verify the image was built by this repository:
 
 ```bash
 cosign verify ghcr.io/gma1k/podtrace:latest \
