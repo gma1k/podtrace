@@ -13,6 +13,18 @@
         {
           "type": "generic",
           "path": "deploy/charts/podtrace/Chart.yaml"
+        },
+        {
+          "type": "generic",
+          "path": "examples/tracerconfig.yaml"
+        },
+        {
+          "type": "generic",
+          "path": "doc/crd-tracerconfig.md"
+        },
+        {
+          "type": "generic",
+          "path": "doc/installation.md"
         }
       ],
       "changelog-sections": [

@@ -35,6 +35,7 @@ Every released image and chart is signed via cosign keyless OIDC,
 recorded in the public Rekor transparency log. Verify before running:
 
 ```bash
+# x-release-please-version
 cosign verify ghcr.io/gma1k/podtrace:0.11.0 \
   --certificate-identity-regexp 'https://github.com/gma1k/podtrace/.+' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
@@ -43,6 +44,7 @@ cosign verify ghcr.io/gma1k/podtrace:0.11.0 \
 The image also ships an SBOM and SLSA provenance attestation:
 
 ```bash
+# x-release-please-version
 cosign download attestation ghcr.io/gma1k/podtrace:0.11.0 \
   --predicate-type https://spdx.dev/Document | jq .
 ```

@@ -109,7 +109,10 @@ $(BPF_OBJ): $(VMLINUX_GEN) bpf/podtrace.bpf.c bpf/*.h bpf/network.c bpf/filesyst
 
 build: $(BPF_OBJ)
 	@mkdir -p bin
-	$(GO) build -tags embed_bpf -o $(BINARY) ./cmd/podtrace
+	$(GO) build -tags embed_bpf \
+	  -ldflags "-X $(MODULE)/internal/config.Version=$(VERSION) \
+	            -X $(MODULE)/internal/config.Commit=$(COMMIT)" \
+	  -o $(BINARY) ./cmd/podtrace
 
 # Release: produce cross-arch tarballs for linux+darwin × amd64+arm64.
 # Each binary embeds the per-arch BPF object via the embed_bpf tag.
