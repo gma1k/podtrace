@@ -38,8 +38,12 @@ privileged debug pod. Install via signed tarball:
 
 ```bash
 curl -fsSL https://github.com/gma1k/podtrace/releases/latest/download/podtrace_linux_amd64.tar.gz \
-  | tar xz -C /usr/local/bin podtrace
+  | sudo tar xz -C /usr/local/bin podtrace
 ```
+
+(`/usr/local/bin` needs `sudo`. To install
+without sudo, extract to a user-writable directory on `$PATH` instead, e.g.
+`mkdir -p ~/.local/bin && tar xz -C ~/.local/bin podtrace`.)
 
 Then:
 

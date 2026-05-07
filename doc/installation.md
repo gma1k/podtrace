@@ -58,19 +58,32 @@ release ships signed tarballs for linux + macOS × amd64 + arm64:
 ```bash
 # Linux amd64
 curl -fsSL https://github.com/gma1k/podtrace/releases/latest/download/podtrace_linux_amd64.tar.gz \
-  | tar xz -C /usr/local/bin podtrace
+  | sudo tar xz -C /usr/local/bin podtrace
 
 # Linux arm64
 curl -fsSL https://github.com/gma1k/podtrace/releases/latest/download/podtrace_linux_arm64.tar.gz \
-  | tar xz -C /usr/local/bin podtrace
+  | sudo tar xz -C /usr/local/bin podtrace
 
 # macOS Apple Silicon
 curl -fsSL https://github.com/gma1k/podtrace/releases/latest/download/podtrace_darwin_arm64.tar.gz \
-  | tar xz -C /usr/local/bin podtrace
+  | sudo tar xz -C /usr/local/bin podtrace
 
 # macOS Intel
 curl -fsSL https://github.com/gma1k/podtrace/releases/latest/download/podtrace_darwin_amd64.tar.gz \
-  | tar xz -C /usr/local/bin podtrace
+  | sudo tar xz -C /usr/local/bin podtrace
+```
+
+`/usr/local/bin` is root-owned on most systems, so the tar extract needs
+`sudo`. The binary already has the executable bit set inside the tarball
+(preserved from `go build`), so no `chmod +x` is required.
+
+To install without sudo, extract to a user-writable directory on `$PATH`:
+
+```bash
+mkdir -p ~/.local/bin
+curl -fsSL https://github.com/gma1k/podtrace/releases/latest/download/podtrace_linux_amd64.tar.gz \
+  | tar xz -C ~/.local/bin podtrace
+# ensure ~/.local/bin is on $PATH (most modern shells include it by default)
 ```
 
 `podtrace --version` should report the tag you installed.
