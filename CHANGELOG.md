@@ -9,6 +9,13 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.11.4](https://github.com/gma1k/podtrace/compare/v0.11.3...v0.11.4) (2026-05-08)
+
+
+### Fixed
+
+* **build:** cross-compile to darwin via build-tagged Prctl + fail-fast release loop ([#93](https://github.com/gma1k/podtrace/issues/93)) ([16cf498](https://github.com/gma1k/podtrace/commit/16cf498cd48019a2821c8b221ba10e38937ca213))
+
 ## [0.11.3](https://github.com/gma1k/podtrace/compare/v0.11.2...v0.11.3) (2026-05-07)
 
 
