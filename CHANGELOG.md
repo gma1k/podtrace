@@ -9,6 +9,13 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.11.5](https://github.com/gma1k/podtrace/compare/v0.11.4...v0.11.5) (2026-05-08)
+
+
+### Added
+
+* **cli:** krew compatibility, auth plugins import and kubectl-aware Use string ([#95](https://github.com/gma1k/podtrace/issues/95)) ([e989941](https://github.com/gma1k/podtrace/commit/e9899417add0ad6685cb86996de5b535631665c4))
+
 ## [0.11.4](https://github.com/gma1k/podtrace/compare/v0.11.3...v0.11.4) (2026-05-08)
 
 
