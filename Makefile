@@ -131,7 +131,8 @@ release-bpf-objects:
 release: release-bpf-objects
 	@rm -rf $(RELEASE_DIR)
 	@mkdir -p $(RELEASE_DIR)
-	@for tgt in $(RELEASE_TARGETS); do \
+	@set -e; \
+	for tgt in $(RELEASE_TARGETS); do \
 	  os=$${tgt%%-*}; arch=$${tgt##*-}; \
 	  echo ">>> Building podtrace for $$os/$$arch (VERSION=$(VERSION))"; \
 	  staging="$(RELEASE_DIR)/staging-$$os-$$arch"; \
@@ -142,6 +143,10 @@ release: release-bpf-objects
 	        -X $(MODULE)/internal/config.Version=$(VERSION) \
 	        -X $(MODULE)/internal/config.Commit=$(COMMIT)" \
 	      -o "$$staging/podtrace" ./cmd/podtrace; \
+	  if [ ! -s "$$staging/podtrace" ]; then \
+	    echo "::error::go build produced empty/missing binary for $$os/$$arch"; \
+	    exit 1; \
+	  fi; \
 	  cp LICENSE README.md CHANGELOG.md "$$staging/"; \
 	  ( cd "$(RELEASE_DIR)" && \
 	    tar --sort=name --owner=root:0 --group=root:0 \

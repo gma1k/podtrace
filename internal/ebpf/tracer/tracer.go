@@ -109,7 +109,7 @@ func roundUpPow2(n uint32) uint32 {
 var _ TracerInterface = (*Tracer)(nil)
 
 func NewTracer() (*Tracer, error) {
-	if err := unix.Prctl(unix.PR_SET_DUMPABLE, 1, 0, 0, 0); err != nil {
+	if err := setDumpable(); err != nil {
 		logger.Warn("Failed to set dumpable flag", zap.Error(err))
 	}
 

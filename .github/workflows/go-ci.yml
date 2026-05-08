@@ -66,6 +66,18 @@ jobs:
         timeout-minutes: 5
         run: GOTOOLCHAIN=auto go build ./...
 
+      - name: Cross-compile sanity check
+        timeout-minutes: 5
+        run: |
+          set -e
+          for goos_goarch in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            os=$(echo $goos_goarch | cut -d/ -f1)
+            arch=$(echo $goos_goarch | cut -d/ -f2)
+            echo "==> $os/$arch"
+            GOTOOLCHAIN=auto GOOS=$os GOARCH=$arch CGO_ENABLED=0 \
+              go build ./...
+          done
+
       - name: Detect changed packages
         id: changed-packages
         if: github.event_name == 'pull_request'
