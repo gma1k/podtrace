@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -99,25 +98,22 @@ func init() {
 	klog.SetOutput(io.Discard)
 }
 
-func usageName() string {
-	if base := filepath.Base(os.Args[0]); strings.HasPrefix(base, "kubectl-") {
-		return "kubectl podtrace"
-	}
-	return "podtrace"
-}
-
 func main() {
-	cmdName := usageName()
 	var rootCmd = &cobra.Command{
-		Use:   cmdName + " [flags] [pod-name]",
+		Use:   "podtrace [flags] [pod-name]",
 		Short: "eBPF-based troubleshooting tool for Kubernetes pods",
 		Long:  `Podtrace attaches eBPF program to a Kubernetes pod's container and prints high-level, human-readable events that help diagnose application issues.`,
-		Example: `  # Realtime trace of a single pod
-  ` + cmdName + ` -n production my-pod
+		Example: `  # Standalone:
+  podtrace -n production my-pod
 
-  ` + cmdName + ` -n production my-pod --diagnose 30s --export json > report.json
+  # As a kubectl plugin (after kubectl krew install podtrace):
+  kubectl podtrace -n production my-pod
 
-  ` + cmdName + ` -n production --pod-selector app=api`,
+  # Bounded diagnose with JSON export:
+  podtrace -n production my-pod --diagnose 30s --export json > report.json
+
+  # Multi-pod via label selector:
+  podtrace -n production --pod-selector app=api`,
 		Args:         cobra.MaximumNArgs(1),
 		RunE:         runPodtrace,
 		SilenceUsage: true,
