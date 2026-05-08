@@ -9,6 +9,13 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.11.6](https://github.com/gma1k/podtrace/compare/v0.11.5...v0.11.6) (2026-05-08)
+
+
+### Fixed
+
+* **cli:** always render help as "podtrace" regardless of invocation path ([#97](https://github.com/gma1k/podtrace/issues/97)) ([25b08a1](https://github.com/gma1k/podtrace/commit/25b08a103e8280c9730b03d929c14d1e655b9bfb))
+
 ## [0.11.5](https://github.com/gma1k/podtrace/compare/v0.11.4...v0.11.5) (2026-05-08)
 
 
