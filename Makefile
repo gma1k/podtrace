@@ -1,7 +1,8 @@
 .PHONY: all build clean test check-go test-unit test-integration test-bench coverage \
         generate manifests clientset envtest docker-build helm-lint helm-template operator-tools \
         chainsaw chainsaw-tools \
-        e2e-kind e2e-kind-cleanup
+        e2e-kind e2e-kind-cleanup \
+        bundle bundle-validate bundle-build bundle-push bundle-clean
 
 CLANG ?= clang
 LLC ?= llc
@@ -341,6 +342,29 @@ helm-template:
 build-setup: build
 	@echo "Setting capabilities..."
 	@sudo ./scripts/setup-capabilities.sh || (echo "Warning: Failed to set capabilities. Run manually: sudo ./scripts/setup-capabilities.sh" && exit 1)
+
+CHART_APP_VERSION := $(shell awk '/^appVersion:/{gsub(/"/,"",$$2); print $$2; exit}' deploy/charts/podtrace/Chart.yaml)
+BUNDLE_VERSION ?= $(CHART_APP_VERSION)
+PREVIOUS_VERSION ?=
+BUNDLE_IMG ?= ghcr.io/gma1k/podtrace-bundle:v$(BUNDLE_VERSION)
+BUNDLE_DIR := bundle/$(BUNDLE_VERSION)
+
+bundle:
+	VERSION=$(BUNDLE_VERSION) PREVIOUS_VERSION=$(PREVIOUS_VERSION) ./scripts/build-olm-bundle.sh
+
+bundle-validate: bundle
+	@command -v operator-sdk >/dev/null 2>&1 || \
+	  { echo "operator-sdk not on PATH; install from https://sdk.operatorframework.io/"; exit 1; }
+	operator-sdk bundle validate $(BUNDLE_DIR) --select-optional name=community
+
+bundle-build: bundle
+	docker build -t $(BUNDLE_IMG) -f $(BUNDLE_DIR)/bundle.Dockerfile $(BUNDLE_DIR)
+
+bundle-push:
+	docker push $(BUNDLE_IMG)
+
+bundle-clean:
+	rm -rf bundle/
 
 help:
 	@echo "Available targets:"
