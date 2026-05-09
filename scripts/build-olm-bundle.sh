@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# Build an OperatorHub-compliant OLM bundle from the Helm chart + CSV
+# template. Output is written to bundle/<version>/.
+#
+# Inputs (env vars or args):
+#   VERSION           Required. e.g. 0.11.7 (no leading 'v')
+#   PREVIOUS_VERSION  Optional. Empty for first catalog submission;
+#                     otherwise the version this release replaces.
+#
+# Outputs:
+#   bundle/<version>/
+#     manifests/
+#       *.crd.yaml                              (copied from chart)
+#       podtrace.clusterserviceversion.yaml     (rendered from template)
+#     metadata/
+#       annotations.yaml                        (copied)
+#     bundle.Dockerfile                         (rendered from template)
+
+set -euo pipefail
+
+
+VERSION="${VERSION:-${1:-}}"
+PREVIOUS_VERSION="${PREVIOUS_VERSION:-${2:-}}"
+
+if [[ -z "$VERSION" ]]; then
+  echo "ERROR: VERSION is required (e.g. VERSION=0.11.7 $0)" >&2
+  exit 2
+fi
+
+# Strip leading 'v' if present (release tags carry it; CSV name does not).
+VERSION="${VERSION#v}"
+PREVIOUS_VERSION="${PREVIOUS_VERSION#v}"
+
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SRC_DIR="$REPO_ROOT/deploy/olm"
+CHART_DIR="$REPO_ROOT/deploy/charts/podtrace"
+CRD_DIR="$CHART_DIR/crds"
+ICON_PATH="$REPO_ROOT/assets/podtrace-icon-olm.png"
+
+OUT_DIR="$REPO_ROOT/bundle/$VERSION"
+MANIFESTS_DIR="$OUT_DIR/manifests"
+METADATA_DIR="$OUT_DIR/metadata"
+
+
+for f in \
+  "$SRC_DIR/csv-template.yaml" \
+  "$SRC_DIR/annotations.yaml" \
+  "$SRC_DIR/bundle.Dockerfile.template" \
+  "$ICON_PATH"; do
+  if [[ ! -f "$f" ]]; then
+    echo "ERROR: missing required file: $f" >&2
+    exit 1
+  fi
+done
+
+if [[ ! -d "$CRD_DIR" ]] || [[ -z "$(ls -A "$CRD_DIR" 2>/dev/null)" ]]; then
+  echo "ERROR: CRD directory empty or missing: $CRD_DIR" >&2
+  exit 1
+fi
+
+
+CREATED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+SKIP_RANGE_UPPER="$VERSION"
+
+
+rm -rf "$OUT_DIR"
+mkdir -p "$MANIFESTS_DIR" "$METADATA_DIR"
+
+
+cp "$CRD_DIR"/*.yaml "$MANIFESTS_DIR/"
+
+
+CSV_OUT="$MANIFESTS_DIR/podtrace.clusterserviceversion.yaml"
+
+# Use python for reliable multi-line/large-substring substitution.
+python3 - "$SRC_DIR/csv-template.yaml" "$CSV_OUT" \
+  "$VERSION" "$PREVIOUS_VERSION" "$CREATED_AT" "$SKIP_RANGE_UPPER" "$ICON_PATH" <<'PY'
+import base64, sys
+
+src, out, version, prev, created_at, skip_upper, icon_path = sys.argv[1:]
+
+with open(src) as f:
+    csv = f.read()
+
+with open(icon_path, "rb") as f:
+    icon_b64 = base64.b64encode(f.read()).decode()
+
+csv = csv.replace("__VERSION__", version)
+csv = csv.replace("__CREATED_AT__", created_at)
+csv = csv.replace("__SKIP_RANGE_UPPER__", skip_upper)
+csv = csv.replace("__ICON_BASE64__", icon_b64)
+
+# `replaces` is per-version: empty for first catalog submission, set
+# for subsequent. Drop the line entirely if PREVIOUS_VERSION is empty;
+# OLM rejects a dangling/malformed replaces field.
+if prev:
+    csv = csv.replace("__PREVIOUS_VERSION__", prev)
+else:
+    csv = "\n".join(
+        line for line in csv.splitlines()
+        if "__PREVIOUS_VERSION__" not in line
+    ) + "\n"
+
+with open(out, "w") as f:
+    f.write(csv)
+PY
+
+
+cp "$SRC_DIR/annotations.yaml" "$METADATA_DIR/annotations.yaml"
+
+sed -e "s|__VERSION__|$VERSION|g" \
+  "$SRC_DIR/bundle.Dockerfile.template" > "$OUT_DIR/bundle.Dockerfile"
+
+# --- summary -----------------------------------------------------------
+
+echo "==> Bundle ready at $OUT_DIR"
+echo "    Manifests:"
+find "$MANIFESTS_DIR" -maxdepth 1 -type f -printf "      %f\n" | sort
+echo "    Metadata:"
+find "$METADATA_DIR" -maxdepth 1 -type f -printf "      %f\n" | sort
+echo "    Dockerfile: bundle.Dockerfile"
+echo
+echo "Next: validate with 'operator-sdk bundle validate $OUT_DIR --select-optional name=community'"

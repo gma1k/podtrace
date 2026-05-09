@@ -3,6 +3,9 @@ bin/
 *.o
 *.so
 
+# OLM bundle build
+bundle/
+
 # Go
 *.exe
 *.test
