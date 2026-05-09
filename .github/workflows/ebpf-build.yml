@@ -1,16 +1,6 @@
 name: eBPF Build
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "bpf/**"
-      - "**/*.c"
-      - "go.mod"
-      - "go.sum"
-      - "cmd/**"
-      - "internal/**"
-      - "Makefile"
   pull_request:
     branches: ["**"]
     paths:
@@ -21,6 +11,8 @@ on:
       - "cmd/**"
       - "internal/**"
       - "Makefile"
+      - ".github/workflows/ebpf-build.yml"
+      - ".github/actions/setup-bpf-toolchain/**"
   workflow_dispatch:
 
 concurrency:

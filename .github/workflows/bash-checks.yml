@@ -1,13 +1,6 @@
 name: Bash Script Checks
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "**/*.sh"
-      - "scripts/**"
-      - "build.sh"
-      - "test/**/*.sh"
   pull_request:
     branches: ["**"]
     paths:

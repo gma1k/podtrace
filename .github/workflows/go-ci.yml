@@ -31,7 +31,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Skip on push events (the post-merge re-run); the PR check already
+  # validated the merged content. The benchmarks job below has its own
+  # if: gate to fire only on main pushes.
   build-and-test:
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:

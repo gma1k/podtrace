@@ -1,18 +1,6 @@
 name: Chainsaw e2e
 
 on:
-  push:
-    branches: ["main"]
-    paths:
-      - "api/v1alpha1/**"
-      - "cmd/podtrace/**"
-      - "internal/operator/**"
-      - "internal/agent/**"
-      - "deploy/charts/podtrace/**"
-      - "test/chainsaw/**"
-      - "Makefile"
-      - "Dockerfile"
-      - ".github/workflows/chainsaw.yml"
   pull_request:
     branches: ["**"]
     paths:
@@ -25,6 +13,8 @@ on:
       - "Makefile"
       - "Dockerfile"
       - ".github/workflows/chainsaw.yml"
+      - ".github/actions/setup-bpf-toolchain/**"
+  workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
