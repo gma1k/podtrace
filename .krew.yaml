@@ -29,27 +29,27 @@ spec:
     darwin/arm64. Compatibility matrix:
     https://github.com/gma1k/podtrace/blob/main/doc/compatibility.md
   platforms:
-    - selector:
-        matchLabels:
-          os: linux
-          arch: amd64
-      {{addURIAndSha "https://github.com/gma1k/podtrace/releases/download/{{ .TagName }}/podtrace_linux_amd64.tar.gz" .TagName }}
-      bin: podtrace
-    - selector:
-        matchLabels:
-          os: linux
-          arch: arm64
-      {{addURIAndSha "https://github.com/gma1k/podtrace/releases/download/{{ .TagName }}/podtrace_linux_arm64.tar.gz" .TagName }}
-      bin: podtrace
-    - selector:
-        matchLabels:
-          os: darwin
-          arch: amd64
-      {{addURIAndSha "https://github.com/gma1k/podtrace/releases/download/{{ .TagName }}/podtrace_darwin_amd64.tar.gz" .TagName }}
-      bin: podtrace
-    - selector:
-        matchLabels:
-          os: darwin
-          arch: arm64
-      {{addURIAndSha "https://github.com/gma1k/podtrace/releases/download/{{ .TagName }}/podtrace_darwin_arm64.tar.gz" .TagName }}
-      bin: podtrace
+  - selector:
+      matchLabels:
+        os: linux
+        arch: amd64
+    {{addURIAndSha "https://github.com/gma1k/podtrace/releases/download/{{ .TagName }}/podtrace_linux_amd64.tar.gz" .TagName }}
+    bin: podtrace
+  - selector:
+      matchLabels:
+        os: linux
+        arch: arm64
+    {{addURIAndSha "https://github.com/gma1k/podtrace/releases/download/{{ .TagName }}/podtrace_linux_arm64.tar.gz" .TagName }}
+    bin: podtrace
+  - selector:
+      matchLabels:
+        os: darwin
+        arch: amd64
+    {{addURIAndSha "https://github.com/gma1k/podtrace/releases/download/{{ .TagName }}/podtrace_darwin_amd64.tar.gz" .TagName }}
+    bin: podtrace
+  - selector:
+      matchLabels:
+        os: darwin
+        arch: arm64
+    {{addURIAndSha "https://github.com/gma1k/podtrace/releases/download/{{ .TagName }}/podtrace_darwin_arm64.tar.gz" .TagName }}
+    bin: podtrace
