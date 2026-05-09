@@ -2,10 +2,56 @@
 
 ## Install
 
-The fastest path uses the published OCI Helm chart in GHCR — no clone,
-no build toolchain.
+Three install paths, ordered by friction:
 
-### Helm chart (recommended)
+1. **Quickstart manifest** — single `kubectl apply`, working demo, end-to-end. Best for evaluating podtrace.
+2. **Helm chart** — production install with custom values,
+   validating webhook, custom RBAC. Best for ongoing operation.
+3. **Building from source** — for contributors or air-gapped
+   clusters.
+
+### Quickstart manifest (one-shot demo)
+
+A pre-rendered manifest including the operator + CRDs + a sample nginx workload + a `PodTraceSession` is attached to every GitHub Release. Apply it with one command:
+
+```bash
+kubectl apply -f https://github.com/gma1k/podtrace/releases/latest/download/quickstart.yaml
+```
+
+What it deploys, in order:
+
+| Resource | Namespace | Purpose |
+|---|---|---|
+| 4 CRDs (`podtrace.io`) | cluster | Operator's API surface |
+| `podtrace-system` Namespace + RBAC + Deployment | `podtrace-system` | Operator runtime |
+| `default` `TracerConfig` | cluster | Governs the agent DaemonSet |
+| `podtrace-demo` Namespace + nginx Deployment | `podtrace-demo` | Sample workload |
+| `demo-otlp` `ExporterConfig` | `podtrace-demo` | No-op OTLP target (no network calls) |
+| `demo-trace` `PodTraceSession` | `podtrace-demo` | 30s diagnose against nginx |
+
+```bash
+# Session should reach phase: Completed
+kubectl get podtracesession demo-trace -n podtrace-demo
+
+# Inspect status.summary (aggregated event counts)
+kubectl get podtracesession demo-trace -n podtrace-demo \
+  -o jsonpath='{.status.summary}{"\n"}'
+
+# Read the full human-readable report
+kubectl get cm nginx-trace-report -n podtrace-demo \
+  -o jsonpath='{.data.report\.txt}'
+```
+
+The demo session has `ttlSecondsAfterFinished: 600`, so it auto-deletes itself 10 minutes after completing. To tear down everything immediately:
+
+```bash
+kubectl delete ns podtrace-system podtrace-demo
+kubectl delete crd -l app.kubernetes.io/name=podtrace
+```
+
+### Helm chart
+
+For production deployments, custom values, validating webhook, multi-tenant agent config, custom RBAC — install via the published OCI Helm chart in GHCR instead:
 
 ```bash
 helm install podtrace oci://ghcr.io/gma1k/charts/podtrace --version 0.1.0 \
@@ -15,24 +61,14 @@ helm install podtrace oci://ghcr.io/gma1k/charts/podtrace --version 0.1.0 \
 
 The chart installs CRDs, namespace, operator, agent DaemonSet, and a
 default `TracerConfig`. See [operator.md](operator.md) for what each
-piece does.
-
-### Quickstart manifest (one-shot)
-
-A pre-rendered manifest including a sample workload + a 30s
-`PodTraceSession` is attached to every GitHub Release:
-
-```bash
-kubectl apply -f https://github.com/gma1k/podtrace/releases/latest/download/quickstart.yaml
-```
-
-After ~45s, `kubectl get podtracesession demo-trace -n podtrace-demo`
-should show `phase: Completed`.
+piece does, and the [chart values reference](../deploy/charts/podtrace/values.yaml)
+for available overrides.
 
 ### Verifying signatures (cosign keyless)
 
-Every released image and chart is signed via cosign keyless OIDC,
-recorded in the public Rekor transparency log. Verify before running:
+Every released image, chart, and CLI tarball is signed via cosign
+keyless OIDC, recorded in the public Rekor transparency log. Verify
+before running:
 
 ```bash
 # x-release-please-version
@@ -47,6 +83,15 @@ The image also ships an SBOM and SLSA provenance attestation:
 # x-release-please-version
 cosign download attestation ghcr.io/gma1k/podtrace:0.11.0 \
   --predicate-type https://spdx.dev/Document | jq .
+```
+
+The quickstart manifest ships with a `quickstart.yaml.sha256` for integrity verification:
+
+```bash
+cd $(mktemp -d)
+curl -fsSLO https://github.com/gma1k/podtrace/releases/latest/download/quickstart.yaml
+curl -fsSLO https://github.com/gma1k/podtrace/releases/latest/download/quickstart.yaml.sha256
+sha256sum -c quickstart.yaml.sha256
 ```
 
 ### Install the CLI
