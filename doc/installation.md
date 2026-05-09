@@ -88,6 +88,17 @@ curl -fsSL https://github.com/gma1k/podtrace/releases/latest/download/podtrace_l
 
 `podtrace --version` should report the tag you installed.
 
+#### Install via krew
+
+If you have [krew](https://krew.sigs.k8s.io/) installed, the simplest
+path is `kubectl krew install`:
+
+```bash
+kubectl krew install podtrace
+kubectl podtrace --version
+kubectl krew upgrade podtrace
+```
+
 #### Verify the tarball signature (cosign keyless + sha256sum)
 
 The release pipeline signs `checksums.txt` via cosign keyless and

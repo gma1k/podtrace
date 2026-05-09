@@ -45,6 +45,13 @@ curl -fsSL https://github.com/gma1k/podtrace/releases/latest/download/podtrace_l
 without sudo, extract to a user-writable directory on `$PATH` instead, e.g.
 `mkdir -p ~/.local/bin && tar xz -C ~/.local/bin podtrace`.)
 
+Or via [krew](https://krew.sigs.k8s.io/):
+
+```bash
+kubectl krew install podtrace
+kubectl podtrace -n production my-pod
+```
+
 Then:
 
 ```bash

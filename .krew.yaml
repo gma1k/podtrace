@@ -1,0 +1,55 @@
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: podtrace
+spec:
+  version: "{{ .TagName }}"
+  homepage: https://github.com/gma1k/podtrace
+  shortDescription: eBPF diagnostics for Kubernetes pods
+  description: |
+    Podtrace runs eBPF probes against Kubernetes pods to surface low-level
+    diagnostics: TCP/UDP latency, DNS resolution, file I/O, syscall traces,
+    lock contention, OOM events, and more. Run from your workstation for
+    ad-hoc diagnose runs of single or multiple pods, with bounded duration
+    and optional JSON/OTLP/Jaeger/Splunk/Datadog export.
+
+    The same binary also powers the in-cluster operator and per-session
+    Job runtime when installed via Helm; the CLI is one mode of three
+    (CLI, continuous PodTrace CR, bounded PodTraceSession CR).
+  caveats: |
+    Podtrace requires Linux nodes with kernel 5.8+ (BPF ring buffer) and,
+    for some probes (gRPC, FastCGI, full path resolution), BTF available
+    at /sys/kernel/btf/vmlinux.
+
+    The agent and per-session Jobs run as privileged in-cluster
+    containers with CAP_BPF + CAP_PERFMON + hostPID. The kubectl plugin
+    itself does not need elevated permissions on your workstation.
+
+    Supported platforms: linux/amd64, linux/arm64, darwin/amd64,
+    darwin/arm64. Compatibility matrix:
+    https://github.com/gma1k/podtrace/blob/main/doc/compatibility.md
+  platforms:
+    - selector:
+        matchLabels:
+          os: linux
+          arch: amd64
+      {{addURIAndSha "https://github.com/gma1k/podtrace/releases/download/{{ .TagName }}/podtrace_linux_amd64.tar.gz" .TagName }}
+      bin: podtrace
+    - selector:
+        matchLabels:
+          os: linux
+          arch: arm64
+      {{addURIAndSha "https://github.com/gma1k/podtrace/releases/download/{{ .TagName }}/podtrace_linux_arm64.tar.gz" .TagName }}
+      bin: podtrace
+    - selector:
+        matchLabels:
+          os: darwin
+          arch: amd64
+      {{addURIAndSha "https://github.com/gma1k/podtrace/releases/download/{{ .TagName }}/podtrace_darwin_amd64.tar.gz" .TagName }}
+      bin: podtrace
+    - selector:
+        matchLabels:
+          os: darwin
+          arch: arm64
+      {{addURIAndSha "https://github.com/gma1k/podtrace/releases/download/{{ .TagName }}/podtrace_darwin_arm64.tar.gz" .TagName }}
+      bin: podtrace
