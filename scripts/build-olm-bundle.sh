@@ -18,64 +18,74 @@
 
 set -euo pipefail
 
+# --- inputs ------------------------------------------------------------
 
 VERSION="${VERSION:-${1:-}}"
 PREVIOUS_VERSION="${PREVIOUS_VERSION:-${2:-}}"
 
-if [[ -z "$VERSION" ]]; then
-  echo "ERROR: VERSION is required (e.g. VERSION=0.11.7 $0)" >&2
-  exit 2
+if [[ -z "${VERSION}" ]]; then
+	echo "ERROR: VERSION is required (e.g. VERSION=0.11.7 $0)" >&2
+	exit 2
 fi
 
 # Strip leading 'v' if present (release tags carry it; CSV name does not).
 VERSION="${VERSION#v}"
 PREVIOUS_VERSION="${PREVIOUS_VERSION#v}"
 
+# --- paths -------------------------------------------------------------
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SRC_DIR="$REPO_ROOT/deploy/olm"
-CHART_DIR="$REPO_ROOT/deploy/charts/podtrace"
-CRD_DIR="$CHART_DIR/crds"
-ICON_PATH="$REPO_ROOT/assets/podtrace-icon-olm.png"
+SRC_DIR="${REPO_ROOT}/deploy/olm"
+CHART_DIR="${REPO_ROOT}/deploy/charts/podtrace"
+CRD_DIR="${CHART_DIR}/crds"
+ICON_PATH="${REPO_ROOT}/assets/podtrace-icon-olm.png"
 
-OUT_DIR="$REPO_ROOT/bundle/$VERSION"
-MANIFESTS_DIR="$OUT_DIR/manifests"
-METADATA_DIR="$OUT_DIR/metadata"
+OUT_DIR="${REPO_ROOT}/bundle/${VERSION}"
+MANIFESTS_DIR="${OUT_DIR}/manifests"
+METADATA_DIR="${OUT_DIR}/metadata"
 
+# --- preflight ---------------------------------------------------------
 
 for f in \
-  "$SRC_DIR/csv-template.yaml" \
-  "$SRC_DIR/annotations.yaml" \
-  "$SRC_DIR/bundle.Dockerfile.template" \
-  "$ICON_PATH"; do
-  if [[ ! -f "$f" ]]; then
-    echo "ERROR: missing required file: $f" >&2
-    exit 1
-  fi
+	"${SRC_DIR}/csv-template.yaml" \
+	"${SRC_DIR}/annotations.yaml" \
+	"${SRC_DIR}/bundle.Dockerfile.template" \
+	"${ICON_PATH}"; do
+	if [[ ! -f "${f}" ]]; then
+		echo "ERROR: missing required file: ${f}" >&2
+		exit 1
+	fi
 done
 
-if [[ ! -d "$CRD_DIR" ]] || [[ -z "$(ls -A "$CRD_DIR" 2>/dev/null)" ]]; then
-  echo "ERROR: CRD directory empty or missing: $CRD_DIR" >&2
-  exit 1
+shopt -s nullglob
+crd_files=("${CRD_DIR}"/*.yaml)
+shopt -u nullglob
+if [[ ! -d "${CRD_DIR}" || ${#crd_files[@]} -eq 0 ]]; then
+	echo "ERROR: CRD directory empty or missing: ${CRD_DIR}" >&2
+	exit 1
 fi
 
+# --- compute placeholders ----------------------------------------------
 
 CREATED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-SKIP_RANGE_UPPER="$VERSION"
+SKIP_RANGE_UPPER="${VERSION}"
 
+# --- clean output ------------------------------------------------------
 
-rm -rf "$OUT_DIR"
-mkdir -p "$MANIFESTS_DIR" "$METADATA_DIR"
+rm -rf "${OUT_DIR}"
+mkdir -p "${MANIFESTS_DIR}" "${METADATA_DIR}"
 
+# --- copy CRDs ---------------------------------------------------------
 
-cp "$CRD_DIR"/*.yaml "$MANIFESTS_DIR/"
+cp "${crd_files[@]}" "${MANIFESTS_DIR}/"
 
+# --- render CSV --------------------------------------------------------
 
-CSV_OUT="$MANIFESTS_DIR/podtrace.clusterserviceversion.yaml"
+CSV_OUT="${MANIFESTS_DIR}/podtrace.clusterserviceversion.yaml"
 
 # Use python for reliable multi-line/large-substring substitution.
-python3 - "$SRC_DIR/csv-template.yaml" "$CSV_OUT" \
-  "$VERSION" "$PREVIOUS_VERSION" "$CREATED_AT" "$SKIP_RANGE_UPPER" "$ICON_PATH" <<'PY'
+python3 - "${SRC_DIR}/csv-template.yaml" "${CSV_OUT}" \
+	"${VERSION}" "${PREVIOUS_VERSION}" "${CREATED_AT}" "${SKIP_RANGE_UPPER}" "${ICON_PATH}" <<'PY'
 import base64, sys
 
 src, out, version, prev, created_at, skip_upper, icon_path = sys.argv[1:]
@@ -106,19 +116,20 @@ with open(out, "w") as f:
     f.write(csv)
 PY
 
+# --- render annotations.yaml + bundle.Dockerfile -----------------------
 
-cp "$SRC_DIR/annotations.yaml" "$METADATA_DIR/annotations.yaml"
+cp "${SRC_DIR}/annotations.yaml" "${METADATA_DIR}/annotations.yaml"
 
-sed -e "s|__VERSION__|$VERSION|g" \
-  "$SRC_DIR/bundle.Dockerfile.template" > "$OUT_DIR/bundle.Dockerfile"
+sed -e "s|__VERSION__|${VERSION}|g" \
+	"${SRC_DIR}/bundle.Dockerfile.template" >"${OUT_DIR}/bundle.Dockerfile"
 
 # --- summary -----------------------------------------------------------
 
-echo "==> Bundle ready at $OUT_DIR"
+echo "==> Bundle ready at ${OUT_DIR}"
 echo "    Manifests:"
-find "$MANIFESTS_DIR" -maxdepth 1 -type f -printf "      %f\n" | sort
+find "${MANIFESTS_DIR}" -maxdepth 1 -type f -printf "      %f\n" | sort
 echo "    Metadata:"
-find "$METADATA_DIR" -maxdepth 1 -type f -printf "      %f\n" | sort
+find "${METADATA_DIR}" -maxdepth 1 -type f -printf "      %f\n" | sort
 echo "    Dockerfile: bundle.Dockerfile"
 echo
-echo "Next: validate with 'operator-sdk bundle validate $OUT_DIR --select-optional name=community'"
+echo "Next: validate with 'operator-sdk bundle validate ${OUT_DIR} --select-optional name=community'"
