@@ -136,19 +136,32 @@ Full reference: [doc/crd-podtracesession.md](doc/crd-podtracesession.md).
 
 ### Install the operator
 
-The fastest path is the published Helm chart in GHCR — no clone, no
+The fastest path is the **one-shot quickstart manifest** —
+operator + CRDs + a sample nginx workload + `PodTraceSession` that reaches `phase: Completed` and writes a report to a ConfigMap. Single `kubectl apply`, no Helm, no clone, no
 build toolchain:
+
+```bash
+kubectl apply -f https://github.com/gma1k/podtrace/releases/latest/download/quickstart.yaml
+
+# Watch the demo session reach Completed (~45-60s end-to-end)
+kubectl get podtracesession demo-trace -n podtrace-demo -w
+
+# Read the report
+kubectl get cm nginx-trace-report -n podtrace-demo \
+  -o jsonpath='{.data.report\.txt}'
+
+# Tear down the demo (operator + sample workload + CRDs)
+kubectl delete ns podtrace-system podtrace-demo
+kubectl delete crd -l app.kubernetes.io/name=podtrace
+```
+
+For production deployments, custom values, validating webhook,
+multi-tenant agent config, install via the published OCI Helm chart
+in GHCR instead:
 
 ```bash
 helm install podtrace oci://ghcr.io/gma1k/charts/podtrace \
   --namespace podtrace-system --create-namespace
-```
-
-Or apply the bundled quickstart manifest (operator + CRDs + a sample
-diagnose session against an nginx workload) in one shot:
-
-```bash
-kubectl apply -f https://github.com/gma1k/podtrace/releases/latest/download/quickstart.yaml
 ```
 
 Verify the image was built by this repository:
