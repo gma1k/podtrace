@@ -1,5 +1,39 @@
 # Running podtrace on OpenShift / OKD
 
+## Install via OperatorHub
+
+The simplest install path on OpenShift is via the embedded
+[OperatorHub catalog](https://operatorhub.io/operator/podtrace):
+**Operators → OperatorHub → search "podtrace" → Install**. The
+operator is installed via Operator Lifecycle Manager (OLM), which
+handles RBAC, SCC association, install plan execution, and future
+upgrades.
+
+CLI equivalent (works on any OLM cluster):
+
+```bash
+oc apply -f - <<EOF
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: podtrace
+  namespace: operators
+spec:
+  channel: stable
+  name: podtrace
+  source: community-operators
+  sourceNamespace: openshift-marketplace
+EOF
+```
+
+> On non-OpenShift OLM clusters, change `source` to
+> `operatorhubio-catalog` and `sourceNamespace` to `olm`.
+
+The rest of this document covers the **manual install path** (Helm
+chart or raw manifests) and OpenShift-specific operational notes
+(SCC, SELinux, CRI-O cgroup mode), relevant whether you installed
+via OperatorHub or manually.
+
 ## Overview
 
 OpenShift uses CRI-O as the container runtime and enforces strict security

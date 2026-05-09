@@ -2,12 +2,13 @@
 
 ## Install
 
-Three install paths, ordered by friction:
+Four install paths, ordered by friction:
 
 1. **Quickstart manifest** — single `kubectl apply`, working demo, end-to-end. Best for evaluating podtrace.
-2. **Helm chart** — production install with custom values,
+2. **OperatorHub.io / OLM** — one-click install on OpenShift or any OLM-managed cluster.
+3. **Helm chart** — production install with custom values,
    validating webhook, custom RBAC. Best for ongoing operation.
-3. **Building from source** — for contributors or air-gapped
+4. **Building from source** — for contributors or air-gapped
    clusters.
 
 ### Quickstart manifest (one-shot demo)
@@ -46,6 +47,46 @@ The demo session has `ttlSecondsAfterFinished: 600`, so it auto-deletes itself 1
 
 ```bash
 kubectl delete ns podtrace-system podtrace-demo
+kubectl delete crd -l app.kubernetes.io/name=podtrace
+```
+
+### OperatorHub.io / OLM
+
+On OpenShift or any cluster running [Operator Lifecycle Manager (OLM)](https://olm.operatorframework.io/),
+Podtrace is published in the [OperatorHub.io community catalog](https://operatorhub.io/operator/podtrace).
+This is the most ergonomic install path for OpenShift admins, one
+click in the Console UI, OLM handles the operator lifecycle (install,
+upgrade, RBAC).
+
+**OpenShift Console:** Operators → OperatorHub → search "podtrace" → Install.
+
+**CLI install via Subscription manifest**:
+
+```bash
+kubectl apply -f - <<EOF
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: podtrace
+  namespace: operators
+spec:
+  channel: stable
+  name: podtrace
+  source: operatorhubio-catalog
+  sourceNamespace: olm
+EOF
+
+# Wait for the InstallPlan to apply
+kubectl wait --for=jsonpath='{.status.phase}'=Succeeded \
+  csv -n operators -l operators.coreos.com/podtrace.operators \
+  --timeout=5m
+```
+
+To uninstall:
+
+```bash
+kubectl delete subscription podtrace -n operators
+kubectl delete csv -n operators -l operators.coreos.com/podtrace.operators
 kubectl delete crd -l app.kubernetes.io/name=podtrace
 ```
 
