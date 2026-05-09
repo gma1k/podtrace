@@ -1,0 +1,25 @@
+name: Setup BPF toolchain
+description: |
+  Install clang, llvm, libbpf-dev, and kernel headers/tools needed to
+  compile the eBPF programs in bpf/ and load them via the agent's tracer.
+
+  Single source of truth so ebpf-build, chainsaw, and security workflows
+  don't drift on package lists. Superset of what any single consumer needs
+  (extra packages don't hurt; missing ones break builds in subtle ways).
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          clang llvm libbpf-dev libelf-dev make pkg-config
+        # bpftool + perf live in linux-tools; pin to running kernel where
+        # possible, fall back to the generic flavour on hosted runners
+        # whose kernel package is missing.
+        sudo apt-get install -y "linux-tools-$(uname -r)" \
+          || sudo apt-get install -y linux-tools-generic
+        sudo apt-get install -y "linux-headers-$(uname -r)" \
+          || sudo apt-get install -y linux-headers-generic

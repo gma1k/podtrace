@@ -6,7 +6,8 @@
     ":semanticCommits",
     ":semanticCommitTypeAll(chore)",
     ":timezone(Europe/Amsterdam)",
-    "schedule:earlyMondays"
+    "schedule:earlyMondays",
+    "helpers:pinGitHubActionDigests"
   ],
   "labels": ["dependencies"],
   "prConcurrentLimit": 5,
