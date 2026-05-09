@@ -9,6 +9,13 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.11.8](https://github.com/gma1k/podtrace/compare/v0.11.7...v0.11.8) (2026-05-09)
+
+
+### Fixed
+
+* **release:** correct .krew.yaml indentation + bump docker/login-action to v4.1.0 ([#102](https://github.com/gma1k/podtrace/issues/102)) ([ee7da68](https://github.com/gma1k/podtrace/commit/ee7da6806629a1ea68adc56105765eec27dc5228))
+
 ## [0.11.7](https://github.com/gma1k/podtrace/compare/v0.11.6...v0.11.7) (2026-05-09)
 
 
