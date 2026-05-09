@@ -9,6 +9,13 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.11.7](https://github.com/gma1k/podtrace/compare/v0.11.6...v0.11.7) (2026-05-09)
+
+
+### Added
+
+* **release:** add OperatorHub.io OLM bundle pipeline ([#100](https://github.com/gma1k/podtrace/issues/100)) ([7f08a63](https://github.com/gma1k/podtrace/commit/7f08a6316514d6c280b0414f400b2478d19a0af7))
+
 ## [0.11.6](https://github.com/gma1k/podtrace/compare/v0.11.5...v0.11.6) (2026-05-08)
 
 
