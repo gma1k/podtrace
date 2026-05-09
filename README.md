@@ -155,9 +155,27 @@ kubectl delete ns podtrace-system podtrace-demo
 kubectl delete crd -l app.kubernetes.io/name=podtrace
 ```
 
-For production deployments, custom values, validating webhook,
-multi-tenant agent config, install via the published OCI Helm chart
-in GHCR instead:
+On OpenShift or any OLM-managed cluster, podtrace is also available
+via the [OperatorHub.io community catalog](https://operatorhub.io/operator/podtrace):
+
+```bash
+# OpenShift Console: Operators → OperatorHub → search "podtrace" → Install
+# Or apply the Subscription manifest directly:
+kubectl apply -f - <<EOF
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata: { name: podtrace, namespace: operators }
+spec:
+  channel: stable
+  name: podtrace
+  source: operatorhubio-catalog
+  sourceNamespace: olm
+EOF
+```
+
+For production Helm-managed deployments — custom values, validating
+webhook, multi-tenant agent config — install via the published OCI
+chart in GHCR:
 
 ```bash
 helm install podtrace oci://ghcr.io/gma1k/charts/podtrace \
