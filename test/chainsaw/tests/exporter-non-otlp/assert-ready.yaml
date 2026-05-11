@@ -1,0 +1,29 @@
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: pt-jaeger
+status:
+  (conditions[?type == 'Degraded'].status | [0]): "False"
+  (conditions[?type == 'Reconciled'].status | [0]): "True"
+  nodeStatus:
+  - ready: true
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: pt-datadog
+status:
+  (conditions[?type == 'Degraded'].status | [0]): "False"
+  (conditions[?type == 'Reconciled'].status | [0]): "True"
+  nodeStatus:
+  - ready: true
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: pt-splunk
+status:
+  (conditions[?type == 'Degraded'].status | [0]): "False"
+  (conditions[?type == 'Reconciled'].status | [0]): "True"
+  nodeStatus:
+  - ready: true

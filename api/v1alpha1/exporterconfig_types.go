@@ -88,7 +88,12 @@ type SplunkExporter struct {
 
 // DataDogExporter configures the DataDog exporter.
 type DataDogExporter struct {
+	Endpoint string `json:"endpoint,omitempty"`
+
 	// Site, e.g. "datadoghq.com" or "datadoghq.eu". Defaults to datadoghq.com.
+	// Used as a label for routing and (when Endpoint is empty) to derive
+	// a default Endpoint pointing at a conventional DataDog Agent
+	// service name.
 	// +optional
 	Site string `json:"site,omitempty"`
 

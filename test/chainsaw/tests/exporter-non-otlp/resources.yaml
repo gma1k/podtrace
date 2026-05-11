@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: non-otlp-target
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: non-otlp-target
+  template:
+    metadata:
+      labels:
+        app: non-otlp-target
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.9
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dd-fake-creds
+type: Opaque
+stringData:
+  api-key: fake-datadog-api-key-for-chainsaw
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: splunk-fake-creds
+type: Opaque
+stringData:
+  hec-token: fake-splunk-hec-token-for-chainsaw
+---
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: jaeger-ec
+spec:
+  type: jaeger
+  jaeger:
+    endpoint: http://jaeger.observability:4318
+---
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: datadog-ec
+spec:
+  type: datadog
+  datadog:
+    endpoint: http://dd-agent.observability:4318
+    apiKeySecretRef:
+      name: dd-fake-creds
+      key: api-key
+---
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: splunk-ec
+spec:
+  type: splunk
+  splunk:
+    endpoint: http://splunk-otel-collector.observability:4318
+    tokenSecretRef:
+      name: splunk-fake-creds
+      key: hec-token
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: pt-jaeger
+spec:
+  selector:
+    matchLabels:
+      app: non-otlp-target
+  filters: [dns]
+  exporterRef:
+    name: jaeger-ec
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: pt-datadog
+spec:
+  selector:
+    matchLabels:
+      app: non-otlp-target
+  filters: [dns]
+  exporterRef:
+    name: datadog-ec
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: pt-splunk
+spec:
+  selector:
+    matchLabels:
+      app: non-otlp-target
+  filters: [dns]
+  exporterRef:
+    name: splunk-ec

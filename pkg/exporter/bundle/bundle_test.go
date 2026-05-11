@@ -186,3 +186,91 @@ func TestToYAML_NilPayloadErrors(t *testing.T) {
 		t.Fatal("expected error on nil")
 	}
 }
+
+// TestVersion_FromConfigMapData covers the bundle-versioning contract:
+// empty version is legacy-OK (operators upgrading in place may write
+// pre-versioning bundles), CurrentVersion is OK, anything else is a
+// hard error so an older agent never silently misreads a newer schema.
+func TestVersion_FromConfigMapData(t *testing.T) {
+	cases := []struct {
+		name    string
+		version string
+		wantErr bool
+	}{
+		{"LegacyEmptyAccepted", "", false},
+		{"CurrentVersionAccepted", CurrentVersion, false},
+		{"UnknownVersionRejected", "v999", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data := map[string]string{"type": "otlp", "endpoint": "x:4318"}
+			if tc.version != "" {
+				data["version"] = tc.version
+			}
+			p, err := FromConfigMapData(data)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for version=%q", tc.version)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if p.Version != tc.version {
+				t.Errorf("Version round-trip: got %q, want %q", p.Version, tc.version)
+			}
+		})
+	}
+}
+
+// TestVersion_FromYAML mirrors TestVersion_FromConfigMapData for the
+// YAML path used by the CLI's --exporter-from-file.
+func TestVersion_FromYAML(t *testing.T) {
+	cases := []struct {
+		name    string
+		yaml    string
+		wantErr bool
+	}{
+		{"LegacyEmptyAccepted", "type: otlp\nendpoint: x:4318\n", false},
+		{"CurrentVersionAccepted", "version: " + CurrentVersion + "\ntype: otlp\nendpoint: x:4318\n", false},
+		{"UnknownVersionRejected", "version: v999\ntype: otlp\nendpoint: x:4318\n", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := FromYAML([]byte(tc.yaml))
+			if tc.wantErr && err == nil {
+				t.Fatalf("expected error for: %s", tc.yaml)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// TestVersion_WritersAlwaysStampCurrent covers the producer side:
+// regardless of what a Payload's in-memory Version field carries,
+// ToConfigMapData and ToYAML always stamp CurrentVersion. This
+// prevents an out-of-band Payload (constructed by a misconfigured
+// test or stale cache) from leaking a stale version onto the wire.
+func TestVersion_WritersAlwaysStampCurrent(t *testing.T) {
+	p := &Payload{Version: "v0-old", Type: TypeOTLP, Endpoint: "x:4318"}
+
+	data := ToConfigMapData(p)
+	if data["version"] != CurrentVersion {
+		t.Errorf("ToConfigMapData version = %q, want %q", data["version"], CurrentVersion)
+	}
+
+	raw, err := ToYAML(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := FromYAML(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Version != CurrentVersion {
+		t.Errorf("ToYAML/FromYAML version = %q, want %q", parsed.Version, CurrentVersion)
+	}
+}

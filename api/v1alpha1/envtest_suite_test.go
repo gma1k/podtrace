@@ -5,7 +5,7 @@
 //
 // This suite spins up a real kube-apiserver + etcd via
 // sigs.k8s.io/controller-runtime/pkg/envtest, installs the CRD manifests
-// rendered under deploy/charts/podtrace/crds, and asserts that
+// rendered under deploy/charts/podtrace/templates/crds, and asserts that
 // the schema accepts the example manifests and rejects invalid ones.
 //
 // It is guarded by the `envtest` build tag so that `go test ./...` still
@@ -113,7 +113,7 @@ func setupEnvtest(t *testing.T) *envtestHarness {
 func locateCRDPath(t *testing.T) string {
 	t.Helper()
 	repoRoot := findRepoRoot(t)
-	src := filepath.Join(repoRoot, "deploy", "charts", "podtrace", "crds")
+	src := filepath.Join(repoRoot, "deploy", "charts", "podtrace", "templates", "crds")
 	dst := t.TempDir()
 
 	entries, err := os.ReadDir(src)

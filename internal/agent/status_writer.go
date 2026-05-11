@@ -21,6 +21,7 @@ type StatusWriter struct {
 	Router   *Router
 
 	Ready func() bool
+	Heartbeat func()
 }
 
 func (w *StatusWriter) Run(ctx context.Context) error {
@@ -46,6 +47,10 @@ func (w *StatusWriter) Run(ctx context.Context) error {
 }
 
 func (w *StatusWriter) emitOnce(ctx context.Context) error {
+	if w.Heartbeat != nil {
+		w.Heartbeat()
+	}
+
 	rules := w.Router.RulesSnapshot()
 	stats := w.Router.Stats().snapshot()
 	agentReady := true

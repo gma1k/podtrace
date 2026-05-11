@@ -7,6 +7,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	"github.com/podtrace/podtrace/pkg/exporter/bundle"
 )
 
 func ec(name string, spec podtracev1alpha1.ExporterConfigSpec) *podtracev1alpha1.ExporterConfig {
@@ -169,5 +170,64 @@ func TestRenderBundlePayload_SamplePercent(t *testing.T) {
 	}
 	if data["sample_percent"] != "25" {
 		t.Errorf("sample_percent=%q want 25", data["sample_percent"])
+	}
+}
+
+func TestRenderBundlePayload_AlwaysStampsVersion(t *testing.T) {
+	cases := []struct {
+		name string
+		spec podtracev1alpha1.ExporterConfigSpec
+	}{
+		{
+			name: "otlp",
+			spec: podtracev1alpha1.ExporterConfigSpec{
+				Type: podtracev1alpha1.ExporterTypeOTLP,
+				OTLP: &podtracev1alpha1.OTLPExporter{Endpoint: "x:4318"},
+			},
+		},
+		{
+			name: "jaeger",
+			spec: podtracev1alpha1.ExporterConfigSpec{
+				Type:   podtracev1alpha1.ExporterTypeJaeger,
+				Jaeger: &podtracev1alpha1.JaegerExporter{Endpoint: "j:4318"},
+			},
+		},
+		{
+			name: "zipkin",
+			spec: podtracev1alpha1.ExporterConfigSpec{
+				Type:   podtracev1alpha1.ExporterTypeZipkin,
+				Zipkin: &podtracev1alpha1.ZipkinExporter{Endpoint: "z:9411"},
+			},
+		},
+		{
+			name: "splunk",
+			spec: podtracev1alpha1.ExporterConfigSpec{
+				Type: podtracev1alpha1.ExporterTypeSplunk,
+				Splunk: &podtracev1alpha1.SplunkExporter{
+					Endpoint:       "s:4318",
+					TokenSecretRef: podtracev1alpha1.SecretKeySelector{Name: "x", Key: "k"},
+				},
+			},
+		},
+		{
+			name: "datadog",
+			spec: podtracev1alpha1.ExporterConfigSpec{
+				Type: podtracev1alpha1.ExporterTypeDataDog,
+				DataDog: &podtracev1alpha1.DataDogExporter{
+					APIKeySecretRef: podtracev1alpha1.SecretKeySelector{Name: "x", Key: "k"},
+				},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data, _, err := renderBundlePayload(ec("v-"+tc.name, tc.spec))
+			if err != nil {
+				t.Fatalf("render: %v", err)
+			}
+			if data["version"] != bundle.CurrentVersion {
+				t.Errorf("version stamp = %q, want %q", data["version"], bundle.CurrentVersion)
+			}
+		})
 	}
 }

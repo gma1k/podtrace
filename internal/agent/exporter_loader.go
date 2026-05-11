@@ -53,14 +53,8 @@ func LoadBundle(ctx context.Context, c client.Client, systemNamespace string, po
 }
 
 // BuildExporter turns a BundlePayload into a tracer.Exporter that
-// accepts []*events.Event. Currently implements the OTLP backend only;
-// Jaeger/Zipkin/Splunk/DataDog bundles return an explicit
-// "not-yet-supported" error so the caller surfaces a clean Degraded
-// condition instead of silently dropping traces.
-//
-// The sole caller (the agent's reconcile loop) converts the error
-// into a per-CR NodeStatus.Message so the user sees it on
-// kubectl describe.
+// accepts []*events.Event.
+// sees the cause on kubectl describe.
 func BuildExporter(payload *BundlePayload, crKey CRKey) (tracer.Exporter, error) {
 	if payload == nil {
 		return nil, fmt.Errorf("nil bundle payload")
@@ -68,8 +62,14 @@ func BuildExporter(payload *BundlePayload, crKey CRKey) (tracer.Exporter, error)
 	switch payload.Type {
 	case bundle.TypeOTLP:
 		return newOTLPEventExporter(crKey, payload)
-	case bundle.TypeJaeger, bundle.TypeZipkin, bundle.TypeSplunk, bundle.TypeDataDog:
-		return nil, fmt.Errorf("exporter type %q not yet implemented in agent mode", payload.Type)
+	case bundle.TypeJaeger:
+		return newJaegerEventExporter(crKey, payload)
+	case bundle.TypeZipkin:
+		return newZipkinEventExporter(crKey, payload)
+	case bundle.TypeDataDog:
+		return newDataDogEventExporter(crKey, payload)
+	case bundle.TypeSplunk:
+		return newSplunkEventExporter(crKey, payload)
 	default:
 		return nil, fmt.Errorf("unknown exporter type %q", payload.Type)
 	}
