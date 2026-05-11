@@ -7,5 +7,6 @@ status:
   (conditions[?type == 'Degraded'].reason | [0]): AgentNodeStatus
   (conditions[?type == 'Degraded'].message | [0]):
     (contains(@, 'not yet implemented')): true
-  (nodeStatus[?ready == `false`] | length(@) >= `1`): true
-  (nodeStatus[?contains(message, 'not yet implemented')] | length(@) >= `1`): true
+  nodeStatus:
+  - ready: false
+    (contains(message, 'not yet implemented')): true
