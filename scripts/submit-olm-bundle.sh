@@ -93,7 +93,11 @@ log_info "cloning fork ${FORK_OWNER}/${FORK_REPO}"
 gh repo clone "${FORK_OWNER}/${FORK_REPO}" "${WORK_DIR}/fork" -- --depth=1
 cd "${WORK_DIR}/fork"
 
-git remote add upstream "https://github.com/${UPSTREAM}.git"
+if git remote get-url upstream >/dev/null 2>&1; then
+	git remote set-url upstream "https://github.com/${UPSTREAM}.git"
+else
+	git remote add upstream "https://github.com/${UPSTREAM}.git"
+fi
 git fetch upstream main --depth=1
 
 local_branch="add-podtrace-${VERSION}"
