@@ -18,48 +18,29 @@ import (
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
 )
 
-// Options configure a single operator run. All addresses default to
-// loopback so unit tests can bring the manager up without opening public
-// ports; production callers override via the CLI flags in
-// cmd/podtrace/operator.go.
 type Options struct {
-	// SystemNamespace is the namespace in which the operator creates
-	// the agent DaemonSet, agent RBAC, per-session Jobs, and resolved
-	// exporter bundles. Must be a PSA-privileged namespace.
 	SystemNamespace string
 
 	// MetricsBindAddress (host:port) for controller-runtime's Prometheus
 	// metrics endpoint. Empty disables the server.
 	MetricsBindAddress string
 
-	// HealthBindAddress (host:port) for /healthz and /readyz. Empty
-	// disables the server.
 	HealthBindAddress string
 
-	// LeaderElection enables HA-safe single-writer reconciliation. Always
-	// on in production; tests disable it because the envtest harness
-	// tears the manager down too fast for a lease renewal.
 	LeaderElection          bool
 	LeaderElectionNamespace string
 	LeaderElectionID        string
 
-	// WebhookPort / WebhookCertDir wire the admission webhook server.
-	// When WebhookCertDir is empty, the webhook server is not started —
-	// useful when running the operator behind an external cert flow.
 	WebhookPort    int
 	WebhookCertDir string
 
-	// SyncPeriod bounds how often controller-runtime re-lists informer
-	// caches. Zero leaves the library default (10h).
 	SyncPeriod time.Duration
 
-	// GracefulShutdownTimeout caps how long Run will block after ctx is
-	// cancelled. Zero leaves the library default.
 	GracefulShutdownTimeout time.Duration
+
+	BootstrapFallbackImage string
 }
 
-// DefaultOptions returns production-sensible defaults. Callers typically
-// start from these and override only what the CLI flags customised.
 func DefaultOptions() Options {
 	return Options{
 		SystemNamespace:         "podtrace-system",
@@ -87,12 +68,6 @@ func NewScheme() (*runtime.Scheme, error) {
 	return s, nil
 }
 
-// Run boots a controller-runtime manager, wires all three reconcilers and
-// the validating webhook, and blocks until ctx is cancelled. Returns the
-// first terminal error, or nil on clean shutdown.
-//
-// The shape mirrors what `cmd/podtrace operator` wants: one function
-// call that owns the whole control-plane lifetime.
 func Run(ctx context.Context, opts Options) error {
 	if opts.SystemNamespace == "" {
 		return errors.New("operator: SystemNamespace is required")
@@ -150,7 +125,15 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("add readyz: %w", err)
 	}
 
-	utilruntime.Must(nil) // keep utilruntime import referenced without panicking
+	if err := mgr.Add(&BootstrapDefaultTracerConfig{
+		Client:          mgr.GetClient(),
+		SystemNamespace: opts.SystemNamespace,
+		FallbackImage:   opts.BootstrapFallbackImage,
+	}); err != nil {
+		return fmt.Errorf("register TracerConfig bootstrap: %w", err)
+	}
+
+	utilruntime.Must(nil)
 	return mgr.Start(ctx)
 }
 

@@ -1,0 +1,248 @@
+{{/*
+cr-bootstrap — chart-side application of the default TracerConfig and
+optional starter ExporterConfig.
+
+Why a Job instead of regular templates:
+
+  Helm validates every rendered manifest against the cluster's
+  RESTMapper BEFORE applying anything. On a fresh cluster the
+  podtrace.io CRDs are about to be installed by the same release, but
+  RESTMapper doesn't know them yet, so any `kind: TracerConfig`
+  manifest in templates/ fails Helm's manifest-build step:
+
+    Error: INSTALLATION FAILED: unable to build kubernetes objects
+    from release manifest: resource mapping not found for name:
+    "default" namespace: "" from "": no matches for kind "TracerConfig"
+    in version "podtrace.io/v1alpha1"
+
+  Two-phase install via Helm's special `crds/` directory works around
+  this, but `crds/` files are install-only and never update on
+  `helm upgrade`. We deliberately moved CRDs into templates/crds/ to
+  fix that, so the same workaround is no longer available.
+
+  Stuffing the CR YAML into a ConfigMap and applying it from a Job at
+  post-install/post-upgrade sidesteps both problems: Helm never decodes
+  the inner YAML against RESTMapper (it's just data in a ConfigMap),
+  and the Job's kubectl-apply runs AFTER the CRDs have been installed
+  and the apiserver has registered the new types.
+
+  The operator also self-bootstraps a default TracerConfig if none
+  exists (see internal/operator/bootstrap.go) so OLM and raw-kubectl
+  install paths — which don't run Helm hooks — still get a working
+  out-of-the-box state. On Helm installs the Job races with the
+  operator and typically wins; the operator's bootstrap then becomes
+  a no-op. Either way, values.yaml-driven config takes precedence.
+
+  Helm-uninstall semantics: hook resources (this Job, its ConfigMap,
+  its RBAC) self-clean via hook-delete-policy. The applied
+  TracerConfig and ExporterConfig persist — the right semantics for
+  long-lived cluster config that should survive a chart uninstall.
+*/}}
+{{- if .Values.operator.enabled }}
+{{- $tcEnabled := .Values.tracerConfig.create }}
+{{- $ecEnabled := .Values.examples.exporterconfig.enabled }}
+{{- if or $tcEnabled $ecEnabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "podtrace.fullname" . }}-cr-bootstrap
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "podtrace.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cr-bootstrap
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+data:
+  {{- if $tcEnabled }}
+  tracerconfig.yaml: |
+    apiVersion: podtrace.io/v1alpha1
+    kind: TracerConfig
+    metadata:
+      name: {{ .Values.tracerConfig.name | default "default" }}
+      labels:
+        app.kubernetes.io/name: podtrace
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/managed-by: {{ .Release.Service }}
+        app.kubernetes.io/component: tracerconfig
+    spec:
+      image: {{ include "podtrace.image" . | quote }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      systemNamespace: {{ include "podtrace.systemNamespace" . | quote }}
+      maxConcurrentSessionsPerNode: {{ .Values.session.maxConcurrentSessionsPerNode }}
+      {{- if .Values.agent.btfMode }}
+      btfMode: {{ .Values.agent.btfMode }}
+      {{- end }}
+      {{- with .Values.agent.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      agent:
+        {{- with .Values.agent.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- if .Values.agent.priorityClassName }}
+        priorityClassName: {{ .Values.agent.priorityClassName | quote }}
+        {{- end }}
+        {{- if .Values.agent.eventBufferSize }}
+        eventBufferSize: {{ .Values.agent.eventBufferSize }}
+        {{- end }}
+        {{- if .Values.agent.statusReportInterval }}
+        statusReportInterval: {{ .Values.agent.statusReportInterval | quote }}
+        {{- end }}
+      session:
+        {{- with .Values.session.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        ttlSecondsAfterFinished: {{ .Values.session.ttlSecondsAfterFinished }}
+        activeDeadlineSecondsOffset: {{ .Values.session.activeDeadlineSecondsOffset }}
+        backoffLimit: {{ .Values.session.backoffLimit }}
+        sidecarUploader: {{ .Values.tracerConfig.sidecarUploader }}
+  {{- end }}
+  {{- if $ecEnabled }}
+  exporterconfig.yaml: |
+    apiVersion: podtrace.io/v1alpha1
+    kind: ExporterConfig
+    metadata:
+      name: {{ .Values.examples.exporterconfig.name | default "starter-otlp" }}
+      namespace: {{ .Values.examples.exporterconfig.namespace | default "default" }}
+      labels:
+        app.kubernetes.io/name: podtrace
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/managed-by: {{ .Release.Service }}
+        app.kubernetes.io/component: example
+    spec:
+      type: otlp
+      otlp:
+        endpoint: {{ .Values.examples.exporterconfig.endpoint | quote }}
+        protocol: {{ .Values.examples.exporterconfig.protocol | default "http" }}
+        insecure: {{ .Values.examples.exporterconfig.insecure }}
+  {{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "podtrace.fullname" . }}-cr-bootstrap
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "podtrace.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cr-bootstrap
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "podtrace.fullname" . }}-cr-bootstrap
+  labels:
+    {{- include "podtrace.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cr-bootstrap
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: ["podtrace.io"]
+    resources: ["tracerconfigs", "exporterconfigs"]
+    verbs: ["get", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "podtrace.fullname" . }}-cr-bootstrap
+  labels:
+    {{- include "podtrace.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cr-bootstrap
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "podtrace.fullname" . }}-cr-bootstrap
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "podtrace.fullname" . }}-cr-bootstrap
+    namespace: {{ .Values.namespace.name }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "podtrace.fullname" . }}-cr-bootstrap
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "podtrace.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cr-bootstrap
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 60
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: podtrace
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: cr-bootstrap
+    spec:
+      serviceAccountName: {{ include "podtrace.fullname" . }}-cr-bootstrap
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kubectl
+          image: {{ .Values.crds.labelerImage | default "alpine/k8s:1.30.4" }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              for f in /crs/*.yaml; do
+                [ -e "$f" ] || continue
+                echo "cr-bootstrap: applying $f"
+                kubectl apply -f "$f"
+              done
+              echo "cr-bootstrap: done"
+          volumeMounts:
+            - name: crs
+              mountPath: /crs
+              readOnly: true
+      volumes:
+        - name: crs
+          configMap:
+            name: {{ include "podtrace.fullname" . }}-cr-bootstrap
+{{- end }}
+{{- end }}

@@ -1,0 +1,159 @@
+{{/*
+crd-labeler — one-time-per-cluster CRD ownership migration.
+
+Before Phase 1 + Phase 5 the chart shipped its CRDs in Helm's `crds/`
+directory, which installs once at first `helm install` and never
+updates afterward. We have since moved the CRDs into `templates/crds/`
+with `helm.sh/hook: pre-install,pre-upgrade` so Helm propagates schema
+changes on upgrade.
+
+The wrinkle: clusters already running an older chart version carry
+CRDs that lack the Helm ownership labels (`app.kubernetes.io/managed-by=Helm`
+and the meta.helm.sh/release-* annotations). When the new pre-upgrade
+hook tries to apply the same-named CRD it refuses with "invalid
+ownership metadata" because Helm will not silently take over a
+resource somebody else created.
+
+This Job runs at weight -20 (before the CRDs themselves at -10) and
+patches the four podtrace.io CRDs with the ownership labels the chart
+expects, so the subsequent CRD hook adopts and updates them cleanly.
+After that first upgrade the CRDs are Helm-owned forever; this Job is
+a no-op on every subsequent run.
+
+Users who manage their CRDs out-of-band can disable the labeler via .Values.crds.adopt=false.
+*/}}
+{{- if and .Values.crds.install .Values.crds.adopt }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "podtrace.fullname" . }}-crd-labeler
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    app.kubernetes.io/name: podtrace
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/component: crd-labeler
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-20"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "podtrace.fullname" . }}-crd-labeler
+  labels:
+    app.kubernetes.io/name: podtrace
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/component: crd-labeler
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-20"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "podtrace.fullname" . }}-crd-labeler
+  labels:
+    app.kubernetes.io/name: podtrace
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/component: crd-labeler
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-20"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "podtrace.fullname" . }}-crd-labeler
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "podtrace.fullname" . }}-crd-labeler
+    namespace: {{ .Values.namespace.name }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "podtrace.fullname" . }}-crd-labeler
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    app.kubernetes.io/name: podtrace
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/component: crd-labeler
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-20"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 60
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: podtrace
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: crd-labeler
+    spec:
+      serviceAccountName: {{ include "podtrace.fullname" . }}-crd-labeler
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kubectl
+          image: {{ .Values.crds.labelerImage | default "alpine/k8s:1.30.4" }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              CRDS="podtraces.podtrace.io podtracesessions.podtrace.io exporterconfigs.podtrace.io tracerconfigs.podtrace.io"
+              RELEASE="{{ .Release.Name }}"
+              RELEASE_NS="{{ .Release.Namespace }}"
+              for crd in $CRDS; do
+                if ! kubectl get crd "$crd" >/dev/null 2>&1; then
+                  echo "crd-labeler: $crd does not exist yet — Helm will create it"
+                  continue
+                fi
+                existing_release=$(kubectl get crd "$crd" -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null || true)
+                if [ "$existing_release" = "$RELEASE" ]; then
+                  echo "crd-labeler: $crd already owned by release $RELEASE — skipping"
+                  continue
+                fi
+                if [ -n "$existing_release" ] && [ "$existing_release" != "$RELEASE" ]; then
+                  echo "crd-labeler: WARNING: $crd is owned by another Helm release ($existing_release); not stealing"
+                  continue
+                fi
+                echo "crd-labeler: adopting $crd for release $RELEASE"
+                kubectl label crd "$crd" \
+                  "app.kubernetes.io/managed-by=Helm" --overwrite
+                kubectl annotate crd "$crd" \
+                  "meta.helm.sh/release-name=$RELEASE" \
+                  "meta.helm.sh/release-namespace=$RELEASE_NS" --overwrite
+              done
+              echo "crd-labeler: done"
+{{- end }}

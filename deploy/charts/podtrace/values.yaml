@@ -17,8 +17,13 @@
 # once the rest of your setup is ready (Secrets, cert-manager, etc.).
 
 crds:
-  install: true   # DEPRECATED: no-op. Use `helm install --skip-crds` instead.
-  keep: true      # DEPRECATED: no-op. CRDs always carry helm.sh/resource-policy: keep.
+  install: true
+
+  adopt: true
+
+  labelerImage: ""
+
+  keep: true
 
 image:
   repository: ghcr.io/gma1k/podtrace

@@ -1,25 +1,25 @@
 apiVersion: podtrace.io/v1alpha1
 kind: ExporterConfig
 metadata:
-  name: unsupported-jaeger
+  name: degraded-zipkin
 spec:
-  type: jaeger
-  jaeger:
-    endpoint: http://jaeger.observability:14250
+  type: zipkin
+  zipkin:
+    endpoint: http://zipkin.observability:9411/api/v2/spans
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: unsupported-target
+  name: degraded-target
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: unsupported-target
+      app: degraded-target
   template:
     metadata:
       labels:
-        app: unsupported-target
+        app: degraded-target
     spec:
       containers:
         - name: app
@@ -28,11 +28,11 @@ spec:
 apiVersion: podtrace.io/v1alpha1
 kind: PodTrace
 metadata:
-  name: unsupported-pt
+  name: degraded-pt
 spec:
   selector:
     matchLabels:
-      app: unsupported-target
+      app: degraded-target
   filters: [dns]
   exporterRef:
-    name: unsupported-jaeger
+    name: degraded-zipkin

@@ -147,6 +147,7 @@ func main() {
 	rootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, "Print version information")
 	rootCmd.Flags().BoolVar(&enableProfiling, "profiling", false, "Enable performance profiling: pprof endpoint discovery on the target pod, auto-trigger on latency spikes, and CPU/memory correlation in reports")
 	rootCmd.Flags().StringVar(&exporterFromFile, "exporter-from-file", "", "Load exporter config from a YAML file (set by the operator for session Jobs)")
+	_ = rootCmd.Flags().MarkHidden("exporter-from-file")
 	rootCmd.Flags().StringVar(&summaryFile, "summary-file", "", "Write a JSON summary of diagnose results to this path when diagnose completes")
 	rootCmd.Flags().StringVar(&terminationMessagePath, "termination-message-path", "", "Write a compact summary JSON to this path so Kubernetes surfaces it in pod status")
 	rootCmd.Flags().StringVar(&reportTo, "report-to", "", "Upload the full diagnose report to a sink: kind/namespace/name (kind is configmap|secret)")

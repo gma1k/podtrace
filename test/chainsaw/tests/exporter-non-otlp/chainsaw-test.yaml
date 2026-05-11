@@ -1,0 +1,29 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: exporter-non-otlp
+spec:
+  description: |
+    PodTraces bound to Jaeger, Datadog, and Splunk ExporterConfigs must reach Degraded=False with at least one
+    NodeStatus.Ready=true row. All three backends share the OTLP HTTP
+    transport in agent mode (Jaeger natively accepts OTLP since 1.35;
+    DataDog and Splunk are reached via their OTLP receivers), so the
+    "exporter built successfully" check is the same control-plane path
+    we already exercise for type:otlp.
+
+    The inverse — Zipkin returns a structured "use OTel Collector"
+    error and surfaces as Degraded=True — is covered by the sibling
+    'exporter-degraded-surface' test.
+  timeouts:
+    apply: 30s
+    assert: 180s
+  steps:
+    - name: setup
+      try:
+        - apply:
+            file: ./resources.yaml
+
+    - name: all-three-ready
+      try:
+        - assert:
+            file: ./assert-ready.yaml

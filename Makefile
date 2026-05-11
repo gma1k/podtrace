@@ -233,7 +233,7 @@ coverage: test-unit
 
 CONTROLLER_GEN_VERSION ?= v0.16.5
 CONTROLLER_GEN ?= $(shell go env GOPATH 2>/dev/null)/bin/controller-gen
-CRD_OUT_DIR ?= deploy/charts/podtrace/crds
+CRD_OUT_DIR ?= deploy/charts/podtrace/templates/crds
 BOILERPLATE ?= hack/boilerplate.go.txt
 
 IMAGE_REPO ?= ghcr.io/gma1k/podtrace
@@ -266,19 +266,9 @@ clientset:
 	  --output-dir=pkg/client/clientset \
 	  --output-pkg=github.com/podtrace/podtrace/pkg/client/clientset
 
-# manifests (re)emits CRD YAMLs under the Helm chart's templates/crds/. The
-# Helm toggle guards (`{{- if .Values.crds.install }}` and the `keep`
-# annotation conditional) are re-applied after regeneration; run
-# `make manifests` whenever CRD markers change.
 manifests: operator-tools
 	$(CONTROLLER_GEN) crd paths=./api/v1alpha1/... output:crd:artifacts:config=$(CRD_OUT_DIR)
-	@# Re-apply the helm.sh/resource-policy: keep annotation that
-	@# controller-gen does not emit. The chart's crds/ directory is
-	@# loaded by Helm before any templates, so we no longer wrap with
-	@# {{- if .Values.crds.install }} — Helm 3 always installs files
-	@# under crds/ on `helm install` and skips them on `helm template`
-	@# unless --include-crds is passed.
-	@./hack/inject-keep-annotation.sh $(CRD_OUT_DIR)
+	@./hack/inject-crd-annotations.sh $(CRD_OUT_DIR)
 	@# Emit the webhook manifest to hack/reference/ as a diff target: the
 	@# Helm template at templates/validating-webhook.yaml is hand-authored,
 	@# but must stay in sync with the paths/rules kubebuilder generates

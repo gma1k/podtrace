@@ -62,24 +62,6 @@ func renderChartWithAPIVersions(t *testing.T, apiVersions []string, setFlags ...
 	return stdout.Bytes()
 }
 
-func renderChartIncludeCRDs(t *testing.T, setFlags ...string) []byte {
-	t.Helper()
-	helm := helmAvailable(t)
-
-	args := []string{"template", "podtrace", chartDir(t), "--include-crds"}
-	for _, f := range setFlags {
-		args = append(args, "--set", f)
-	}
-	var stdout, stderr bytes.Buffer
-	cmd := exec.Command(helm, args...)
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("helm template --include-crds %v: %v\nstderr: %s", args, err, stderr.String())
-	}
-	return stdout.Bytes()
-}
-
 func chartDir(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -104,9 +86,8 @@ func TestChart_DefaultValues(t *testing.T) {
 	out := renderChart(t)
 	resources := parseKinds(t, out)
 
-	// Default render does NOT include CRDs (they live under crds/).
-	if resources["CustomResourceDefinition"] != 0 {
-		t.Errorf("default `helm template` should skip crds/; got %d", resources["CustomResourceDefinition"])
+	if resources["CustomResourceDefinition"] != 4 {
+		t.Errorf("default `helm template` should render 4 CRDs; got %d", resources["CustomResourceDefinition"])
 	}
 	if resources["Namespace"] != 1 {
 		t.Errorf("Namespace count: got %d want 1", resources["Namespace"])
@@ -117,21 +98,39 @@ func TestChart_DefaultValues(t *testing.T) {
 	}
 }
 
-func TestChart_CRDsRenderedWithIncludeFlag(t *testing.T) {
-	out := renderChartIncludeCRDs(t)
+func TestChart_CRDsToggleOff(t *testing.T) {
+	out := renderChart(t, "crds.install=false")
 	resources := parseKinds(t, out)
-	if resources["CustomResourceDefinition"] != 4 {
-		t.Errorf("expected 4 CRDs from crds/, got %d", resources["CustomResourceDefinition"])
+	if resources["CustomResourceDefinition"] != 0 {
+		t.Errorf("crds.install=false should suppress CRDs; got %d", resources["CustomResourceDefinition"])
+	}
+	if bytes.Contains(out, []byte("crd-labeler")) {
+		t.Error("crds.install=false should also suppress the labeler Job")
 	}
 }
 
 func TestChart_CRDsCarryKeepAnnotation(t *testing.T) {
-	out := renderChartIncludeCRDs(t)
-	// Each CRD should carry the annotation. We expect one occurrence
-	// per CRD (4 total).
+	out := renderChart(t)
+	// Each CRD carries the annotation. Expect at least 4 occurrences
+	// (one per CRD); the labeler's hook-delete-policy line is unrelated.
 	count := bytes.Count(out, []byte("helm.sh/resource-policy: keep"))
 	if count < 4 {
 		t.Errorf("keep annotation count: got %d want >= 4 (one per CRD)", count)
+	}
+}
+
+// TestChart_CRDLabelerRendersAsPreInstallHook pins the migration
+// contract: when crds.
+func TestChart_CRDLabelerRendersAsPreInstallHook(t *testing.T) {
+	out := renderChart(t)
+	if !bytes.Contains(out, []byte("crd-labeler")) {
+		t.Fatal("expected crd-labeler resources to render with default values")
+	}
+	if !bytes.Contains(out, []byte(`helm.sh/hook: pre-install,pre-upgrade`)) {
+		t.Error("crd-labeler should be a pre-install,pre-upgrade hook")
+	}
+	if !bytes.Contains(out, []byte(`helm.sh/hook-weight: "-20"`)) {
+		t.Error("crd-labeler should have hook-weight -20 (runs before CRDs at -10)")
 	}
 }
 
@@ -284,8 +283,8 @@ func TestChart_TracerConfigRenderedWhenOperatorEnabled(t *testing.T) {
 
 func TestChart_TracerConfigSuppressedWhenDisabled(t *testing.T) {
 	out := renderChart(t, "operator.enabled=true", "tracerConfig.create=false")
-	if n := parseKinds(t, out)["TracerConfig"]; n != 0 {
-		t.Errorf("tracerConfig.create=false should not render a TracerConfig, got %d", n)
+	if bytes.Contains(out, []byte("tracerconfig.yaml: |")) {
+		t.Error("tracerConfig.create=false should suppress the TracerConfig YAML in the cr-bootstrap ConfigMap")
 	}
 }
 
@@ -379,11 +378,11 @@ func TestChart_ExporterConfigExampleToggle(t *testing.T) {
 		"examples.exporterconfig.namespace=demo",
 		"examples.exporterconfig.endpoint=otel:4318",
 	)
-	if n := parseKinds(t, off)["ExporterConfig"]; n != 0 {
-		t.Errorf("ExporterConfig should not render when example toggle is off, got %d", n)
+	if bytes.Contains(off, []byte("exporterconfig.yaml: |")) {
+		t.Error("ExporterConfig example must not render in the cr-bootstrap ConfigMap when the toggle is off")
 	}
-	if parseKinds(t, on)["ExporterConfig"] < 1 {
-		t.Fatal("examples.exporterconfig.enabled=true should render an ExporterConfig")
+	if !bytes.Contains(on, []byte("exporterconfig.yaml: |")) {
+		t.Fatal("examples.exporterconfig.enabled=true should render an exporterconfig.yaml entry in the cr-bootstrap ConfigMap")
 	}
 	for _, marker := range []string{
 		"namespace: demo",

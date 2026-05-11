@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	"github.com/podtrace/podtrace/pkg/exporter/bundle"
 )
 
 // renderBundlePayload converts an ExporterConfig's typed spec into the
@@ -28,7 +29,8 @@ import (
 // OTLP) return nil here.
 func renderBundlePayload(ec *podtracev1alpha1.ExporterConfig) (map[string]string, *podtracev1alpha1.SecretKeySelector, error) {
 	data := map[string]string{
-		"type": string(ec.Spec.Type),
+		"version": bundle.CurrentVersion,
+		"type":    string(ec.Spec.Type),
 	}
 	if ec.Spec.SamplePercent != nil {
 		data["sample_percent"] = itoa(int(*ec.Spec.SamplePercent))
@@ -82,6 +84,7 @@ func renderBundlePayload(ec *podtracev1alpha1.ExporterConfig) (map[string]string
 			return nil, nil, fmt.Errorf("spec.splunk is required when type=splunk")
 		}
 		data["endpoint"] = ec.Spec.Splunk.Endpoint
+		data["header_secret_name"] = "X-SF-TOKEN"
 		ref := ec.Spec.Splunk.TokenSecretRef
 		return data, &ref, nil
 
@@ -89,11 +92,17 @@ func renderBundlePayload(ec *podtracev1alpha1.ExporterConfig) (map[string]string
 		if ec.Spec.DataDog == nil {
 			return nil, nil, fmt.Errorf("spec.datadog is required when type=datadog")
 		}
-		if ec.Spec.DataDog.Site != "" {
-			data["site"] = ec.Spec.DataDog.Site
-		} else {
-			data["site"] = "datadoghq.com"
+		site := ec.Spec.DataDog.Site
+		if site == "" {
+			site = "datadoghq.com"
 		}
+		data["site"] = site
+		if ec.Spec.DataDog.Endpoint != "" {
+			data["endpoint"] = ec.Spec.DataDog.Endpoint
+		} else {
+			data["endpoint"] = "datadog-agent.datadog:4318"
+		}
+		data["header_secret_name"] = "DD-API-KEY"
 		ref := ec.Spec.DataDog.APIKeySecretRef
 		return data, &ref, nil
 

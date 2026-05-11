@@ -117,22 +117,68 @@ func TestBuildExporter_OTLP(t *testing.T) {
 	if exp == nil {
 		t.Fatal("nil exporter")
 	}
-	// Clean shutdown is required — it closes the TP before the test returns.
 	ctx, cancel := contextWithTimeout(1)
 	defer cancel()
 	_ = exp.Close(ctx)
 }
 
-func TestBuildExporter_UnsupportedTypeReturnsDescriptiveError(t *testing.T) {
-	cases := []string{"jaeger", "zipkin", "splunk", "datadog"}
-	for _, ty := range cases {
-		t.Run(ty, func(t *testing.T) {
-			_, err := BuildExporter(&BundlePayload{Type: bundle.Type(ty)}, CRKey{"ns", "n"})
-			if err == nil {
-				t.Fatalf("expected not-yet-implemented error for %q", ty)
+func TestBuildExporter_OTLPLikeTypesBuildSuccessfully(t *testing.T) {
+	cases := []struct {
+		ty       bundle.Type
+		endpoint string
+	}{
+		{bundle.TypeJaeger, "jaeger-collector:4318"},
+		{bundle.TypeDataDog, "datadog-agent:4318"},
+		{bundle.TypeSplunk, "splunk-otel-collector:4318"},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.ty), func(t *testing.T) {
+			p := &BundlePayload{
+				Type:     tc.ty,
+				Endpoint: tc.endpoint,
+				Insecure: true,
 			}
-			if !strings.Contains(err.Error(), "not yet implemented") {
-				t.Errorf("error text wrong: %v", err)
+			exp, err := BuildExporter(p, CRKey{"ns", "cr"})
+			if err != nil {
+				t.Fatalf("expected exporter to build, got: %v", err)
+			}
+			if exp == nil {
+				t.Fatal("nil exporter")
+			}
+			// The exporter's Name() should mention the backend type so
+			// log lines and Degraded conditions are attributable.
+			if !strings.Contains(exp.Name(), string(tc.ty)) {
+				t.Errorf("Name() = %q; expected to contain %q", exp.Name(), tc.ty)
+			}
+			ctx, cancel := contextWithTimeout(1)
+			defer cancel()
+			_ = exp.Close(ctx)
+		})
+	}
+}
+
+func TestBuildExporter_ZipkinReturnsHelpfulError(t *testing.T) {
+	_, err := BuildExporter(&BundlePayload{Type: bundle.TypeZipkin, Endpoint: "zipkin:9411"}, CRKey{"ns", "n"})
+	if err == nil {
+		t.Fatal("expected error from zipkin exporter")
+	}
+	if !strings.Contains(err.Error(), "OpenTelemetry Collector") {
+		t.Errorf("error should point at OTel Collector; got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "type: otlp") {
+		t.Errorf("error should suggest type: otlp; got: %v", err)
+	}
+}
+
+func TestBuildExporter_EmptyEndpointRejected(t *testing.T) {
+	for _, ty := range []bundle.Type{bundle.TypeOTLP, bundle.TypeJaeger, bundle.TypeDataDog, bundle.TypeSplunk} {
+		t.Run(string(ty), func(t *testing.T) {
+			_, err := BuildExporter(&BundlePayload{Type: ty}, CRKey{"ns", "n"})
+			if err == nil {
+				t.Fatalf("expected error for empty endpoint on %q", ty)
+			}
+			if !strings.Contains(err.Error(), "endpoint") {
+				t.Errorf("error should mention endpoint; got: %v", err)
 			}
 		})
 	}
@@ -152,10 +198,6 @@ func TestBuildExporter_NilPayload(t *testing.T) {
 	}
 }
 
-// --- helpers ----------------------------------------------------------
-
-// contextWithTimeout is a tiny helper so test files don't all need to
-// import time + context for every trivial cleanup.
 func contextWithTimeout(seconds int) (context.Context, func()) {
 	return context.WithCancel(context.Background()) //nolint:contextcheck // tests tolerate indefinite ctx
 }

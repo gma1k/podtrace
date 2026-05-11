@@ -206,7 +206,7 @@ func ensureExporterConfig(t *testing.T, c client.Client, namespace, name string)
 func locateCRDPath(t *testing.T) string {
 	t.Helper()
 	repoRoot := findRepoRoot(t)
-	src := filepath.Join(repoRoot, "deploy", "charts", "podtrace", "crds")
+	src := filepath.Join(repoRoot, "deploy", "charts", "podtrace", "templates", "crds")
 	dst := t.TempDir()
 
 	entries, err := os.ReadDir(src)

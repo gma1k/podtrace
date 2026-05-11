@@ -1,12 +1,12 @@
 apiVersion: podtrace.io/v1alpha1
 kind: PodTrace
 metadata:
-  name: unsupported-pt
+  name: degraded-pt
 status:
   (conditions[?type == 'Degraded'].status | [0]): "True"
   (conditions[?type == 'Degraded'].reason | [0]): AgentNodeStatus
   (conditions[?type == 'Degraded'].message | [0]):
-    (contains(@, 'not yet implemented')): true
+    (contains(@, 'OpenTelemetry Collector')): true
   nodeStatus:
   - ready: false
-    (contains(message, 'not yet implemented')): true
+    (contains(message, 'OpenTelemetry Collector')): true

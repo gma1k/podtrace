@@ -1,0 +1,24 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: exporter-degraded-surface
+spec:
+  description: |
+    Property tested: when an agent cannot build an exporter for a CR,
+    the failure is visible on kubectl describe, Degraded=True with
+    Reason=AgentNodeStatus, NodeStatus row Ready=false with a useful
+    Message. This is the user-visible failure path the Phase 0
+    tombstone wiring guarantees.
+  timeouts:
+    apply: 30s
+    assert: 180s
+  steps:
+    - name: setup
+      try:
+        - apply:
+            file: ./resources.yaml
+
+    - name: degraded-surfaces
+      try:
+        - assert:
+            file: ./assert-degraded.yaml

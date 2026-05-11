@@ -2,6 +2,22 @@
 
 This guide provides detailed instructions for setting up and configuring each tracing exporter supported by `Podtrace`.
 
+## Agent-mode exporter support
+
+The continuous-trace agent (DaemonSet) supports the following ExporterConfig types. All four OTLP-speaking backends share a single transport (`go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp`); operational differences are configuration, not protocol.
+
+| `spec.type` | Agent mode | Operational model |
+|---|---|---|
+| `otlp` | ✅ Supported | Point at any OTLP HTTP receiver (default port 4318). |
+| `jaeger` | ✅ Supported | Jaeger 1.35+ natively accepts OTLP; point at Jaeger's OTLP port (typically 4318). |
+| `datadog` | ✅ Supported | Recommended: deploy the Datadog Agent Helm chart with the OTLP receiver enabled and set `spec.datadog.endpoint` to the in-cluster Agent service (default: `datadog-agent.datadog:4318`). The agent receives spans via OTLP; the API key in `apiKeySecretRef` is forwarded as the `DD-API-KEY` header for direct-intake scenarios. |
+| `splunk` | ✅ Supported | Recommended: deploy the official Splunk OpenTelemetry Collector Helm chart with the OTLP receiver enabled and set `spec.splunk.endpoint` to its OTLP port. The token in `tokenSecretRef` is forwarded as the `X-SF-TOKEN` header. |
+| `zipkin` | ❌ Not supported directly | The OpenTelemetry SDK's Zipkin exporter is deprecated (removal scheduled early 2027). For Zipkin destinations, run an OpenTelemetry Collector configured with the `zipkin` exporter and point podtrace at the Collector via `type: otlp`. |
+
+For Zipkin: the agent returns a structured error explaining the OTel Collector pattern. That error appears as `Degraded=True` with `Reason=AgentNodeStatus` on `kubectl describe podtrace`, so users see the cause immediately without reading agent logs.
+
+CLI / one-shot diagnose mode (`podtrace diagnose`) continues to support every backend including direct Zipkin, since that path uses its own hand-rolled exporters rather than the agent's SDK-based pipeline.
+
 ## Table of Contents
 
 - [OpenTelemetry (OTLP)](#opentelemetry-otlp)

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -44,6 +45,36 @@ func TestComputeNodeReport_EmptyRouterIsZeroed(t *testing.T) {
 	}
 	if rep.Node != "node-x" {
 		t.Errorf("Node=%q want node-x", rep.Node)
+	}
+}
+
+// TestEmitOnce_HeartbeatFiresEveryTick pins the liveness wiring:
+// every status-writer tick must call probes.
+func TestEmitOnce_HeartbeatFiresEveryTick(t *testing.T) {
+	router := NewRouter(nil)
+	calls := 0
+	w := &StatusWriter{
+		Client:    nil,
+		NodeName:  "node-x",
+		Router:    router,
+		Ready:     func() bool { return true },
+		Heartbeat: func() { calls++ },
+	}
+	_ = w.emitOnce(context.Background())
+	if calls != 1 {
+		t.Errorf("Heartbeat call count = %d, want 1", calls)
+	}
+	_ = w.emitOnce(context.Background())
+	if calls != 2 {
+		t.Errorf("Heartbeat call count = %d, want 2", calls)
+	}
+}
+
+func TestEmitOnce_NilHeartbeatIsSafe(t *testing.T) {
+	router := NewRouter(nil)
+	w := &StatusWriter{Router: router, NodeName: "node-x", Ready: func() bool { return true }}
+	if err := w.emitOnce(context.Background()); err != nil {
+		t.Fatalf("emitOnce with nil Heartbeat: %v", err)
 	}
 }
 

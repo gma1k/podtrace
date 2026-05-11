@@ -25,6 +25,8 @@ import (
 // SecretKeySelector into it.
 const CredentialKey = "credential"
 
+const CurrentVersion = "v1"
+
 // Type names the exporter implementation a Payload targets.
 type Type string
 
@@ -36,10 +38,9 @@ const (
 	TypeDataDog Type = "datadog"
 )
 
-// Payload is the normalized, exporter-agnostic view of an ExporterConfig.
-// Fields that apply only to specific types (Site for DataDog, Insecure
-// for OTLP) are set only for those types and ignored otherwise.
 type Payload struct {
+	Version string `yaml:"version,omitempty"`
+
 	// Type selects the exporter implementation.
 	Type Type `yaml:"type"`
 
@@ -84,7 +85,11 @@ func FromConfigMapData(data map[string]string) (*Payload, error) {
 	if data == nil {
 		return nil, fmt.Errorf("bundle: nil ConfigMap data")
 	}
+	if v := data["version"]; v != "" && v != CurrentVersion {
+		return nil, fmt.Errorf("bundle: unsupported version %q (this build understands %q)", v, CurrentVersion)
+	}
 	p := &Payload{
+		Version:    data["version"],
 		Type:       Type(data["type"]),
 		Endpoint:   data["endpoint"],
 		Protocol:   data["protocol"],
@@ -124,7 +129,8 @@ func ToConfigMapData(p *Payload) map[string]string {
 		return nil
 	}
 	out := map[string]string{
-		"type": string(p.Type),
+		"version": CurrentVersion,
+		"type":    string(p.Type),
 	}
 	if p.Endpoint != "" {
 		out["endpoint"] = p.Endpoint
@@ -168,6 +174,9 @@ func FromYAML(raw []byte) (*Payload, error) {
 	if err := yaml.Unmarshal(raw, &p); err != nil {
 		return nil, fmt.Errorf("bundle: parse YAML: %w", err)
 	}
+	if p.Version != "" && p.Version != CurrentVersion {
+		return nil, fmt.Errorf("bundle: unsupported version %q (this build understands %q)", p.Version, CurrentVersion)
+	}
 	if p.Type == "" {
 		return nil, fmt.Errorf("bundle: missing required field 'type'")
 	}
@@ -184,5 +193,7 @@ func ToYAML(p *Payload) ([]byte, error) {
 	if p == nil {
 		return nil, fmt.Errorf("bundle: nil payload")
 	}
-	return yaml.Marshal(p)
+	out := *p
+	out.Version = CurrentVersion
+	return yaml.Marshal(&out)
 }
