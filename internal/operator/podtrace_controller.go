@@ -30,9 +30,6 @@ import (
 //   - Aggregates status.conditions from the per-node status entries
 //     written directly by agents. It does NOT touch status.nodeStatus —
 //     that array is agent-owned and patched via merge.
-//
-// The agent is not in the hot path: status rollup runs on the standard
-// reconcile cadence, not per-event.
 type PodTraceReconciler struct {
 	client.Client
 	Scheme          *runtime.Scheme
@@ -56,8 +53,6 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, fmt.Errorf("get PodTrace: %w", err)
 	}
 
-	// Deletion path: tear down cross-namespace children first, then
-	// release the finalizer so the apiserver actually removes the CR.
 	if !pt.DeletionTimestamp.IsZero() {
 		if err := cleanupPodTraceChildren(ctx, r.Client, &pt, r.SystemNamespace); err != nil {
 			return ctrl.Result{}, err
@@ -73,8 +68,6 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		if err := r.Update(ctx, &pt); err != nil {
 			return ctrl.Result{}, fmt.Errorf("set finalizer: %w", err)
 		}
-		// Re-queue; the Update mutated the object and we want a fresh
-		// Get before running the rest of the reconcile.
 		return ctrl.Result{Requeue: true}, nil
 	}
 
@@ -85,7 +78,6 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	r.setCondition(&pt, ConditionPaused, metav1.ConditionFalse, "NotPaused", "")
 
-	// Resolve the exporter. Its readiness gates bundle sync.
 	var ec podtracev1alpha1.ExporterConfig
 	ecKey := types.NamespacedName{Namespace: pt.Namespace, Name: pt.Spec.ExporterRef.Name}
 	if err := r.Get(ctx, ecKey, &ec); err != nil {
@@ -105,11 +97,14 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		_ = r.Status().Update(ctx, &pt)
 		return ctrl.Result{}, err
 	}
-	r.setCondition(&pt, ConditionDegraded, metav1.ConditionFalse, "Reconciled", "")
 
-	// matchedPods and ready-rollup are conservative when there are no
-	// per-node reports yet (first reconcile). Agents patch status.nodeStatus
-	// every ~30s (StatusReportInterval), after which this rollup is accurate.
+	if node, msg, ok := firstDegradedNode(pt.Status.NodeStatus); ok {
+		r.setCondition(&pt, ConditionDegraded, metav1.ConditionTrue, "AgentNodeStatus",
+			fmt.Sprintf("node %s: %s", node, msg))
+	} else {
+		r.setCondition(&pt, ConditionDegraded, metav1.ConditionFalse, "Reconciled", "")
+	}
+
 	pt.Status.MatchedPods = countReadyPods(pt.Status.NodeStatus)
 	allReady := len(pt.Status.NodeStatus) > 0 && allNodesReady(pt.Status.NodeStatus)
 	r.setCondition(&pt, ConditionReady, conditionStatusFromBool(allReady), "AgentsReady",
@@ -159,14 +154,6 @@ func (r *PodTraceReconciler) exporterConfigToPodTraces(ctx context.Context, obj 
 	return reqs
 }
 
-// syncExporterBundle creates / updates the per-PodTrace ConfigMap+Secret
-// in the system namespace. The ConfigMap carries endpoint metadata that
-// agents use to construct the exporter; the Secret carries the resolved
-// credential material (copied from user-namespace Secrets at sync time).
-//
-// One bundle per PodTrace simplifies the agent-side view: an agent looks
-// up "the bundle for PodTrace X" and that is the ground truth for
-// everything needed to export its events.
 func (r *PodTraceReconciler) syncExporterBundle(ctx context.Context, pt *podtracev1alpha1.PodTrace, ec *podtracev1alpha1.ExporterConfig) error {
 	systemNS := r.SystemNamespace
 	name := ExporterBundleName(pt.UID)
@@ -183,9 +170,6 @@ func (r *PodTraceReconciler) syncExporterBundle(ctx context.Context, pt *podtrac
 			LabelExporterConfig: ec.Name,
 		}),
 	}
-	// No ownerReference: Kubernetes forbids a namespaced owner (PodTrace)
-	// from owning a child in a different namespace. Finalizer + label-
-	// based cleanup handles deletion — see finalizer.go.
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, cm, func() error {
 		cm.Labels = mergeLabels(cm.Labels, map[string]string{
 			LabelManagedBy:      ManagedByValue,
@@ -203,9 +187,6 @@ func (r *PodTraceReconciler) syncExporterBundle(ctx context.Context, pt *podtrac
 		return fmt.Errorf("bundle ConfigMap: %w", err)
 	}
 
-	// Only create a companion Secret when the exporter actually references
-	// one. Exporters without credentials (e.g. plain Jaeger/Zipkin) get a
-	// ConfigMap-only bundle.
 	if credSecretRef != nil {
 		credData, err := r.loadCredentialSecret(ctx, ec.Namespace, *credSecretRef)
 		if err != nil {
@@ -255,7 +236,6 @@ func (r *PodTraceReconciler) loadCredentialSecret(ctx context.Context, namespace
 	return map[string][]byte{"credential": val}, nil
 }
 
-// setCondition, scoped to PodTrace status.
 func (r *PodTraceReconciler) setCondition(pt *podtracev1alpha1.PodTrace, condType string, status metav1.ConditionStatus, reason, message string) {
 	pt.Status.Conditions = upsertCondition(pt.Status.Conditions, metav1.Condition{
 		Type:               condType,
@@ -274,6 +254,27 @@ func allNodesReady(ns []podtracev1alpha1.PodTraceNodeStatus) bool {
 		}
 	}
 	return true
+}
+
+// firstDegradedNode returns the (node, message) of the lexicographically
+// first NodeStatus row that an agent has tombstoned (Ready=false with a
+// non-empty Message). The lexicographic pick keeps the rolled-up
+// condition stable across reconciles when multiple nodes report errors;
+// users see one representative cause and can run
+//   kubectl get podtrace -o jsonpath
+// to enumerate the rest.
+func firstDegradedNode(ns []podtracev1alpha1.PodTraceNodeStatus) (node, message string, ok bool) {
+	for _, n := range ns {
+		if n.Ready || n.Message == "" {
+			continue
+		}
+		if !ok || n.Node < node {
+			node = n.Node
+			message = n.Message
+			ok = true
+		}
+	}
+	return node, message, ok
 }
 
 // countReadyPods sums activeCgroups across all per-node reports as a

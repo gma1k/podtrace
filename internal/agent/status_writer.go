@@ -12,20 +12,8 @@ import (
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
 )
 
-// DefaultStatusReportInterval matches the TracerConfig default. Tests
-// override to a much shorter interval.
 const DefaultStatusReportInterval = 30 * time.Second
 
-// StatusWriter patches PodTrace.status.nodeStatus on a timer. One entry
-// per node is maintained, keyed on the node name via the
-// `patchMergeKey: "node"` strategic-merge marker declared on the Go
-// field. Many agents writing concurrently therefore do not overwrite
-// each other's entries.
-//
-// The writer never reads per-CR state directly — it takes a snapshot
-// from the router (for cgroup counts) and the per-CR stats table (for
-// events/drops) under the router's own lock. This keeps status writes
-// off the event hot path.
 type StatusWriter struct {
 	Client   client.Client
 	NodeName string
@@ -35,8 +23,6 @@ type StatusWriter struct {
 	Ready func() bool
 }
 
-// Run blocks until ctx is done, emitting status patches every
-// Interval. Safe to call at most once per StatusWriter instance.
 func (w *StatusWriter) Run(ctx context.Context) error {
 	interval := w.Interval
 	if interval <= 0 {
@@ -59,34 +45,37 @@ func (w *StatusWriter) Run(ctx context.Context) error {
 	}
 }
 
-// emitOnce walks every active CR rule and patches that CR's
-// status.nodeStatus with the writer's row. Errors are returned
-// per-tick (not per-CR) so the Run loop can log one line rather than
-// spamming one per CR.
 func (w *StatusWriter) emitOnce(ctx context.Context) error {
 	rules := w.Router.RulesSnapshot()
 	stats := w.Router.Stats().snapshot()
-	ready := true
+	agentReady := true
 	if w.Ready != nil {
-		ready = w.Ready()
+		agentReady = w.Ready()
 	}
 
 	var firstErr error
 	for _, rule := range rules {
-		counters := stats[rule.Key]
-		entry := podtracev1alpha1.PodTraceNodeStatus{
-			Node:          w.NodeName,
-			Ready:         ready,
-			ActiveCgroups: lenToInt32(len(rule.CgroupIDs)),
-			EventsTotal:   counters.Events,
-			DroppedEvents: counters.Dropped,
-			LastHeartbeat: metav1.NewTime(time.Now()),
-		}
+		entry := buildNodeStatusEntry(w.NodeName, &rule, stats[rule.Key], agentReady, time.Now())
 		if err := w.patchCRStatus(ctx, rule.Key, entry); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
 	return firstErr
+}
+
+func buildNodeStatusEntry(node string, rule *CRRule, counters crCounters, agentReady bool, now time.Time) podtracev1alpha1.PodTraceNodeStatus {
+	entry := podtracev1alpha1.PodTraceNodeStatus{
+		Node:          node,
+		Ready:         agentReady && rule.Err == nil,
+		ActiveCgroups: lenToInt32(len(rule.CgroupIDs)),
+		EventsTotal:   counters.Events,
+		DroppedEvents: counters.Dropped,
+		LastHeartbeat: metav1.NewTime(now),
+	}
+	if rule.Err != nil {
+		entry.Message = rule.Err.Error()
+	}
+	return entry
 }
 
 func (w *StatusWriter) patchCRStatus(ctx context.Context, key CRKey, entry podtracev1alpha1.PodTraceNodeStatus) error {
@@ -107,10 +96,6 @@ func (w *StatusWriter) patchCRStatus(ctx context.Context, key CRKey, entry podtr
 	)
 }
 
-// ComputeNodeReport assembles the aggregate counters a liveness
-// handler might expose. Split out so the probes package and the
-// /metrics server can share the same view without duplicating the
-// snapshotting code.
 func ComputeNodeReport(nodeName string, router *Router, ready bool) NodeReport {
 	rules := router.RulesSnapshot()
 	stats := router.Stats().snapshot()
@@ -139,6 +124,4 @@ func ComputeNodeReport(nodeName string, router *Router, ready bool) NodeReport {
 	}
 }
 
-// compile-time assertion we do not accidentally lose thread-safety by
-// adding a mutable field.
 var _ sync.Locker = (*sync.Mutex)(nil)

@@ -130,15 +130,12 @@ func TestRouter_ExporterErrorIsCountedAsDrop(t *testing.T) {
 	if stats[CRKey{"ns", "ok"}].Events != 1 {
 		t.Errorf("healthy exporter should still receive event, got %+v", stats[CRKey{"ns", "ok"}])
 	}
-	// One bad exporter must not prevent the other from getting events.
 	if good.count() != 1 {
 		t.Errorf("good exporter count=%d, want 1", good.count())
 	}
 }
 
 func TestRouter_EmptyFiltersDeliversNothing(t *testing.T) {
-	// Empty filter set must be "deny all" rather than "match all" — a
-	// misconfigured CR should not produce a flood.
 	exp := &recExp{name: "x"}
 	r := NewRouter(nil)
 	r.Publish([]CRRule{
@@ -188,6 +185,77 @@ func TestRouter_PublishDropsStaleStats(t *testing.T) {
 	}
 }
 
+// TestRouter_Export_SkipsTombstoneRules covers the router's tombstone
+// contract: a CRRule with Err != nil (or Exporter == nil) must be
+// dropped during dispatch — never NPE, never deliver events to a nil
+// exporter, never count the tombstone as a successful or dropped
+// delivery. Healthy rules sharing the same cgroup must still receive
+// their events.
+func TestRouter_Export_SkipsTombstoneRules(t *testing.T) {
+	good := &recExp{name: "good"}
+	r := NewRouter(nil)
+	r.Publish([]CRRule{
+		{
+			Key:       CRKey{"ns", "tomb"},
+			CgroupIDs: map[uint64]struct{}{1: {}},
+			Filters:   map[events.EventType]struct{}{events.EventDNS: {}},
+			Exporter:  nil,
+			Err:       errors.New("build exporter: not yet implemented"),
+		},
+		mkRule("ns", "ok", []uint64{1}, []events.EventType{events.EventDNS}, good),
+	})
+
+	batch := []*events.Event{{CgroupID: 1, Type: events.EventDNS}}
+	if err := r.Export(context.Background(), batch); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+
+	if good.count() != 1 {
+		t.Errorf("healthy exporter count = %d, want 1", good.count())
+	}
+	stats := r.Stats().snapshot()
+	if stats[CRKey{"ns", "tomb"}].Events != 0 || stats[CRKey{"ns", "tomb"}].Dropped != 0 {
+		t.Errorf("tombstone must not bump any counter, got %+v", stats[CRKey{"ns", "tomb"}])
+	}
+	if stats[CRKey{"ns", "ok"}].Events != 1 {
+		t.Errorf("healthy CR events = %d, want 1", stats[CRKey{"ns", "ok"}].Events)
+	}
+}
+
+// TestRouter_Export_TombstoneWithNilExporterButNoErr defends against
+// a hypothetical caller that builds a CRRule with Exporter==nil but
+// forgot to set Err. The dispatch path must still skip it rather than
+// NPE — Exporter==nil is the canonical "do not dispatch" signal.
+func TestRouter_Export_TombstoneWithNilExporterButNoErr(t *testing.T) {
+	r := NewRouter(nil)
+	r.Publish([]CRRule{
+		{
+			Key:       CRKey{"ns", "nilexp"},
+			CgroupIDs: map[uint64]struct{}{1: {}},
+			Filters:   map[events.EventType]struct{}{events.EventDNS: {}},
+			Exporter:  nil,
+		},
+	})
+	if err := r.Export(context.Background(), []*events.Event{{CgroupID: 1, Type: events.EventDNS}}); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+}
+
+// TestRouter_Close_TombstonesAreSafeToClose asserts that Close handles
+// tombstone rules (Exporter == nil) without panicking. Documents that
+// the router's shutdown path coexists with the reconciler's tombstone
+// pattern.
+func TestRouter_Close_TombstonesAreSafeToClose(t *testing.T) {
+	r := NewRouter(nil)
+	r.Publish([]CRRule{
+		{Key: CRKey{"ns", "tomb"}, Err: errors.New("x")},
+		mkRule("ns", "ok", []uint64{1}, []events.EventType{events.EventDNS}, &recExp{name: "ok"}),
+	})
+	if err := r.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
 func TestRouter_ConcurrentExportAndPublish(t *testing.T) {
 	r := NewRouter(nil)
 	exp := &recExp{name: "e"}
@@ -211,8 +279,6 @@ func TestRouter_ConcurrentExportAndPublish(t *testing.T) {
 		}
 	}()
 	wg.Wait()
-	// No deadlock, no race (run with -race). Exact counts are
-	// non-deterministic; correctness is that we returned at all.
 }
 
 // helpers

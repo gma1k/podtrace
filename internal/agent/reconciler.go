@@ -31,12 +31,6 @@ import (
 // to changes on three resource types — PodTrace (cluster), Pod
 // (node-local), and ConfigMap (system-NS bundles) — and rebuilds the
 // Router's full rule set from scratch on every tick.
-//
-// "Rebuild from scratch" rather than incremental deltas is deliberate:
-// the rule set is small (usually <10 CRs per cluster, not per node),
-// the informer cache is already in memory, and a full rebuild is
-// simpler to reason about than a diff loop that has to track
-// add/modify/delete per informer.
 type AgentReconciler struct {
 	client.Client
 	NodeName        string
@@ -46,16 +40,10 @@ type AgentReconciler struct {
 
 	TargetsCh chan tracer.TargetSet
 
-	// ExporterBuilder is the dependency injection point for
-	// BuildExporter. Tests override with a fake exporter factory.
 	ExporterBuilder func(payload *BundlePayload, crKey CRKey) (tracer.Exporter, error)
 
 	CgroupResolver func(pods []*corev1.Pod) (map[uint64]struct{}, error)
 
-	// ExporterCache memoizes the tracer.Exporter per CR keyed by
-	// bundle ResourceVersion. A bundle ResourceVersion change (e.g.
-	// secret rotation) forces a rebuild; a no-op reconcile does not
-	// reopen connections.
 	exporterCacheMu sync.Mutex
 	exporterCache   map[CRKey]cachedExporter
 }
@@ -101,12 +89,10 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		r.Metrics.ReconcileTotal.Inc()
 	}
 
-	// --- step 1: list CRs ------------------------------------------------
 	var ptList podtracev1alpha1.PodTraceList
 	if err := r.List(ctx, &ptList); err != nil {
 		return ctrl.Result{}, fmt.Errorf("list PodTrace: %w", err)
 	}
-	// --- step 2: list local pods ---------------------------------------
 	var pods corev1.PodList
 	if err := r.List(ctx, &pods); err != nil {
 		return ctrl.Result{}, fmt.Errorf("list Pods: %w", err)
@@ -119,7 +105,6 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
-	// --- step 3: for each CR, match pods → compute cgroups → load bundle
 	rules := make([]CRRule, 0, len(ptList.Items))
 	activeKeys := make(map[CRKey]struct{}, len(ptList.Items))
 
@@ -133,12 +118,14 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		matched, err := MatchPodTraceAgainstPods(pt, localPods)
 		if err != nil {
 			logger.Error(err, "match pods", "cr", key)
+			rules = append(rules, CRRule{
+				Key: key,
+				Err: fmt.Errorf("match pods: %w", err),
+			})
+			activeKeys[key] = struct{}{}
 			continue
 		}
 		if len(matched) == 0 {
-			// No pods on this node match — release the cached exporter
-			// so credential memory does not linger, and skip publishing
-			// a rule for this CR.
 			r.releaseExporter(key)
 			continue
 		}
@@ -146,6 +133,13 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		cgroupIDs, err := r.CgroupResolver(matched)
 		if err != nil {
 			logger.Error(err, "resolve cgroup IDs", "cr", key)
+			rules = append(rules, CRRule{
+				Key:         key,
+				Filters:     filtersToSet(pt.Spec.Filters),
+				MatchedPods: lenToInt32(len(matched)),
+				Err:         fmt.Errorf("resolve cgroup IDs: %w", err),
+			})
+			activeKeys[key] = struct{}{}
 			continue
 		}
 
@@ -156,12 +150,29 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 				continue
 			}
 			logger.Error(err, "load bundle", "cr", key)
+			rules = append(rules, CRRule{
+				Key:         key,
+				CgroupIDs:   cgroupIDs,
+				Filters:     filtersToSet(pt.Spec.Filters),
+				MatchedPods: lenToInt32(len(matched)),
+				Err:         fmt.Errorf("load bundle: %w", err),
+			})
+			activeKeys[key] = struct{}{}
 			continue
 		}
 
 		exporter, err := r.obtainExporter(key, bundle)
 		if err != nil {
 			logger.Error(err, "build exporter", "cr", key)
+			rules = append(rules, CRRule{
+				Key:            key,
+				CgroupIDs:      cgroupIDs,
+				Filters:        filtersToSet(pt.Spec.Filters),
+				BundleRevision: bundle.ResourceVer,
+				MatchedPods:    lenToInt32(len(matched)),
+				Err:            fmt.Errorf("build exporter: %w", err),
+			})
+			activeKeys[key] = struct{}{}
 			continue
 		}
 
@@ -176,17 +187,14 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		activeKeys[key] = struct{}{}
 	}
 
-	// Release cached exporters for CRs that dropped off the active set.
 	r.reapStaleExporters(activeKeys)
 
 	r.Router.Publish(rules)
 
-	// --- step 4: feed the union cgroup set to the tracer ---------------
 	targets := buildTargetSet(rules, localPods)
 	select {
 	case r.TargetsCh <- targets:
 	default:
-		// Channel full → keep-latest semantics. Drop one and retry.
 		select {
 		case <-r.TargetsCh:
 		default:
@@ -197,7 +205,6 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
-	// --- step 5: refresh metrics view ----------------------------------
 	if r.Metrics != nil {
 		r.Metrics.RefreshFromRouter(r.Router)
 	}
@@ -205,8 +212,6 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	return ctrl.Result{}, nil
 }
 
-// enqueueAllPodTraces turns a Pod event into one reconcile request per
-// PodTrace: any pod change can affect any CR's matched set.
 func (r *AgentReconciler) enqueueAllPodTraces(ctx context.Context, _ client.Object) []reconcile.Request {
 	var list podtracev1alpha1.PodTraceList
 	if err := r.List(ctx, &list); err != nil {
@@ -247,7 +252,6 @@ func (r *AgentReconciler) obtainExporter(key CRKey, bundle *BundlePayload) (trac
 		if entry.bundleRV == bundle.ResourceVer {
 			return entry.exporter, nil
 		}
-		// Bundle RV changed: close the old exporter before replacing.
 		if entry.exporter != nil {
 			_ = entry.exporter.Close(context.Background())
 		}
@@ -295,9 +299,6 @@ func (r *AgentReconciler) reapStaleExporters(active map[CRKey]struct{}) {
 // number — the value the kernel stamps on every event. Pods with
 // unresolvable cgroups are silently skipped (they will return on the
 // next reconcile when the kubelet has published a cgroup path).
-//
-// The agent must run with host PID + cgroup mounts for Stat to reach
-// the actual inode; the DaemonSet manifest guarantees this.
 func resolveCgroupIDs(pods []*corev1.Pod) (map[uint64]struct{}, error) {
 	out := map[uint64]struct{}{}
 	for _, p := range pods {
@@ -322,11 +323,6 @@ func resolveCgroupIDs(pods []*corev1.Pod) (map[uint64]struct{}, error) {
 // heuristic here is slightly-lossy and relies on the reconcile loop
 // picking up a pod on a later tick once its cgroup path materializes.
 func cgroupPathForContainer(p *corev1.Pod, _ string) string {
-	// Systemd cgroup driver emits paths under
-	//   /sys/fs/cgroup/kubepods.slice/kubepods-<qos>.slice/kubepods-<qos>-pod<UID>.slice
-	// kubelet's "cgroupfs" driver emits
-	//   /sys/fs/cgroup/kubepods/<qos>/pod<UID>
-	// We walk both layouts and return the first that stat()s.
 	uid := strings.ReplaceAll(string(p.UID), "-", "_")
 	qos := strings.ToLower(string(p.Status.QOSClass))
 	if qos == "" {
@@ -374,8 +370,6 @@ func buildTargetSet(rules []CRRule, pods []*corev1.Pod) tracer.TargetSet {
 				continue
 			}
 			seen[id] = struct{}{}
-			// Find the pod whose cgroup matches this ID, copy its
-			// metadata onto the Target so exporters can enrich events.
 			for _, p := range pods {
 				path := cgroupPathForContainer(p, "")
 				if path == "" {

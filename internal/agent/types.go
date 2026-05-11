@@ -15,16 +15,8 @@ import (
 	"github.com/podtrace/podtrace/pkg/tracer"
 )
 
-// NodeName is supplied by the agent DaemonSet via the downward API
-// ($NODE_NAME). It scopes every informer filter and every status patch.
-// Kept as a package-level string rather than threaded everywhere
-// because it is set once at process start and never changes.
 type NodeName string
 
-// CRKey uniquely identifies a PodTrace CR cluster-wide.
-// (namespace, name) is guaranteed unique by the apiserver; we do not
-// use UID because it is not stable across recreate-with-same-name and
-// our router rules are keyed on user-facing identity.
 type CRKey struct {
 	Namespace string
 	Name      string
@@ -32,25 +24,19 @@ type CRKey struct {
 
 func (k CRKey) String() string { return k.Namespace + "/" + k.Name }
 
-// CRRule is the per-CR snapshot the router needs to route events.
-// Assembled by the reconcile loop from matched pods + exporter bundles
-// and handed to the router as a complete replacement each time
-// anything under the CR changes. Immutable once published.
 type CRRule struct {
 	Key       CRKey
-	CgroupIDs map[uint64]struct{}   // kernel cgroup inode numbers the tracer will see on events
+	CgroupIDs map[uint64]struct{} // kernel cgroup inode numbers the tracer will see on events
 	Filters   map[events.EventType]struct{}
 	Exporter  tracer.Exporter
 
-	// BundleRevision is the ResourceVersion of the exporter bundle
-	// ConfigMap+Secret used to construct Exporter. Recorded so the
-	// reconcile loop can detect credential rotation without recreating
-	// an identical exporter.
 	BundleRevision string
 
 	// MatchedPods is the count of local pods currently satisfying the
 	// CR's selector. Status writer reports this on status.nodeStatus.
 	MatchedPods int32
+
+	Err error
 }
 
 // NodeReport aggregates the counters the status writer reports on one
