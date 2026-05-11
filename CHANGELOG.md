@@ -9,6 +9,13 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.11.9](https://github.com/gma1k/podtrace/compare/v0.11.8...v0.11.9) (2026-05-11)
+
+
+### Added
+
+* **agent:** surface per-CR failures as Degraded condition with cause on NodeStatus.Message ([#109](https://github.com/gma1k/podtrace/issues/109)) ([bd0322b](https://github.com/gma1k/podtrace/commit/bd0322bdd97229a8d5fd7b1ff55c3bbd24f9a504))
+
 ## [0.11.8](https://github.com/gma1k/podtrace/compare/v0.11.7...v0.11.8) (2026-05-09)
 
 
