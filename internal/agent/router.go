@@ -38,13 +38,6 @@ func NewRouter(stats *perCRStats) *Router {
 	}
 }
 
-// Publish atomically replaces the rule set. Callers must supply a
-// *complete* snapshot; Publish does not merge. Rules are deep-copied
-// defensively so the caller is free to mutate its own copy afterward.
-//
-// Per-CR stats are preserved for CRs that still appear in the new
-// snapshot and dropped for CRs that are removed — so a CR that blinks
-// out and back does not accumulate stale counters.
 func (r *Router) Publish(rules []CRRule) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -56,7 +49,6 @@ func (r *Router) Publish(rules []CRRule) {
 		seen[rule.Key] = struct{}{}
 	}
 
-	// Drop stats for any CR that disappeared from this publish.
 	for existing := range r.stats.snapshot() {
 		if _, ok := seen[existing]; !ok {
 			r.stats.drop(existing)
@@ -66,9 +58,6 @@ func (r *Router) Publish(rules []CRRule) {
 	r.rules = cp
 }
 
-// Snapshot returns the union of cgroup IDs across all active rules —
-// the set the tracer should currently be attached to. Order is not
-// guaranteed; uniqueness is.
 func (r *Router) Snapshot() []uint64 {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -86,10 +75,6 @@ func (r *Router) Snapshot() []uint64 {
 	return out
 }
 
-// FilterUnion returns the union of enabled event filters across all
-// active rules. The tracer uses this to decide which kprobe categories
-// to attach kernel-side — attaching a kprobe nobody consumes wastes
-// per-event CPU.
 func (r *Router) FilterUnion() []events.EventType {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -107,8 +92,6 @@ func (r *Router) FilterUnion() []events.EventType {
 	return out
 }
 
-// RulesSnapshot returns a read-only copy of the current rules. Used by
-// the status writer and by tests.
 func (r *Router) RulesSnapshot() []CRRule {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -117,25 +100,10 @@ func (r *Router) RulesSnapshot() []CRRule {
 	return out
 }
 
-// Stats exposes the shared per-CR counter table.
 func (r *Router) Stats() *perCRStats { return r.stats }
 
-// Name implements tracer.Exporter.
 func (r *Router) Name() string { return "cr-router" }
 
-// Export implements tracer.Exporter. It dispatches each event in the
-// batch to the subset of CR exporters whose cgroup set contains the
-// event's CgroupID AND whose filters include the event's type.
-//
-// A single event may fan out to multiple exporters (overlapping CRs)
-// or to none (an event from a cgroup no CR currently claims — rare,
-// usually means the tracer saw a detach-in-progress). In either case
-// we count the event against every CR that received it.
-//
-// Dispatch errors from one exporter must not abort delivery to others;
-// the router records the error via incrDropped and continues. This
-// matches pkg/tracer.Engine's contract that exporter failures are
-// non-fatal.
 func (r *Router) Export(ctx context.Context, batch []*events.Event) error {
 	r.mu.RLock()
 	rules := r.rules
@@ -145,8 +113,6 @@ func (r *Router) Export(ctx context.Context, batch []*events.Event) error {
 		return nil
 	}
 
-	// Per-rule filtered batches: amortises allocations when many rules
-	// overlap the same cgroup set.
 	filtered := make([][]*events.Event, len(rules))
 	for i := range rules {
 		filtered[i] = filtered[i][:0]
@@ -157,6 +123,9 @@ func (r *Router) Export(ctx context.Context, batch []*events.Event) error {
 			continue
 		}
 		for i := range rules {
+			if rules[i].Err != nil || rules[i].Exporter == nil {
+				continue
+			}
 			if !matchRule(&rules[i], ev) {
 				continue
 			}
@@ -168,6 +137,9 @@ func (r *Router) Export(ctx context.Context, batch []*events.Event) error {
 		if len(filtered[i]) == 0 {
 			continue
 		}
+		if rules[i].Exporter == nil {
+			continue
+		}
 		if err := rules[i].Exporter.Export(ctx, filtered[i]); err != nil {
 			r.stats.incrDropped(rules[i].Key, int64(len(filtered[i])))
 			continue
@@ -177,8 +149,6 @@ func (r *Router) Export(ctx context.Context, batch []*events.Event) error {
 	return nil
 }
 
-// Close implements tracer.Exporter. Called once during tracer shutdown.
-// Closes every downstream exporter; collects errors but never fails fast.
 func (r *Router) Close(ctx context.Context) error {
 	r.mu.Lock()
 	rules := r.rules
@@ -194,24 +164,10 @@ func (r *Router) Close(ctx context.Context) error {
 	return nil
 }
 
-// matchRule returns true when event `ev` should be delivered to the
-// exporter for `rule`. Both conditions must hold:
-//
-//  1. The event's cgroup ID is in the rule's cgroup set (the rule's
-//     PodTrace claims that pod right now).
-//  2. The event's type is enabled in the rule's filter set (the rule's
-//     PodTrace opted into that event category).
-//
-// Rule (1) relies on the kernel's cgroup-ID delivery semantics: our
-// kprobes stamp the task's cgroup inode on each event, so the agent
-// can route without knowing the per-pod path.
 func matchRule(rule *CRRule, ev *events.Event) bool {
 	if _, ok := rule.CgroupIDs[ev.CgroupID]; !ok {
 		return false
 	}
-	// Empty filter set means "no categories accepted" rather than "all
-	// accepted" — the operator always seeds a non-empty default, but we
-	// defend against an empty CR spec here to avoid a silent flood.
 	if len(rule.Filters) == 0 {
 		return false
 	}
@@ -219,16 +175,13 @@ func matchRule(rule *CRRule, ev *events.Event) bool {
 	return ok
 }
 
-// cloneCRRule returns a defensive copy of a CRRule. The maps are
-// reallocated; the Exporter reference is shared (Exporters are
-// intentionally long-lived — constructing one on every Publish would
-// reopen connections).
 func cloneCRRule(in CRRule) CRRule {
 	out := CRRule{
 		Key:            in.Key,
 		Exporter:       in.Exporter,
 		BundleRevision: in.BundleRevision,
 		MatchedPods:    in.MatchedPods,
+		Err:            in.Err,
 	}
 	if in.CgroupIDs != nil {
 		out.CgroupIDs = make(map[uint64]struct{}, len(in.CgroupIDs))

@@ -1,0 +1,38 @@
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: unsupported-jaeger
+spec:
+  type: jaeger
+  jaeger:
+    endpoint: http://jaeger.observability:14250
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unsupported-target
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: unsupported-target
+  template:
+    metadata:
+      labels:
+        app: unsupported-target
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.9
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: unsupported-pt
+spec:
+  selector:
+    matchLabels:
+      app: unsupported-target
+  filters: [dns]
+  exporterRef:
+    name: unsupported-jaeger

@@ -5,6 +5,8 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -45,14 +47,6 @@ func (e *recordingExporter) count() int {
 // TestAgentEnvtest_TwoOverlappingCRs_ProduceScopedStreams is the
 // multi-CR merge acceptance test. It asserts that applying two
 // PodTrace CRs with overlapping selectors on the same node produces:
-//
-//  1. One tracer: a single Router/Engine pipeline servicing both CRs.
-//  2. Correctly-scoped events: each recorder receives only the events
-//     whose (cgroup, filter) tuple matches its CR. Router unit tests
-//     cover this in isolation; this test re-verifies against
-//     apiserver-backed CRRules to catch integration regressions.
-//  3. Healthy per-node status: the StatusWriter patches nodeStatus
-//     entries on both CRs with non-zero counters after dispatch.
 func TestAgentEnvtest_TwoOverlappingCRs_ProduceScopedStreams(t *testing.T) {
 	scheme, c := setupSharedEnvtest(t)
 	_ = scheme
@@ -62,14 +56,9 @@ func TestAgentEnvtest_TwoOverlappingCRs_ProduceScopedStreams(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	// --- fixtures ---------------------------------------------------------
-	// Two pods on the same node, both labeled app=api. Both CRs select
-	// app=api so they overlap: each CR matches both pods.
 	createRunningPod(t, c, ns, "api-a", node, map[string]string{"app": "api"})
 	createRunningPod(t, c, ns, "api-b", node, map[string]string{"app": "api"})
 
-	// Synthetic cgroup IDs — tests do not have /sys/fs/cgroup access in
-	// envtest, so we map each pod name to a deterministic ID.
 	cgroupIDByPod := map[string]uint64{
 		"api-a": 1001,
 		"api-b": 1002,
@@ -98,9 +87,6 @@ func TestAgentEnvtest_TwoOverlappingCRs_ProduceScopedStreams(t *testing.T) {
 		t.Fatalf("create ptB: %v", err)
 	}
 
-	// Bundle ConfigMaps in system NS so LoadBundle returns cleanly.
-	// Content is arbitrary: the reconciler's ExporterBuilder is
-	// overridden by the test to return recorders regardless of payload.
 	for _, pt := range []*podtracev1alpha1.PodTrace{ptA, ptB} {
 		bundle := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
@@ -118,7 +104,6 @@ func TestAgentEnvtest_TwoOverlappingCRs_ProduceScopedStreams(t *testing.T) {
 		}
 	}
 
-	// --- reconciler with injected cgroup resolver + recorder exporters ----
 	recorders := map[CRKey]*recordingExporter{}
 	buildExporter := func(_ *BundlePayload, key CRKey) (tracer.Exporter, error) {
 		rec := &recordingExporter{name: key.String()}
@@ -147,11 +132,8 @@ func TestAgentEnvtest_TwoOverlappingCRs_ProduceScopedStreams(t *testing.T) {
 		ExporterBuilder: buildExporter,
 		CgroupResolver:  resolveCg,
 	}
-	// Initialise the exporter cache without calling SetupWithManager
-	// (which would require a real manager).
 	r.exporterCache = map[CRKey]cachedExporter{}
 
-	// --- run reconcile --------------------------------------------------
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: ptA.Name, Namespace: ns}}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -180,7 +162,6 @@ func TestAgentEnvtest_TwoOverlappingCRs_ProduceScopedStreams(t *testing.T) {
 		t.Error("CR-B filter missing EventConnect")
 	}
 
-	// Both CRs match the same two cgroup IDs (overlap).
 	for _, id := range []uint64{1001, 1002} {
 		if _, ok := ruleA.CgroupIDs[id]; !ok {
 			t.Errorf("CR-A missing cgroup %d", id)
@@ -190,8 +171,6 @@ func TestAgentEnvtest_TwoOverlappingCRs_ProduceScopedStreams(t *testing.T) {
 		}
 	}
 
-	// --- assertion 2: dispatch scopes events correctly ------------------
-	// Events for cgroup 1001 (both CRs claim it).
 	batch := []*events.Event{
 		{CgroupID: 1001, Type: events.EventDNS},      // A only (B does not filter DNS)
 		{CgroupID: 1001, Type: events.EventConnect},  // B only (A does not filter Connect)
@@ -215,7 +194,6 @@ func TestAgentEnvtest_TwoOverlappingCRs_ProduceScopedStreams(t *testing.T) {
 		t.Errorf("CR-B events=%d want 2", recB.count())
 	}
 
-	// --- assertion 3: status writer patches nodeStatus on both CRs ------
 	writer := &StatusWriter{
 		Client:   c,
 		NodeName: node,
@@ -250,11 +228,6 @@ func TestAgentEnvtest_TwoOverlappingCRs_ProduceScopedStreams(t *testing.T) {
 	}
 }
 
-// TestAgentEnvtest_EngineNoopBackendDispatch covers the Engine+Router
-// integration: events pushed through a NoopBackend reach the per-CR
-// exporters via the Router. Complements the acceptance test by
-// exercising the real engine loop rather than calling Router.Export
-// directly.
 func TestAgentEnvtest_EngineNoopBackendDispatch(t *testing.T) {
 	scheme, c := setupSharedEnvtest(t)
 	_ = scheme
@@ -324,14 +297,12 @@ func TestAgentEnvtest_EngineNoopBackendDispatch(t *testing.T) {
 		t.Fatalf("reconcile: %v", err)
 	}
 
-	// Inject events via the backend, which the Engine pumps into the Router.
 	for i := 0; i < 5; i++ {
 		if !backend.Inject(&events.Event{CgroupID: cgID, Type: events.EventDNS}) {
 			t.Fatalf("inject: backend not started")
 		}
 	}
 
-	// Wait for the recorder to see all five events.
 	deadline := time.Now().Add(5 * time.Second)
 	for rec.count() < 5 {
 		if time.Now().After(deadline) {
@@ -345,5 +316,118 @@ func TestAgentEnvtest_EngineNoopBackendDispatch(t *testing.T) {
 	case <-engineDone:
 	case <-time.After(3 * time.Second):
 		t.Error("engine did not shut down cleanly")
+	}
+}
+
+func TestAgentEnvtest_TombstoneSurfacesOnNodeStatus(t *testing.T) {
+	scheme, c := setupSharedEnvtest(t)
+	_ = scheme
+	systemNS := ensureSystemNamespace(t, c)
+	ns := freshNamespace(t, c)
+	const node = "tombstone-node"
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	createRunningPod(t, c, ns, "svc", node, map[string]string{"app": "svc"})
+
+	pt := &podtracev1alpha1.PodTrace{
+		ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: ns, UID: "uid-tomb"},
+		Spec: podtracev1alpha1.PodTraceSpec{
+			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "svc"}},
+			Filters:     []podtracev1alpha1.EventFilter{podtracev1alpha1.FilterDNS},
+			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ignored"},
+		},
+	}
+	if err := c.Create(ctx, pt); err != nil {
+		t.Fatalf("create pt: %v", err)
+	}
+	bundle := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      operator.ExporterBundleName(pt.UID),
+			Namespace: systemNS,
+			Labels: map[string]string{
+				operator.LabelManagedBy: operator.ManagedByValue,
+				operator.LabelComponent: operator.ComponentBundle,
+			},
+		},
+		Data: map[string]string{"type": "jaeger", "endpoint": "http://jaeger:14250"},
+	}
+	if err := c.Create(ctx, bundle); err != nil {
+		t.Fatalf("create bundle: %v", err)
+	}
+
+	router := NewRouter(nil)
+	var buildShouldFail bool = true
+	r := &AgentReconciler{
+		Client:          c,
+		NodeName:        node,
+		SystemNamespace: systemNS,
+		Router:          router,
+		TargetsCh:       make(chan tracer.TargetSet, 4),
+		ExporterBuilder: func(p *BundlePayload, _ CRKey) (tracer.Exporter, error) {
+			if buildShouldFail {
+				return nil, fmt.Errorf("exporter type %q not yet implemented in agent mode", p.Type)
+			}
+			return &recordingExporter{name: "fixed"}, nil
+		},
+		CgroupResolver: func(pods []*corev1.Pod) (map[uint64]struct{}, error) {
+			out := map[uint64]struct{}{}
+			for range pods {
+				out[100] = struct{}{}
+			}
+			return out, nil
+		},
+		exporterCache: map[CRKey]cachedExporter{},
+	}
+
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: pt.Name}}); err != nil {
+		t.Fatalf("reconcile 1: %v", err)
+	}
+	writer := &StatusWriter{Client: c, NodeName: node, Router: router, Ready: func() bool { return true }}
+	if err := writer.emitOnce(ctx); err != nil {
+		t.Fatalf("emitOnce 1: %v", err)
+	}
+
+	var got podtracev1alpha1.PodTrace
+	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: pt.Name}, &got); err != nil {
+		t.Fatalf("get pt 1: %v", err)
+	}
+	if len(got.Status.NodeStatus) != 1 {
+		t.Fatalf("rows after failure = %d, want 1", len(got.Status.NodeStatus))
+	}
+	row := got.Status.NodeStatus[0]
+	if row.Ready {
+		t.Error("Ready = true after build failure; want false")
+	}
+	if row.Message == "" {
+		t.Fatal("Message is empty after build failure; tombstone should surface the cause")
+	}
+	if !strings.Contains(row.Message, "build exporter") {
+		t.Errorf("Message = %q; expected 'build exporter:' prefix", row.Message)
+	}
+	if !strings.Contains(row.Message, "not yet implemented") {
+		t.Errorf("Message = %q; expected wrapped builder error", row.Message)
+	}
+
+	buildShouldFail = false
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: pt.Name}}); err != nil {
+		t.Fatalf("reconcile 2: %v", err)
+	}
+	if err := writer.emitOnce(ctx); err != nil {
+		t.Fatalf("emitOnce 2: %v", err)
+	}
+
+	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: pt.Name}, &got); err != nil {
+		t.Fatalf("get pt 2: %v", err)
+	}
+	if len(got.Status.NodeStatus) != 1 {
+		t.Fatalf("rows after recovery = %d, want 1", len(got.Status.NodeStatus))
+	}
+	row = got.Status.NodeStatus[0]
+	if !row.Ready {
+		t.Errorf("Ready = false after recovery; want true. Message=%q", row.Message)
+	}
+	if row.Message != "" {
+		t.Errorf("Message = %q after recovery; want empty (stale messages confuse users)", row.Message)
 	}
 }
