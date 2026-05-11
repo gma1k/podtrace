@@ -113,6 +113,7 @@ log_info "staged bundle into ${target}/"
 
 git config user.name "${BOT_NAME}"
 git config user.email "${BOT_EMAIL}"
+git config commit.gpgsign false
 git add "operators/podtrace/${VERSION}"
 git commit -s -m "operator podtrace (${VERSION})"
 
