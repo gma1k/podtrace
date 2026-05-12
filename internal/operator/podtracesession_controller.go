@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -15,7 +16,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
 )
@@ -84,12 +87,21 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return r.reconcileTerminalSession(ctx, &session)
 	}
 
-	targetNodes, err := r.resolveTargetNodes(ctx, &session)
+	targetNodes, targetNamespaces, err := r.resolveTargetNodes(ctx, &session)
 	if err != nil {
-		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "ResolveTargets", err.Error())
+		// Distinguish a malformed NamespaceSelector (admission webhook
+		// should normally catch it, but envtest harnesses skip webhooks)
+		// from a general resolve failure for a clearer Degraded reason.
+		reason := "ResolveTargets"
+		if strings.Contains(err.Error(), "invalid NamespaceSelector") {
+			reason = "NamespaceSelectorInvalid"
+		}
+		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, reason, err.Error())
 		_ = r.Status().Update(ctx, &session)
 		return ctrl.Result{}, err
 	}
+	// Surface the resolved allowlist on .status for debuggability.
+	session.Status.TargetNamespaces = targetNamespaces
 	if len(targetNodes) == 0 {
 		logger.Info("no matched pods; session stays Pending until pods appear")
 		session.Status.Phase = podtracev1alpha1.SessionPhasePending
@@ -190,40 +202,99 @@ func (r *PodTraceSessionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("podtracesession").
 		For(&podtracev1alpha1.PodTraceSession{}).
+		Watches(
+			&corev1.Namespace{},
+			handler.EnqueueRequestsFromMapFunc(r.namespaceToPodTraceSessions),
+		).
 		WithOptions(defaultControllerOptions()).
 		Complete(r)
 }
 
+// namespaceToPodTraceSessions returns the set of PodTraceSessions
+// that should re-reconcile when any Namespace event fires.
+func (r *PodTraceSessionReconciler) namespaceToPodTraceSessions(ctx context.Context, _ client.Object) []reconcile.Request {
+	var list podtracev1alpha1.PodTraceSessionList
+	if err := r.List(ctx, &list); err != nil {
+		return nil
+	}
+	out := make([]reconcile.Request, 0, len(list.Items))
+	for i := range list.Items {
+		s := &list.Items[i]
+		if s.Spec.NamespaceSelector == nil {
+			continue
+		}
+		if s.Status.Phase == podtracev1alpha1.SessionPhaseCompleted ||
+			s.Status.Phase == podtracev1alpha1.SessionPhaseFailed {
+			continue
+		}
+		out = append(out, reconcile.Request{
+			NamespacedName: client.ObjectKey{Namespace: s.Namespace, Name: s.Name},
+		})
+	}
+	return out
+}
+
 // resolveTargetNodes expands spec.selector / spec.podRefs into the set of
-// node names hosting at least one matched pod. Deterministic ordering
-// (sorted) so reconcile is idempotent under flaky informer caches.
-func (r *PodTraceSessionReconciler) resolveTargetNodes(ctx context.Context, s *podtracev1alpha1.PodTraceSession) ([]string, error) {
+// node names hosting at least one matched pod.
+func (r *PodTraceSessionReconciler) resolveTargetNodes(ctx context.Context, s *podtracev1alpha1.PodTraceSession) ([]string, []string, error) {
 	nodes := map[string]struct{}{}
+
+	targetNamespaces, err := ResolveNamespaceSelector(ctx, r.Client, s.Spec.NamespaceSelector)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	if s.Spec.Selector != nil {
 		sel, err := metav1.LabelSelectorAsSelector(s.Spec.Selector)
 		if err != nil {
-			return nil, fmt.Errorf("invalid selector: %w", err)
+			return nil, nil, fmt.Errorf("invalid selector: %w", err)
 		}
-		var list corev1.PodList
-		listOpts := &client.ListOptions{
-			LabelSelector: sel,
-			Namespace:     s.Namespace,
-		}
-		if s.Spec.NamespaceSelector != nil {
-			// NamespaceSelector opens cross-namespace search. The
-			// selector's own label expressions are not yet honoured —
-			// that would require a Namespace informer we do not wire
-			// here. Presence of the field alone is enough to widen
-			// scope to every namespace.
-			listOpts.Namespace = ""
-		}
-		if err := r.List(ctx, &list, listOpts); err != nil {
-			return nil, fmt.Errorf("list pods for selector: %w", err)
-		}
-		for _, p := range list.Items {
-			if p.Spec.NodeName != "" && isPodEligible(&p) {
-				nodes[p.Spec.NodeName] = struct{}{}
+
+		// Allowlist drives the namespace scope. Three cases:
+		//
+		//   targetNamespaces == nil  → selector unset on the CR; restrict
+		//                              to the session's own namespace.
+		//   targetNamespaces empty   → selector set but no namespaces
+		//                              match; skip the List entirely (no
+		//                              pods can be selected).
+		//   targetNamespaces non-empty → list cluster-wide and filter the
+		//                              results in-memory against the set.
+		//
+		// In-memory filtering after a cluster-wide List is cheaper than N
+		// per-namespace Lists when the cached informer is cluster-scoped
+		// (which it is for our manager).
+		switch {
+		case targetNamespaces == nil:
+			listOpts := &client.ListOptions{LabelSelector: sel, Namespace: s.Namespace}
+			var list corev1.PodList
+			if err := r.List(ctx, &list, listOpts); err != nil {
+				return nil, nil, fmt.Errorf("list pods for selector: %w", err)
+			}
+			for _, p := range list.Items {
+				if p.Spec.NodeName != "" && isPodEligible(&p) {
+					nodes[p.Spec.NodeName] = struct{}{}
+				}
+			}
+		case len(targetNamespaces) == 0:
+			// Selector matched zero namespaces — no pods are reachable.
+			// Fall through; the function returns an empty node set.
+		default:
+			allowSet := make(map[string]struct{}, len(targetNamespaces))
+			for _, ns := range targetNamespaces {
+				allowSet[ns] = struct{}{}
+			}
+			listOpts := &client.ListOptions{LabelSelector: sel} // Namespace empty == cluster-wide
+			var list corev1.PodList
+			if err := r.List(ctx, &list, listOpts); err != nil {
+				return nil, nil, fmt.Errorf("list pods for selector: %w", err)
+			}
+			for _, p := range list.Items {
+				if _, ok := allowSet[p.Namespace]; !ok {
+					continue
+				}
+				if p.Spec.NodeName != "" && isPodEligible(&p) {
+					nodes[p.Spec.NodeName] = struct{}{}
+				}
 			}
 		}
 	}
@@ -238,7 +309,7 @@ func (r *PodTraceSessionReconciler) resolveTargetNodes(ctx context.Context, s *p
 			if apierrors.IsNotFound(err) {
 				continue
 			}
-			return nil, fmt.Errorf("get pod %s/%s: %w", ns, ref.Name, err)
+			return nil, nil, fmt.Errorf("get pod %s/%s: %w", ns, ref.Name, err)
 		}
 		if pod.Spec.NodeName != "" && isPodEligible(&pod) {
 			nodes[pod.Spec.NodeName] = struct{}{}
@@ -250,7 +321,7 @@ func (r *PodTraceSessionReconciler) resolveTargetNodes(ctx context.Context, s *p
 		out = append(out, n)
 	}
 	sort.Strings(out)
-	return out, nil
+	return out, targetNamespaces, nil
 }
 
 // isPodEligible filters out pods the tracer cannot attach to: those in

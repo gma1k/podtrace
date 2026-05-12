@@ -274,3 +274,86 @@ func TestVersion_WritersAlwaysStampCurrent(t *testing.T) {
 		t.Errorf("ToYAML/FromYAML version = %q, want %q", parsed.Version, CurrentVersion)
 	}
 }
+
+// TestTargetNamespaces_ConfigMapTriState pins the wire contract for
+// allowlist field: agents have to distinguish "selector
+// not set"
+func TestTargetNamespaces_ConfigMapTriState(t *testing.T) {
+	cases := []struct {
+		name      string
+		input     *Payload
+		wantKey   bool
+		wantValue string
+		wantField []string
+		fieldIsNil bool
+	}{
+		{
+			name:      "NilFieldOmitsKey",
+			input:     &Payload{Type: TypeOTLP, Endpoint: "x:4318", TargetNamespaces: nil},
+			wantKey:   false,
+			fieldIsNil: true,
+		},
+		{
+			name:      "EmptySliceWritesEmptyValue",
+			input:     &Payload{Type: TypeOTLP, Endpoint: "x:4318", TargetNamespaces: []string{}},
+			wantKey:   true,
+			wantValue: "",
+			wantField: []string{},
+		},
+		{
+			name:      "PopulatedSliceWritesCommaJoined",
+			input:     &Payload{Type: TypeOTLP, Endpoint: "x:4318", TargetNamespaces: []string{"team-b", "team-a", "prod"}},
+			wantKey:   true,
+			wantValue: "prod,team-a,team-b",
+			wantField: []string{"prod", "team-a", "team-b"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data := ToConfigMapData(tc.input)
+			val, ok := data["target_namespaces"]
+			if ok != tc.wantKey {
+				t.Fatalf("target_namespaces key presence = %v, want %v", ok, tc.wantKey)
+			}
+			if ok && val != tc.wantValue {
+				t.Errorf("target_namespaces value = %q, want %q", val, tc.wantValue)
+			}
+			parsed, err := FromConfigMapData(data)
+			if err != nil {
+				t.Fatalf("parse back: %v", err)
+			}
+			if tc.fieldIsNil {
+				if parsed.TargetNamespaces != nil {
+					t.Errorf("expected nil after round-trip, got %v", parsed.TargetNamespaces)
+				}
+				return
+			}
+			if parsed.TargetNamespaces == nil {
+				t.Fatal("expected non-nil slice after round-trip, got nil")
+			}
+			if !reflect.DeepEqual(parsed.TargetNamespaces, tc.wantField) {
+				t.Errorf("round-trip slice = %v, want %v", parsed.TargetNamespaces, tc.wantField)
+			}
+		})
+	}
+}
+
+func TestTargetNamespaces_AgentRejectV1BundleAfterV2Migration(t *testing.T) {
+	_, err := FromConfigMapData(map[string]string{
+		"version":           "v3-future",
+		"type":              "otlp",
+		"endpoint":          "x:4318",
+		"target_namespaces": "team-a",
+	})
+	if err == nil {
+		t.Fatal("FromConfigMapData should reject unknown future version")
+	}
+	if !contains(err.Error(), "v3-future") {
+		t.Errorf("error %q should name the unknown version", err.Error())
+	}
+	if !contains(err.Error(), CurrentVersion) {
+		t.Errorf("error %q should name the current version", err.Error())
+	}
+}
+
+func contains(s, sub string) bool { return strings.Contains(s, sub) }

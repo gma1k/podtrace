@@ -41,6 +41,7 @@ type PodTraceReconciler struct {
 // +kubebuilder:rbac:groups=podtrace.io,resources=podtraces/finalizers,verbs=update
 // +kubebuilder:rbac:groups=podtrace.io,resources=exporterconfigs,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=secrets;configmaps,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch
 
 func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithValues("podtrace", req.String())
@@ -91,12 +92,27 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, fmt.Errorf("get ExporterConfig: %w", err)
 	}
 
-	if err := r.syncExporterBundle(ctx, &pt, &ec); err != nil {
+	// Resolve spec.namespaceSelector against the cluster's Namespace
+	// labels. Tri-state result:
+	//   nil   → selector not set on the CR (agent falls back to own-ns)
+	//   []{}  → selector set but matched zero namespaces
+	//   list  → resolved allowlist
+	targetNamespaces, err := ResolveNamespaceSelector(ctx, r.Client, pt.Spec.NamespaceSelector)
+	if err != nil {
+		logger.Error(err, "resolve namespace selector")
+		r.setCondition(&pt, ConditionDegraded, metav1.ConditionTrue, "NamespaceSelectorInvalid", err.Error())
+		_ = r.Status().Update(ctx, &pt)
+		return ctrl.Result{}, err
+	}
+
+	if err := r.syncExporterBundle(ctx, &pt, &ec, targetNamespaces); err != nil {
 		logger.Error(err, "sync exporter bundle")
 		r.setCondition(&pt, ConditionDegraded, metav1.ConditionTrue, "BundleSync", err.Error())
 		_ = r.Status().Update(ctx, &pt)
 		return ctrl.Result{}, err
 	}
+
+	pt.Status.TargetNamespaces = targetNamespaces
 
 	if node, msg, ok := firstDegradedNode(pt.Status.NodeStatus); ok {
 		r.setCondition(&pt, ConditionDegraded, metav1.ConditionTrue, "AgentNodeStatus",
@@ -129,8 +145,32 @@ func (r *PodTraceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&podtracev1alpha1.ExporterConfig{},
 			handler.EnqueueRequestsFromMapFunc(r.exporterConfigToPodTraces),
 		).
+		Watches(
+			&corev1.Namespace{},
+			handler.EnqueueRequestsFromMapFunc(r.namespaceToPodTraces),
+		).
 		WithOptions(defaultControllerOptions()).
 		Complete(r)
+}
+
+// namespaceToPodTraces returns the set of PodTraces that should
+// re-reconcile when any Namespace event fires.
+func (r *PodTraceReconciler) namespaceToPodTraces(ctx context.Context, _ client.Object) []reconcile.Request {
+	var list podtracev1alpha1.PodTraceList
+	if err := r.List(ctx, &list); err != nil {
+		return nil
+	}
+	out := make([]reconcile.Request, 0, len(list.Items))
+	for i := range list.Items {
+		pt := &list.Items[i]
+		if pt.Spec.NamespaceSelector == nil {
+			continue
+		}
+		out = append(out, reconcile.Request{
+			NamespacedName: client.ObjectKey{Namespace: pt.Namespace, Name: pt.Name},
+		})
+	}
+	return out
 }
 
 func (r *PodTraceReconciler) exporterConfigToPodTraces(ctx context.Context, obj client.Object) []reconcile.Request {
@@ -154,11 +194,11 @@ func (r *PodTraceReconciler) exporterConfigToPodTraces(ctx context.Context, obj 
 	return reqs
 }
 
-func (r *PodTraceReconciler) syncExporterBundle(ctx context.Context, pt *podtracev1alpha1.PodTrace, ec *podtracev1alpha1.ExporterConfig) error {
+func (r *PodTraceReconciler) syncExporterBundle(ctx context.Context, pt *podtracev1alpha1.PodTrace, ec *podtracev1alpha1.ExporterConfig, targetNamespaces []string) error {
 	systemNS := r.SystemNamespace
 	name := ExporterBundleName(pt.UID)
 
-	payload, credSecretRef, err := renderBundlePayload(ec)
+	payload, credSecretRef, err := renderBundlePayload(ec, targetNamespaces)
 	if err != nil {
 		return err
 	}

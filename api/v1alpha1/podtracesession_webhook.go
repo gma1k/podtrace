@@ -61,6 +61,9 @@ func (v *PodTraceSessionCustomValidator) validate(ctx context.Context, s *PodTra
 	if err := validateSelectorExclusivity(s.Spec.Selector, s.Spec.PodRefs); err != nil {
 		return nil, err
 	}
+	if err := validateNamespaceSelector(s.Spec.NamespaceSelector); err != nil {
+		return nil, err
+	}
 	if s.Spec.Duration.Duration <= 0 {
 		return nil, fmt.Errorf("spec.duration must be greater than zero")
 	}

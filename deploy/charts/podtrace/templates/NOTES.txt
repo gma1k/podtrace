@@ -1,9 +1,16 @@
 Podtrace installed — release {{ .Release.Name | quote }}.
 
+Note: `helm install --create-namespace` (or a pre-created release
+namespace) is required. Helm writes its release record into the target
+namespace before any chart hook runs, so the chart cannot bootstrap
+that namespace itself. The bootstrap Job in kube-system patches PSA
+labels onto the existing namespace after Helm creates it.
+
 Installed resources
 -------------------
-  CRDs (podtrace.io/v1alpha1) — installed from the chart's crds/ directory
-                                (Helm always installs these before templates):
+  CRDs (podtrace.io/v1alpha1) — installed by the chart's pre-install hook
+                                (templates/crds/, weight -10, runs before
+                                regular templates):
     PodTrace          continuous realtime tracing
     PodTraceSession   bounded diagnose-mode tracing
     ExporterConfig    reusable trace exporter

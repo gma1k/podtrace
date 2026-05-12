@@ -30,8 +30,8 @@ func newClientWithExporter(t *testing.T, namespace, name string) client.Client {
 		builder = builder.WithObjects(&podtracev1alpha1.ExporterConfig{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 			Spec: podtracev1alpha1.ExporterConfigSpec{
-				Type:   podtracev1alpha1.ExporterTypeOTLP,
-				OTLP:   &podtracev1alpha1.OTLPExporter{Endpoint: "x:4318"},
+				Type: podtracev1alpha1.ExporterTypeOTLP,
+				OTLP: &podtracev1alpha1.OTLPExporter{Endpoint: "x:4318"},
 			},
 		})
 	}
@@ -403,7 +403,6 @@ func TestPodTraceValidator_Update(t *testing.T) {
 			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
 		},
 	}
-	// New spec flips the exporter to a non-existent one.
 	newPT := oldPT.DeepCopy()
 	newPT.Spec.ExporterRef.Name = "ghost"
 
@@ -433,5 +432,97 @@ func TestExporterConfigValidator_EmptyType(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "does not match") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestPodTraceValidator_RejectsMalformedNamespaceSelector(t *testing.T) {
+	c := newClientWithExporter(t, "default", "prod-otlp")
+	badSel := &metav1.LabelSelector{
+		MatchExpressions: []metav1.LabelSelectorRequirement{{
+			Key:      "team",
+			Operator: "BogusOp",
+		}},
+	}
+
+	cases := []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: "PodTrace",
+			run: func() error {
+				v := &podtracev1alpha1.PodTraceCustomValidator{Client: c}
+				_, err := v.ValidateCreate(context.Background(), &podtracev1alpha1.PodTrace{
+					ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: "default"},
+					Spec: podtracev1alpha1.PodTraceSpec{
+						Selector:          validSelector(),
+						ExporterRef:       podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+						NamespaceSelector: badSel,
+					},
+				})
+				return err
+			},
+		},
+		{
+			name: "PodTraceSession",
+			run: func() error {
+				v := &podtracev1alpha1.PodTraceSessionCustomValidator{Client: c}
+				_, err := v.ValidateCreate(context.Background(), &podtracev1alpha1.PodTraceSession{
+					ObjectMeta: metav1.ObjectMeta{Name: "pts", Namespace: "default"},
+					Spec: podtracev1alpha1.PodTraceSessionSpec{
+						Selector:          validSelector(),
+						Duration:          metav1.Duration{Duration: time.Minute},
+						ExporterRef:       podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+						NamespaceSelector: badSel,
+					},
+				})
+				return err
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.run()
+			if err == nil || !strings.Contains(err.Error(), "spec.namespaceSelector") {
+				t.Fatalf("expected namespaceSelector rejection, got %v", err)
+			}
+		})
+	}
+}
+
+func TestPodTraceValidator_AcceptsValidNamespaceSelectors(t *testing.T) {
+	c := newClientWithExporter(t, "default", "prod-otlp")
+	v := &podtracev1alpha1.PodTraceCustomValidator{Client: c}
+
+	cases := []struct {
+		name string
+		sel  *metav1.LabelSelector
+	}{
+		{name: "nil", sel: nil},
+		{name: "empty-matches-all", sel: &metav1.LabelSelector{}},
+		{name: "match-labels", sel: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}}},
+		{name: "match-expressions-in", sel: &metav1.LabelSelector{
+			MatchExpressions: []metav1.LabelSelectorRequirement{{
+				Key:      "team",
+				Operator: metav1.LabelSelectorOpIn,
+				Values:   []string{"a", "b"},
+			}},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			obj := &podtracev1alpha1.PodTrace{
+				ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: "default"},
+				Spec: podtracev1alpha1.PodTraceSpec{
+					Selector:          validSelector(),
+					ExporterRef:       podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+					NamespaceSelector: tc.sel,
+				},
+			}
+			if _, err := v.ValidateCreate(context.Background(), obj); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
 	}
 }

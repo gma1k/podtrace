@@ -89,10 +89,12 @@ func TestChart_DefaultValues(t *testing.T) {
 	if resources["CustomResourceDefinition"] != 4 {
 		t.Errorf("default `helm template` should render 4 CRDs; got %d", resources["CustomResourceDefinition"])
 	}
-	if resources["Namespace"] != 1 {
-		t.Errorf("Namespace count: got %d want 1", resources["Namespace"])
+	if resources["Namespace"] != 0 {
+		t.Errorf("Namespace count: got %d want 0 (namespace is created by the bootstrap Job, not as a tracked resource)", resources["Namespace"])
 	}
-	// Should NOT render the webhook by default (operator not enabled).
+	if !bytes.Contains(out, []byte("namespace-bootstrap")) {
+		t.Error("default render must include the namespace-bootstrap Job that creates the system namespace")
+	}
 	if resources["ValidatingWebhookConfiguration"] != 0 {
 		t.Errorf("webhook should be disabled by default, got %d", resources["ValidatingWebhookConfiguration"])
 	}
@@ -172,22 +174,21 @@ func TestChart_NamespacePSALabels(t *testing.T) {
 	}
 }
 
-// TestChart_OperatorToggleRendersFullStack asserts that enabling the
-// operator pulls in the Deployment, SA, ClusterRole, ClusterRoleBinding,
-// and metrics Service — and that default (off) mode does not.
+// TestChart_OperatorToggleRendersFullStack asserts the operator stack
+// renders by default and disappears when explicitly disabled.
 func TestChart_OperatorToggleRendersFullStack(t *testing.T) {
-	off := renderChart(t)
-	on := renderChart(t, "operator.enabled=true")
+	on := renderChart(t)
+	off := renderChart(t, "operator.enabled=false")
 
-	offKinds := parseKinds(t, off)
 	onKinds := parseKinds(t, on)
+	offKinds := parseKinds(t, off)
 
 	if offKinds["Deployment"] != 0 {
 		t.Errorf("operator Deployment should not render with operator.enabled=false, got %d", offKinds["Deployment"])
 	}
 	for _, kind := range []string{"Deployment", "ServiceAccount", "ClusterRole", "ClusterRoleBinding", "Service"} {
 		if onKinds[kind] < 1 {
-			t.Errorf("operator.enabled=true: expected >=1 %s, got %d", kind, onKinds[kind])
+			t.Errorf("default render: expected >=1 %s, got %d", kind, onKinds[kind])
 		}
 	}
 }
@@ -196,7 +197,7 @@ func TestChart_OperatorToggleRendersFullStack(t *testing.T) {
 // templates render only when BOTH operator AND webhook are enabled,
 // because the webhook server runs inside the operator Deployment.
 func TestChart_WebhookRequiresOperatorToRender(t *testing.T) {
-	webhookOnly := renderChart(t, "webhook.enabled=true")
+	webhookOnly := renderChart(t, "operator.enabled=false", "webhook.enabled=true")
 	both := renderChart(t, "operator.enabled=true", "webhook.enabled=true")
 
 	woKinds := parseKinds(t, webhookOnly)
@@ -254,8 +255,11 @@ func TestChart_OperatorDeploymentSecurityContext(t *testing.T) {
 // namespace from values.
 func TestChart_SystemNamespaceOverride(t *testing.T) {
 	out := renderChart(t, "namespace.name=custom-podtrace")
-	if !bytes.Contains(out, []byte("name: custom-podtrace")) {
+	if !bytes.Contains(out, []byte("namespace: custom-podtrace")) {
 		t.Error("namespace.name override not reflected in rendered output")
+	}
+	if !bytes.Contains(out, []byte(`NS="custom-podtrace"`)) {
+		t.Error("namespace.name override not threaded into the bootstrap Job's kubectl apply payload")
 	}
 }
 

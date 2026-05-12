@@ -1,22 +1,160 @@
+{{/*
+namespace-bootstrap — idempotent creation + PSA-labeling of the system
+namespace via a pre-install/pre-upgrade hook Job.
+
+Why a Job instead of a templated Namespace resource:
+
+  Templating a Namespace as a regular release manifest conflicts with
+  both common install paths:
+
+    1. `helm install --create-namespace` creates the namespace BEFORE
+       rendering templates, but without Helm ownership labels. The
+       chart's Namespace template then tries to "import" it and Helm
+       refuses with "invalid ownership metadata".
+
+    2. Pre-creating the namespace by hand has the same failure mode.
+
+  A pre-install hook Job that runs `kubectl apply` on the Namespace
+  sidesteps both problems. `kubectl apply` is the idempotent operation —
+  it creates the namespace if missing and patches labels if existing,
+  with no Helm ownership check involved. The Job itself lives in
+  kube-system (always present on every cluster), so it has somewhere to
+  land regardless of whether the user used --create-namespace.
+
+  Weight -100 puts this before crd-labeler (-20) and the CRD templates
+  (-10), so by the time those hooks run, the target namespace exists.
+
+  The hook-delete-policy clears the Job after success, so it does not
+  accumulate across upgrades. The Namespace itself persists — there is
+  no delete-policy on the manifest applied inside the Job.
+*/}}
 {{- if .Values.namespace.create }}
+---
 apiVersion: v1
-kind: Namespace
+kind: ServiceAccount
 metadata:
-  name: {{ include "podtrace.systemNamespace" . }}
+  name: {{ include "podtrace.fullname" . }}-namespace-bootstrap
+  namespace: kube-system
   labels:
-    {{- include "podtrace.labels" . | nindent 4 }}
-    # podtrace-system must be a PSA "privileged" namespace because the
-    # agent DaemonSet and session Jobs run as root with CAP_BPF /
-    # CAP_SYS_ADMIN / CAP_PERFMON. User PodTrace / PodTraceSession CRs
-    # live in user namespaces; only the implementation pods land here.
-    pod-security.kubernetes.io/enforce: privileged
-    pod-security.kubernetes.io/audit: privileged
-    pod-security.kubernetes.io/warn: privileged
-    {{- with .Values.namespace.labels }}
-    {{- toYaml . | nindent 4 }}
-    {{- end }}
-  {{- with .Values.namespace.annotations }}
+    app.kubernetes.io/name: podtrace
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/component: namespace-bootstrap
   annotations:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-100"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "podtrace.fullname" . }}-namespace-bootstrap
+  labels:
+    app.kubernetes.io/name: podtrace
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/component: namespace-bootstrap
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-100"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "create", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "podtrace.fullname" . }}-namespace-bootstrap
+  labels:
+    app.kubernetes.io/name: podtrace
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/component: namespace-bootstrap
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-100"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "podtrace.fullname" . }}-namespace-bootstrap
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "podtrace.fullname" . }}-namespace-bootstrap
+    namespace: kube-system
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "podtrace.fullname" . }}-namespace-bootstrap
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: podtrace
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/component: namespace-bootstrap
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-100"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 60
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: podtrace
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: namespace-bootstrap
+    spec:
+      serviceAccountName: {{ include "podtrace.fullname" . }}-namespace-bootstrap
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kubectl
+          image: {{ .Values.crds.labelerImage | default "alpine/k8s:1.30.4" }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              NS="{{ include "podtrace.systemNamespace" . }}"
+              cat <<EOF | kubectl apply -f -
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: $NS
+                labels:
+                  app.kubernetes.io/name: podtrace
+                  app.kubernetes.io/instance: {{ .Release.Name }}
+                  app.kubernetes.io/managed-by: {{ .Release.Service }}
+                  app.kubernetes.io/part-of: podtrace
+                  # podtrace-system runs the agent DaemonSet and session
+                  # Jobs, which require CAP_BPF / CAP_SYS_ADMIN / CAP_PERFMON.
+                  # User-namespace CRs (PodTrace / PodTraceSession) stay
+                  # under restricted PSA; only implementation pods land here.
+                  pod-security.kubernetes.io/enforce: privileged
+                  pod-security.kubernetes.io/audit: privileged
+                  pod-security.kubernetes.io/warn: privileged
+              EOF
+              echo "namespace-bootstrap: $NS ready"
 {{- end }}

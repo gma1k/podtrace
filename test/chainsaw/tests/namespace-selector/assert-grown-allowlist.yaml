@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: podtrace-system
+  labels:
+    podtrace.io/managed-by: podtrace-operator
+    podtrace.io/component: exporter-bundle
+    podtrace.io/exporter-config: ns-selector-otlp
+data:
+  target_namespaces: ns-selector-in,ns-selector-out
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: ns-selector-pt
+status:
+  targetNamespaces:
+    - ns-selector-in
+    - ns-selector-out

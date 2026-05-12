@@ -2,6 +2,8 @@ package operator
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
 	"github.com/podtrace/podtrace/pkg/exporter/bundle"
@@ -22,18 +24,19 @@ import (
 //	headers.<name>       = literal value (OTLP only)
 //	header_secret_keys   = space-separated list of ConfigMap keys that
 //	                       reference the companion Secret (OTLP only)
-//
-// The second return value, if non-nil, names the user-namespace Secret
-// key the operator should load for the bundle's companion credential
-// Secret. Exporters without credentials (Jaeger, Zipkin, credential-less
-// OTLP) return nil here.
-func renderBundlePayload(ec *podtracev1alpha1.ExporterConfig) (map[string]string, *podtracev1alpha1.SecretKeySelector, error) {
+func renderBundlePayload(ec *podtracev1alpha1.ExporterConfig, targetNamespaces []string) (map[string]string, *podtracev1alpha1.SecretKeySelector, error) {
 	data := map[string]string{
 		"version": bundle.CurrentVersion,
 		"type":    string(ec.Spec.Type),
 	}
 	if ec.Spec.SamplePercent != nil {
 		data["sample_percent"] = itoa(int(*ec.Spec.SamplePercent))
+	}
+	if targetNamespaces != nil {
+		sorted := make([]string, len(targetNamespaces))
+		copy(sorted, targetNamespaces)
+		sort.Strings(sorted)
+		data["target_namespaces"] = strings.Join(sorted, ",")
 	}
 
 	switch ec.Spec.Type {
@@ -49,14 +52,7 @@ func renderBundlePayload(ec *podtracev1alpha1.ExporterConfig) (map[string]string
 		}
 		data["insecure"] = boolString(ec.Spec.OTLP.Insecure)
 		for _, h := range ec.Spec.OTLP.Headers {
-			// Literal-valued headers go straight into the ConfigMap.
-			// Secret-valued headers are deferred to the credential path;
-			// this first iteration supports exactly one Secret-valued
-			// header (the most common pattern — an Authorization bearer).
 			if h.ValueFrom != nil {
-				// Use the first Secret-backed header as THE credential,
-				// exposed in the companion Secret under key "credential".
-				// Multi-Secret support is tracked as a future enhancement.
 				sk := h.ValueFrom.DeepCopy()
 				data["header_secret_name"] = h.Name
 				return data, sk, nil

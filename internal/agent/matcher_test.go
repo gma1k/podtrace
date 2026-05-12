@@ -30,7 +30,7 @@ func TestMatchPodTraceAgainstPods_SelectorMatch(t *testing.T) {
 		mkPod("default", "api-b", map[string]string{"app": "api"}),
 		mkPod("default", "worker", map[string]string{"app": "worker"}),
 	}
-	matched, err := MatchPodTraceAgainstPods(pt, pods)
+	matched, err := MatchPodTraceAgainstPods(pt, pods, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestMatchPodTraceAgainstPods_PodRefs(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "pt"},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			PodRefs: []podtracev1alpha1.PodRef{
-				{Name: "api-a"},                    // defaults to default ns
+				{Name: "api-a"},                         // defaults to default ns
 				{Namespace: "kube-system", Name: "dns"}, // explicit ns
 			},
 			NamespaceSelector: &metav1.LabelSelector{}, // allow cross-ns
@@ -58,12 +58,37 @@ func TestMatchPodTraceAgainstPods_PodRefs(t *testing.T) {
 		mkPod("default", "unrelated", nil),
 		mkPod("kube-system", "dns", nil),
 	}
-	matched, err := MatchPodTraceAgainstPods(pt, pods)
+	allowlist := []string{"default", "kube-system"}
+	matched, err := MatchPodTraceAgainstPods(pt, pods, allowlist)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(matched) != 2 {
 		t.Fatalf("matched=%d want 2: %+v", len(matched), matched)
+	}
+}
+
+func TestMatchPodTraceAgainstPods_PodRefs_NilAllowlistFallsBackToOwnNamespace(t *testing.T) {
+	pt := &podtracev1alpha1.PodTrace{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "pt"},
+		Spec: podtracev1alpha1.PodTraceSpec{
+			PodRefs: []podtracev1alpha1.PodRef{
+				{Name: "api-a"},
+				{Namespace: "kube-system", Name: "dns"},
+			},
+			NamespaceSelector: &metav1.LabelSelector{},
+		},
+	}
+	pods := []*corev1.Pod{
+		mkPod("default", "api-a", nil),
+		mkPod("kube-system", "dns", nil),
+	}
+	matched, err := MatchPodTraceAgainstPods(pt, pods, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matched) != 1 || matched[0].Name != "api-a" {
+		t.Fatalf("conservative fallback should match only the own-ns pod; got %+v", matched)
 	}
 }
 
@@ -76,7 +101,7 @@ func TestMatchPodTraceAgainstPods_PausedReturnsNothing(t *testing.T) {
 		},
 	}
 	pods := []*corev1.Pod{mkPod("default", "api-a", map[string]string{"app": "api"})}
-	matched, err := MatchPodTraceAgainstPods(pt, pods)
+	matched, err := MatchPodTraceAgainstPods(pt, pods, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +123,7 @@ func TestMatchPodTraceAgainstPods_NamespaceScope(t *testing.T) {
 		mkPod("default", "a", map[string]string{"app": "x"}),
 		mkPod("other-ns", "b", map[string]string{"app": "x"}),
 	}
-	matched, err := MatchPodTraceAgainstPods(pt, pods)
+	matched, err := MatchPodTraceAgainstPods(pt, pods, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +149,7 @@ func TestMatchPodTraceAgainstPods_OnlyRunningPodsEligible(t *testing.T) {
 	}
 	running := mkPod("default", "running", map[string]string{"app": "x"})
 
-	matched, err := MatchPodTraceAgainstPods(pt, []*corev1.Pod{pending, failed, running})
+	matched, err := MatchPodTraceAgainstPods(pt, []*corev1.Pod{pending, failed, running}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +169,7 @@ func TestMatchPodTraceAgainstPods_EmptySelectorIsUnset(t *testing.T) {
 		},
 	}
 	pods := []*corev1.Pod{mkPod("default", "a", map[string]string{"app": "x"})}
-	matched, err := MatchPodTraceAgainstPods(pt, pods)
+	matched, err := MatchPodTraceAgainstPods(pt, pods, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +179,7 @@ func TestMatchPodTraceAgainstPods_EmptySelectorIsUnset(t *testing.T) {
 }
 
 func TestMatchPodTraceAgainstPods_NilPtRejected(t *testing.T) {
-	if _, err := MatchPodTraceAgainstPods(nil, nil); err == nil {
+	if _, err := MatchPodTraceAgainstPods(nil, nil, nil); err == nil {
 		t.Error("expected error on nil PodTrace")
 	}
 }
@@ -166,8 +191,75 @@ func TestMatchPodTraceAgainstPods_HandlesNilPodSlice(t *testing.T) {
 			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
 		},
 	}
-	matched, err := MatchPodTraceAgainstPods(pt, nil)
+	matched, err := MatchPodTraceAgainstPods(pt, nil, nil)
 	if err != nil || len(matched) != 0 {
 		t.Errorf("nil pod slice: err=%v matched=%+v", err, matched)
+	}
+}
+
+func TestInNamespaceScope_AllowlistSemantics(t *testing.T) {
+	ptOwnNS := func(sel *metav1.LabelSelector) *podtracev1alpha1.PodTrace {
+		return &podtracev1alpha1.PodTrace{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "pt"},
+			Spec:       podtracev1alpha1.PodTraceSpec{NamespaceSelector: sel},
+		}
+	}
+	cases := []struct {
+		name      string
+		pt        *podtracev1alpha1.PodTrace
+		pod       *corev1.Pod
+		allowlist []string
+		want      bool
+	}{
+		{
+			name:      "NilSelector_OwnNamespacePodAccepted",
+			pt:        ptOwnNS(nil),
+			pod:       mkPod("default", "p", nil),
+			allowlist: nil,
+			want:      true,
+		},
+		{
+			name:      "NilSelector_OtherNamespacePodRejected",
+			pt:        ptOwnNS(nil),
+			pod:       mkPod("kube-system", "p", nil),
+			allowlist: nil,
+			want:      false,
+		},
+		{
+			name:      "SelectorSet_NilAllowlist_FallsBackToOwnNamespace",
+			pt:        ptOwnNS(&metav1.LabelSelector{}),
+			pod:       mkPod("kube-system", "p", nil),
+			allowlist: nil,
+			want:      false,
+		},
+		{
+			name:      "SelectorSet_EmptyAllowlist_NothingMatches",
+			pt:        ptOwnNS(&metav1.LabelSelector{}),
+			pod:       mkPod("default", "p", nil),
+			allowlist: []string{},
+			want:      false,
+		},
+		{
+			name:      "SelectorSet_AllowlistContainsPodNamespace",
+			pt:        ptOwnNS(&metav1.LabelSelector{}),
+			pod:       mkPod("team-a", "p", nil),
+			allowlist: []string{"team-a", "team-b"},
+			want:      true,
+		},
+		{
+			name:      "SelectorSet_AllowlistMissingPodNamespace",
+			pt:        ptOwnNS(&metav1.LabelSelector{}),
+			pod:       mkPod("team-c", "p", nil),
+			allowlist: []string{"team-a", "team-b"},
+			want:      false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := inNamespaceScope(tc.pt, tc.pod, tc.allowlist)
+			if got != tc.want {
+				t.Errorf("inNamespaceScope = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

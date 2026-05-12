@@ -20,12 +20,10 @@ import (
 )
 
 // CredentialKey is the fixed key under which the operator stores the
-// resolved credential material in the companion Secret. Agents and CLI
-// both read exactly this key; the operator abstracts any upstream
-// SecretKeySelector into it.
+// resolved credential material in the companion Secret.
 const CredentialKey = "credential"
 
-const CurrentVersion = "v1"
+const CurrentVersion = "v2"
 
 // Type names the exporter implementation a Payload targets.
 type Type string
@@ -67,6 +65,19 @@ type Payload struct {
 	// companion Secret's CredentialKey. Empty when no Secret-backed
 	// header is configured.
 	HeaderName string `yaml:"headerName,omitempty"`
+
+	// TargetNamespaces is the resolved allowlist of namespace names a
+	// PodTrace's spec.namespaceSelector matched at bundle-render time.
+	// The semantics are tri-state and the wire format preserves all
+	// three (see ConfigMapHasTargetNamespacesKey for the on-wire
+	// representation):
+	//
+	//	nil         — spec.namespaceSelector is nil on the CR; agents
+	//	              fall back to own-namespace matching (legacy).
+	//	[]string{}  — spec.namespaceSelector is set but matched no
+	//	              namespaces; agents match nothing for this CR.
+	//	["a", "b"]  — spec.namespaceSelector matched these namespaces.
+	TargetNamespaces []string `yaml:"targetNamespaces,omitempty"`
 
 	// Credential is the resolved secret material (Splunk token,
 	// DataDog API key, or OTLP Secret-backed header value). Transport
@@ -117,6 +128,19 @@ func FromConfigMapData(data map[string]string) (*Payload, error) {
 			p.Headers[rest] = v
 		}
 	}
+	// TargetNamespaces uses key-presence semantics on "target_namespaces"
+	// to distinguish the three states the agent needs to act on:
+	//
+	//	key absent         → nil result        (selector not set)
+	//	key present, ""    → []string{} result (selector set, no match)
+	//	key present, "a,b" → ["a","b"] result  (selector matched)
+	if raw, ok := data["target_namespaces"]; ok {
+		if raw == "" {
+			p.TargetNamespaces = []string{}
+		} else {
+			p.TargetNamespaces = strings.Split(raw, ",")
+		}
+	}
 	return p, nil
 }
 
@@ -153,9 +177,6 @@ func ToConfigMapData(p *Payload) map[string]string {
 		percent := int(p.Sample*100 + 0.5)
 		out["sample_percent"] = strconv.Itoa(percent)
 	}
-	// Deterministic key order is not an on-disk invariant (ConfigMap
-	// keys are unordered), but tests compare rendered data maps and
-	// sorted construction makes failure diffs readable.
 	keys := make([]string, 0, len(p.Headers))
 	for k := range p.Headers {
 		keys = append(keys, k)
@@ -163,6 +184,12 @@ func ToConfigMapData(p *Payload) map[string]string {
 	sort.Strings(keys)
 	for _, k := range keys {
 		out["headers."+k] = p.Headers[k]
+	}
+	if p.TargetNamespaces != nil {
+		sorted := make([]string, len(p.TargetNamespaces))
+		copy(sorted, p.TargetNamespaces)
+		sort.Strings(sorted)
+		out["target_namespaces"] = strings.Join(sorted, ",")
 	}
 	return out
 }

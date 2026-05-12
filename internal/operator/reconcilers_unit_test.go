@@ -742,11 +742,10 @@ func TestResolveTargetNodes_BySelectorAndPodRefs(t *testing.T) {
 	}
 
 	r := &PodTraceSessionReconciler{Client: c, Scheme: scheme}
-	got, err := r.resolveTargetNodes(context.Background(), s)
+	got, _, err := r.resolveTargetNodes(context.Background(), s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Pending pod n3 must be skipped; n1, n2, n4 included; sorted.
 	want := []string{"n1", "n2", "n4"}
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)

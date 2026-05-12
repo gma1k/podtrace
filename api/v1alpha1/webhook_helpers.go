@@ -10,14 +10,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// validateSelectorExclusivity enforces that exactly one of Selector or
-// PodRefs is populated on a trace intent. Shared by PodTrace and
-// PodTraceSession: both resources target pods identically.
-//
-// Neither-or-both configurations are silently ambiguous — either no pods
-// would be targeted or the two sources could disagree — so we reject at
-// admission time rather than leaving the ambiguity to agent runtime
-// heuristics.
+func validateNamespaceSelector(sel *metav1.LabelSelector) error {
+	if sel == nil {
+		return nil
+	}
+	if _, err := metav1.LabelSelectorAsSelector(sel); err != nil {
+		return fmt.Errorf("spec.namespaceSelector: %w", err)
+	}
+	return nil
+}
+
 func validateSelectorExclusivity(selector *metav1.LabelSelector, podRefs []PodRef) error {
 	hasSelector := selector != nil && (len(selector.MatchLabels) > 0 || len(selector.MatchExpressions) > 0)
 	hasPodRefs := len(podRefs) > 0

@@ -47,7 +47,7 @@ func SessionBundleName(sessionUID types.UID) string {
 func ensureSessionExporterBundle(ctx context.Context, c client.Client, s *podtracev1alpha1.PodTraceSession, ec *podtracev1alpha1.ExporterConfig, systemNS string) error {
 	name := SessionBundleName(s.UID)
 
-	payload, credSecretRef, err := renderBundlePayload(ec)
+	payload, credSecretRef, err := renderBundlePayload(ec, nil)
 	if err != nil {
 		return fmt.Errorf("render session bundle payload: %w", err)
 	}

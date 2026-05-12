@@ -64,6 +64,9 @@ func (v *PodTraceCustomValidator) validate(ctx context.Context, pt *PodTrace) (a
 	if err := validateSelectorExclusivity(pt.Spec.Selector, pt.Spec.PodRefs); err != nil {
 		return nil, err
 	}
+	if err := validateNamespaceSelector(pt.Spec.NamespaceSelector); err != nil {
+		return nil, err
+	}
 	if err := resolveExporterRef(ctx, v.Client, pt.Namespace, pt.Spec.ExporterRef.Name); err != nil {
 		return nil, err
 	}
