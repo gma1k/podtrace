@@ -376,6 +376,13 @@ spec:
                   for this PodTrace.
                 format: int64
                 type: integer
+              targetNamespaces:
+                description: |-
+                  TargetNamespaces is the sorted list of namespace names the operator
+                  resolved spec.namespaceSelector to at the last successful reconcile.
+                items:
+                  type: string
+                type: array
             type: object
         type: object
     served: true

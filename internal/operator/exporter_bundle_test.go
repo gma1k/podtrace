@@ -29,7 +29,7 @@ func TestRenderBundlePayload_OTLP_LiteralHeaders(t *testing.T) {
 				{Name: "X-Env", Value: "prod"},
 			},
 		},
-	}))
+	}), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestRenderBundlePayload_OTLP_SecretBackedHeader(t *testing.T) {
 				}},
 			},
 		},
-	}))
+	}), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestRenderBundlePayload_Jaeger_NoCredentials(t *testing.T) {
 	data, secret, err := renderBundlePayload(ec("j", podtracev1alpha1.ExporterConfigSpec{
 		Type:   podtracev1alpha1.ExporterTypeJaeger,
 		Jaeger: &podtracev1alpha1.JaegerExporter{Endpoint: "http://jaeger:14268"},
-	}))
+	}), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestRenderBundlePayload_Zipkin(t *testing.T) {
 	data, secret, err := renderBundlePayload(ec("z", podtracev1alpha1.ExporterConfigSpec{
 		Type:   podtracev1alpha1.ExporterTypeZipkin,
 		Zipkin: &podtracev1alpha1.ZipkinExporter{Endpoint: "http://zipkin:9411/api/v2/spans"},
-	}))
+	}), nil)
 	if err != nil || secret != nil || data["type"] != "zipkin" {
 		t.Fatalf("zipkin payload: err=%v secret=%v data=%v", err, secret, data)
 	}
@@ -109,7 +109,7 @@ func TestRenderBundlePayload_Splunk_RequiresTokenSecret(t *testing.T) {
 			Endpoint:       "https://splunk:8088",
 			TokenSecretRef: podtracev1alpha1.SecretKeySelector{Name: "hec", Key: "token"},
 		},
-	}))
+	}), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestRenderBundlePayload_DataDog_DefaultSite(t *testing.T) {
 		DataDog: &podtracev1alpha1.DataDogExporter{
 			APIKeySecretRef: podtracev1alpha1.SecretKeySelector{Name: "dd", Key: "api"},
 		},
-	}))
+	}), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestRenderBundlePayload_ErrorOnMissingVariant(t *testing.T) {
 	_, _, err := renderBundlePayload(ec("broken", podtracev1alpha1.ExporterConfigSpec{
 		Type: podtracev1alpha1.ExporterTypeOTLP,
 		// no OTLP block populated
-	}))
+	}), nil)
 	if err == nil {
 		t.Fatal("expected error when spec.otlp is nil for type=otlp")
 	}
@@ -152,7 +152,7 @@ func TestRenderBundlePayload_ErrorOnMissingVariant(t *testing.T) {
 func TestRenderBundlePayload_UnknownType(t *testing.T) {
 	_, _, err := renderBundlePayload(ec("xxx", podtracev1alpha1.ExporterConfigSpec{
 		Type: podtracev1alpha1.ExporterType("made-up"),
-	}))
+	}), nil)
 	if err == nil {
 		t.Fatal("expected error for unknown type")
 	}
@@ -164,7 +164,7 @@ func TestRenderBundlePayload_SamplePercent(t *testing.T) {
 		Type:          podtracev1alpha1.ExporterTypeJaeger,
 		Jaeger:        &podtracev1alpha1.JaegerExporter{Endpoint: "j:14268"},
 		SamplePercent: &pct,
-	}))
+	}), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestRenderBundlePayload_AlwaysStampsVersion(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			data, _, err := renderBundlePayload(ec("v-"+tc.name, tc.spec))
+			data, _, err := renderBundlePayload(ec("v-"+tc.name, tc.spec), nil)
 			if err != nil {
 				t.Fatalf("render: %v", err)
 			}

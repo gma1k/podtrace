@@ -140,6 +140,10 @@ type PodTraceSessionStatus struct {
 	// +optional
 	Summary *SessionSummary `json:"summary,omitempty"`
 
+	// TargetNamespaces is the sorted list of namespace names the operator
+	// resolved spec.namespaceSelector.
+	TargetNamespaces []string `json:"targetNamespaces,omitempty"`
+
 	// Conditions is the latest available observations of session state.
 	// +optional
 	// +patchMergeKey=type

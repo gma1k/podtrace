@@ -104,6 +104,10 @@ type PodTraceStatus struct {
 	// MatchedPods is the total number of pods currently matched across all nodes.
 	MatchedPods int32 `json:"matchedPods,omitempty"`
 
+	// TargetNamespaces is the sorted list of namespace names the operator
+	// resolved spec.namespaceSelector to at the last successful reconcile.
+	TargetNamespaces []string `json:"targetNamespaces,omitempty"`
+
 	// ObservedGeneration is the most recent generation observed for this PodTrace.
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }

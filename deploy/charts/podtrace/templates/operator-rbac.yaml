@@ -43,6 +43,12 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch"]
+  # Namespace lookup for spec.namespaceSelector resolution. The operator
+  # lists namespaces, filters by the user-supplied LabelSelector, and
+  # writes the result into the agent bundle's target_namespaces field.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
   # System-namespace infrastructure: SAs, bundles (ConfigMap+Secret)
   - apiGroups: [""]
     resources: ["serviceaccounts", "configmaps", "secrets"]

@@ -115,7 +115,25 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		key := CRKey{Namespace: pt.Namespace, Name: pt.Name}
 
-		matched, err := MatchPodTraceAgainstPods(pt, localPods)
+		// Load the bundle BEFORE matching, so bundle.TargetNamespaces
+		// is available to the matcher.
+		bundle, err := LoadBundle(ctx, r.Client, r.SystemNamespace, pt.UID)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				logger.V(1).Info("bundle not yet synced", "cr", key)
+				continue
+			}
+			logger.Error(err, "load bundle", "cr", key)
+			rules = append(rules, CRRule{
+				Key:     key,
+				Filters: filtersToSet(pt.Spec.Filters),
+				Err:     fmt.Errorf("load bundle: %w", err),
+			})
+			activeKeys[key] = struct{}{}
+			continue
+		}
+
+		matched, err := MatchPodTraceAgainstPods(pt, localPods, bundle.TargetNamespaces)
 		if err != nil {
 			logger.Error(err, "match pods", "cr", key)
 			rules = append(rules, CRRule{
@@ -138,24 +156,6 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 				Filters:     filtersToSet(pt.Spec.Filters),
 				MatchedPods: lenToInt32(len(matched)),
 				Err:         fmt.Errorf("resolve cgroup IDs: %w", err),
-			})
-			activeKeys[key] = struct{}{}
-			continue
-		}
-
-		bundle, err := LoadBundle(ctx, r.Client, r.SystemNamespace, pt.UID)
-		if err != nil {
-			if apierrors.IsNotFound(err) {
-				logger.V(1).Info("bundle not yet synced", "cr", key)
-				continue
-			}
-			logger.Error(err, "load bundle", "cr", key)
-			rules = append(rules, CRRule{
-				Key:         key,
-				CgroupIDs:   cgroupIDs,
-				Filters:     filtersToSet(pt.Spec.Filters),
-				MatchedPods: lenToInt32(len(matched)),
-				Err:         fmt.Errorf("load bundle: %w", err),
 			})
 			activeKeys[key] = struct{}{}
 			continue

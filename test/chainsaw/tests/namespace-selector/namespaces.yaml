@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ns-selector-in
+  labels:
+    podtrace.io/chainsaw-ns-selector: "in"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ns-selector-out
+  labels:
+    podtrace.io/chainsaw-ns-selector: "out"

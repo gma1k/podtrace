@@ -1,0 +1,60 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: namespace-selector
+spec:
+  description: |
+    Verifies cross-namespace targeting via spec.namespaceSelector:
+      1. Create two test namespaces with distinct labels.
+      2. Create a PodTrace whose NamespaceSelector matches exactly one.
+      3. Assert the bundle ConfigMap surfaces the resolved namespace
+         allowlist in data.target_namespaces and the PodTrace status
+         echoes it in status.targetNamespaces.
+      4. Re-label the previously-excluded namespace; assert the operator
+         requeues on the Namespace event and the allowlist grows.
+
+    The Namespace event watch is the load-bearing piece — without it the
+    bundle would only update on the next PodTrace reconcile, which is
+    operator-period-bound and not user-visible.
+  timeouts:
+    apply: 30s
+    assert: 120s
+    delete: 60s
+  steps:
+    - name: prepare-namespaces
+      try:
+        - apply:
+            file: ./namespaces.yaml
+
+    - name: apply-cr
+      try:
+        - apply:
+            file: ./resources.yaml
+        - assert:
+            file: ./assert-initial-allowlist.yaml
+
+    - name: relabel-namespace
+      try:
+        - patch:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: ns-selector-out
+                labels:
+                  podtrace.io/chainsaw-ns-selector: "in"
+        - assert:
+            file: ./assert-grown-allowlist.yaml
+
+    - name: cleanup
+      cleanup:
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Namespace
+              name: ns-selector-in
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Namespace
+              name: ns-selector-out

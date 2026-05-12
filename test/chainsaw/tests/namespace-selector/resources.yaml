@@ -1,0 +1,24 @@
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: ns-selector-otlp
+spec:
+  type: otlp
+  otlp:
+    endpoint: otel-collector:4318
+    protocol: http
+    insecure: true
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: ns-selector-pt
+spec:
+  selector:
+    matchLabels:
+      app: ns-selector-target
+  namespaceSelector:
+    matchLabels:
+      podtrace.io/chainsaw-ns-selector: "in"
+  exporterRef:
+    name: ns-selector-otlp

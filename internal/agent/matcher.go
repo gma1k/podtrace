@@ -11,9 +11,21 @@ import (
 )
 
 // MatchPodTraceAgainstPods returns the subset of `pods` that match the
-// PodTrace's selector (or appear in its PodRefs) AND are currently
-// schedulable for tracing (Running + have a container status).
-func MatchPodTraceAgainstPods(pt *podtracev1alpha1.PodTrace, pods []*corev1.Pod) ([]*corev1.Pod, error) {
+// PodTrace's selector (or appear in its PodRefs), are currently
+// schedulable for tracing (Running + container status), and live in a
+// namespace permitted by the operator-resolved allowlist.
+//
+// The allowlist is a tri-state argument:
+//
+//	nil           — the bundle did not carry target_namespaces. Either
+//	                the CR has no spec.namespaceSelector or the operator
+//	                hasn't yet upgraded. The matcher falls back to
+//	                own-namespace-only matching.
+//	[]string{}    — spec.namespaceSelector was set but matched zero
+//	                namespaces. No pods can match for this CR.
+//	[ns, ...]     — the bundle carries the resolved allowlist; only
+//	                pods in these namespaces are eligible.
+func MatchPodTraceAgainstPods(pt *podtracev1alpha1.PodTrace, pods []*corev1.Pod, allowlist []string) ([]*corev1.Pod, error) {
 	if pt == nil {
 		return nil, fmt.Errorf("nil PodTrace")
 	}
@@ -32,7 +44,7 @@ func MatchPodTraceAgainstPods(pt *podtracev1alpha1.PodTrace, pods []*corev1.Pod)
 		if p == nil || !isEligiblePod(p) {
 			continue
 		}
-		if !inNamespaceScope(pt, p) {
+		if !inNamespaceScope(pt, p, allowlist) {
 			continue
 		}
 		switch {
@@ -79,17 +91,19 @@ func buildPodRefIndex(pt *podtracev1alpha1.PodTrace) map[string]struct{} {
 	return idx
 }
 
-// inNamespaceScope enforces the same "own-namespace-only unless
-// NamespaceSelector is set" rule the operator's session reconciler
-// uses. A non-nil NamespaceSelector opens cross-namespace matching;
-// the NamespaceSelector's own expressions are not yet honoured —
-// evaluating them would require a Namespace informer that is not
-// wired here.
-func inNamespaceScope(pt *podtracev1alpha1.PodTrace, p *corev1.Pod) bool {
-	if pt.Spec.NamespaceSelector != nil {
-		return true
+func inNamespaceScope(pt *podtracev1alpha1.PodTrace, p *corev1.Pod, allowlist []string) bool {
+	if pt.Spec.NamespaceSelector == nil {
+		return p.Namespace == pt.Namespace
 	}
-	return p.Namespace == pt.Namespace
+	if allowlist == nil {
+		return p.Namespace == pt.Namespace
+	}
+	for _, ns := range allowlist {
+		if p.Namespace == ns {
+			return true
+		}
+	}
+	return false
 }
 
 // isEligiblePod is the agent-side counterpart to the operator's pod

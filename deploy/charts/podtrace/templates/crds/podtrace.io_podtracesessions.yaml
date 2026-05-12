@@ -484,6 +484,13 @@ spec:
                 required:
                 - totalEvents
                 type: object
+              targetNamespaces:
+                description: |-
+                  TargetNamespaces is the sorted list of namespace names the operator
+                  resolved spec.namespaceSelector.
+                items:
+                  type: string
+                type: array
             type: object
         type: object
     served: true
