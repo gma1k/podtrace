@@ -1,0 +1,8 @@
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: ec-status-splunk
+status:
+  ready: true
+  (conditions[?type == 'Ready'].status | [0]): "True"
+  (conditions[?type == 'Ready'].reason | [0]): SecretsResolved

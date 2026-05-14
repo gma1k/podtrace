@@ -5,6 +5,7 @@
   "include-v-in-tag": true,
   "bump-minor-pre-major": false,
   "bump-patch-for-minor-pre-major": true,
+  "pull-request-title-pattern": "chore(release): release ${version}",
   "packages": {
     ".": {
       "package-name": "podtrace",
@@ -28,18 +29,20 @@
         }
       ],
       "changelog-sections": [
-        { "type": "feat",     "section": "Added" },
-        { "type": "fix",      "section": "Fixed" },
-        { "type": "perf",     "section": "Changed" },
-        { "type": "revert",   "section": "Changed" },
-        { "type": "refactor", "section": "Changed" },
-        { "type": "chore",    "section": "Changed", "hidden": true },
-        { "type": "docs",     "section": "Changed", "hidden": true },
-        { "type": "style",    "section": "Changed", "hidden": true },
-        { "type": "test",     "section": "Changed", "hidden": true },
-        { "type": "build",    "section": "Changed", "hidden": true },
-        { "type": "ci",       "section": "Changed", "hidden": true },
-        { "type": "security", "section": "Security" }
+        { "type": "feat",      "section": "Added" },
+        { "type": "fix",       "section": "Fixed" },
+        { "type": "perf",      "section": "Performance" },
+        { "type": "deprecate", "section": "Deprecated" },
+        { "type": "remove",    "section": "Removed" },
+        { "type": "security",  "section": "Security" },
+        { "type": "revert",    "section": "Changed" },
+        { "type": "refactor",  "section": "Changed", "hidden": true },
+        { "type": "chore",     "section": "Changed", "hidden": true },
+        { "type": "docs",      "section": "Changed", "hidden": true },
+        { "type": "style",     "section": "Changed", "hidden": true },
+        { "type": "test",      "section": "Changed", "hidden": true },
+        { "type": "build",     "section": "Changed", "hidden": true },
+        { "type": "ci",        "section": "Changed", "hidden": true }
       ]
     }
   }

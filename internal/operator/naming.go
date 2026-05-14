@@ -37,11 +37,12 @@ const (
 
 // Condition types reported on CR .status.conditions.
 const (
-	ConditionReady      = "Ready"
-	ConditionReconciled = "Reconciled"
-	ConditionDegraded   = "Degraded"
-	ConditionPaused     = "Paused"
+	ConditionReady          = "Ready"
+	ConditionReconciled     = "Reconciled"
+	ConditionDegraded       = "Degraded"
+	ConditionPaused         = "Paused"
 	ConditionReportUploaded = "ReportUploaded"
+	ConditionReferenced     = "Referenced"
 )
 
 // AgentDaemonSetName is the fixed DaemonSet name created by

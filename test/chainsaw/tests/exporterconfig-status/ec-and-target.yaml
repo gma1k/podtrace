@@ -1,0 +1,29 @@
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: ec-status-splunk
+spec:
+  type: splunk
+  splunk:
+    endpoint: https://splunk.observability:8088
+    tokenSecretRef:
+      name: ec-status-secret
+      key: token
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ec-status-target
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ec-status-target
+  template:
+    metadata:
+      labels:
+        app: ec-status-target
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.9

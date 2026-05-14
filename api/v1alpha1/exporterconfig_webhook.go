@@ -35,7 +35,7 @@ func (v *ExporterConfigCustomValidator) ValidateCreate(_ context.Context, obj ru
 	if !ok {
 		return nil, fmt.Errorf("expected *ExporterConfig, got %T", obj)
 	}
-	return nil, validateExporterConfigVariant(ec.Spec)
+	return nil, ValidateExporterConfigVariant(ec.Spec)
 }
 
 func (v *ExporterConfigCustomValidator) ValidateUpdate(_ context.Context, _, newObj runtime.Object) (admission.Warnings, error) {
@@ -43,7 +43,7 @@ func (v *ExporterConfigCustomValidator) ValidateUpdate(_ context.Context, _, new
 	if !ok {
 		return nil, fmt.Errorf("expected *ExporterConfig, got %T", newObj)
 	}
-	return nil, validateExporterConfigVariant(ec.Spec)
+	return nil, ValidateExporterConfigVariant(ec.Spec)
 }
 
 func (v *ExporterConfigCustomValidator) ValidateDelete(_ context.Context, _ runtime.Object) (admission.Warnings, error) {

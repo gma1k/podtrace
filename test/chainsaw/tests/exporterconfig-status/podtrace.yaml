@@ -1,0 +1,11 @@
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: ec-status-pt
+spec:
+  selector:
+    matchLabels:
+      app: ec-status-target
+  filters: [dns]
+  exporterRef:
+    name: ec-status-splunk

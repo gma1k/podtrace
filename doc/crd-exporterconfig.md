@@ -163,16 +163,50 @@ the CR into each namespace (the bundle is per-CR anyway).
 
 ## Status reference
 
+The operator runs a dedicated reconciler that keeps an ExporterConfig's
+status fresh:
+
 ```yaml
 status:
+  ready: true
+  referencedBy: 3
+  observedGeneration: 4
   conditions:
-    - type: Reconciled
+    - type: Ready
       status: "True"
-      reason: Reconciled
+      reason: SecretsResolved
+      message: all referenced Secrets resolved
+    - type: Referenced
+      status: "True"
+      reason: Referenced
+      message: 3 referent(s)
 ```
 
-ExporterConfig itself is mostly passive — the heavy reconcile happens
-when a PodTrace or PodTraceSession references it.
+### Field semantics
+
+| Field | Meaning |
+|---|---|
+| `ready` | `true` when the spec variant validates AND every referenced Secret (and required key, if any) exists. |
+| `referencedBy` | Count of `PodTrace` + non-terminal `PodTraceSession` objects in the same namespace whose `spec.exporterRef.name` matches this EC. Terminal sessions (`Completed`, `Failed`) are excluded so the count reflects active load. |
+| `observedGeneration` | Mirrors `metadata.generation` on the last successful reconcile. |
+
+### Conditions
+
+| Type | Status | Reason | Meaning |
+|---|---|---|---|
+| `Ready` | `True` | `SecretsResolved` | All required Secrets and keys resolved. |
+| `Ready` | `False` | `SecretMissing` | A referenced Secret does not exist. The message names the Secret. |
+| `Ready` | `False` | `SecretKeyMissing` | The referenced Secret exists but lacks the required key. The message names both. |
+| `Ready` | `False` | `InvalidSpec` | `spec.type` does not match the populated typed field. Normally blocked by the admission webhook; this reason appears on clusters where the webhook is disabled. |
+| `Ready` | `Unknown` | `TransientError` | Transient API error during reconcile. Self-heals on the next watch event. |
+| `Referenced` | `True` | `Referenced` | At least one `PodTrace` or active `PodTraceSession` uses this EC. |
+| `Referenced` | `False` | `Unreferenced` | No active referents. Useful for alerting on orphaned ECs: `kubectl wait --for=condition=Referenced=false`. |
+
+### What the status reconciler does *not* do
+
+- It does **not** probe the exporter endpoint. Network reachability is reported by the agent at first export, surfacing as a `Degraded` condition on the referring `PodTrace` / `PodTraceSession`. Probing here would flap on transient backend issues and cause false alerts across every CR that references the EC.
+- It does **not** validate credential *contents* against the remote service (e.g. it never tries the Splunk token against Splunk). The agent learns about credential rejections on first export.
+- It does **not** mutate the spec. Missing Secrets must be fixed by the user; the controller surfaces the condition and waits.
 
 ## Related
 
