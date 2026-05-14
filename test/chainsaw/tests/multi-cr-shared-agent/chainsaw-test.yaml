@@ -26,12 +26,21 @@ spec:
     - name: one-agent-pod-per-node
       try:
         - script:
+            timeout: 30s
             content: |
               set -eu
               nodes=$(kubectl get nodes --no-headers | wc -l)
-              agents=$(kubectl -n podtrace-system get pods \
-                -l podtrace.io/component=agent --no-headers | wc -l)
-              if [ "$nodes" != "$agents" ]; then
-                echo "expected $nodes agent pods, got $agents" >&2
-                exit 1
-              fi
+              for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+                agents=$(kubectl -n podtrace-system get pods \
+                  -l podtrace.io/component=agent \
+                  --field-selector=status.phase=Running \
+                  --no-headers | wc -l)
+                if [ "$nodes" = "$agents" ]; then
+                  echo "ok: $agents Running agent pods on $nodes nodes"
+                  exit 0
+                fi
+                sleep 2
+              done
+              echo "expected $nodes agent pods Running, got $agents" >&2
+              kubectl -n podtrace-system get pods -l podtrace.io/component=agent -o wide >&2 || true
+              exit 1

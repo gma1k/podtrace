@@ -91,9 +91,11 @@ func cleanupPodTraceSessionChildren(ctx context.Context, c client.Client, s *pod
 
 	// Session-scoped exporter bundle lives in the system namespace.
 	bundleName := SessionBundleName(s.UID)
+	objstoreCredsName := SessionObjectStoreCredsName(s.UID)
 	for _, obj := range []client.Object{
 		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: bundleName, Namespace: systemNS}},
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: bundleName, Namespace: systemNS}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: objstoreCredsName, Namespace: systemNS}},
 	} {
 		if err := c.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
 			return fmt.Errorf("delete session bundle %T: %w", obj, err)

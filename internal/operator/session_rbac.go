@@ -163,9 +163,7 @@ func reportRefResource(ref *podtracev1alpha1.ReportReference) (string, string) {
 }
 
 // reportToSpecFromReportRef renders the session's reportRef into the
-// kind/namespace/name form the CLI's --report-to flag parses. Used by
-// the Job spec builder to wire the flag. Returns empty string when no
-// CLI-uploadable sink is set.
+// form the CLI's --report-to flag parses. Returns empty string when no
 func reportToSpecFromReportRef(s *podtracev1alpha1.PodTraceSession) string {
 	if s == nil || s.Spec.ReportRef == nil {
 		return ""
@@ -175,6 +173,8 @@ func reportToSpecFromReportRef(s *podtracev1alpha1.PodTraceSession) string {
 		return "configmap/" + s.Namespace + "/" + s.Spec.ReportRef.ConfigMap.Name
 	case s.Spec.ReportRef.Secret != nil && s.Spec.ReportRef.Secret.Name != "":
 		return "secret/" + s.Namespace + "/" + s.Spec.ReportRef.Secret.Name
+	case s.Spec.ReportRef.ObjectStore != nil && s.Spec.ReportRef.ObjectStore.URI != "":
+		return s.Spec.ReportRef.ObjectStore.URI
 	}
 	return ""
 }

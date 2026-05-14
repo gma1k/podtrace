@@ -164,12 +164,14 @@ func (r *Router) Close(ctx context.Context) error {
 	return nil
 }
 
+// matchRule decides whether an event is forwarded to a given CR's
+// exporter.
 func matchRule(rule *CRRule, ev *events.Event) bool {
 	if _, ok := rule.CgroupIDs[ev.CgroupID]; !ok {
 		return false
 	}
 	if len(rule.Filters) == 0 {
-		return false
+		return true
 	}
 	_, ok := rule.Filters[ev.Type]
 	return ok

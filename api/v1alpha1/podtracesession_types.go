@@ -144,6 +144,13 @@ type PodTraceSessionStatus struct {
 	// resolved spec.namespaceSelector.
 	TargetNamespaces []string `json:"targetNamespaces,omitempty"`
 
+	// ReportLocation is the resolved object URI of the uploaded session
+	// report when spec.reportRef.objectStore is set and the sidecar
+	// uploader has succeeded. Empty for ConfigMap/Secret sinks (the
+	// report lives at .spec.reportRef itself) and before upload completes.
+	// +optional
+	ReportLocation string `json:"reportLocation,omitempty"`
+
 	// Conditions is the latest available observations of session state.
 	// +optional
 	// +patchMergeKey=type

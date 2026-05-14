@@ -147,12 +147,13 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	writer := &StatusWriter{
-		Client:    mgr.GetClient(),
-		NodeName:  opts.NodeName,
-		Interval:  opts.StatusReportInterval,
-		Router:    router,
-		Ready:     probes.IsReady,
-		Heartbeat: probes.Heartbeat,
+		Client:     mgr.GetClient(),
+		NodeName:   opts.NodeName,
+		Interval:   opts.StatusReportInterval,
+		Router:     router,
+		Ready:      probes.IsReady,
+		Heartbeat:  probes.Heartbeat,
+		BackendErr: backendErr,
 	}
 
 	g, gctx := errgroup.WithContext(ctx)

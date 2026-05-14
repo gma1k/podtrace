@@ -20,8 +20,10 @@ type StatusWriter struct {
 	Interval time.Duration
 	Router   *Router
 
-	Ready func() bool
+	Ready     func() bool
 	Heartbeat func()
+
+	BackendErr error
 }
 
 func (w *StatusWriter) Run(ctx context.Context) error {
@@ -60,7 +62,7 @@ func (w *StatusWriter) emitOnce(ctx context.Context) error {
 
 	var firstErr error
 	for _, rule := range rules {
-		entry := buildNodeStatusEntry(w.NodeName, &rule, stats[rule.Key], agentReady, time.Now())
+		entry := buildNodeStatusEntry(w.NodeName, &rule, stats[rule.Key], agentReady, w.BackendErr, time.Now())
 		if err := w.patchCRStatus(ctx, rule.Key, entry); err != nil && firstErr == nil {
 			firstErr = err
 		}
@@ -68,16 +70,19 @@ func (w *StatusWriter) emitOnce(ctx context.Context) error {
 	return firstErr
 }
 
-func buildNodeStatusEntry(node string, rule *CRRule, counters crCounters, agentReady bool, now time.Time) podtracev1alpha1.PodTraceNodeStatus {
+func buildNodeStatusEntry(node string, rule *CRRule, counters crCounters, agentReady bool, backendErr error, now time.Time) podtracev1alpha1.PodTraceNodeStatus {
 	entry := podtracev1alpha1.PodTraceNodeStatus{
 		Node:          node,
-		Ready:         agentReady && rule.Err == nil,
+		Ready:         agentReady && rule.Err == nil && backendErr == nil,
 		ActiveCgroups: lenToInt32(len(rule.CgroupIDs)),
 		EventsTotal:   counters.Events,
 		DroppedEvents: counters.Dropped,
 		LastHeartbeat: metav1.NewTime(now),
 	}
-	if rule.Err != nil {
+	switch {
+	case backendErr != nil:
+		entry.Message = "tracer backend unavailable: " + backendErr.Error()
+	case rule.Err != nil:
 		entry.Message = rule.Err.Error()
 	}
 	return entry

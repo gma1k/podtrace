@@ -41,6 +41,7 @@ const (
 	ConditionReconciled = "Reconciled"
 	ConditionDegraded   = "Degraded"
 	ConditionPaused     = "Paused"
+	ConditionReportUploaded = "ReportUploaded"
 )
 
 // AgentDaemonSetName is the fixed DaemonSet name created by

@@ -3,6 +3,7 @@ package operator
 import (
 	"context"
 	"fmt"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -13,7 +14,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
@@ -44,8 +44,6 @@ type PodTraceReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch
 
 func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx).WithValues("podtrace", req.String())
-
 	var pt podtracev1alpha1.PodTrace
 	if err := r.Get(ctx, req.NamespacedName, &pt); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -99,17 +97,15 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	//   list  → resolved allowlist
 	targetNamespaces, err := ResolveNamespaceSelector(ctx, r.Client, pt.Spec.NamespaceSelector)
 	if err != nil {
-		logger.Error(err, "resolve namespace selector")
 		r.setCondition(&pt, ConditionDegraded, metav1.ConditionTrue, "NamespaceSelectorInvalid", err.Error())
 		_ = r.Status().Update(ctx, &pt)
-		return ctrl.Result{}, err
+		return ctrl.Result{}, nil
 	}
 
 	if err := r.syncExporterBundle(ctx, &pt, &ec, targetNamespaces); err != nil {
-		logger.Error(err, "sync exporter bundle")
 		r.setCondition(&pt, ConditionDegraded, metav1.ConditionTrue, "BundleSync", err.Error())
 		_ = r.Status().Update(ctx, &pt)
-		return ctrl.Result{}, err
+		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
 	}
 
 	pt.Status.TargetNamespaces = targetNamespaces

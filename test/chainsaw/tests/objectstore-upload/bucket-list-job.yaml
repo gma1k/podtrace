@@ -1,0 +1,37 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seaweedfs-bucket-list
+spec:
+  backoffLimit: 4
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: awscli
+          image: public.ecr.aws/aws-cli/aws-cli:2.17.0
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              value: chainsaw
+            - name: AWS_SECRET_ACCESS_KEY
+              value: chainsawSecretKey
+            - name: AWS_REGION
+              value: us-east-1
+            - name: AWS_EC2_METADATA_DISABLED
+              value: "true"
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              for i in 1 2 3 4 5 6 7 8 9 10; do
+                count=$(aws --endpoint-url http://seaweedfs.objectstore-upload-test.svc.cluster.local:8333 s3 ls s3://reports/diagnose/ 2>/dev/null | wc -l)
+                if [ "$count" -gt 0 ]; then
+                  echo "found $count object(s) under s3://reports/diagnose/"
+                  exit 0
+                fi
+                echo "attempt $i: bucket empty, retrying"
+                sleep 3
+              done
+              echo "no report objects under s3://reports/diagnose/ after retries"
+              exit 1

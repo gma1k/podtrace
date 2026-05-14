@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -27,10 +28,7 @@ import (
 	"github.com/podtrace/podtrace/pkg/tracer"
 )
 
-// AgentReconciler is the single controller the agent runs. It listens
-// to changes on three resource types — PodTrace (cluster), Pod
-// (node-local), and ConfigMap (system-NS bundles) — and rebuilds the
-// Router's full rule set from scratch on every tick.
+// AgentReconciler is the single controller the agent runs.
 type AgentReconciler struct {
 	client.Client
 	NodeName        string
@@ -78,10 +76,7 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-// Reconcile rebuilds the full router rule set. The incoming req is
-// used only for logging — every invocation rebuilds everything,
-// guaranteeing the router snapshot matches the API server's view at
-// any moment in time.
+// Reconcile rebuilds the full router rule set.
 func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := ctrllog.FromContext(ctx).WithName("agent").WithValues("nudged_by", req.String())
 
@@ -115,8 +110,6 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		key := CRKey{Namespace: pt.Namespace, Name: pt.Name}
 
-		// Load the bundle BEFORE matching, so bundle.TargetNamespaces
-		// is available to the matcher.
 		bundle, err := LoadBundle(ctx, r.Client, r.SystemNamespace, pt.UID)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
@@ -163,7 +156,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 		exporter, err := r.obtainExporter(key, bundle)
 		if err != nil {
-			logger.Error(err, "build exporter", "cr", key)
+			logger.V(1).Info("build exporter (tombstoned on CR)", "cr", key, "error", err)
 			rules = append(rules, CRRule{
 				Key:            key,
 				CgroupIDs:      cgroupIDs,
@@ -268,7 +261,6 @@ func (r *AgentReconciler) obtainExporter(key CRKey, bundle *BundlePayload) (trac
 }
 
 // releaseExporter closes and removes the cached exporter for key.
-// Called when a CR's matched-pod set on this node drops to zero.
 func (r *AgentReconciler) releaseExporter(key CRKey) {
 	r.exporterCacheMu.Lock()
 	entry, ok := r.exporterCache[key]
@@ -296,55 +288,94 @@ func (r *AgentReconciler) reapStaleExporters(active map[CRKey]struct{}) {
 }
 
 // resolveCgroupIDs maps each matched pod's cgroup path to its inode
-// number — the value the kernel stamps on every event. Pods with
-// unresolvable cgroups are silently skipped (they will return on the
-// next reconcile when the kubelet has published a cgroup path).
+// number — the value the kernel stamps on every event.
 func resolveCgroupIDs(pods []*corev1.Pod) (map[uint64]struct{}, error) {
 	out := map[uint64]struct{}{}
+	root := discoverKubepodsRoot()
 	for _, p := range pods {
-		for _, cs := range p.Status.ContainerStatuses {
-			path := cgroupPathForContainer(p, cs.Name)
-			if path == "" {
-				continue
-			}
-			id, err := cgroupIDFromPath(path)
-			if err != nil {
-				continue
-			}
+		path := cgroupPathForPod(p, root)
+		if path == "" {
+			continue
+		}
+		if id, err := cgroupIDFromPath(path); err == nil {
 			out[id] = struct{}{}
+		}
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			child := filepath.Join(path, e.Name())
+			if id, err := cgroupIDFromPath(child); err == nil {
+				out[id] = struct{}{}
+			}
 		}
 	}
 	return out, nil
 }
 
-// cgroupPathForContainer returns the best-effort /sys/fs/cgroup path
-// for a container inside a pod. The real CRI-aware resolver lives in
-// internal/kubernetes and is too heavy for the agent's hot path; the
-// heuristic here is slightly-lossy and relies on the reconcile loop
-// picking up a pod on a later tick once its cgroup path materializes.
-func cgroupPathForContainer(p *corev1.Pod, _ string) string {
-	uid := strings.ReplaceAll(string(p.UID), "-", "_")
+// kubepodsRootCandidates lists the well-known cgroup directories
+// kubelet publishes per-pod slices under.
+var kubepodsRootCandidates = []string{
+	"/sys/fs/cgroup/kubepods.slice",
+	"/sys/fs/cgroup/kubepods",
+	"/sys/fs/cgroup/kubelet.slice/kubelet-kubepods.slice",
+	"/sys/fs/cgroup/system.slice/kubelet.service/kubepods",
+}
+
+// discoverKubepodsRoot returns the first kubepods root that exists on
+// this node.
+func discoverKubepodsRoot() string {
+	for _, c := range kubepodsRootCandidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return ""
+}
+
+// cgroupPathForPod composes the per-pod cgroup directory under a
+// discovered root.
+func cgroupPathForPod(p *corev1.Pod, root string) string {
+	if root == "" {
+		return ""
+	}
+	uidDash := string(p.UID)
+	uidUnder := strings.ReplaceAll(uidDash, "-", "_")
 	qos := strings.ToLower(string(p.Status.QOSClass))
 	if qos == "" {
 		qos = "besteffort"
 	}
 
+	// The slice-prefix is the leaf of the discovered root with .slice
+	// stripped.
+	leaf := filepath.Base(root)
+	prefix := strings.TrimSuffix(leaf, ".slice")
+
 	candidates := []string{
-		fmt.Sprintf("/sys/fs/cgroup/kubepods.slice/kubepods-%s.slice/kubepods-%s-pod%s.slice", qos, qos, uid),
-		fmt.Sprintf("/sys/fs/cgroup/kubepods/%s/pod%s", qos, string(p.UID)),
-		fmt.Sprintf("/sys/fs/cgroup/kubepods.slice/kubepods-pod%s.slice", uid),
+		filepath.Join(root,
+			prefix+"-"+qos+".slice",
+			prefix+"-"+qos+"-pod"+uidUnder+".slice",
+		),
+		filepath.Join(root,
+			prefix+"-pod"+uidUnder+".slice",
+		),
+		filepath.Join(root, qos, "pod"+uidDash),
+		filepath.Join(root, "pod"+uidDash),
 	}
-	for _, p := range candidates {
-		if _, err := os.Stat(p); err == nil {
-			return p
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
 		}
 	}
 	return ""
 }
 
 // cgroupIDFromPath returns the inode of a cgroup path — the ID the
-// kernel exposes on eBPF events. Duplicated from internal/ebpf/tracer
-// (where it is unexported) to keep the agent's import graph shallow.
+// kernel exposes on eBPF events.
 func cgroupIDFromPath(path string) (uint64, error) {
 	st, err := os.Stat(path)
 	if err != nil {
@@ -358,11 +389,10 @@ func cgroupIDFromPath(path string) (uint64, error) {
 }
 
 // buildTargetSet turns the active rule set into a tracer.TargetSet.
-// Each Target needs a cgroup path (not ID) for the tracer's
-// AttachToCgroup call, so we rebuild paths from local pods here.
 func buildTargetSet(rules []CRRule, pods []*corev1.Pod) tracer.TargetSet {
 	seen := map[uint64]struct{}{}
 	var out tracer.TargetSet
+	root := discoverKubepodsRoot()
 
 	for _, rule := range rules {
 		for id := range rule.CgroupIDs {
@@ -371,7 +401,7 @@ func buildTargetSet(rules []CRRule, pods []*corev1.Pod) tracer.TargetSet {
 			}
 			seen[id] = struct{}{}
 			for _, p := range pods {
-				path := cgroupPathForContainer(p, "")
+				path := cgroupPathForPod(p, root)
 				if path == "" {
 					continue
 				}
@@ -394,8 +424,7 @@ func buildTargetSet(rules []CRRule, pods []*corev1.Pod) tracer.TargetSet {
 }
 
 // filtersToSet converts the CRD's EventFilter list into the
-// EventType-keyed set the router needs. Unrecognised names are skipped
-// silently: the CRD enum prevents that case in practice.
+// EventType-keyed set the router needs.
 func filtersToSet(in []podtracev1alpha1.EventFilter) map[events.EventType]struct{} {
 	out := map[events.EventType]struct{}{}
 	for _, f := range in {
@@ -408,8 +437,6 @@ func filtersToSet(in []podtracev1alpha1.EventFilter) map[events.EventType]struct
 
 // filterToEventTypes expands a high-level filter category into the set
 // of low-level EventType values the tracer produces for that category.
-// The mapping is intentionally broad — a CR opting into "net" wants
-// TCP + UDP + retransmits, not just TCP send.
 func filterToEventTypes(f podtracev1alpha1.EventFilter) []events.EventType {
 	switch f {
 	case podtracev1alpha1.FilterDNS:
@@ -449,8 +476,7 @@ func copyMap(in map[string]string) map[string]string {
 
 // podChangePredicates filters Pod watches down to events that actually
 // affect matching: label changes (selector matching), phase changes
-// (Running-ness), and deletions. Drops spec-only mutations that have
-// no bearing on our routing.
+// (Running-ness), and deletions.
 func podChangePredicates() predicate.Predicate {
 	return predicate.Funcs{
 		CreateFunc:  func(e event.CreateEvent) bool { return true },
@@ -484,4 +510,3 @@ func labelsEqual(a, b map[string]string) bool {
 	}
 	return true
 }
-

@@ -88,15 +88,16 @@ func TestBuildNodeStatusEntry(t *testing.T) {
 	now := time.Now()
 
 	cases := []struct {
-		name          string
-		rule          *CRRule
-		counters      crCounters
-		agentReady    bool
-		wantReady     bool
-		wantMessage   string
-		wantCgroups   int32
-		wantEvents    int64
-		wantDropped   int64
+		name        string
+		rule        *CRRule
+		counters    crCounters
+		agentReady  bool
+		backendErr  error
+		wantReady   bool
+		wantMessage string
+		wantCgroups int32
+		wantEvents  int64
+		wantDropped int64
 	}{
 		{
 			name: "HealthyRule",
@@ -132,10 +133,10 @@ func TestBuildNodeStatusEntry(t *testing.T) {
 				CgroupIDs: map[uint64]struct{}{1: {}},
 				Exporter:  &recExp{},
 			},
-			counters:   crCounters{Events: 1},
-			agentReady: false,
-			wantReady:  false,
-			wantEvents: 1,
+			counters:    crCounters{Events: 1},
+			agentReady:  false,
+			wantReady:   false,
+			wantEvents:  1,
 			wantCgroups: 1,
 		},
 		{
@@ -149,11 +150,45 @@ func TestBuildNodeStatusEntry(t *testing.T) {
 			wantReady:   false,
 			wantMessage: "load bundle: parse error",
 		},
+		{
+			// Backend failure (e.g. BPF/BTF unavailable) makes every
+			// CR ready=false and surfaces a single "tracer backend
+			// unavailable: …" message — operators see the root cause
+			// instead of a confusing healthy-looking row with zero
+			// events.
+			name: "BackendErrOnHealthyRule",
+			rule: &CRRule{
+				Key:       CRKey{"ns", "ok"},
+				CgroupIDs: map[uint64]struct{}{1: {}},
+				Exporter:  &recExp{},
+			},
+			counters:    crCounters{},
+			agentReady:  true,
+			backendErr:  errors.New("BPF object not embedded in this build"),
+			wantReady:   false,
+			wantMessage: "tracer backend unavailable: BPF object not embedded in this build",
+			wantCgroups: 1,
+		},
+		{
+			// Backend failure takes precedence over per-CR rule errors.
+			// rule.Err is the secondary effect; users should chase the
+			// backend first.
+			name: "BackendErrTakesPrecedenceOverRuleErr",
+			rule: &CRRule{
+				Key: CRKey{"ns", "tomb"},
+				Err: errors.New("build exporter: zipkin not supported"),
+			},
+			counters:    crCounters{},
+			agentReady:  true,
+			backendErr:  errors.New("kernel missing CAP_BPF"),
+			wantReady:   false,
+			wantMessage: "tracer backend unavailable: kernel missing CAP_BPF",
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildNodeStatusEntry(node, tc.rule, tc.counters, tc.agentReady, now)
+			got := buildNodeStatusEntry(node, tc.rule, tc.counters, tc.agentReady, tc.backendErr, now)
 			if got.Node != node {
 				t.Errorf("Node = %q, want %q", got.Node, node)
 			}

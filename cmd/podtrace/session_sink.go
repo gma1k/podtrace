@@ -165,11 +165,19 @@ func writeTerminationMessage(path string, summary SessionSummary) error {
 	return hostfs.WriteFile(path, data, 0o600)
 }
 
-// uploadReport parses a report-to spec of the form "kind/namespace/name"
-// and patches the named ConfigMap or Secret with the report text. Uses
-// the in-cluster ServiceAccount; expected to be a narrow Role granting
-// patch on exactly this one object.
+// objectStoreReportFile is the on-disk handoff path between the main
+// session container and the report-uploader sidecar. EmptyDir-mounted
+// at /var/run/podtrace in both containers; the main writes here when
+// the sink is an ObjectStore URI, the sidecar reads from here.
+const objectStoreReportFile = "/var/run/podtrace/report.txt"
+
 func uploadReport(ctx context.Context, spec, reportText string) error {
+	if strings.Contains(spec, "://") {
+		if err := hostfs.WriteFile(objectStoreReportFile, []byte(reportText), 0o644); err != nil {
+			return fmt.Errorf("write report file for sidecar: %w", err)
+		}
+		return nil
+	}
 	kind, namespace, name, err := parseReportToSpec(spec)
 	if err != nil {
 		return err

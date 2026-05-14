@@ -8,6 +8,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/podtrace/podtrace/internal/agent"
+	"github.com/podtrace/podtrace/internal/ebpf"
+	"github.com/podtrace/podtrace/pkg/tracer"
 )
 
 // agentOptions holds flags for `podtrace agent`. Defaults mirror
@@ -80,5 +82,10 @@ func toAgentOptions(c *agentOptions) (agent.Options, error) {
 		MetricsAddr:          c.metricsAddr,
 		HealthAddr:           c.healthAddr,
 		StatusReportInterval: c.statusReportInterval,
+		BackendFactory:       agentBackendFactory,
 	}, nil
+}
+
+func agentBackendFactory() (tracer.TracerBackend, error) {
+	return ebpf.NewTracer()
 }

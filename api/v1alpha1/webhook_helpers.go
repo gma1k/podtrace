@@ -3,6 +3,8 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -20,6 +22,43 @@ func validateNamespaceSelector(sel *metav1.LabelSelector) error {
 	return nil
 }
 
+// ValidateObjectStoreReference is the admission-time check for
+// spec.reportRef.objectStore.
+func ValidateObjectStoreReference(ref *ObjectStoreReference) error {
+	if ref == nil {
+		return nil
+	}
+	if ref.URI == "" {
+		return fmt.Errorf("spec.reportRef.objectStore.uri is required")
+	}
+	if err := validateObjectStoreURI(ref.URI); err != nil {
+		return fmt.Errorf("spec.reportRef.objectStore.uri: %w", err)
+	}
+	return nil
+}
+
+// validateObjectStoreURI enforces the supported URI shapes.
+func validateObjectStoreURI(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("parse %q: %w", raw, err)
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return fmt.Errorf("%q must include scheme and host", raw)
+	}
+	switch u.Scheme {
+	case "s3", "gs":
+	case "azblob":
+		path := strings.TrimPrefix(u.Path, "/")
+		if path == "" || strings.HasPrefix(path, "/") {
+			return fmt.Errorf("azblob URI %q must include a container after the account", raw)
+		}
+	default:
+		return fmt.Errorf("unsupported URI scheme %q (want s3, gs, or azblob)", u.Scheme)
+	}
+	return nil
+}
+
 func validateSelectorExclusivity(selector *metav1.LabelSelector, podRefs []PodRef) error {
 	hasSelector := selector != nil && (len(selector.MatchLabels) > 0 || len(selector.MatchExpressions) > 0)
 	hasPodRefs := len(podRefs) > 0
@@ -33,17 +72,12 @@ func validateSelectorExclusivity(selector *metav1.LabelSelector, podRefs []PodRe
 }
 
 // resolveExporterRef verifies that spec.exporterRef.name refers to an
-// ExporterConfig that exists in the caller's namespace. Cross-namespace
-// references are not supported: the referent and the referring trace
-// must share a namespace so that Secret refs (which are namespace-scoped)
-// remain unambiguous.
+// ExporterConfig that exists in the caller's namespace.
 func resolveExporterRef(ctx context.Context, c client.Client, namespace, name string) error {
 	if name == "" {
 		return fmt.Errorf("spec.exporterRef.name is required")
 	}
 	if c == nil {
-		// Defensive: if the webhook was wired without a client, fail
-		// closed rather than silently skipping the referential check.
 		return fmt.Errorf("webhook client not configured; cannot resolve ExporterConfig %q", name)
 	}
 	var ec ExporterConfig
@@ -58,8 +92,7 @@ func resolveExporterRef(ctx context.Context, c client.Client, namespace, name st
 }
 
 // validateExporterConfigVariant enforces that the typed field matching
-// spec.type is populated, and only that one. This cannot be expressed as
-// a simple CRD marker: it is a cross-field invariant.
+// spec.type is populated, and only that one.
 func validateExporterConfigVariant(spec ExporterConfigSpec) error {
 	present := map[ExporterType]bool{
 		ExporterTypeOTLP:    spec.OTLP != nil,

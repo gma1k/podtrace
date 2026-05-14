@@ -1,18 +1,28 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/podtrace/podtrace/internal/hostfs"
+	"github.com/podtrace/podtrace/internal/reportsink/objectstore"
 )
+
+const envObjectStoreCredentialsDir = "PODTRACE_OBJECTSTORE_CREDENTIALS_DIR"
+
+const reportLocationFile = "/var/run/podtrace/report-location.txt"
+
+const terminationLogPath = "/dev/termination-log"
 
 func newReportUploaderCmd() *cobra.Command {
 	var (
@@ -42,8 +52,11 @@ func newReportUploaderCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&reportFile, "report-file", "", "Path to the report file the main container produces")
-	cmd.Flags().StringVar(&reportToSpec, "report-to", "", "Target sink as kind/namespace/name (kind is configmap|secret)")
-	cmd.Flags().StringVar(&summaryPath, "summary-file", "", "Optional summary JSON path (uploaded under key summary.json)")
+	cmd.Flags().StringVar(&reportToSpec, "report-to", "",
+		"Target sink. One of: kind/namespace/name (kind=configmap|secret) "+
+			"or an object-store URI (s3://, gs://, azblob://)")
+	cmd.Flags().StringVar(&summaryPath, "summary-file", "",
+		"Optional summary JSON path. ObjectStore uploads also push this under <key>.summary.json")
 	cmd.Flags().DurationVar(&watchInterval, "watch-interval", 500*time.Millisecond, "Poll interval while waiting for the report file")
 	cmd.Flags().DurationVar(&maxWaitTimeout, "max-wait", 0, "Maximum time to wait for the report file before uploading what exists (0 = wait until SIGTERM)")
 	return cmd
@@ -101,5 +114,105 @@ func uploadIfPresent(ctx context.Context, opts reportUploaderOptions) error {
 		}
 		return fmt.Errorf("read report file: %w", err)
 	}
+
+	if isObjectStoreURI(opts.ReportToSpec) {
+		return uploadToObjectStore(ctx, opts, raw)
+	}
 	return uploadReport(ctx, opts.ReportToSpec, string(raw))
+}
+
+func isObjectStoreURI(spec string) bool {
+	return strings.Contains(spec, "://")
+}
+
+func uploadToObjectStore(ctx context.Context, opts reportUploaderOptions, report []byte) error {
+	creds, err := loadObjectStoreCredentials()
+	if err != nil {
+		return fmt.Errorf("object-store credentials: %w", err)
+	}
+	sink, err := objectstore.New(ctx, objectstore.Config{
+		URI:         opts.ReportToSpec,
+		Credentials: creds,
+	})
+	if err != nil {
+		return fmt.Errorf("object-store sink: %w", err)
+	}
+	defer func() {
+		// Close() failures during shutdown are best-effort: the upload
+		// already happened (or failed loudly) above. Surface to stderr
+		// so cluster operators can correlate persistent close errors
+		// with broader sidecar lifecycle issues.
+		if cerr := sink.Close(); cerr != nil {
+			fmt.Fprintf(os.Stderr, "warning: object-store sink close: %v\n", cerr)
+		}
+	}()
+
+	keyHint := buildObjectKeyHint()
+	resolved, err := sink.Upload(ctx, keyHint, "text/plain", bytes.NewReader(report))
+	if err != nil {
+		return fmt.Errorf("upload report: %w", err)
+	}
+
+	if opts.SummaryFile != "" {
+		summary, err := hostfs.ReadFile(opts.SummaryFile)
+		if err == nil && len(summary) > 0 {
+			summaryHint := keyHint + ".summary.json"
+			if _, err := sink.Upload(ctx, summaryHint, "application/json", bytes.NewReader(summary)); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: summary upload failed: %v\n", err)
+			}
+		}
+	}
+
+	if err := writeResolvedLocation(resolved); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: write resolved location: %v\n", err)
+	}
+	if err := hostfs.WriteFile(terminationLogPath, []byte(resolved), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: write termination message: %v\n", err)
+	}
+	return nil
+}
+
+func loadObjectStoreCredentials() (map[string][]byte, error) {
+	dir := os.Getenv(envObjectStoreCredentialsDir)
+	if dir == "" {
+		return nil, nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read credentials dir %q: %w", dir, err)
+	}
+	out := make(map[string][]byte, len(entries))
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "..") {
+			continue
+		}
+		if e.IsDir() {
+			continue
+		}
+		data, err := hostfs.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("read credential file %q: %w", e.Name(), err)
+		}
+		out[e.Name()] = data
+	}
+	return out, nil
+}
+
+func buildObjectKeyHint() string {
+	pod := os.Getenv("HOSTNAME")
+	if pod == "" {
+		pod = "session"
+	}
+	stamp := time.Now().UTC().Format("2006-01-02T15-04-05Z")
+	return fmt.Sprintf("%s-%s.txt", pod, stamp)
+}
+
+func writeResolvedLocation(uri string) error {
+	if err := hostfs.WriteFile(reportLocationFile, []byte(uri), 0o644); err != nil {
+		return err
+	}
+	return nil
 }

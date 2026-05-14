@@ -953,16 +953,16 @@ func TestCgroupIDFromPath_Errors(t *testing.T) {
 	}
 }
 
-// TestCgroupPathForContainer_NoMatch covers the all-candidates-miss
-// branch by passing a synthetic UID that cannot exist on the host.
-func TestCgroupPathForContainer_NoMatch(t *testing.T) {
+// TestCgroupPathForPod_NoMatch covers the all-candidates-miss branch
+// by passing a synthetic UID that cannot exist on the host.
+func TestCgroupPathForPod_NoMatch(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			UID: types.UID("definitely-not-a-real-pod-uid-0123456789abcdef"),
 		},
 		Status: corev1.PodStatus{QOSClass: corev1.PodQOSGuaranteed},
 	}
-	if got := cgroupPathForContainer(pod, ""); got != "" {
+	if got := cgroupPathForPod(pod, discoverKubepodsRoot()); got != "" {
 		t.Errorf("expected empty path for synthetic UID, got %q", got)
 	}
 }

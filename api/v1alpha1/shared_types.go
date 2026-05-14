@@ -78,29 +78,44 @@ type ReportReference struct {
 	// +optional
 	Secret *corev1.LocalObjectReference `json:"secret,omitempty"`
 
-	// ObjectStore uploads the report to a cloud bucket (s3, gs, az). Use
-	// this sink for reports that may exceed the 1MiB ConfigMap/Secret
-	// limit. Rejected by the validating webhook in v1alpha1 — the
-	// schema is reserved so clients can adopt it without a CRD bump
-	// later.
+	// ObjectStore uploads the report to a cloud bucket (s3, gs, azblob).
+	// Use this sink for reports that may exceed the 1MiB ConfigMap/Secret
+	// limit. Requires the session pod to be on a Kubernetes 1.29+ cluster
+	// so the native sidecar restartPolicy is honoured.
 	// +optional
 	ObjectStore *ObjectStoreReference `json:"objectStore,omitempty"`
 }
 
 // ObjectStoreReference names a cloud-storage destination for a session
-// report. The credentials secret, when set, must live in the same
-// namespace as the session and is consumed by the session Job pod via
-// vendor SDK default-credential-provider chains (IRSA, workload
-// identity, static access keys, etc.).
+// report. When CredentialsSecretRef is unset, the uploader uses the
+// cloud SDK's default credential chain (IRSA / Workload Identity /
+// Managed Identity) — the cloud-native preferred path. The explicit
+// Secret is the fallback for clusters without ambient credentials.
+//
+// Per-backend Secret key schema (all optional — missing keys defer to
+// the SDK default chain):
+//
+//	S3:     access_key_id, secret_access_key, session_token,
+//	        region, endpoint, force_path_style
+//	GCS:    service_account_json, endpoint
+//	Azure:  tenant_id, client_id, client_secret,
+//	        account_key, endpoint
 type ObjectStoreReference struct {
-	// URI of the destination, e.g. "s3://bucket/path/" or "gs://bucket/path/".
+	// URI of the destination. Three schemes:
+	//
+	//   s3://bucket/key-or-prefix
+	//   gs://bucket/key-or-prefix
+	//   azblob://account/container/key-or-prefix
+	//
+	// A trailing slash means "prefix mode" — the uploader appends a
+	// per-session filename (<pod-name>-<rfc3339>.txt) and an additional
+	// <key>.summary.json object. Without a trailing slash, the URI's
+	// path is used verbatim as the object key.
 	// +kubebuilder:validation:Required
 	URI string `json:"uri"`
 
 	// CredentialsSecretRef names a Secret in the session's namespace
-	// whose keys the uploader reads (e.g. "access_key_id",
-	// "secret_access_key"). Implementation-specific — interpretation is
-	// left to the CLI uploader.
+	// whose keys the uploader reads.
 	// +optional
 	CredentialsSecretRef *corev1.LocalObjectReference `json:"credentialsSecretRef,omitempty"`
 }

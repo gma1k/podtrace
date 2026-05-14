@@ -70,6 +70,7 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 				FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"},
 			},
 		},
+		{Name: "PODTRACE_PROC_BASE", Value: "/host/proc"},
 	}
 
 	if lvl := tc.Spec.Agent.LogLevel; lvl != "" {
@@ -101,13 +102,13 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 				Labels: selector.MatchLabels,
 			},
 			Spec: corev1.PodSpec{
-				ServiceAccountName:           AgentServiceAccountName(),
-				PriorityClassName:            priorityClassName,
-				HostPID:                      true, // needed for pid→cgroup traversal via /proc
-				NodeSelector:                 tc.Spec.NodeSelector,
-				Tolerations:                  tc.Spec.Tolerations,
-				Affinity:                     tc.Spec.Affinity,
-				ImagePullSecrets:             tc.Spec.ImagePullSecrets,
+				ServiceAccountName:            AgentServiceAccountName(),
+				PriorityClassName:             priorityClassName,
+				HostPID:                       true, // needed for pid→cgroup traversal via /proc
+				NodeSelector:                  tc.Spec.NodeSelector,
+				Tolerations:                   tc.Spec.Tolerations,
+				Affinity:                      tc.Spec.Affinity,
+				ImagePullSecrets:              tc.Spec.ImagePullSecrets,
 				TerminationGracePeriodSeconds: ptrInt64(30),
 				Containers: []corev1.Container{{
 					Name:            "agent",
@@ -174,7 +175,7 @@ func ptrInt64(v int64) *int64 { return &v }
 func itoa(n int) string       { return strconv.Itoa(n) }
 
 // intstrFromString returns an IntOrString whose StrVal names a port by
-// name. Extracted into a helper purely for call-site readability.
+// name.
 func intstrFromString(name string) intstr.IntOrString {
 	return intstr.FromString(name)
 }
