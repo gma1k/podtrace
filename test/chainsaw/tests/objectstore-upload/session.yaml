@@ -1,0 +1,54 @@
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: objstore-otlp
+spec:
+  type: otlp
+  otlp:
+    endpoint: otel-collector:4318
+    protocol: http
+    insecure: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chatty
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: objstore-target
+  template:
+    metadata:
+      labels:
+        app: objstore-target
+    spec:
+      containers:
+        - name: curl
+          image: curlimages/curl:latest
+          command:
+            - sh
+            - -c
+            - |
+              while true; do
+                curl -sS -o /dev/null https://kubernetes.io || true
+                sleep 1
+              done
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTraceSession
+metadata:
+  name: objstore-diag
+spec:
+  selector:
+    matchLabels:
+      app: objstore-target
+  duration: 30s
+  filters: [dns, net]
+  exporterRef:
+    name: objstore-otlp
+  reportRef:
+    objectStore:
+      uri: s3://reports/diagnose/
+      credentialsSecretRef:
+        name: seaweedfs-s3-creds

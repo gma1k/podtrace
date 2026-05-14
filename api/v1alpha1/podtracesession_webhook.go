@@ -76,11 +76,10 @@ func (v *PodTraceSessionCustomValidator) validate(ctx context.Context, s *PodTra
 	return nil, nil
 }
 
-// validateReportRef enforces the sink-exclusivity rule and rejects
-// object-store references at v1alpha1. The CRD schema carries
-// ObjectStore so clients can adopt the field ahead of the upload path
-// going live, but sessions that set it today are rejected — anything
-// else would silently drop the artifact.
+// validateReportRef enforces the sink-exclusivity rule and validates
+// each sink shape. ObjectStore upload is wired as: URIs
+// must be syntactically well-formed against the known schemes
+// (s3, gs, azblob).
 func validateReportRef(ref *ReportReference) error {
 	if ref == nil {
 		return nil
@@ -99,7 +98,9 @@ func validateReportRef(ref *ReportReference) error {
 		return fmt.Errorf("spec.reportRef: at most one of configMap, secret, objectStore may be set")
 	}
 	if ref.ObjectStore != nil {
-		return fmt.Errorf("spec.reportRef.objectStore is reserved and not yet supported in v1alpha1")
+		if err := ValidateObjectStoreReference(ref.ObjectStore); err != nil {
+			return err
+		}
 	}
 	return nil
 }

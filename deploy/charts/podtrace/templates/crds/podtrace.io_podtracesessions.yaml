@@ -188,18 +188,17 @@ spec:
                     x-kubernetes-map-type: atomic
                   objectStore:
                     description: |-
-                      ObjectStore uploads the report to a cloud bucket (s3, gs, az). Use
-                      this sink for reports that may exceed the 1MiB ConfigMap/Secret
-                      limit. Rejected by the validating webhook in v1alpha1 — the
-                      schema is reserved so clients can adopt it without a CRD bump
-                      later.
+                      ObjectStore uploads the report to a cloud bucket (s3, gs, azblob).
+                      Use this sink for reports that may exceed the 1MiB ConfigMap/Secret
+                      limit. Requires the session pod to be on a Kubernetes 1.29+ cluster
+                      so the native sidecar restartPolicy is honoured.
                     properties:
                       credentialsSecretRef:
                         description: |-
                           CredentialsSecretRef names a Secret in the session's namespace
-                          whose keys the uploader reads (e.g. "access_key_id",
-                          "secret_access_key"). Implementation-specific — interpretation is
-                          left to the CLI uploader.
+                          whose keys the uploader reads. See doc/object-store-reports.md
+                          for the per-backend Secret key schema. Omit for ambient
+                          credentials (IRSA / Workload Identity / Managed Identity).
                         properties:
                           name:
                             default: ""
@@ -213,8 +212,16 @@ spec:
                         type: object
                         x-kubernetes-map-type: atomic
                       uri:
-                        description: URI of the destination, e.g. "s3://bucket/path/"
-                          or "gs://bucket/path/".
+                        description: |-
+                          URI of the destination. Three schemes:
+
+                            s3://bucket/key-or-prefix
+                            gs://bucket/key-or-prefix
+                            azblob://account/container/key-or-prefix
+
+                          A trailing slash means "prefix mode" — the uploader appends a
+                          per-session filename. Without one, the URI's path is used as
+                          the exact object key.
                         type: string
                     required:
                     - uri
@@ -484,6 +491,13 @@ spec:
                 required:
                 - totalEvents
                 type: object
+              reportLocation:
+                description: |-
+                  ReportLocation is the resolved object URI of the uploaded session
+                  report when spec.reportRef.objectStore is set and the sidecar
+                  uploader has succeeded. Empty for ConfigMap/Secret sinks (the
+                  report lives at .spec.reportRef itself) and before upload completes.
+                type: string
               targetNamespaces:
                 description: |-
                   TargetNamespaces is the sorted list of namespace names the operator

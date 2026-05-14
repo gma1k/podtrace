@@ -560,6 +560,11 @@ func (in *PodTraceSessionStatus) DeepCopyInto(out *PodTraceSessionStatus) {
 		*out = new(SessionSummary)
 		**out = **in
 	}
+	if in.TargetNamespaces != nil {
+		in, out := &in.TargetNamespaces, &out.TargetNamespaces
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]v1.Condition, len(*in))
@@ -641,6 +646,11 @@ func (in *PodTraceStatus) DeepCopyInto(out *PodTraceStatus) {
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
+	}
+	if in.TargetNamespaces != nil {
+		in, out := &in.TargetNamespaces, &out.TargetNamespaces
+		*out = make([]string, len(*in))
+		copy(*out, *in)
 	}
 }
 

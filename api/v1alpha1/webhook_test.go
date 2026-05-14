@@ -221,6 +221,107 @@ func TestPodTraceSessionValidator_Create(t *testing.T) {
 	}
 }
 
+// TestPodTraceSessionValidator_ObjectStoreReportRef covers Phase 3:
+// ObjectStore is no longer blanket-rejected; URI shape is validated
+// instead.
+func TestPodTraceSessionValidator_ObjectStoreReportRef(t *testing.T) {
+	base := func() podtracev1alpha1.PodTraceSessionSpec {
+		return podtracev1alpha1.PodTraceSessionSpec{
+			Selector:    validSelector(),
+			Duration:    metav1.Duration{Duration: 5 * time.Minute},
+			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+		}
+	}
+	cases := []struct {
+		name      string
+		ref       *podtracev1alpha1.ObjectStoreReference
+		wantError string
+	}{
+		{
+			name: "s3-prefix-accepted",
+			ref:  &podtracev1alpha1.ObjectStoreReference{URI: "s3://bucket/reports/"},
+		},
+		{
+			name: "s3-key-accepted",
+			ref:  &podtracev1alpha1.ObjectStoreReference{URI: "s3://bucket/path/report.txt"},
+		},
+		{
+			name: "gs-accepted",
+			ref:  &podtracev1alpha1.ObjectStoreReference{URI: "gs://bucket/prefix/"},
+		},
+		{
+			name: "azblob-with-container-accepted",
+			ref:  &podtracev1alpha1.ObjectStoreReference{URI: "azblob://acct/container/"},
+		},
+		{
+			name:      "empty-uri-rejected",
+			ref:       &podtracev1alpha1.ObjectStoreReference{URI: ""},
+			wantError: "uri is required",
+		},
+		{
+			name:      "unknown-scheme-rejected",
+			ref:       &podtracev1alpha1.ObjectStoreReference{URI: "ftp://b/k"},
+			wantError: "unsupported URI scheme",
+		},
+		{
+			name:      "missing-host-rejected",
+			ref:       &podtracev1alpha1.ObjectStoreReference{URI: "s3:///k"},
+			wantError: "must include scheme and host",
+		},
+		{
+			name:      "azblob-missing-container-rejected",
+			ref:       &podtracev1alpha1.ObjectStoreReference{URI: "azblob://acct/"},
+			wantError: "must include a container",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newClientWithExporter(t, "default", "prod-otlp")
+			v := &podtracev1alpha1.PodTraceSessionCustomValidator{Client: c}
+			spec := base()
+			spec.ReportRef = &podtracev1alpha1.ReportReference{ObjectStore: tc.ref}
+			obj := &podtracev1alpha1.PodTraceSession{
+				ObjectMeta: metav1.ObjectMeta{Name: "pts", Namespace: "default"},
+				Spec:       spec,
+			}
+			_, err := v.ValidateCreate(context.Background(), obj)
+			if tc.wantError == "" {
+				if err != nil {
+					t.Fatalf("expected accept, got %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("expected error containing %q, got %v", tc.wantError, err)
+			}
+		})
+	}
+}
+
+// TestPodTraceSessionValidator_ReportRefExclusivity locks in that at
+// most one sink can be set.
+func TestPodTraceSessionValidator_ReportRefExclusivity(t *testing.T) {
+	c := newClientWithExporter(t, "default", "prod-otlp")
+	v := &podtracev1alpha1.PodTraceSessionCustomValidator{Client: c}
+	obj := &podtracev1alpha1.PodTraceSession{
+		ObjectMeta: metav1.ObjectMeta{Name: "pts", Namespace: "default"},
+		Spec: podtracev1alpha1.PodTraceSessionSpec{
+			Selector:    validSelector(),
+			Duration:    metav1.Duration{Duration: time.Minute},
+			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+			ReportRef: &podtracev1alpha1.ReportReference{
+				ConfigMap:   &corev1.LocalObjectReference{Name: "rpt"},
+				ObjectStore: &podtracev1alpha1.ObjectStoreReference{URI: "s3://b/"},
+			},
+		},
+	}
+	_, err := v.ValidateCreate(context.Background(), obj)
+	if err == nil || !strings.Contains(err.Error(), "at most one of configMap, secret, objectStore") {
+		t.Fatalf("expected mutual-exclusion rejection, got %v", err)
+	}
+}
+
 func TestExporterConfigValidator_Create(t *testing.T) {
 	cases := []struct {
 		name      string

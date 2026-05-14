@@ -80,11 +80,17 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Terminal phases are sticky. TTL-driven cleanup runs below, but we
-	// do not re-fan out a session that has already produced Jobs.
 	if session.Status.Phase == podtracev1alpha1.SessionPhaseCompleted ||
 		session.Status.Phase == podtracev1alpha1.SessionPhaseFailed {
 		return r.reconcileTerminalSession(ctx, &session)
+	}
+
+	if session.Spec.ReportRef != nil && session.Spec.ReportRef.ObjectStore != nil {
+		if err := podtracev1alpha1.ValidateObjectStoreReference(session.Spec.ReportRef.ObjectStore); err != nil {
+			r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "ObjectStoreURIInvalid", err.Error())
+			_ = r.Status().Update(ctx, &session)
+			return ctrl.Result{}, nil
+		}
 	}
 
 	targetNodes, targetNamespaces, err := r.resolveTargetNodes(ctx, &session)
@@ -126,7 +132,13 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if err := ensureSessionExporterBundle(ctx, r.Client, &session, &ec, systemNS); err != nil {
 		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "BundleSync", err.Error())
 		_ = r.Status().Update(ctx, &session)
-		return ctrl.Result{}, err
+		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
+	}
+
+	if _, err := ensureSessionObjectStoreCredentials(ctx, r.Client, &session, systemNS); err != nil {
+		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "ObjectStoreCreds", err.Error())
+		_ = r.Status().Update(ctx, &session)
+		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
 	}
 
 	if err := ensureSessionServiceAccount(ctx, r.Client, systemNS); err != nil {
@@ -183,6 +195,12 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		fmt.Sprintf("%d Job(s) on %d node(s)", len(jobs), len(targetNodes)))
 	r.setCondition(&session, ConditionDegraded, metav1.ConditionFalse, "Reconciled", "")
 
+	if uri, terminated, ok, err := harvestReportLocation(ctx, r.Client, &session, systemNS); err != nil {
+		logger.Error(err, "harvest report location")
+	} else {
+		applyReportUploadStatus(&session, uri, terminated, ok)
+	}
+
 	if err := r.Status().Update(ctx, &session); err != nil {
 		if apierrors.IsConflict(err) {
 			return ctrl.Result{Requeue: true}, nil
@@ -190,8 +208,6 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, fmt.Errorf("update status: %w", err)
 	}
 
-	// Re-queue while the session is still running so status reflects Job
-	// progress without waiting on a default 10h informer re-list.
 	if !isTerminal(session.Status.Phase) {
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
@@ -276,8 +292,6 @@ func (r *PodTraceSessionReconciler) resolveTargetNodes(ctx context.Context, s *p
 				}
 			}
 		case len(targetNamespaces) == 0:
-			// Selector matched zero namespaces — no pods are reachable.
-			// Fall through; the function returns an empty node set.
 		default:
 			allowSet := make(map[string]struct{}, len(targetNamespaces))
 			for _, ns := range targetNamespaces {
@@ -336,9 +350,7 @@ func isPodEligible(p *corev1.Pod) bool {
 }
 
 // resolveTracerConfig returns the "default" TracerConfig when present,
-// otherwise nil. A missing TracerConfig is not fatal for session
-// reconciliation — defaults are applied — it only means certain caps
-// (like MaxConcurrentSessionsPerNode) do not apply.
+// otherwise nil.
 func (r *PodTraceSessionReconciler) resolveTracerConfig(ctx context.Context) *podtracev1alpha1.TracerConfig {
 	var tc podtracev1alpha1.TracerConfig
 	if err := r.Get(ctx, types.NamespacedName{Name: "default"}, &tc); err != nil {
@@ -415,15 +427,9 @@ func (r *PodTraceSessionReconciler) ensureJobs(ctx context.Context, s *podtracev
 				LabelSessionNS:   s.Namespace,
 				LabelNodeName:    node,
 			})
-			// Spec is immutable after Job creation apart from specific fields;
-			// controllerutil.CreateOrUpdate will call us with the existing
-			// object, so we only set Spec when it is the zero value (fresh create).
 			if job.Spec.Template.Spec.Containers == nil {
 				job.Spec = buildSessionJobSpec(s, tc, node)
 			}
-			// No ownerReference: the PodTraceSession lives in the user
-			// namespace but its Jobs live in podtrace-system. Cleanup goes
-			// through FinalizerCleanup; see finalizer.go.
 			return nil
 		}); err != nil {
 			return nil, fmt.Errorf("ensure Job for node %s: %w", node, err)

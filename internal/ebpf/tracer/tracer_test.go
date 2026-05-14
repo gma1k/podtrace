@@ -54,6 +54,72 @@ func TestTracer_AttachToCgroup(t *testing.T) {
 	}
 }
 
+// TestTracer_AttachToCgroup_IsAdditive locks in the per-cgroup contract
+// used by the agent's engine: calling AttachToCgroup multiple times
+// must accumulate paths, not replace them. The original implementation
+// silently dropped earlier attachments on every new call, breaking
+// continuous-trace event flow once a PodTrace matched more than one pod.
+func TestTracer_AttachToCgroup_IsAdditive(t *testing.T) {
+	tr := &Tracer{filter: filter.NewCgroupFilter()}
+
+	for _, p := range []string{"/sys/fs/cgroup/a", "/sys/fs/cgroup/b", "/sys/fs/cgroup/c"} {
+		if err := tr.AttachToCgroup(p); err != nil {
+			t.Fatalf("AttachToCgroup(%q): %v", p, err)
+		}
+	}
+
+	if got := len(tr.cgroupPaths); got != 3 {
+		t.Errorf("cgroupPaths len = %d, want 3 (additive across calls)", got)
+	}
+	seen := map[string]struct{}{}
+	for _, p := range tr.cgroupPaths {
+		seen[p] = struct{}{}
+	}
+	for _, want := range []string{"/sys/fs/cgroup/a", "/sys/fs/cgroup/b", "/sys/fs/cgroup/c"} {
+		if _, ok := seen[want]; !ok {
+			t.Errorf("cgroupPaths missing %q after additive Attach", want)
+		}
+	}
+}
+
+// TestTracer_AttachToCgroup_IdempotentOnRepeat asserts that re-calling
+// AttachToCgroup with the same path is a no-op rather than a duplicate
+// entry. The agent's engine relies on this when a workload survives
+// across reconciles.
+func TestTracer_AttachToCgroup_IdempotentOnRepeat(t *testing.T) {
+	tr := &Tracer{filter: filter.NewCgroupFilter()}
+	const p = "/sys/fs/cgroup/dup"
+	for i := 0; i < 3; i++ {
+		if err := tr.AttachToCgroup(p); err != nil {
+			t.Fatalf("AttachToCgroup(%q) attempt %d: %v", p, i, err)
+		}
+	}
+	if got := len(tr.cgroupPaths); got != 1 {
+		t.Errorf("cgroupPaths len = %d, want 1 (idempotent on repeat)", got)
+	}
+}
+
+// TestTracer_AttachToCgroups_Replaces preserves the session-Job bulk
+// contract: passing the full set as one call replaces whatever was
+// there before.
+func TestTracer_AttachToCgroups_Replaces(t *testing.T) {
+	tr := &Tracer{filter: filter.NewCgroupFilter()}
+	if err := tr.AttachToCgroup("/sys/fs/cgroup/old"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := tr.AttachToCgroups([]string{"/sys/fs/cgroup/new1", "/sys/fs/cgroup/new2"}); err != nil {
+		t.Fatalf("AttachToCgroups: %v", err)
+	}
+	if got := len(tr.cgroupPaths); got != 2 {
+		t.Errorf("cgroupPaths len = %d, want 2 (bulk = replace)", got)
+	}
+	for _, p := range tr.cgroupPaths {
+		if p == "/sys/fs/cgroup/old" {
+			t.Errorf("bulk AttachToCgroups should have dropped the earlier path, still see %q", p)
+		}
+	}
+}
+
 func TestTracer_SetContainerID(t *testing.T) {
 	tracer := &Tracer{
 		filter:      filter.NewCgroupFilter(),

@@ -89,11 +89,11 @@ func TestRouter_DispatchesByCgroupAndFilter(t *testing.T) {
 	})
 
 	batch := []*events.Event{
-		{CgroupID: 100, Type: events.EventDNS},      // A only
-		{CgroupID: 200, Type: events.EventDNS},      // both
-		{CgroupID: 200, Type: events.EventConnect},  // B only (A filtered it out)
-		{CgroupID: 300, Type: events.EventDNS},      // B only
-		{CgroupID: 999, Type: events.EventDNS},      // neither (cgroup not claimed)
+		{CgroupID: 100, Type: events.EventDNS},     // A only
+		{CgroupID: 200, Type: events.EventDNS},     // both
+		{CgroupID: 200, Type: events.EventConnect}, // B only (A filtered it out)
+		{CgroupID: 300, Type: events.EventDNS},     // B only
+		{CgroupID: 999, Type: events.EventDNS},     // neither (cgroup not claimed)
 	}
 	if err := r.Export(context.Background(), batch); err != nil {
 		t.Fatalf("Export: %v", err)
@@ -135,15 +135,44 @@ func TestRouter_ExporterErrorIsCountedAsDrop(t *testing.T) {
 	}
 }
 
-func TestRouter_EmptyFiltersDeliversNothing(t *testing.T) {
+// TestRouter_EmptyFiltersDeliversAll pins the CRD contract: when
+// spec.filters is empty (the most common shape in examples), every
+// event type from a matching cgroup is forwarded.
+func TestRouter_EmptyFiltersDeliversAll(t *testing.T) {
 	exp := &recExp{name: "x"}
 	r := NewRouter(nil)
 	r.Publish([]CRRule{
 		{Key: CRKey{"ns", "n"}, CgroupIDs: map[uint64]struct{}{1: {}}, Filters: nil, Exporter: exp},
 	})
-	_ = r.Export(context.Background(), []*events.Event{{CgroupID: 1, Type: events.EventDNS}})
-	if exp.count() != 0 {
-		t.Errorf("empty filter set should deliver zero events, got %d", exp.count())
+	_ = r.Export(context.Background(), []*events.Event{
+		{CgroupID: 1, Type: events.EventDNS},
+		{CgroupID: 1, Type: events.EventTCPSend},
+	})
+	if got := exp.count(); got != 2 {
+		t.Errorf("empty filter set should deliver every matching event, got %d (want 2)", got)
+	}
+}
+
+// TestRouter_NonEmptyFiltersFiltersByType locks in the positive
+// allowlist semantics: when spec.filters is set, only the listed event
+// types are forwarded.
+func TestRouter_NonEmptyFiltersFiltersByType(t *testing.T) {
+	exp := &recExp{name: "x"}
+	r := NewRouter(nil)
+	r.Publish([]CRRule{
+		{
+			Key:       CRKey{"ns", "n"},
+			CgroupIDs: map[uint64]struct{}{1: {}},
+			Filters:   map[events.EventType]struct{}{events.EventDNS: {}},
+			Exporter:  exp,
+		},
+	})
+	_ = r.Export(context.Background(), []*events.Event{
+		{CgroupID: 1, Type: events.EventDNS},     // matches
+		{CgroupID: 1, Type: events.EventTCPSend}, // not in allowlist
+	})
+	if got := exp.count(); got != 1 {
+		t.Errorf("explicit filter should deliver only matching types, got %d (want 1)", got)
 	}
 }
 
@@ -172,7 +201,6 @@ func TestRouter_PublishDropsStaleStats(t *testing.T) {
 		mkRule("ns", "stays", []uint64{1}, []events.EventType{events.EventDNS}, &recExp{}),
 		mkRule("ns", "goes", []uint64{2}, []events.EventType{events.EventDNS}, &recExp{}),
 	})
-	// Seed stats so "goes" has a non-zero counter that must get dropped.
 	r.Stats().incr(CRKey{"ns", "goes"}, 5)
 
 	r.Publish([]CRRule{
@@ -189,8 +217,7 @@ func TestRouter_PublishDropsStaleStats(t *testing.T) {
 // contract: a CRRule with Err != nil (or Exporter == nil) must be
 // dropped during dispatch — never NPE, never deliver events to a nil
 // exporter, never count the tombstone as a successful or dropped
-// delivery. Healthy rules sharing the same cgroup must still receive
-// their events.
+// delivery.
 func TestRouter_Export_SkipsTombstoneRules(t *testing.T) {
 	good := &recExp{name: "good"}
 	r := NewRouter(nil)
@@ -262,7 +289,6 @@ func TestRouter_ConcurrentExportAndPublish(t *testing.T) {
 	r.Publish([]CRRule{mkRule("ns", "n", []uint64{1}, []events.EventType{events.EventDNS}, exp)})
 
 	var wg sync.WaitGroup
-	// Publisher: replace rules 50 times.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -270,7 +296,6 @@ func TestRouter_ConcurrentExportAndPublish(t *testing.T) {
 			r.Publish([]CRRule{mkRule("ns", "n", []uint64{uint64(i % 3)}, []events.EventType{events.EventDNS}, exp)})
 		}
 	}()
-	// Exporter: push 500 events.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()

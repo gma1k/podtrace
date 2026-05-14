@@ -1,0 +1,119 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: objectstore-upload
+spec:
+  namespace: objectstore-upload-test
+  description: |
+    End-to-end verification — ObjectStore session report uploads.
+
+    Setup:
+      1. Run SeaweedFS in-cluster as an S3-compatible backend. Apache 2.0,
+         production-grade.
+      2. Run an init Job that creates the destination bucket via the
+         SeaweedFS S3 API.
+      3. Deploy a chatty Deployment so a session has pods to trace.
+      4. Flip TracerConfig.spec.session.sidecarUploader=true so the
+         operator attaches the report-uploader sidecar to session Jobs.
+
+    Exercise:
+      5. Apply a PodTraceSession whose reportRef.objectStore points at
+         the SeaweedFS bucket, with a CredentialsSecretRef carrying
+         SeaweedFS's S3 access/secret keys.
+
+    Assertions:
+      6. Session reaches phase=Completed and the ReportUploaded
+         condition is True.
+      7. status.reportLocation is populated with an s3://... URI.
+      8. A follow-up Job lists the bucket and exits 0 only when at
+         least one report object exists under the configured prefix.
+
+    Requires Kubernetes 1.29+ for native sidecar semantics; older
+    clusters will leave the sidecar lifecycle ambiguous because
+    initContainer RestartPolicy=Always is unsupported.
+  timeouts:
+    apply: 60s
+    assert: 180s
+    delete: 60s
+    cleanup: 120s
+  steps:
+    - name: deploy-seaweedfs
+      try:
+        - apply:
+            file: ./seaweedfs.yaml
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: seaweedfs
+              status:
+                readyReplicas: 1
+
+    - name: create-bucket
+      try:
+        - apply:
+            file: ./bucket-init-job.yaml
+        - assert:
+            resource:
+              apiVersion: batch/v1
+              kind: Job
+              metadata:
+                name: seaweedfs-bucket-init
+              status:
+                succeeded: 1
+
+    - name: enable-sidecar-uploader
+      try:
+        - patch:
+            resource:
+              apiVersion: podtrace.io/v1alpha1
+              kind: TracerConfig
+              metadata:
+                name: default
+              spec:
+                session:
+                  sidecarUploader: true
+
+    - name: run-session
+      try:
+        - apply:
+            file: ./session.yaml
+        - assert:
+            file: ./assert-completed.yaml
+
+    - name: verify-report-location-uri
+      try:
+        - assert:
+            resource:
+              apiVersion: podtrace.io/v1alpha1
+              kind: PodTraceSession
+              metadata:
+                name: objstore-diag
+              status:
+                (starts_with(reportLocation, 's3://reports/diagnose/')): true
+
+    - name: verify-report-uploaded
+      try:
+        - apply:
+            file: ./bucket-list-job.yaml
+        - assert:
+            resource:
+              apiVersion: batch/v1
+              kind: Job
+              metadata:
+                name: seaweedfs-bucket-list
+              status:
+                succeeded: 1
+
+    - name: restore-sidecar-default
+      try:
+        - patch:
+            resource:
+              apiVersion: podtrace.io/v1alpha1
+              kind: TracerConfig
+              metadata:
+                name: default
+              spec:
+                session:
+                  sidecarUploader: false

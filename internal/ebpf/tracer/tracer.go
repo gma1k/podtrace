@@ -28,8 +28,6 @@ import (
 	"github.com/podtrace/podtrace/internal/analysis/criticalpath"
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/ebpf/cache"
-	"github.com/podtrace/podtrace/internal/procfs"
-	"github.com/podtrace/podtrace/internal/sysfs"
 	"github.com/podtrace/podtrace/internal/ebpf/filter"
 	"github.com/podtrace/podtrace/internal/ebpf/loader"
 	"github.com/podtrace/podtrace/internal/ebpf/parser"
@@ -37,8 +35,10 @@ import (
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/internal/logger"
 	"github.com/podtrace/podtrace/internal/metricsexporter"
+	"github.com/podtrace/podtrace/internal/procfs"
 	"github.com/podtrace/podtrace/internal/redactor"
 	"github.com/podtrace/podtrace/internal/resource"
+	"github.com/podtrace/podtrace/internal/sysfs"
 	"github.com/podtrace/podtrace/internal/validation"
 )
 
@@ -248,11 +248,30 @@ func NewTracer() (*Tracer, error) {
 	return t, nil
 }
 
+// AttachToCgroup adds cgroupPath to the tracer's filter set and is
+// idempotent. Repeated calls with the same path are a no-op; calls
+// with new paths merge into the existing set.
+//
+// Used by the engine's continuous-trace path, which discovers
+// per-pod cgroups one at a time as workloads come and go. Contrast
+// with AttachToCgroups, which replaces the entire set in one shot
+// (the session Job's bulk-attach contract).
 func (t *Tracer) AttachToCgroup(cgroupPath string) error {
-	return t.AttachToCgroups([]string{cgroupPath})
+	return t.attachCgroups([]string{cgroupPath}, false /* replace */)
 }
 
+// AttachToCgroups replaces the tracer's entire cgroup filter set with
+// the given list. Used by the session Job's one-shot diagnose flow,
+// which knows the full target set up front.
 func (t *Tracer) AttachToCgroups(cgroupPaths []string) error {
+	return t.attachCgroups(cgroupPaths, true /* replace */)
+}
+
+// attachCgroups is the shared implementation. When replace=false the
+// new cgroups are merged into the existing filter state (engine path);
+// when replace=true the existing state is dropped first (session Job
+// bulk-attach path).
+func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 	normalized := make([]string, 0, len(cgroupPaths))
 	for _, cgroupPath := range cgroupPaths {
 		if cgroupPath == "" {
@@ -274,12 +293,43 @@ func (t *Tracer) AttachToCgroups(cgroupPaths []string) error {
 		return fmt.Errorf("no valid cgroup paths provided")
 	}
 
-	t.cgroupPaths = normalized
-	t.cgroupPath = normalized[0]
-	t.filter.SetCgroupPaths(normalized)
+	// Build the desired path set. In replace mode it equals normalized.
+	// In merge mode it is the union of existing t.cgroupPaths and
+	// normalized — dedup via a map.
+	var allPaths []string
+	if replace {
+		allPaths = normalized
+		t.targetCgroupID = 0
+		t.targetCgroupIDs = make(map[uint64]struct{}, len(normalized))
+	} else {
+		seen := make(map[string]struct{}, len(t.cgroupPaths)+len(normalized))
+		for _, p := range t.cgroupPaths {
+			if _, dup := seen[p]; dup {
+				continue
+			}
+			seen[p] = struct{}{}
+			allPaths = append(allPaths, p)
+		}
+		for _, p := range normalized {
+			if _, dup := seen[p]; dup {
+				continue
+			}
+			seen[p] = struct{}{}
+			allPaths = append(allPaths, p)
+		}
+		if t.targetCgroupIDs == nil {
+			t.targetCgroupIDs = make(map[uint64]struct{}, len(allPaths))
+		}
+	}
+
+	t.cgroupPaths = allPaths
+	if len(allPaths) > 0 {
+		t.cgroupPath = allPaths[0]
+	}
+	t.filter.SetCgroupPaths(allPaths)
 
 	if t.containerPID == 0 {
-		for _, cgroupPath := range normalized {
+		for _, cgroupPath := range allPaths {
 			if pid := readFirstPIDFromCgroupProcs(cgroupPath); pid != 0 {
 				t.containerPID = pid
 				break
@@ -287,17 +337,27 @@ func (t *Tracer) AttachToCgroups(cgroupPaths []string) error {
 		}
 	}
 
-	t.targetCgroupID = 0
-	t.targetCgroupIDs = make(map[uint64]struct{}, len(normalized))
 	if isCgroupV2Base(config.CgroupBasePath) {
-		for _, cgroupPath := range normalized {
+		newPaths := normalized
+		for _, cgroupPath := range newPaths {
 			if cgid, err := getCgroupIDFromPath(cgroupPath); err == nil && cgid != 0 {
 				t.targetCgroupIDs[cgid] = struct{}{}
 				if t.targetCgroupID == 0 {
 					t.targetCgroupID = cgid
 				}
-			} else {
+			} else if err != nil {
 				logger.Debug("Could not get cgroup ID from path", zap.Error(err), zap.String("cgroup_path", cgroupPath))
+			}
+			if entries, err := os.ReadDir(cgroupPath); err == nil {
+				for _, e := range entries {
+					if !e.IsDir() {
+						continue
+					}
+					child := filepath.Join(cgroupPath, e.Name())
+					if cgid, err := getCgroupIDFromPath(child); err == nil && cgid != 0 {
+						t.targetCgroupIDs[cgid] = struct{}{}
+					}
+				}
 			}
 		}
 		if err := t.syncTargetCgroupMap(); err != nil {
@@ -315,7 +375,8 @@ func (t *Tracer) AttachToCgroups(cgroupPaths []string) error {
 		zap.Int("cgroup_count", len(t.cgroupPaths)),
 		zap.Uint32("container_pid", t.containerPID),
 		zap.Int("target_cgroup_id_count", len(t.targetCgroupIDs)),
-		zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter))
+		zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter),
+		zap.Bool("replace", replace))
 	return nil
 }
 

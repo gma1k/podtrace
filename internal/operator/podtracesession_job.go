@@ -152,7 +152,11 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 		VolumeMounts: mainVolumeMounts,
 	}
 
-	initContainers := buildSessionSidecar(sidecarUploader, reportTo, image, imagePullPolicy)
+	initContainers := buildSessionSidecar(sidecarUploader, reportTo, image, imagePullPolicy, s)
+
+	if vol, ok := objectStoreCredentialsVolume(s); ok {
+		volumes = append(volumes, vol)
+	}
 
 	return batchv1.JobSpec{
 		Completions:             &completions,
@@ -192,16 +196,29 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 // restartPolicy=Always) that re-uploads the session report when the
 // operator's TracerConfig.spec.session.sidecarUploader flag is set.
 // Returns nil when the flag is off or no report sink is configured.
-//
-// Native sidecar semantics (Kubernetes 1.29+) guarantee the sidecar
-// starts before the main container and gets SIGTERM when the main
-// container completes — the podtrace report-uploader subcommand uses
-// that signal to perform a final upload.
-func buildSessionSidecar(enabled bool, reportTo, image string, pullPolicy corev1.PullPolicy) []corev1.Container {
+func buildSessionSidecar(enabled bool, reportTo, image string, pullPolicy corev1.PullPolicy, s *podtracev1alpha1.PodTraceSession) []corev1.Container {
 	if !enabled || reportTo == "" {
 		return nil
 	}
 	always := corev1.ContainerRestartPolicyAlways
+
+	mounts := []corev1.VolumeMount{
+		{Name: "rundir", MountPath: "/var/run/podtrace"},
+	}
+	var env []corev1.EnvVar
+	if _, ok := objectStoreCredentialsVolume(s); ok {
+		const credsMount = "/etc/podtrace/objectstore-credentials" // #nosec G101 -- mount path, not a credential value; documented in doc/object-store-reports.md
+		mounts = append(mounts, corev1.VolumeMount{
+			Name:      objectStoreCredentialsVolumeName,
+			MountPath: credsMount,
+			ReadOnly:  true,
+		})
+		env = append(env, corev1.EnvVar{
+			Name:  "PODTRACE_OBJECTSTORE_CREDENTIALS_DIR",
+			Value: credsMount,
+		})
+	}
+
 	return []corev1.Container{{
 		Name:            "report-uploader",
 		Image:           image,
@@ -213,24 +230,42 @@ func buildSessionSidecar(enabled bool, reportTo, image string, pullPolicy corev1
 			"--summary-file", "/var/run/podtrace/summary.json",
 			"--report-to", reportTo,
 		},
-		VolumeMounts: []corev1.VolumeMount{
-			{Name: "rundir", MountPath: "/var/run/podtrace"},
-		},
+		Env: env,
+		TerminationMessagePath:   "/dev/termination-log",
+		TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
+		VolumeMounts:             mounts,
 	}}
 }
 
+const objectStoreCredentialsVolumeName = "objectstore-credentials"
+
+func objectStoreCredentialsVolume(s *podtracev1alpha1.PodTraceSession) (corev1.Volume, bool) {
+	if s == nil || s.Spec.ReportRef == nil || s.Spec.ReportRef.ObjectStore == nil {
+		return corev1.Volume{}, false
+	}
+	ref := s.Spec.ReportRef.ObjectStore.CredentialsSecretRef
+	if ref == nil || ref.Name == "" {
+		return corev1.Volume{}, false
+	}
+	return corev1.Volume{
+		Name: objectStoreCredentialsVolumeName,
+		VolumeSource: corev1.VolumeSource{
+			Secret: &corev1.SecretVolumeSource{
+				SecretName: SessionObjectStoreCredsName(s.UID),
+				Optional:   pointerBool(false),
+			},
+		},
+	}, true
+}
+
 // pointerBool is a trivial helper for struct-literal initialization of
-// *bool fields that Kubernetes API types require. Callers read better
-// at the use site than a one-off &boolvar pattern.
+// *bool fields that Kubernetes API types require.
 func pointerBool(b bool) *bool {
 	return &b
 }
 
 // buildDiagnoseArgs produces the `podtrace` CLI args that a session Job
-// executes. The Job is pinned to one node, so we additionally pre-filter
-// the selector/podRefs to that node at --pods time — but this first
-// iteration trusts the top-level selector and lets the binary resolve
-// pods itself.
+// executes.
 func buildDiagnoseArgs(s *podtracev1alpha1.PodTraceSession) []string {
 	args := []string{
 		"--diagnose", s.Spec.Duration.Duration.String(),
@@ -249,8 +284,6 @@ func buildDiagnoseArgs(s *podtracev1alpha1.PodTraceSession) []string {
 		args = append(args, "--tracing-sample-rate", strconv.FormatFloat(float64(*s.Spec.SamplePercent)/100.0, 'f', 2, 64))
 	}
 
-	// Selector → podtrace's --pod-selector flag. PodRefs → --pods.
-	// Webhook guarantees exactly one of the two is set.
 	if s.Spec.Selector != nil {
 		args = append(args, "--pod-selector", labelSelectorToFlag(s.Spec.Selector))
 		args = append(args, "--all-in-namespace", "--namespace", s.Namespace)
@@ -320,7 +353,7 @@ func jobBackoffLimit(j *batchv1.Job) int32 {
 	if j.Spec.BackoffLimit != nil {
 		return *j.Spec.BackoffLimit
 	}
-	return 6 // Kubernetes default
+	return 6
 }
 
 // computeSessionPhase maps Job statuses to a SessionPhase.
