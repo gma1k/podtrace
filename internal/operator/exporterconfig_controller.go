@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	"github.com/podtrace/podtrace/internal/safeconv"
 )
 
 // ExporterConfigReconciler populates an ExporterConfig's status:
@@ -75,8 +76,6 @@ func (r *ExporterConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	refs, err := r.countReferences(ctx, &ec)
 	if err != nil {
-		// Listing failures are transient — keep the previous count
-		// rather than zeroing it and triggering false alerts.
 		logger.V(1).Info("count references failed; keeping previous count", "error", err)
 		refs = ec.Status.ReferencedBy
 	}
@@ -176,7 +175,7 @@ func (r *ExporterConfigReconciler) countReferences(ctx context.Context, ec *podt
 		return 0, fmt.Errorf("list PodTraceSession: %w", err)
 	}
 
-	count := int32(len(ptList.Items))
+	count := safeconv.IntToInt32(len(ptList.Items))
 	for i := range ptsList.Items {
 		if !isSessionTerminal(ptsList.Items[i].Status.Phase) {
 			count++
