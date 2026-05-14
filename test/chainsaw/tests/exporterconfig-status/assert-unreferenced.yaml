@@ -1,0 +1,8 @@
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: ec-status-splunk
+status:
+  ready: true
+  (conditions[?type == 'Referenced'].status | [0]): "False"
+  (conditions[?type == 'Referenced'].reason | [0]): Unreferenced

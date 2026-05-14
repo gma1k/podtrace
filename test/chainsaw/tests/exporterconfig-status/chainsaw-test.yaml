@@ -1,0 +1,50 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: exporterconfig-status
+spec:
+  description: |
+    Property tested: the ExporterConfig status reconciler populates
+    .status.ready, .status.referencedBy, and the Ready/Referenced
+    conditions in response to changes in (a) referenced Secrets and
+    (b) PodTraces / PodTraceSessions pointing at the EC.
+
+    Walks four transitions:
+      1. EC referencing a missing Secret → Ready=false, reason=SecretMissing
+      2. Create the Secret               → Ready=true,  reason=SecretsResolved
+      3. Create PodTrace referencing EC  → referencedBy=1, Referenced=True
+      4. Delete PodTrace                 → referencedBy=0, Referenced=False
+  timeouts:
+    apply: 30s
+    assert: 60s
+  steps:
+    - name: ec-without-secret
+      try:
+        - apply:
+            file: ./ec-and-target.yaml
+        - assert:
+            file: ./assert-secret-missing.yaml
+
+    - name: create-secret
+      try:
+        - apply:
+            file: ./secret.yaml
+        - assert:
+            file: ./assert-ready.yaml
+
+    - name: add-reference
+      try:
+        - apply:
+            file: ./podtrace.yaml
+        - assert:
+            file: ./assert-referenced.yaml
+
+    - name: remove-reference
+      try:
+        - delete:
+            ref:
+              apiVersion: podtrace.io/v1alpha1
+              kind: PodTrace
+              name: ec-status-pt
+        - assert:
+            file: ./assert-unreferenced.yaml

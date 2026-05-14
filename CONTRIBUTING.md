@@ -125,11 +125,34 @@ no trailing period, ≤ 72 chars.
 |---|---|---|
 | `feat:` | ✅ Added section | patch bump |
 | `fix:` | ✅ Fixed section | patch bump |
-| `refactor:`, `perf:`, `revert:` | ✅ Changed section | patch bump |
-| `chore:`, `docs:`, `style:`, `test:`, `build:`, `ci:` | ❌ Hidden | no bump |
+| `perf:` | ✅ Performance section | patch bump |
+| `deprecate:` | ✅ Deprecated section | patch bump |
+| `remove:` | ✅ Removed section | patch bump |
 | `security:` | ✅ Security section | patch bump |
+| `revert:` | ✅ Changed section | patch bump |
+| `refactor:`, `chore:`, `docs:`, `style:`, `test:`, `build:`, `ci:` | ❌ Hidden | no bump |
 | Footer `BREAKING CHANGE:` | ✅ called out | **minor bump** (your only path to `v0.X+1.0`) |
 | Footer `Release-As: 0.X.Y` | overrides version explicitly | Forces release-please to propose the named version |
+
+A few notes on type choice:
+
+- **One PR = one type.** Pick the type that matches the PR's dominant
+  intent and stick with it. release-please reads only the squash-merge
+  subject line — sub-bullets in the PR body do *not* get categorised.
+  Mixed-intent PRs should be split.
+- **`refactor:` is hidden** because, by definition, a refactor has no
+  user-visible behaviour change. If the change *does* affect a public
+  surface (CLI flag, CRD field, env var, Helm value), it is not a
+  refactor — use `feat:` or `feat!:` / `BREAKING CHANGE:`.
+- **`deprecate:` vs `remove:`** — deprecating something keeps it
+  working for one or more releases with a warning; removing it
+  breaks the contract. A removal should usually carry a
+  `BREAKING CHANGE:` footer too, so the minor-version bump signals
+  the contract change.
+- **`security:` and `deprecate:` / `remove:` are project-specific
+  extensions** to the standard Conventional Commits vocabulary. They
+  exist because Keep-a-Changelog defines Security / Deprecated /
+  Removed sections that the upstream spec has no native types for.
 
 Examples:
 
@@ -147,10 +170,25 @@ BPF object instead of erroring on load.
 ```
 
 ```
-refactor(build): per-arch BPF objects under internal/ebpf/embedded
+deprecate(api): spec.legacySelector is replaced by spec.selector
 
-BREAKING CHANGE: env var PODTRACE_BPF_OBJECT now defaults to a
-per-arch path. Users overriding this var must update.
+spec.legacySelector keeps working in 0.x but emits a warning event
+on every reconcile. It will be removed in v1.0.0; switch to
+spec.selector now.
+```
+
+```
+remove(api): drop spec.legacySelector
+
+BREAKING CHANGE: spec.legacySelector was deprecated in 0.10 and is
+now removed. Use spec.selector. Existing CRs that still set
+legacySelector will fail admission until updated.
+```
+
+```
+perf(agent): hash cgroup IDs with xxh3 instead of sha256
+
+Reduces per-event hashing overhead by ~70% on hot paths.
 ```
 
 The bump rules above apply pre-1.0. After `v1.0.0`, the standard semver
@@ -164,7 +202,7 @@ The release pipeline is fully automated once a release-worthy commit
 lands on `main`:
 
 ```
-1. You merge a PR with a non-hidden commit type (feat:/fix:/refactor:/perf:/security:)
+1. You merge a PR with a non-hidden commit type (feat:/fix:/perf:/deprecate:/remove:/security:/revert:)
    ↓
 2. release-please opens a "chore(main): release X.Y.Z" PR
    - Updates CHANGELOG.md

@@ -91,9 +91,9 @@ func resolveExporterRef(ctx context.Context, c client.Client, namespace, name st
 	return fmt.Errorf("spec.exporterRef.name %q: %w", name, err)
 }
 
-// validateExporterConfigVariant enforces that the typed field matching
+// ValidateExporterConfigVariant enforces that the typed field matching
 // spec.type is populated, and only that one.
-func validateExporterConfigVariant(spec ExporterConfigSpec) error {
+func ValidateExporterConfigVariant(spec ExporterConfigSpec) error {
 	present := map[ExporterType]bool{
 		ExporterTypeOTLP:    spec.OTLP != nil,
 		ExporterTypeJaeger:  spec.Jaeger != nil,
