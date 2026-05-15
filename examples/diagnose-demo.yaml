@@ -6,7 +6,7 @@
 # later) you can inspect:
 #
 #   kubectl -n podtrace-demo get podtracesession diag-demo -o yaml
-#     → .status.phase == Completed
+#     → .status.state == Completed
 #     → .status.summary.totalEvents > 0
 #     → .status.jobs[].eventCount > 0
 #

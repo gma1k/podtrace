@@ -86,8 +86,8 @@ func TestChart_DefaultValues(t *testing.T) {
 	out := renderChart(t)
 	resources := parseKinds(t, out)
 
-	if resources["CustomResourceDefinition"] != 4 {
-		t.Errorf("default `helm template` should render 4 CRDs; got %d", resources["CustomResourceDefinition"])
+	if resources["CustomResourceDefinition"] != 5 {
+		t.Errorf("default `helm template` should render 5 CRDs; got %d", resources["CustomResourceDefinition"])
 	}
 	if resources["Namespace"] != 0 {
 		t.Errorf("Namespace count: got %d want 0 (namespace is created by the bootstrap Job, not as a tracked resource)", resources["Namespace"])

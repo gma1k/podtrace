@@ -93,7 +93,7 @@ can introspect a finished session without scraping pod logs:
 
 | Field | Notes |
 |---|---|
-| `phase` | `Pending` → `Running` → `Completed` / `Failed`. |
+| `state` | `Pending` → `Running` → `Completed` / `Failed`. |
 | `startTime`, `completionTime` | Set when the first Job starts and last completes. |
 | `jobs[]` | One entry per node hosting a matched pod. Carries `node`, `name`, `completed`, `eventCount`, `startTime`, `completionTime`. |
 | `summary` | Aggregated `{totalEvents, dnsEvents, netEvents, fsEvents, cpuEvents, procEvents, errorsDetected}` across all Jobs. |
@@ -107,7 +107,7 @@ applied → Pending → (Running once first Job starts)
                   → CR auto-deleted after .spec.ttlSecondsAfterFinished (default 300s)
 ```
 
-The session is one-shot: terminal phases are sticky. Editing a
+The session is one-shot: terminal states are sticky. Editing a
 Completed session has no effect — create a new CR.
 
 ## Common operations
@@ -197,7 +197,7 @@ kubectl describe podtracesession <name> -n <ns>
 Look at the `Conditions` block. Likely candidates:
 - `Degraded=True ExporterNotFound` — fix the `exporterRef`.
 - `Degraded=True NodeCapacity` — `TracerConfig.spec.maxConcurrentSessionsPerNode` saturated.
-- No matched pods — selector matches nothing in `Running` phase.
+- No matched pods — selector matches no `Running` pods.
 
 **Phase = `Failed` immediately:**
 ```bash

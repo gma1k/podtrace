@@ -27,6 +27,7 @@ kubectl apply -f examples/podtracesession.yaml
 | [exporterconfig-datadog.yaml](exporterconfig-datadog.yaml) | DataDog exporter with a Secret-backed API key. |
 | [podtrace.yaml](podtrace.yaml) | Continuous tracing of pods matching `app=api`. |
 | [podtracesession.yaml](podtracesession.yaml) | Bounded 5-minute diagnose of the same selector. |
+| [podtraceschedule.yaml](podtraceschedule.yaml) | Recurring diagnose — fires a new `PodTraceSession` every 10 minutes using a session template. |
 | [diagnose-demo.yaml](diagnose-demo.yaml) | Self-contained end-to-end demo: a curl workload plus a 30s session with a `reportRef` ConfigMap sink. One `kubectl apply -f` away from a populated `.status.summary`. |
 
 ## Quick end-to-end on kind

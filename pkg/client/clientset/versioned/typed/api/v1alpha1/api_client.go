@@ -29,6 +29,7 @@ type PodtraceV1alpha1Interface interface {
 	RESTClient() rest.Interface
 	ExporterConfigsGetter
 	PodTracesGetter
+	PodTraceSchedulesGetter
 	PodTraceSessionsGetter
 	TracerConfigsGetter
 }
@@ -44,6 +45,10 @@ func (c *PodtraceV1alpha1Client) ExporterConfigs(namespace string) ExporterConfi
 
 func (c *PodtraceV1alpha1Client) PodTraces(namespace string) PodTraceInterface {
 	return newPodTraces(c, namespace)
+}
+
+func (c *PodtraceV1alpha1Client) PodTraceSchedules(namespace string) PodTraceScheduleInterface {
+	return newPodTraceSchedules(c, namespace)
 }
 
 func (c *PodtraceV1alpha1Client) PodTraceSessions(namespace string) PodTraceSessionInterface {

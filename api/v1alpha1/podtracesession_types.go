@@ -4,15 +4,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// SessionPhase represents the lifecycle phase of a PodTraceSession.
+// SessionState represents the high-level lifecycle state of a
+// PodTraceSession.
 // +kubebuilder:validation:Enum=Pending;Running;Completed;Failed
-type SessionPhase string
+type SessionState string
 
 const (
-	SessionPhasePending   SessionPhase = "Pending"
-	SessionPhaseRunning   SessionPhase = "Running"
-	SessionPhaseCompleted SessionPhase = "Completed"
-	SessionPhaseFailed    SessionPhase = "Failed"
+	SessionStatePending   SessionState = "Pending"
+	SessionStateRunning   SessionState = "Running"
+	SessionStateCompleted SessionState = "Completed"
+	SessionStateFailed    SessionState = "Failed"
 )
 
 // PodTraceSessionSpec defines a bounded diagnose-mode trace. The operator
@@ -116,9 +117,9 @@ type SessionSummary struct {
 
 // PodTraceSessionStatus reflects the observed state of a PodTraceSession.
 type PodTraceSessionStatus struct {
-	// Phase is the high-level state of the session.
+	// State is the high-level lifecycle state of the session.
 	// +optional
-	Phase SessionPhase `json:"phase,omitempty"`
+	State SessionState `json:"state,omitempty"`
 
 	// StartTime is set when the first child Job enters Running.
 	// +optional
@@ -168,7 +169,7 @@ type PodTraceSessionStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=pts,categories=podtrace
-// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
 // +kubebuilder:printcolumn:name="Duration",type=string,JSONPath=`.spec.duration`
 // +kubebuilder:printcolumn:name="Exporter",type=string,JSONPath=`.spec.exporterRef.name`
 // +kubebuilder:printcolumn:name="Events",type=integer,JSONPath=`.status.summary.totalEvents`

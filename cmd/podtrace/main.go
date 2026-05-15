@@ -123,6 +123,7 @@ func main() {
 	rootCmd.AddCommand(newAgentCmd())
 	rootCmd.AddCommand(newOperatorCmd())
 	rootCmd.AddCommand(newReportUploaderCmd())
+	rootCmd.AddCommand(newScheduleCmd())
 
 	rootCmd.Flags().StringVarP(&namespace, "namespace", "n", config.DefaultNamespace, "Kubernetes namespace")
 	rootCmd.Flags().StringVar(&namespacesCSV, "namespaces", "", "Comma-separated namespaces for multi-pod tracing (e.g., default,prod)")
@@ -159,7 +160,6 @@ func main() {
 	}
 
 	if err := rootCmd.Execute(); err != nil {
-		logger.Error("Command execution failed", zap.Error(err))
 		exitFunc(1)
 	}
 	defer logger.Sync()

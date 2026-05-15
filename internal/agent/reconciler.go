@@ -475,7 +475,7 @@ func copyMap(in map[string]string) map[string]string {
 }
 
 // podChangePredicates filters Pod watches down to events that actually
-// affect matching: label changes (selector matching), phase changes
+// affect matching: label changes (selector matching), state changes
 // (Running-ness), and deletions.
 func podChangePredicates() predicate.Predicate {
 	return predicate.Funcs{

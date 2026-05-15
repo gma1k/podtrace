@@ -17,7 +17,7 @@ import (
 // missing keys mean "fall back to the SDK default credential chain"
 // (which discovers IRSA, env vars, EC2 instance profile, etc.).
 //
-// Documented as a public API surface in doc/object-store-reports.md.
+// Documented as a public API surface in docs/object-store-reports.md.
 const (
 	s3SecretKeyAccessKeyID     = "access_key_id"
 	s3SecretKeySecretAccessKey = "secret_access_key"

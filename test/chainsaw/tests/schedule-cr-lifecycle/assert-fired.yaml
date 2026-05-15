@@ -1,0 +1,14 @@
+apiVersion: podtrace.io/v1alpha1
+kind: PodTraceSchedule
+metadata:
+  name: every-minute
+status:
+  (lastScheduleTime != null): true
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTraceSession
+metadata:
+  labels:
+    podtrace.io/schedule: every-minute
+status:
+  state: Completed

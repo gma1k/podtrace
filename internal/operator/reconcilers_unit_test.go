@@ -557,8 +557,8 @@ func TestSessionReconciler_NoMatchedPodsStaysPending(t *testing.T) {
 	if err := c.Get(context.Background(), client.ObjectKeyFromObject(s), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Status.Phase != podtracev1alpha1.SessionPhasePending {
-		t.Errorf("phase = %q, want Pending", got.Status.Phase)
+	if got.Status.State != podtracev1alpha1.SessionStatePending {
+		t.Errorf("state = %q, want Pending", got.Status.State)
 	}
 }
 
@@ -578,7 +578,7 @@ func TestSessionReconciler_TerminalSession_TTLNotExpiredKeepsAlive(t *testing.T)
 			TTLSecondsAfterFinished: &ttl,
 		},
 		Status: podtracev1alpha1.PodTraceSessionStatus{
-			Phase:          podtracev1alpha1.SessionPhaseCompleted,
+			State:          podtracev1alpha1.SessionStateCompleted,
 			CompletionTime: &completion,
 		},
 	}
@@ -619,7 +619,7 @@ func TestSessionReconciler_TerminalSession_TTLExpiredDeletes(t *testing.T) {
 			TTLSecondsAfterFinished: &ttl,
 		},
 		Status: podtracev1alpha1.PodTraceSessionStatus{
-			Phase:          podtracev1alpha1.SessionPhaseFailed,
+			State:          podtracev1alpha1.SessionStateFailed,
 			CompletionTime: &completion,
 		},
 	}

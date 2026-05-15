@@ -177,15 +177,15 @@ func (r *ExporterConfigReconciler) countReferences(ctx context.Context, ec *podt
 
 	count := safeconv.IntToInt32(len(ptList.Items))
 	for i := range ptsList.Items {
-		if !isSessionTerminal(ptsList.Items[i].Status.Phase) {
+		if !isSessionTerminal(ptsList.Items[i].Status.State) {
 			count++
 		}
 	}
 	return count, nil
 }
 
-func isSessionTerminal(p podtracev1alpha1.SessionPhase) bool {
-	return p == podtracev1alpha1.SessionPhaseCompleted || p == podtracev1alpha1.SessionPhaseFailed
+func isSessionTerminal(p podtracev1alpha1.SessionState) bool {
+	return p == podtracev1alpha1.SessionStateCompleted || p == podtracev1alpha1.SessionStateFailed
 }
 
 // SetupWithManager wires the controller's watches. Field indexers

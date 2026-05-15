@@ -157,5 +157,8 @@ func registerWebhooks(mgr ctrl.Manager) error {
 	if err := podtracev1alpha1.SetupExporterConfigWebhookWithManager(mgr); err != nil {
 		return fmt.Errorf("exporterconfig webhook: %w", err)
 	}
+	if err := podtracev1alpha1.SetupPodTraceScheduleWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("podtraceschedule webhook: %w", err)
+	}
 	return nil
 }

@@ -24,13 +24,13 @@ rules:
   # expired PodTraceSession resources (sessionTTL on terminal phase)
   # and for agent-driven removal of stale PodTrace entries.
   - apiGroups: ["podtrace.io"]
-    resources: ["tracerconfigs", "podtraces", "podtracesessions", "exporterconfigs"]
-    verbs: ["get", "list", "watch", "update", "patch", "delete"]
+    resources: ["tracerconfigs", "podtraces", "podtracesessions", "exporterconfigs", "podtraceschedules"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["podtrace.io"]
-    resources: ["tracerconfigs/status", "podtraces/status", "podtracesessions/status", "exporterconfigs/status"]
+    resources: ["tracerconfigs/status", "podtraces/status", "podtracesessions/status", "exporterconfigs/status", "podtraceschedules/status"]
     verbs: ["get", "update", "patch"]
   - apiGroups: ["podtrace.io"]
-    resources: ["tracerconfigs/finalizers", "podtraces/finalizers", "podtracesessions/finalizers"]
+    resources: ["tracerconfigs/finalizers", "podtraces/finalizers", "podtracesessions/finalizers", "podtraceschedules/finalizers"]
     verbs: ["update"]
   # Owned workload resources
   - apiGroups: ["apps"]

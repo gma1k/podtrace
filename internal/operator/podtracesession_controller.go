@@ -27,10 +27,6 @@ import (
 // node hosting at least one matched pod. Jobs invoke the standalone
 // `podtrace --diagnose <duration>` CLI, so session execution is
 // decoupled from the DaemonSet agent's lifecycle.
-//
-// The reconcile loop is intentionally one-shot: once Jobs exist we only
-// roll up their status. The only mutating action after initial fan-out
-// is TTL-driven cleanup.
 type PodTraceSessionReconciler struct {
 	client.Client
 	Scheme          *runtime.Scheme
@@ -68,6 +64,9 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 		if removeFinalizer(&session) {
 			if err := r.Update(ctx, &session); err != nil {
+				if apierrors.IsConflict(err) {
+					return ctrl.Result{Requeue: true}, nil
+				}
 				return ctrl.Result{}, fmt.Errorf("clear finalizer: %w", err)
 			}
 		}
@@ -75,18 +74,22 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 	if ensureFinalizer(&session) {
 		if err := r.Update(ctx, &session); err != nil {
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
 			return ctrl.Result{}, fmt.Errorf("set finalizer: %w", err)
 		}
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	if session.Status.Phase == podtracev1alpha1.SessionPhaseCompleted ||
-		session.Status.Phase == podtracev1alpha1.SessionPhaseFailed {
+	if session.Status.State == podtracev1alpha1.SessionStateCompleted ||
+		session.Status.State == podtracev1alpha1.SessionStateFailed {
 		return r.reconcileTerminalSession(ctx, &session)
 	}
 
 	if session.Spec.ReportRef != nil && session.Spec.ReportRef.ObjectStore != nil {
 		if err := podtracev1alpha1.ValidateObjectStoreReference(session.Spec.ReportRef.ObjectStore); err != nil {
+			session.Status.State = podtracev1alpha1.SessionStateFailed
 			r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "ObjectStoreURIInvalid", err.Error())
 			_ = r.Status().Update(ctx, &session)
 			return ctrl.Result{}, nil
@@ -95,22 +98,19 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	targetNodes, targetNamespaces, err := r.resolveTargetNodes(ctx, &session)
 	if err != nil {
-		// Distinguish a malformed NamespaceSelector (admission webhook
-		// should normally catch it, but envtest harnesses skip webhooks)
-		// from a general resolve failure for a clearer Degraded reason.
 		reason := "ResolveTargets"
 		if strings.Contains(err.Error(), "invalid NamespaceSelector") {
 			reason = "NamespaceSelectorInvalid"
+			session.Status.State = podtracev1alpha1.SessionStateFailed
 		}
 		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, reason, err.Error())
 		_ = r.Status().Update(ctx, &session)
 		return ctrl.Result{}, err
 	}
-	// Surface the resolved allowlist on .status for debuggability.
 	session.Status.TargetNamespaces = targetNamespaces
 	if len(targetNodes) == 0 {
 		logger.Info("no matched pods; session stays Pending until pods appear")
-		session.Status.Phase = podtracev1alpha1.SessionPhasePending
+		session.Status.State = podtracev1alpha1.SessionStatePending
 		r.setCondition(&session, ConditionReconciled, metav1.ConditionTrue, "NoMatchedPods", "selector matched zero pods")
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, r.Status().Update(ctx, &session)
 	}
@@ -175,9 +175,9 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	// Refresh status from Job conditions. summarizeSessionJobs also decides
-	// whether the session has reached a terminal phase.
+	// whether the session has reached a terminal state.
 	session.Status.Jobs = makeSessionJobRefs(jobs)
-	session.Status.Phase = computeSessionPhase(jobs)
+	session.Status.State = computeSessionState(jobs)
 	session.Status.ObservedGeneration = session.Generation
 
 	if err := populateSessionSummaries(ctx, r.Client, &session, jobs); err != nil {
@@ -187,7 +187,7 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		now := metav1.Now()
 		session.Status.StartTime = &now
 	}
-	if isTerminal(session.Status.Phase) && session.Status.CompletionTime == nil {
+	if isTerminal(session.Status.State) && session.Status.CompletionTime == nil {
 		now := metav1.Now()
 		session.Status.CompletionTime = &now
 	}
@@ -208,7 +208,7 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, fmt.Errorf("update status: %w", err)
 	}
 
-	if !isTerminal(session.Status.Phase) {
+	if !isTerminal(session.Status.State) {
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 	return ctrl.Result{}, nil
@@ -239,8 +239,8 @@ func (r *PodTraceSessionReconciler) namespaceToPodTraceSessions(ctx context.Cont
 		if s.Spec.NamespaceSelector == nil {
 			continue
 		}
-		if s.Status.Phase == podtracev1alpha1.SessionPhaseCompleted ||
-			s.Status.Phase == podtracev1alpha1.SessionPhaseFailed {
+		if s.Status.State == podtracev1alpha1.SessionStateCompleted ||
+			s.Status.State == podtracev1alpha1.SessionStateFailed {
 			continue
 		}
 		out = append(out, reconcile.Request{
@@ -492,4 +492,3 @@ func systemNamespaceForSession(tc *podtracev1alpha1.TracerConfig, fallback strin
 	}
 	return fallback
 }
-

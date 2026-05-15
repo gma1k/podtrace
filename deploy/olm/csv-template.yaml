@@ -109,7 +109,7 @@ spec:
     promotion to `v1beta1`. See
     [STABILITY.md](https://github.com/gma1k/podtrace/blob/main/STABILITY.md)
     for the project's stability statement and
-    [doc/compatibility.md](https://github.com/gma1k/podtrace/blob/main/doc/compatibility.md)
+    [docs/compatibility.md](https://github.com/gma1k/podtrace/blob/main/docs/compatibility.md)
     for the kernel and Kubernetes version compatibility matrix.
 
     ## Prerequisites

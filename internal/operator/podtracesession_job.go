@@ -207,7 +207,7 @@ func buildSessionSidecar(enabled bool, reportTo, image string, pullPolicy corev1
 	}
 	var env []corev1.EnvVar
 	if _, ok := objectStoreCredentialsVolume(s); ok {
-		const credsMount = "/etc/podtrace/objectstore-credentials" // #nosec G101 -- mount path, not a credential value; documented in doc/object-store-reports.md
+		const credsMount = "/etc/podtrace/objectstore-credentials" // #nosec G101 -- mount path, not a credential value; documented in docs/object-store-reports.md
 		mounts = append(mounts, corev1.VolumeMount{
 			Name:      objectStoreCredentialsVolumeName,
 			MountPath: credsMount,
@@ -356,15 +356,15 @@ func jobBackoffLimit(j *batchv1.Job) int32 {
 	return 6
 }
 
-// computeSessionPhase maps Job statuses to a SessionPhase.
+// computeSessionState maps Job statuses to a SessionState.
 //
 //   - All succeeded         → Completed
 //   - Any failed past limit → Failed
 //   - Any running           → Running
 //   - Otherwise             → Pending
-func computeSessionPhase(jobs []batchv1.Job) podtracev1alpha1.SessionPhase {
+func computeSessionState(jobs []batchv1.Job) podtracev1alpha1.SessionState {
 	if len(jobs) == 0 {
-		return podtracev1alpha1.SessionPhasePending
+		return podtracev1alpha1.SessionStatePending
 	}
 	allSucceeded := true
 	anyRunning := false
@@ -387,18 +387,18 @@ func computeSessionPhase(jobs []batchv1.Job) podtracev1alpha1.SessionPhase {
 	}
 	switch {
 	case allSucceeded:
-		return podtracev1alpha1.SessionPhaseCompleted
+		return podtracev1alpha1.SessionStateCompleted
 	case anyFailedFatal:
-		return podtracev1alpha1.SessionPhaseFailed
+		return podtracev1alpha1.SessionStateFailed
 	case anyRunning:
-		return podtracev1alpha1.SessionPhaseRunning
+		return podtracev1alpha1.SessionStateRunning
 	default:
-		return podtracev1alpha1.SessionPhasePending
+		return podtracev1alpha1.SessionStatePending
 	}
 }
 
-func isTerminal(p podtracev1alpha1.SessionPhase) bool {
-	return p == podtracev1alpha1.SessionPhaseCompleted || p == podtracev1alpha1.SessionPhaseFailed
+func isTerminal(p podtracev1alpha1.SessionState) bool {
+	return p == podtracev1alpha1.SessionStateCompleted || p == podtracev1alpha1.SessionStateFailed
 }
 
 func anyJobStarted(jobs []batchv1.Job) bool {

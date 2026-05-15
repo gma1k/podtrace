@@ -94,7 +94,7 @@ spec:
 status:
   desiredAgents: 3        # node count the DaemonSet targets
   readyAgents: 3          # agents currently passing readiness probe
-  activeSessions: 1       # session Jobs in Running phase
+  activeSessions: 1       # session Jobs currently Running
   conditions:
     - type: Reconciled
       status: "True"

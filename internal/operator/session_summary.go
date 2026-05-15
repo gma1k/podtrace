@@ -62,7 +62,7 @@ func populateSessionSummaries(ctx context.Context, c client.Client, session *pod
 	// Fold per-Job EventCount back into the SessionJobRef array. The
 	// array has already been built by makeSessionJobRefs in the main
 	// reconcile path; we only mutate the EventCount field here so we
-	// do not race with phase/time fields.
+	// do not race with state/time fields.
 	for i := range session.Status.Jobs {
 		ref := &session.Status.Jobs[i]
 		if s, ok := summaryByNode[ref.Node]; ok {

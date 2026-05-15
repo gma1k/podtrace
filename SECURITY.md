@@ -93,7 +93,7 @@ assumes about its environment:
   cosign-signed keyless via GitHub OIDC, with the signing event
   recorded in the public Sigstore Rekor transparency log. Verify
   the chain before running in trusted environments — see
-  [doc/installation.md](doc/installation.md) for the verification
+  [docs/installation.md](docs/installation.md) for the verification
   commands.
 
 ## Past Advisories
@@ -115,4 +115,4 @@ is a concern:
   data-plane load.
 
 For per-distro hardening notes (SELinux, AppArmor, Pod Security
-Standards), see the platform guides under [doc/](doc/).
+Standards), see the platform guides under [docs/](docs/).

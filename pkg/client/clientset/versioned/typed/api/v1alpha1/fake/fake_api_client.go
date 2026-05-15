@@ -35,6 +35,10 @@ func (c *FakePodtraceV1alpha1) PodTraces(namespace string) v1alpha1.PodTraceInte
 	return newFakePodTraces(c, namespace)
 }
 
+func (c *FakePodtraceV1alpha1) PodTraceSchedules(namespace string) v1alpha1.PodTraceScheduleInterface {
+	return newFakePodTraceSchedules(c, namespace)
+}
+
 func (c *FakePodtraceV1alpha1) PodTraceSessions(namespace string) v1alpha1.PodTraceSessionInterface {
 	return newFakePodTraceSessions(c, namespace)
 }

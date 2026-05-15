@@ -58,6 +58,9 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		if removeFinalizer(&pt) {
 			if err := r.Update(ctx, &pt); err != nil {
+				if apierrors.IsConflict(err) {
+					return ctrl.Result{Requeue: true}, nil
+				}
 				return ctrl.Result{}, fmt.Errorf("clear finalizer: %w", err)
 			}
 		}
@@ -65,6 +68,12 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	if ensureFinalizer(&pt) {
 		if err := r.Update(ctx, &pt); err != nil {
+			// Optimistic-concurrency conflict: the CR was modified between
+			// our Get and Update. Requeue and try again on the fresh
+			// version — this is normal, not an error.
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
 			return ctrl.Result{}, fmt.Errorf("set finalizer: %w", err)
 		}
 		return ctrl.Result{Requeue: true}, nil

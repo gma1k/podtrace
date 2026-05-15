@@ -21,11 +21,11 @@
         },
         {
           "type": "generic",
-          "path": "doc/crd-tracerconfig.md"
+          "path": "docs/crd-tracerconfig.md"
         },
         {
           "type": "generic",
-          "path": "doc/installation.md"
+          "path": "docs/installation.md"
         }
       ],
       "changelog-sections": [

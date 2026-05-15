@@ -1,0 +1,57 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: schedule-cr-lifecycle
+spec:
+  description: |
+    End-to-end PodTraceSchedule loop:
+      1. Apply ExporterConfig + Deployment + PodTraceSchedule with a
+         per-minute cron and a short (10s) session duration.
+      2. Controller fires a PodTraceSession owned by the schedule.
+      3. Session reaches phase=Completed.
+      4. status.lastScheduleTime is populated on the schedule.
+      5. Suspending the schedule stops new fires.
+  timeouts:
+    apply: 30s
+    assert: 180s
+    delete: 60s
+    cleanup: 120s
+  steps:
+    - name: setup-workload
+      try:
+        - apply:
+            file: ./resources.yaml
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: schedule-chatty
+              status:
+                readyReplicas: 1
+
+    - name: apply-schedule
+      try:
+        - apply:
+            file: ./schedule.yaml
+        - assert:
+            file: ./assert-fired.yaml
+
+    - name: suspend-schedule
+      try:
+        - patch:
+            resource:
+              apiVersion: podtrace.io/v1alpha1
+              kind: PodTraceSchedule
+              metadata:
+                name: every-minute
+              spec:
+                suspend: true
+        - assert:
+            resource:
+              apiVersion: podtrace.io/v1alpha1
+              kind: PodTraceSchedule
+              metadata:
+                name: every-minute
+              status:
+                (length(conditions[?type == 'Paused' && status == 'True'])): 1

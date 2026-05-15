@@ -46,6 +46,7 @@ session lifecycle test to complete.
 | [agent-restart-resilience](tests/agent-restart-resilience) | Restart the agent DaemonSet; existing CRs stay healthy and per-node status reappears. **Control-plane only** — does not assert event continuity (Phase 5+ work). |
 | [exporter-credential-rotation](tests/exporter-credential-rotation) | Update an upstream `ExporterConfig` Secret; operator refreshes the bundle Secret in `podtrace-system`. **Control-plane only** — does not assert delivery to a real receiver (Phase 7+ work). |
 | [psa-enforcement](tests/psa-enforcement) | PSA `enforce: privileged` admits agent pods in `podtrace-system` and rejects equivalent pod specs in a `restricted` namespace. |
+| [schedule-cr-lifecycle](tests/schedule-cr-lifecycle) | `PodTraceSchedule` fires a child `PodTraceSession` on a per-minute cron; verifies `status.lastScheduleTime`, ownership via `podtrace.io/schedule` label, and that `spec.suspend=true` halts further fires. |
 
 ## Honest scope notes
 

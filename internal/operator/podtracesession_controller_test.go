@@ -178,8 +178,8 @@ func TestPodTraceSessionReconciler_EnvtestStatusReflectsJobCompletion(t *testing
 			if err := c.Get(ctx, types.NamespacedName{Name: session.Name, Namespace: ns}, &got); err != nil {
 				return err
 			}
-			if got.Status.Phase != podtracev1alpha1.SessionPhaseCompleted {
-				return errf("phase=%q want Completed", got.Status.Phase)
+			if got.Status.State != podtracev1alpha1.SessionStateCompleted {
+				return errf("state=%q want Completed", got.Status.State)
 			}
 			return nil
 		},

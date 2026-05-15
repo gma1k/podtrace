@@ -66,6 +66,12 @@ func (r *TracerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	ds, err := r.ensureAgentDaemonSet(ctx, &tc, systemNS)
 	if err != nil {
+		// Optimistic-concurrency conflict (someone else just touched the
+		// DaemonSet — kubectl rollout restart, helm upgrade, another
+		// reconcile). Requeue silently; controller-runtime will re-list.
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
 		logger.Error(err, "ensure agent DaemonSet")
 		r.setCondition(&tc, ConditionDegraded, metav1.ConditionTrue, "DaemonSetError", err.Error())
 		_ = r.Status().Update(ctx, &tc)

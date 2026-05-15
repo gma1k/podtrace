@@ -21,8 +21,8 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.phase
-      name: Phase
+    - jsonPath: .status.state
+      name: State
       type: string
     - jsonPath: .spec.duration
       name: Duration
@@ -196,9 +196,7 @@ spec:
                       credentialsSecretRef:
                         description: |-
                           CredentialsSecretRef names a Secret in the session's namespace
-                          whose keys the uploader reads. See doc/object-store-reports.md
-                          for the per-backend Secret key schema. Omit for ambient
-                          credentials (IRSA / Workload Identity / Managed Identity).
+                          whose keys the uploader reads.
                         properties:
                           name:
                             default: ""
@@ -220,8 +218,9 @@ spec:
                             azblob://account/container/key-or-prefix
 
                           A trailing slash means "prefix mode" — the uploader appends a
-                          per-session filename. Without one, the URI's path is used as
-                          the exact object key.
+                          per-session filename (<pod-name>-<rfc3339>.txt) and an additional
+                          <key>.summary.json object. Without a trailing slash, the URI's
+                          path is used verbatim as the object key.
                         type: string
                     required:
                     - uri
@@ -451,17 +450,24 @@ spec:
                   for this session.
                 format: int64
                 type: integer
-              phase:
-                description: Phase is the high-level state of the session.
+              reportLocation:
+                description: |-
+                  ReportLocation is the resolved object URI of the uploaded session
+                  report when spec.reportRef.objectStore is set and the sidecar
+                  uploader has succeeded. Empty for ConfigMap/Secret sinks (the
+                  report lives at .spec.reportRef itself) and before upload completes.
+                type: string
+              startTime:
+                description: StartTime is set when the first child Job enters Running.
+                format: date-time
+                type: string
+              state:
+                description: State is the high-level lifecycle state of the session.
                 enum:
                 - Pending
                 - Running
                 - Completed
                 - Failed
-                type: string
-              startTime:
-                description: StartTime is set when the first child Job enters Running.
-                format: date-time
                 type: string
               summary:
                 description: Summary is a compact per-category event roll-up for this
@@ -491,13 +497,6 @@ spec:
                 required:
                 - totalEvents
                 type: object
-              reportLocation:
-                description: |-
-                  ReportLocation is the resolved object URI of the uploaded session
-                  report when spec.reportRef.objectStore is set and the sidecar
-                  uploader has succeeded. Empty for ConfigMap/Secret sinks (the
-                  report lives at .spec.reportRef itself) and before upload completes.
-                type: string
               targetNamespaces:
                 description: |-
                   TargetNamespaces is the sorted list of namespace names the operator
