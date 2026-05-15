@@ -59,6 +59,24 @@ metadata:
             "exporterRef": { "name": "prod-otlp" },
             "reportRef": { "configMap": { "name": "api-diag-report" } }
           }
+        },
+        {
+          "apiVersion": "podtrace.io/v1alpha1",
+          "kind": "PodTraceSchedule",
+          "metadata": { "name": "nightly-diagnose", "namespace": "default" },
+          "spec": {
+            "schedule": "0 2 * * *",
+            "concurrencyPolicy": "Forbid",
+            "successfulSessionsHistoryLimit": 7,
+            "sessionTemplate": {
+              "spec": {
+                "selector": { "matchLabels": { "app": "api" } },
+                "duration": "5m",
+                "filters": ["dns", "net", "fs"],
+                "exporterRef": { "name": "prod-otlp" }
+              }
+            }
+          }
         }
       ]
 
@@ -72,9 +90,9 @@ spec:
     Memcached, Kafka, FastCGI/PHP-FPM) — without requiring application
     code changes or sidecars.
 
-    ## Three usage modes
+    ## Four usage modes
 
-    Podtrace ships one operator that supports three workflows:
+    Podtrace ships one operator that supports four workflows:
 
     - **`PodTrace` CR** — continuous, realtime tracing of pods matching
       a label selector. Events stream through a per-node agent
@@ -84,9 +102,14 @@ spec:
     - **`PodTraceSession` CR** — bounded, GitOps-driven diagnose runs.
       The operator fans out a privileged Job per node hosting a matched
       pod, collects events for a configured duration, and writes a
-      structured report to a `ConfigMap` or `Secret`. Equivalent to the
-      podtrace CLI's `--diagnose` mode but multi-tenant and
-      operator-managed.
+      structured report to a `ConfigMap`, `Secret`, or cloud object
+      store (S3 / GCS / Azure Blob). Equivalent to the podtrace CLI's
+      `--diagnose` mode but multi-tenant and operator-managed.
+
+    - **`PodTraceSchedule` CR** — cron-style recurring diagnose. Fires
+      a fresh `PodTraceSession` on every tick, subject to a
+      `ConcurrencyPolicy` (Allow / Forbid / Replace), with
+      history-limit retention and owner-reference cascade deletion.
 
     - **`TracerConfig` CR** — cluster-wide tracer configuration that
       governs the agent DaemonSet (event buffer sizes, default filters,
@@ -95,7 +118,7 @@ spec:
     ## Architecture
 
     On install the operator runs unprivileged in the
-    `podtrace-system` namespace and watches the four CRD kinds
+    `podtrace-system` namespace and watches the five CRD kinds
     cluster-wide. When a `TracerConfig` is created, the operator rolls
     out a `podtrace-agent` DaemonSet across the cluster with the
     minimum capabilities eBPF requires: `CAP_BPF`, `CAP_PERFMON`, and
@@ -235,7 +258,7 @@ spec:
           fans out one privileged Job per node hosting a matched
           pod, collects events for the configured duration, and
           writes a structured report to a `ConfigMap` or `Secret`.
-          Reaches `phase: Completed` when all child Jobs finish.
+          Reaches `state: Completed` when all child Jobs finish.
         resources:
           - kind: Job
             version: batch/v1
@@ -243,6 +266,22 @@ spec:
             version: v1
           - kind: Secret
             version: v1
+
+      - name: podtraceschedules.podtrace.io
+        version: v1alpha1
+        kind: PodTraceSchedule
+        displayName: Pod Trace Schedule
+        description: |
+          Cron-style recurring diagnose. The operator fires a fresh
+          `PodTraceSession` on every cron tick, subject to a
+          `ConcurrencyPolicy` (Allow / Forbid / Replace), with
+          history-limit retention and owner-reference cascade
+          deletion. Suspend with `spec.suspend: true`; manual
+          one-off runs are available via
+          `kubectl podtrace schedule trigger <name>`.
+        resources:
+          - kind: PodTraceSession
+            version: podtrace.io/v1alpha1
 
   install:
     strategy: deployment

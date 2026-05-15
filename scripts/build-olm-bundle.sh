@@ -37,7 +37,7 @@ PREVIOUS_VERSION="${PREVIOUS_VERSION#v}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC_DIR="${REPO_ROOT}/deploy/olm"
 CHART_DIR="${REPO_ROOT}/deploy/charts/podtrace"
-CRD_DIR="${CHART_DIR}/crds"
+CRD_DIR="${CHART_DIR}/templates/crds"
 ICON_PATH="${REPO_ROOT}/assets/podtrace-icon-olm.png"
 
 OUT_DIR="${REPO_ROOT}/bundle/${VERSION}"
@@ -77,7 +77,10 @@ mkdir -p "${MANIFESTS_DIR}" "${METADATA_DIR}"
 
 # --- copy CRDs ---------------------------------------------------------
 
-cp "${crd_files[@]}" "${MANIFESTS_DIR}/"
+for src in "${crd_files[@]}"; do
+	dst="${MANIFESTS_DIR}/$(basename "${src}")"
+	grep -v -E '^\s*\{\{' "${src}" >"${dst}"
+done
 
 # --- render CSV --------------------------------------------------------
 
