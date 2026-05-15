@@ -9,6 +9,17 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.11.10](https://github.com/gma1k/podtrace/compare/v0.11.9...v0.11.10) (2026-05-15)
+
+
+### Added
+
+* add PodTraceSchedule CRD, rename PodTraceSession to `.status.state`, and harden operator/CLI reconcile and error paths ([#118](https://github.com/gma1k/podtrace/issues/118)) ([97f7407](https://github.com/gma1k/podtrace/commit/97f74073ed8ec355f6647ad017c11ee4f6ce67db))
+* **agent:** add Jaeger/DataDog/Splunk exporters, version bundles, manage CRDs via Helm hooks ([#113](https://github.com/gma1k/podtrace/issues/113)) ([dd6a1aa](https://github.com/gma1k/podtrace/commit/dd6a1aae108a6c2a427a5c68483187df1003d582))
+* cross-namespace PodTrace targeting via spec.namespaceSelector and chart namespace-bootstrap hardening ([#115](https://github.com/gma1k/podtrace/issues/115)) ([7d70f3f](https://github.com/gma1k/podtrace/commit/7d70f3ff9bed2f7a8bb58a665852e6fb14cc46ff))
+* **operator:** ExporterConfig status reconciler, changelog and CI hygiene ([#117](https://github.com/gma1k/podtrace/issues/117)) ([c70a710](https://github.com/gma1k/podtrace/commit/c70a71005646db953cc240ee4504df17bcbd3d27))
+* **reports:** upload session reports to S3/GCS/Azure object stores, fix agent BPF wiring, harden chart fresh-install path ([#116](https://github.com/gma1k/podtrace/issues/116)) ([ec6e335](https://github.com/gma1k/podtrace/commit/ec6e3354dae7bc1ccf88a07400e451e313359fda))
+
 ## [0.11.9](https://github.com/gma1k/podtrace/compare/v0.11.8...v0.11.9) (2026-05-11)
 
 
