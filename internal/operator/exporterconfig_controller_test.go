@@ -303,7 +303,7 @@ func TestExporterConfigReconciler_ReferenceCounts(t *testing.T) {
 				&podtracev1alpha1.PodTraceSession{
 					ObjectMeta: metav1.ObjectMeta{Name: "pts1", Namespace: "ns"},
 					Spec:       podtracev1alpha1.PodTraceSessionSpec{ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec1"}},
-					Status:     podtracev1alpha1.PodTraceSessionStatus{Phase: podtracev1alpha1.SessionPhaseRunning},
+					Status:     podtracev1alpha1.PodTraceSessionStatus{State: podtracev1alpha1.SessionStateRunning},
 				},
 			},
 			wantRefs:   2,
@@ -319,7 +319,7 @@ func TestExporterConfigReconciler_ReferenceCounts(t *testing.T) {
 				&podtracev1alpha1.PodTraceSession{
 					ObjectMeta: metav1.ObjectMeta{Name: "done", Namespace: "ns"},
 					Spec:       podtracev1alpha1.PodTraceSessionSpec{ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec1"}},
-					Status:     podtracev1alpha1.PodTraceSessionStatus{Phase: podtracev1alpha1.SessionPhaseCompleted},
+					Status:     podtracev1alpha1.PodTraceSessionStatus{State: podtracev1alpha1.SessionStateCompleted},
 				},
 			},
 			wantRefs:   1,
@@ -331,7 +331,7 @@ func TestExporterConfigReconciler_ReferenceCounts(t *testing.T) {
 				&podtracev1alpha1.PodTraceSession{
 					ObjectMeta: metav1.ObjectMeta{Name: "bad", Namespace: "ns"},
 					Spec:       podtracev1alpha1.PodTraceSessionSpec{ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec1"}},
-					Status:     podtracev1alpha1.PodTraceSessionStatus{Phase: podtracev1alpha1.SessionPhaseFailed},
+					Status:     podtracev1alpha1.PodTraceSessionStatus{State: podtracev1alpha1.SessionStateFailed},
 				},
 			},
 			wantRefs:   0,

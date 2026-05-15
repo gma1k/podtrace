@@ -1,0 +1,45 @@
+# Minimal end-to-end PodTraceSchedule example.
+#
+# Apply with:
+#   kubectl apply -f examples/podtraceschedule.yaml
+#
+# The schedule fires a new PodTraceSession every 10 minutes against
+# pods labeled app=api in the same namespace. Each session runs for
+# 5 minutes and exports captured spans via OTLP/HTTP.
+#
+# `concurrencyPolicy: Forbid` prevents a long-running session from
+# overlapping with the next fire — useful when sessions multiply load
+# on target pods. Switch to `Allow` (the default) if overlap is fine,
+# or to `Replace` for "always sample the latest window" workflows.
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: prod-otlp
+spec:
+  type: otlp
+  otlp:
+    endpoint: otel-collector.observability:4318
+    protocol: http
+    insecure: true
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTraceSchedule
+metadata:
+  name: api-diagnose
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  successfulSessionsHistoryLimit: 5
+  failedSessionsHistoryLimit: 2
+  sessionTemplate:
+    metadata:
+      labels:
+        scheduled-by: api-diagnose
+    spec:
+      selector:
+        matchLabels:
+          app: api
+      duration: 5m
+      filters: [dns, net]
+      exporterRef:
+        name: prod-otlp

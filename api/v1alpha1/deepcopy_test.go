@@ -81,7 +81,7 @@ func populatedPodTraceSession() *PodTraceSession {
 			TTLSecondsAfterFinished: &ttl,
 		},
 		Status: PodTraceSessionStatus{
-			Phase:          SessionPhaseRunning,
+			State:          SessionStateRunning,
 			StartTime:      &tt,
 			CompletionTime: &tt,
 			Jobs: []SessionJobRef{

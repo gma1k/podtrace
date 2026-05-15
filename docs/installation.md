@@ -31,7 +31,7 @@ What it deploys, in order:
 | `demo-trace` `PodTraceSession` | `podtrace-demo` | 30s diagnose against nginx |
 
 ```bash
-# Session should reach phase: Completed
+# Session should reach state: Completed
 kubectl get podtracesession demo-trace -n podtrace-demo
 
 # Inspect status.summary (aggregated event counts)

@@ -24,7 +24,7 @@ By combining system-level details, application-layer insights, and real-time eve
 
 ## Documentation
 
-Podtrace documentation is available in the [`doc/`](doc/) directory.
+Podtrace documentation is available in the [`docs/`](docs/) directory.
 
 ## Three usage patterns
 
@@ -64,8 +64,8 @@ podtrace -n production my-pod --diagnose 30s --export json > report.json
 
 For other platforms (linux/arm64, darwin/amd64, darwin/arm64) and
 cosign-verifiable installs, see
-[doc/installation.md#install-the-cli](doc/installation.md#install-the-cli).
-Full CLI reference: [doc/usage.md](doc/usage.md).
+[docs/installation.md#install-the-cli](docs/installation.md#install-the-cli).
+Full CLI reference: [docs/usage.md](docs/usage.md).
 
 ### 2. Continuous tracing via the `PodTrace` CR
 
@@ -98,7 +98,7 @@ kubectl get podtraces.podtrace.io watch-api -n my-app -o yaml
 > Event flow through the agent to the exporter is upcoming work — for
 > real eBPF event capture today, use pattern 3 below.
 
-Full reference: [doc/crd-podtrace.md](doc/crd-podtrace.md).
+Full reference: [docs/crd-podtrace.md](docs/crd-podtrace.md).
 
 ### 3. Bounded diagnose via the `PodTraceSession` CR
 
@@ -132,12 +132,43 @@ privileged Job. Results land in three parallel channels:
 - `status.jobs[].eventCount` — per-node breakdown
 - `reportRef.configMap` (or `.secret`) — full human-readable report
 
-Full reference: [doc/crd-podtracesession.md](doc/crd-podtracesession.md).
+Full reference: [docs/crd-podtracesession.md](docs/crd-podtracesession.md).
+
+### 4. Recurring diagnose via the `PodTraceSchedule` CR
+
+Best for nightly diagnose sweeps and on-call probes where you want the
+last N runs ready to inspect on demand. The schedule fires a fresh
+`PodTraceSession` on every cron tick, owns each child via owner
+references, and prunes history per the configured limits.
+
+```yaml
+apiVersion: podtrace.io/v1alpha1
+kind: PodTraceSchedule
+metadata: { name: nightly-diagnose, namespace: my-app }
+spec:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulSessionsHistoryLimit: 7
+  sessionTemplate:
+    spec:
+      selector: { matchLabels: { app: api } }
+      duration: 5m
+      filters: [dns, net]
+      exporterRef: { name: prod-otlp }
+```
+
+Manual one-off trigger from the CLI:
+
+```bash
+kubectl podtrace schedule trigger nightly-diagnose -n my-app
+```
+
+Full reference: [docs/crd-podtraceschedule.md](docs/crd-podtraceschedule.md).
 
 ### Install the operator
 
 The fastest path is the **one-shot quickstart manifest** —
-operator + CRDs + a sample nginx workload + `PodTraceSession` that reaches `phase: Completed` and writes a report to a ConfigMap. Single `kubectl apply`, no Helm, no clone, no
+operator + CRDs + a sample nginx workload + `PodTraceSession` that reaches `state: Completed` and writes a report to a ConfigMap. Single `kubectl apply`, no Helm, no clone, no
 build toolchain:
 
 ```bash
@@ -191,9 +222,9 @@ cosign verify ghcr.io/gma1k/podtrace:latest \
 ```
 
 For prerequisites, supported kernels, and per-distro notes see
-[doc/installation.md](doc/installation.md) and
-[doc/compatibility.md](doc/compatibility.md). For chart values and
-operator architecture see [doc/operator.md](doc/operator.md).
+[docs/installation.md](docs/installation.md) and
+[docs/compatibility.md](docs/compatibility.md). For chart values and
+operator architecture see [docs/operator.md](docs/operator.md).
 
 Building from source (for contributors or air-gapped clusters) is
 covered below under [Building](#building).
@@ -201,7 +232,7 @@ covered below under [Building](#building).
 ### Coming from the CLI
 
 If you're already a CLI user and want a translation table from the CLI
-to CRs, see [doc/migration.md](doc/migration.md).
+to CRs, see [docs/migration.md](docs/migration.md).
 
 ## Features
 

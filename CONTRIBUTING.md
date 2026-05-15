@@ -11,7 +11,7 @@ For everything beyond this file:
   promises (and doesn't) at `v0.x`
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — community behavioral standards
 - [SECURITY.md](SECURITY.md) — vulnerability reporting
-- [doc/](doc/) — full reference for installation, CRDs, eBPF internals,
+- [docs/](docs/) — full reference for installation, CRDs, eBPF internals,
   per-distro notes, and tracing exporters
 
 ## Project layout
@@ -32,7 +32,7 @@ internal/                 Implementation packages
 deploy/charts/podtrace/   Helm chart (CRDs, operator deployment, RBAC)
 deploy/quickstart-sample.yaml  Demo workload + sample CRs concatenated
                           into the released `quickstart.yaml`
-doc/                      User documentation
+docs/                      User documentation
 test/                     Integration tests + chainsaw e2e suite
 .github/workflows/        CI workflows (per-PR + release pipeline)
 ```
@@ -74,7 +74,7 @@ make build
 ```
 
 For per-distro specifics (AKS, EKS, GKE, OpenShift, Talos), see the
-guides in [doc/](doc/).
+guides in [docs/](docs/).
 
 ### Iterating
 
@@ -244,9 +244,9 @@ Before opening a PR:
 
 - [ ] Commit message follows Conventional Commits (drives release-please)
 - [ ] Tests pass: at minimum `make test-unit`; `make chainsaw` for BPF/operator/agent changes
-- [ ] Updated relevant docs in `doc/` if you changed user-visible behavior
+- [ ] Updated relevant docs in `docs/` if you changed user-visible behavior
 - [ ] If touching public surface (CRDs, CLI flags, Helm values, env vars), reviewed [STABILITY.md](STABILITY.md) and called out any breaking change in the commit footer
-- [ ] If adding a new BPF probe or feature, considered the kernel-version pitfalls documented in [doc/compatibility.md](doc/compatibility.md)
+- [ ] If adding a new BPF probe or feature, considered the kernel-version pitfalls documented in [docs/compatibility.md](docs/compatibility.md)
 
 ## Where to ask
 

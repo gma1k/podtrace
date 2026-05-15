@@ -3,5 +3,5 @@ kind: PodTraceSession
 metadata:
   name: objstore-diag
 status:
-  phase: Completed
+  state: Completed
   (conditions[?type == 'ReportUploaded'].status | [0]): "True"

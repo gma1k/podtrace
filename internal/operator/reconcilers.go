@@ -52,5 +52,13 @@ func registerReconcilers(mgr ctrl.Manager, opts Options) error {
 		return fmt.Errorf("ExporterConfigReconciler: %w", err)
 	}
 
+	pscr := &PodTraceScheduleReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}
+	if err := pscr.SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("PodTraceScheduleReconciler: %w", err)
+	}
+
 	return nil
 }

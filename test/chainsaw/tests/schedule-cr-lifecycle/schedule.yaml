@@ -1,0 +1,18 @@
+apiVersion: podtrace.io/v1alpha1
+kind: PodTraceSchedule
+metadata:
+  name: every-minute
+spec:
+  schedule: "* * * * *"
+  concurrencyPolicy: Forbid
+  successfulSessionsHistoryLimit: 2
+  failedSessionsHistoryLimit: 1
+  sessionTemplate:
+    spec:
+      selector:
+        matchLabels:
+          app: schedule-target
+      duration: 10s
+      filters: [dns, net]
+      exporterRef:
+        name: schedule-otlp

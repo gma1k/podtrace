@@ -39,7 +39,7 @@ podtrace/
 ├── test/                   # Test utilities and integration tests
 │   ├── integration_test.go # Integration test framework
 │   └── *.sh                # Test setup and utility scripts
-└── doc/                    # Documentation
+└── docs/                    # Documentation
 ```
 
 ## Building

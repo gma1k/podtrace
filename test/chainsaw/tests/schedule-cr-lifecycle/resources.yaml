@@ -1,0 +1,36 @@
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: schedule-otlp
+spec:
+  type: otlp
+  otlp:
+    endpoint: otel-collector:4318
+    protocol: http
+    insecure: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: schedule-chatty
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: schedule-target
+  template:
+    metadata:
+      labels:
+        app: schedule-target
+    spec:
+      containers:
+        - name: curl
+          image: curlimages/curl:latest
+          command:
+            - sh
+            - -c
+            - |
+              while true; do
+                curl -sS -o /dev/null https://kubernetes.io || true
+                sleep 1
+              done

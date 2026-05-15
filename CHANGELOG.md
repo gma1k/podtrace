@@ -104,7 +104,7 @@ based on [Conventional Commits](https://www.conventionalcommits.org/).
 - Multi-pod tracing and cross-namespace support ([#63]).
 
 ### Changed
-- README consolidated into `doc/` ([#68]).
+- README consolidated into `docs/` ([#68]).
 - Multi-pod tracing features restored to README.
 
 ### Fixed

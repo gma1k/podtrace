@@ -50,6 +50,26 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
+      path: /validate-podtrace-io-v1alpha1-podtraceschedule
+  failurePolicy: Fail
+  name: vpodtraceschedule.podtrace.io
+  rules:
+  - apiGroups:
+    - podtrace.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - podtraceschedules
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
       path: /validate-podtrace-io-v1alpha1-podtracesession
   failurePolicy: Fail
   name: vpodtracesession.podtrace.io

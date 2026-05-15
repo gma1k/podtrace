@@ -59,7 +59,6 @@ spec:
 
 | Field | Notes |
 |---|---|
-| `phase` | Aggregate state derived from per-node reports. |
 | `matchedPods` | Sum of `activeCgroups` across all reporting nodes. |
 | `nodeStatus[]` | One entry per node hosting a matched pod. Each carries `node`, `ready`, `activeCgroups`, `eventsTotal`, `droppedEvents`, `lastHeartbeat`, `message`. |
 | `conditions` | Standard Kubernetes condition objects. `Ready=True` once at least one node reports healthy. `Degraded=True` on bundle sync errors. `Paused` mirrors `spec.paused`. |

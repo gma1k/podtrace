@@ -42,11 +42,12 @@ func TestExamples_RoundTrip(t *testing.T) {
 	decoder := scheme.Codecs.UniversalDeserializer()
 
 	expectedKinds := map[string]bool{
-		"PodTrace":        false,
-		"PodTraceSession": false,
-		"ExporterConfig":  false,
-		"TracerConfig":    false,
-		"Secret":          false,
+		"PodTrace":         false,
+		"PodTraceSession":  false,
+		"PodTraceSchedule": false,
+		"ExporterConfig":   false,
+		"TracerConfig":     false,
+		"Secret":           false,
 	}
 	supportingKinds := map[string]bool{
 		"Namespace":  true,
@@ -175,6 +176,19 @@ func validateStructuralNotEmpty(obj runtime.Object, kind string) error {
 		}
 		if o.Spec.ExporterRef.Name == "" {
 			return fmt.Errorf("spec.exporterRef.name empty")
+		}
+	case *podtracev1alpha1.PodTraceSchedule:
+		if o.Name == "" {
+			return fmt.Errorf("metadata.name empty")
+		}
+		if o.Spec.Schedule == "" {
+			return fmt.Errorf("spec.schedule empty")
+		}
+		if o.Spec.SessionTemplate.Spec.Duration.Duration <= 0 {
+			return fmt.Errorf("spec.sessionTemplate.spec.duration not positive")
+		}
+		if o.Spec.SessionTemplate.Spec.ExporterRef.Name == "" {
+			return fmt.Errorf("spec.sessionTemplate.spec.exporterRef.name empty")
 		}
 	case *podtracev1alpha1.ExporterConfig:
 		if o.Name == "" {

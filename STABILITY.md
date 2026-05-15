@@ -107,12 +107,12 @@ Until then, expect `v0.x` cadence with the rules above.
 
 - [CHANGELOG.md](CHANGELOG.md) — release-by-release record, including
   every breaking change.
-- [doc/compatibility.md](doc/compatibility.md) — kernel, Kubernetes,
+- [docs/compatibility.md](docs/compatibility.md) — kernel, Kubernetes,
   architecture, and distro support matrix.
-- [doc/migration.md](doc/migration.md) — how to move between the CLI and
+- [docs/migration.md](docs/migration.md) — how to move between the CLI and
   CRD models. Not the same as schema migration.
-- [doc/crd-podtrace.md](doc/crd-podtrace.md),
-  [doc/crd-podtracesession.md](doc/crd-podtracesession.md),
-  [doc/crd-exporterconfig.md](doc/crd-exporterconfig.md),
-  [doc/crd-tracerconfig.md](doc/crd-tracerconfig.md) — per-CRD field
+- [docs/crd-podtrace.md](docs/crd-podtrace.md),
+  [docs/crd-podtracesession.md](docs/crd-podtracesession.md),
+  [docs/crd-exporterconfig.md](docs/crd-exporterconfig.md),
+  [docs/crd-tracerconfig.md](docs/crd-tracerconfig.md) — per-CRD field
   reference.

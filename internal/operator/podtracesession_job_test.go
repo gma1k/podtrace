@@ -209,18 +209,18 @@ func TestComputeSessionPhase_Transitions(t *testing.T) {
 	cases := []struct {
 		name string
 		jobs []batchv1.Job
-		want podtracev1alpha1.SessionPhase
+		want podtracev1alpha1.SessionState
 	}{
-		{"empty-pending", nil, podtracev1alpha1.SessionPhasePending},
-		{"all-succeeded", []batchv1.Job{succeededJob, succeededJob}, podtracev1alpha1.SessionPhaseCompleted},
-		{"any-fatal-failed", []batchv1.Job{succeededJob, failedJob}, podtracev1alpha1.SessionPhaseFailed},
-		{"any-running", []batchv1.Job{pendingJob, runningJob}, podtracev1alpha1.SessionPhaseRunning},
-		{"pending-only", []batchv1.Job{pendingJob, pendingJob}, podtracev1alpha1.SessionPhasePending},
+		{"empty-pending", nil, podtracev1alpha1.SessionStatePending},
+		{"all-succeeded", []batchv1.Job{succeededJob, succeededJob}, podtracev1alpha1.SessionStateCompleted},
+		{"any-fatal-failed", []batchv1.Job{succeededJob, failedJob}, podtracev1alpha1.SessionStateFailed},
+		{"any-running", []batchv1.Job{pendingJob, runningJob}, podtracev1alpha1.SessionStateRunning},
+		{"pending-only", []batchv1.Job{pendingJob, pendingJob}, podtracev1alpha1.SessionStatePending},
 	}
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			if got := computeSessionPhase(tc.jobs); got != tc.want {
+			if got := computeSessionState(tc.jobs); got != tc.want {
 				t.Errorf("got %q want %q", got, tc.want)
 			}
 		})
@@ -264,16 +264,16 @@ func TestAnyJobStarted(t *testing.T) {
 }
 
 func TestIsTerminal(t *testing.T) {
-	if !isTerminal(podtracev1alpha1.SessionPhaseCompleted) {
+	if !isTerminal(podtracev1alpha1.SessionStateCompleted) {
 		t.Error("Completed should be terminal")
 	}
-	if !isTerminal(podtracev1alpha1.SessionPhaseFailed) {
+	if !isTerminal(podtracev1alpha1.SessionStateFailed) {
 		t.Error("Failed should be terminal")
 	}
-	if isTerminal(podtracev1alpha1.SessionPhaseRunning) {
+	if isTerminal(podtracev1alpha1.SessionStateRunning) {
 		t.Error("Running must not be terminal")
 	}
-	if isTerminal(podtracev1alpha1.SessionPhasePending) {
+	if isTerminal(podtracev1alpha1.SessionStatePending) {
 		t.Error("Pending must not be terminal")
 	}
 }

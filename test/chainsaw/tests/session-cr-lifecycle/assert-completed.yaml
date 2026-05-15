@@ -3,5 +3,5 @@ kind: PodTraceSession
 metadata:
   name: session-diag
 status:
-  phase: Completed
+  state: Completed
   (summary.totalEvents > `0`): true

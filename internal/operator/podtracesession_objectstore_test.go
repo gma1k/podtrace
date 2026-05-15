@@ -337,6 +337,12 @@ func TestPodTraceSessionReconciler_RejectsBadObjectStoreURI(t *testing.T) {
 	if deg.Status != metav1.ConditionTrue || deg.Reason != "ObjectStoreURIInvalid" {
 		t.Errorf("Degraded = (%s, %s); want (True, ObjectStoreURIInvalid). Message: %q", deg.Status, deg.Reason, deg.Message)
 	}
+	// A permanently-malformed spec should land in Failed state so
+	// `kubectl get` STATE column reflects the dead state instead of
+	// staying empty until the user describes the resource.
+	if got.Status.State != podtracev1alpha1.SessionStateFailed {
+		t.Errorf("State = %q; want Failed", got.Status.State)
+	}
 	var jobs batchv1.JobList
 	if err := c.List(context.Background(), &jobs); err != nil {
 		t.Fatalf("list jobs: %v", err)

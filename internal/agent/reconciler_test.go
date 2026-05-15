@@ -131,7 +131,7 @@ func TestPodChangePredicates(t *testing.T) {
 		t.Error("Generic predicate should reject events")
 	}
 
-	// UpdateFunc: same labels + same phase → false; different labels → true; different phase → true.
+	// UpdateFunc: same labels + same state → false; different labels → true; different state → true.
 	old := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"a": "1"}},
 		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
@@ -150,7 +150,7 @@ func TestPodChangePredicates(t *testing.T) {
 	rephased := old.DeepCopy()
 	rephased.Status.Phase = corev1.PodPending
 	if !p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: rephased}) {
-		t.Error("phase change Update should pass")
+		t.Error("state-change Update should pass")
 	}
 
 	// Non-Pod ObjectOld/New → false.

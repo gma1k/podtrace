@@ -21,6 +21,8 @@ type ExporterConfigExpansion interface{}
 
 type PodTraceExpansion interface{}
 
+type PodTraceScheduleExpansion interface{}
+
 type PodTraceSessionExpansion interface{}
 
 type TracerConfigExpansion interface{}
