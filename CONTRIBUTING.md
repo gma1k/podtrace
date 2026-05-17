@@ -123,15 +123,15 @@ no trailing period, ≤ 72 chars.
 
 | Type | Visible in changelog? | Effect on version (pre-1.0) |
 |---|---|---|
-| `feat:` | ✅ Added section | patch bump |
-| `fix:` | ✅ Fixed section | patch bump |
+| `feat:` | ✅ Features section | patch bump |
+| `fix:` | ✅ Bug Fixes section | patch bump |
 | `perf:` | ✅ Performance section | patch bump |
+| `security:` | ✅ Security section | patch bump |
 | `deprecate:` | ✅ Deprecated section | patch bump |
 | `remove:` | ✅ Removed section | patch bump |
-| `security:` | ✅ Security section | patch bump |
-| `revert:` | ✅ Changed section | patch bump |
-| `refactor:`, `chore:`, `docs:`, `style:`, `test:`, `build:`, `ci:` | ❌ Hidden | no bump |
-| Footer `BREAKING CHANGE:` | ✅ called out | **minor bump** (your only path to `v0.X+1.0`) |
+| `revert:` | ✅ Maintenance section | patch bump |
+| `refactor:`, `chore:`, `docs:`, `style:`, `test:`, `build:`, `ci:` | ❌ Hidden in CHANGELOG, ✅ shown on Release page | no bump |
+| Title suffix `feat!:` / footer `BREAKING CHANGE:` | ✅ ⚠ BREAKING CHANGES section | **minor bump** (your only path to `v0.X+1.0`) |
 | Footer `Release-As: 0.X.Y` | overrides version explicitly | Forces release-please to propose the named version |
 
 A few notes on type choice:
@@ -153,6 +153,11 @@ A few notes on type choice:
   extensions** to the standard Conventional Commits vocabulary. They
   exist because Keep-a-Changelog defines Security / Deprecated /
   Removed sections that the upstream spec has no native types for.
+- **CHANGELOG.md sections align with the enriched Release page** —
+  both use Features / Bug Fixes / Performance / Security / Deprecated
+  / Removed / Maintenance. The Release page additionally surfaces the
+  types hidden from CHANGELOG (Documentation, Tests, CI/Build), which
+  is why the two artifacts look similar but not identical.
 
 Examples:
 
