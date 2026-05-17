@@ -14,6 +14,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -80,16 +81,30 @@ type Tracer struct {
 	cgroupPaths              []string
 	useUserspaceCgroupFilter bool
 	targetCgroupID           uint64
-	targetCgroupIDs          map[uint64]struct{}
+	targetCgroupIDs atomic.Pointer[map[uint64]struct{}]
+	cgroupWriteMu   sync.Mutex
 	cpAnalyzer               *criticalpath.Analyzer
 	piiRedactor              *redactor.Redactor
 	profilingCtrl            ProfilingController
 }
 
 // SetProfilingController wires an optional profiling controller into the
-// management API server.  Must be called before Start().
+// management API server.
 func (t *Tracer) SetProfilingController(ctrl ProfilingController) {
 	t.profilingCtrl = ctrl
+}
+
+// loadCgroupIDs returns the current cgroup-ID filter set.
+func (t *Tracer) loadCgroupIDs() map[uint64]struct{} {
+	if p := t.targetCgroupIDs.Load(); p != nil {
+		return *p
+	}
+	return nil
+}
+
+// storeCgroupIDs atomically publishes a new cgroup-ID filter set.
+func (t *Tracer) storeCgroupIDs(m map[uint64]struct{}) {
+	t.targetCgroupIDs.Store(&m)
 }
 
 // roundUpPow2 rounds n up to the nearest power of two, minimum 4096.
@@ -142,10 +157,6 @@ func NewTracer() (*Tracer, error) {
 		return nil, err
 	}
 
-	// Patch ring buffer size (must be power-of-2 multiple of page size).
-	// ClampUint32 keeps the int → uint32 narrowing safe even if a
-	// pathological PODTRACE_RING_BUFFER_SIZE_KB overflows when multiplied
-	// by 1024.
 	rbBytes := config.RingBufferSizeKB
 	if rbBytes > 0 && rbBytes <= math.MaxInt/1024 {
 		rbBytes *= 1024
@@ -156,7 +167,6 @@ func NewTracer() (*Tracer, error) {
 	if m, ok := spec.Maps["events"]; ok {
 		m.MaxEntries = rbSize
 	}
-	// Patch hash map sizes.
 	hashSize := config.ClampUint32(config.BPFHashMapSize)
 	for name, m := range spec.Maps {
 		if m.Type == ebpf.Hash {
@@ -180,10 +190,6 @@ func NewTracer() (*Tracer, error) {
 		return nil, NewCollectionError(err)
 	}
 
-	// Initialize configurable alert thresholds in the BPF map. The
-	// AlertX values are pre-clamped to [0, 100] in config.go;
-	// ClampUint32 here is a no-op for valid configs and makes the
-	// narrowing locally verifiable to static analyzers.
 	if threshMap, ok := coll.Maps["alert_thresholds"]; ok && threshMap != nil {
 		thresholds := []uint32{
 			config.ClampUint32(config.AlertWarnPct),
@@ -226,8 +232,8 @@ func NewTracer() (*Tracer, error) {
 		processNameCache:         processCache,
 		pathCache:                cache.NewPathCache(),
 		useUserspaceCgroupFilter: true,
-		targetCgroupIDs:          make(map[uint64]struct{}),
 	}
+	t.storeCgroupIDs(map[uint64]struct{}{})
 
 	if config.CriticalPathEnabled {
 		window := time.Duration(config.CriticalPathWindowMS) * time.Millisecond
@@ -248,21 +254,34 @@ func NewTracer() (*Tracer, error) {
 	return t, nil
 }
 
+// SetCgroups replaces the tracer's entire cgroup filter set with the
+// given paths.
+func (t *Tracer) SetCgroups(cgroupPaths []string) error {
+	if len(cgroupPaths) == 0 {
+		t.cgroupWriteMu.Lock()
+		t.cgroupPaths = nil
+		t.cgroupPath = ""
+		t.targetCgroupID = 0
+		t.storeCgroupIDs(map[uint64]struct{}{})
+		t.filter.SetCgroupPaths(nil)
+		if err := t.syncTargetCgroupMap(); err != nil {
+			logger.Warn("Failed to clear target_cgroup_ids map", zap.Error(err))
+		}
+		t.cgroupWriteMu.Unlock()
+		logger.Debug("Detached all cgroups")
+		return nil
+	}
+	return t.attachCgroups(cgroupPaths, true /* replace */)
+}
+
 // AttachToCgroup adds cgroupPath to the tracer's filter set and is
-// idempotent. Repeated calls with the same path are a no-op; calls
-// with new paths merge into the existing set.
-//
-// Used by the engine's continuous-trace path, which discovers
-// per-pod cgroups one at a time as workloads come and go. Contrast
-// with AttachToCgroups, which replaces the entire set in one shot
-// (the session Job's bulk-attach contract).
+// idempotent.
 func (t *Tracer) AttachToCgroup(cgroupPath string) error {
 	return t.attachCgroups([]string{cgroupPath}, false /* replace */)
 }
 
 // AttachToCgroups replaces the tracer's entire cgroup filter set with
-// the given list. Used by the session Job's one-shot diagnose flow,
-// which knows the full target set up front.
+// the given list.
 func (t *Tracer) AttachToCgroups(cgroupPaths []string) error {
 	return t.attachCgroups(cgroupPaths, true /* replace */)
 }
@@ -293,14 +312,17 @@ func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 		return fmt.Errorf("no valid cgroup paths provided")
 	}
 
-	// Build the desired path set. In replace mode it equals normalized.
-	// In merge mode it is the union of existing t.cgroupPaths and
-	// normalized — dedup via a map.
+	// Serialize multi-writer access (engine reconciles + the event-loop's
+	// auto-disable path) and build a fresh ID map for an atomic publish.
+	t.cgroupWriteMu.Lock()
+	defer t.cgroupWriteMu.Unlock()
+
 	var allPaths []string
+	var newIDs map[uint64]struct{}
 	if replace {
 		allPaths = normalized
 		t.targetCgroupID = 0
-		t.targetCgroupIDs = make(map[uint64]struct{}, len(normalized))
+		newIDs = make(map[uint64]struct{}, len(normalized))
 	} else {
 		seen := make(map[string]struct{}, len(t.cgroupPaths)+len(normalized))
 		for _, p := range t.cgroupPaths {
@@ -317,8 +339,9 @@ func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 			seen[p] = struct{}{}
 			allPaths = append(allPaths, p)
 		}
-		if t.targetCgroupIDs == nil {
-			t.targetCgroupIDs = make(map[uint64]struct{}, len(allPaths))
+		newIDs = make(map[uint64]struct{}, len(allPaths))
+		for k := range t.loadCgroupIDs() {
+			newIDs[k] = struct{}{}
 		}
 	}
 
@@ -341,7 +364,7 @@ func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 		newPaths := normalized
 		for _, cgroupPath := range newPaths {
 			if cgid, err := getCgroupIDFromPath(cgroupPath); err == nil && cgid != 0 {
-				t.targetCgroupIDs[cgid] = struct{}{}
+				newIDs[cgid] = struct{}{}
 				if t.targetCgroupID == 0 {
 					t.targetCgroupID = cgid
 				}
@@ -355,26 +378,28 @@ func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 					}
 					child := filepath.Join(cgroupPath, e.Name())
 					if cgid, err := getCgroupIDFromPath(child); err == nil && cgid != 0 {
-						t.targetCgroupIDs[cgid] = struct{}{}
+						newIDs[cgid] = struct{}{}
 					}
 				}
 			}
 		}
+		t.storeCgroupIDs(newIDs)
 		if err := t.syncTargetCgroupMap(); err != nil {
 			logger.Warn("Failed to sync target_cgroup_ids map", zap.Error(err))
-		} else if len(t.targetCgroupIDs) > 0 {
-			logger.Debug("Set target cgroup IDs for in-kernel filtering", zap.Int("count", len(t.targetCgroupIDs)))
+		} else if len(newIDs) > 0 {
+			logger.Debug("Set target cgroup IDs for in-kernel filtering", zap.Int("count", len(newIDs)))
 		}
-		if len(t.targetCgroupIDs) > 0 && os.Getenv("PODTRACE_DISABLE_USERSPACE_CGROUP_FILTER") == "1" {
+		if len(newIDs) > 0 && os.Getenv("PODTRACE_DISABLE_USERSPACE_CGROUP_FILTER") == "1" {
 			t.useUserspaceCgroupFilter = false
 		}
 	} else {
+		t.storeCgroupIDs(newIDs)
 		logger.Debug("Cgroup v2 not detected, using userspace filtering only", zap.String("cgroup_base", config.CgroupBasePath))
 	}
 	logger.Debug("Attached to cgroups",
 		zap.Int("cgroup_count", len(t.cgroupPaths)),
 		zap.Uint32("container_pid", t.containerPID),
-		zap.Int("target_cgroup_id_count", len(t.targetCgroupIDs)),
+		zap.Int("target_cgroup_id_count", len(newIDs)),
 		zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter),
 		zap.Bool("replace", replace))
 	return nil
@@ -389,11 +414,13 @@ func (t *Tracer) syncTargetCgroupMap() error {
 		return nil
 	}
 
+	ids := t.loadCgroupIDs()
+
 	// Clear existing keys.
 	var key uint64
 	var val uint8
 	iter := targetMap.Iterate()
-	keys := make([]uint64, 0, len(t.targetCgroupIDs))
+	keys := make([]uint64, 0, len(ids))
 	for iter.Next(&key, &val) {
 		keys = append(keys, key)
 	}
@@ -402,7 +429,7 @@ func (t *Tracer) syncTargetCgroupMap() error {
 	}
 
 	one := uint8(1)
-	for cgid := range t.targetCgroupIDs {
+	for cgid := range ids {
 		cgidCopy := cgid
 		if err := targetMap.Update(&cgidCopy, &one, ebpf.UpdateAny); err != nil {
 			return err
@@ -559,7 +586,7 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 		zap.String("cgroup_path", t.cgroupPath),
 		zap.Uint32("container_pid", t.containerPID),
 		zap.Uint64("target_cgroup_id", t.targetCgroupID),
-		zap.Int("target_cgroup_id_count", len(t.targetCgroupIDs)),
+		zap.Int("target_cgroup_id_count", len(t.loadCgroupIDs())),
 		zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter))
 
 	go func() {
@@ -580,12 +607,14 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 							zap.String("cgroup_path", t.cgroupPath),
 							zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter))
 						filteringDisabled = true
+						t.cgroupWriteMu.Lock()
 						t.useUserspaceCgroupFilter = false
 						t.targetCgroupID = 0
-						t.targetCgroupIDs = map[uint64]struct{}{}
+						t.storeCgroupIDs(map[uint64]struct{}{})
 						if err := t.syncTargetCgroupMap(); err == nil {
 							logger.Info("Cleared kernel-side cgroup filter")
 						}
+						t.cgroupWriteMu.Unlock()
 					} else if !filterAutoDisableHintLogged {
 						filterAutoDisableHintLogged = true
 						logger.Warn("Events parsed but all filtered; automatic cgroup filter disable not applied. Set PODTRACE_ALLOW_CGROUP_FILTER_DISABLE=1 to allow clearing cgroup filters as a last resort",
@@ -725,18 +754,19 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 				}
 
 				allowed := true
+				cgroupIDs := t.loadCgroupIDs()
 				if filteringDisabled {
 					// Fallback mode: allow all events
 					allowed = true
-				} else if len(t.targetCgroupIDs) > 0 && event.CgroupID != 0 {
-					_, allowed = t.targetCgroupIDs[event.CgroupID]
+				} else if len(cgroupIDs) > 0 && event.CgroupID != 0 {
+					_, allowed = cgroupIDs[event.CgroupID]
 					if !allowed {
 						eventsFiltered++
 						// Log first few mismatches for debugging, then throttle
 						if eventsFiltered <= 5 || time.Now().Unix()%10 == 0 {
 							logger.Debug("Event filtered by cgroup ID mismatch",
 								zap.Uint64("event_cgroup_id", event.CgroupID),
-								zap.Int("target_cgroup_id_count", len(t.targetCgroupIDs)),
+								zap.Int("target_cgroup_id_count", len(cgroupIDs)),
 								zap.Uint32("pid", event.PID),
 								zap.String("process", event.ProcessName))
 						}

@@ -129,7 +129,9 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	exporters := []tracer.Exporter{router}
-	engine, err := tracer.NewEngine(backend, exporters, tracer.Config{})
+	engine, err := tracer.NewEngine(backend, exporters, tracer.Config{
+		Observer: metrics.EngineObserver(),
+	})
 	if err != nil {
 		return fmt.Errorf("build tracer engine: %w", err)
 	}
@@ -280,6 +282,19 @@ func (b *NoopBackend) AttachToCgroup(path string) error {
 	return nil
 }
 
+func (b *NoopBackend) SetCgroups(targets []tracer.CgroupTarget) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.attached = make(map[string]struct{}, len(targets))
+	for _, t := range targets {
+		if t.CgroupPath == "" {
+			continue
+		}
+		b.attached[t.CgroupPath] = struct{}{}
+	}
+	return nil
+}
+
 func (b *NoopBackend) SetContainerID(_ string) error { return nil }
 
 func (b *NoopBackend) Start(_ context.Context, ch chan<- *events.Event) error {
@@ -309,11 +324,6 @@ func (b *NoopBackend) Inject(ev *events.Event) bool {
 	return true
 }
 
-// Reconciler is implemented in agent_reconciler.go. Declared here in a
-// small stub comment so this file lists every integration point.
-
-// ResolveNodeName reads $NODE_NAME or falls back to the hostname. Safe
-// to call from the CLI before Run.
 func ResolveNodeName() string {
 	if n := strings.TrimSpace(os.Getenv("NODE_NAME")); n != "" {
 		return n
@@ -323,4 +333,3 @@ func ResolveNodeName() string {
 	}
 	return ""
 }
-

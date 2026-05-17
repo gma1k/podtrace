@@ -35,7 +35,6 @@ func TestDefaultOptions_NonEmptyAddrs(t *testing.T) {
 	if o.HealthAddr == "" {
 		t.Error("HealthAddr should be defaulted")
 	}
-	// NodeName + SystemNamespace deliberately left empty (CLI must set them).
 	if o.NodeName != "" || o.SystemNamespace != "" {
 		t.Errorf("DefaultOptions must NOT default NodeName/SystemNamespace, got %+v", o)
 	}
@@ -78,11 +77,9 @@ func TestNewAgentScheme_RegistersBothAPIs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// corev1 (clientgoscheme) must be present.
 	if _, _, err := s.ObjectKinds(&corev1.Pod{}); err != nil {
 		t.Errorf("corev1.Pod not registered: %v", err)
 	}
-	// podtracev1alpha1 must be present.
 	if _, _, err := s.ObjectKinds(&podtracev1alpha1.PodTrace{}); err != nil {
 		t.Errorf("podtracev1alpha1.PodTrace not registered: %v", err)
 	}
@@ -93,8 +90,9 @@ func TestNewAgentScheme_RegistersBothAPIs(t *testing.T) {
 type fakeBackend struct{ name string }
 
 func (b *fakeBackend) AttachToCgroup(_ string) error                          { return nil }
+func (b *fakeBackend) SetCgroups(_ []tracer.CgroupTarget) error               { return nil }
 func (b *fakeBackend) SetContainerID(_ string) error                          { return nil }
-func (b *fakeBackend) Start(_ context.Context, _ chan<- *events.Event) error { return nil }
+func (b *fakeBackend) Start(_ context.Context, _ chan<- *events.Event) error  { return nil }
 func (b *fakeBackend) Stop() error                                            { return nil }
 
 func TestBuildBackend_NilFactoryReturnsNoop(t *testing.T) {
@@ -208,7 +206,6 @@ func TestServeMetrics_BadAddrErrors(t *testing.T) {
 }
 
 func TestServeMetrics_ServesAndShutsDown(t *testing.T) {
-	// Bind to a free port the kernel hands out.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -222,7 +219,6 @@ func TestServeMetrics_ServesAndShutsDown(t *testing.T) {
 		done <- serveMetrics(ctx, addr, NewMetrics(), logr.Discard())
 	}()
 
-	// Poll briefly for /metrics to come up.
 	deadline := time.Now().Add(2 * time.Second)
 	var ok bool
 	for time.Now().Before(deadline) {
@@ -611,10 +607,8 @@ func TestResolveNodeName_HostnameFallback(t *testing.T) {
 }
 
 // guard that StatusWriter.patchCRStatus uses the SSA path with
-// a deterministic field manager — we cannot easily inspect the
-// underlying request from the fake client, but we can prove
-// the call does not panic on a sentinel CR.
-var _ = sync.Mutex{} // satisfy the import in compile-only contexts
+// a deterministic field manager.
+var _ = sync.Mutex{}
 
 func TestRouter_NameAndStats(t *testing.T) {
 	r := NewRouter(nil)

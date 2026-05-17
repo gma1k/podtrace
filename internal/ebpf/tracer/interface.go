@@ -7,6 +7,8 @@ import (
 )
 
 type TracerInterface interface {
+	SetCgroups(cgroupPaths []string) error
+
 	AttachToCgroup(cgroupPath string) error
 	SetContainerID(containerID string) error
 	Start(ctx context.Context, eventChan chan<- *events.Event) error

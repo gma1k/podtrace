@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/podtrace/podtrace/internal/agent"
 	"github.com/podtrace/podtrace/internal/ebpf"
+	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/pkg/tracer"
 )
 
@@ -43,8 +45,6 @@ tracer. Multiple PodTrace CRs targeting the same node are merged into a
 single tracer instance (one set of cgroups, union of filters, per-CR
 exporter routing).`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			// Signal handler is process-singleton; wired here so
-			// internal/agent stays a reusable library.
 			ctx := ctrl.SetupSignalHandler()
 			resolved, err := toAgentOptions(opts)
 			if err != nil {
@@ -73,9 +73,7 @@ exporter routing).`,
 }
 
 // toAgentOptions translates the Cobra flag struct into agent.Options
-// and resolves $NODE_NAME / hostname fallbacks. Returns an error only
-// when the node name cannot be determined, because the agent cannot
-// function without knowing which node it is on.
+// and resolves $NODE_NAME / hostname fallbacks.
 func toAgentOptions(c *agentOptions) (agent.Options, error) {
 	node := c.nodeName
 	if node == "" {
@@ -113,7 +111,45 @@ func selectBackendFactory(mode string) (func() (tracer.TracerBackend, error), er
 }
 
 func agentBackendFactory() (tracer.TracerBackend, error) {
-	return ebpf.NewTracer()
+	tr, err := ebpf.NewTracer()
+	if err != nil {
+		return nil, err
+	}
+	return &ebpfBackendAdapter{tr: tr}, nil
+}
+
+// ebpfBackendAdapter narrows the internal eBPF tracer interface
+// (path-list cgroup contract) to the pkg/tracer.TracerBackend contract
+// (CgroupTarget snapshot).
+type ebpfBackendAdapter struct {
+	tr ebpf.TracerInterface
+}
+
+func (a *ebpfBackendAdapter) SetCgroups(targets []tracer.CgroupTarget) error {
+	paths := make([]string, 0, len(targets))
+	for _, t := range targets {
+		if t.CgroupPath == "" {
+			continue
+		}
+		paths = append(paths, t.CgroupPath)
+	}
+	return a.tr.SetCgroups(paths)
+}
+
+func (a *ebpfBackendAdapter) AttachToCgroup(path string) error {
+	return a.tr.AttachToCgroup(path)
+}
+
+func (a *ebpfBackendAdapter) SetContainerID(id string) error {
+	return a.tr.SetContainerID(id)
+}
+
+func (a *ebpfBackendAdapter) Start(ctx context.Context, ch chan<- *events.Event) error {
+	return a.tr.Start(ctx, ch)
+}
+
+func (a *ebpfBackendAdapter) Stop() error {
+	return a.tr.Stop()
 }
 
 func noopBackendFactory() (tracer.TracerBackend, error) {

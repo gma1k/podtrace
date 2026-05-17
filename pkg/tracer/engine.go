@@ -11,29 +11,24 @@ import (
 
 // Config tunes Engine behaviour. Defaults are applied by NewEngine when a
 // zero value is passed. Every field is operationally significant:
-//
-//   - EventBufferSize controls how much backpressure the backend can absorb
-//     before the engine drops events (and increments DroppedEvents).
-//   - ExportBatchSize is the soft upper bound on events forwarded to an
-//     exporter in a single call; larger values trade latency for throughput.
 type Config struct {
-	// EventBufferSize sizes the internal channel between the TracerBackend
-	// and the dispatch loop. Default 10_000 matches the legacy CLI default.
 	EventBufferSize int
 
-	// ExportBatchSize is the target batch size for exporter dispatches.
-	// Default 256.
 	ExportBatchSize int
+
+	Observer EngineObserver
 }
 
 // EngineStats is a point-in-time counter snapshot. Thread-safe snapshot is
 // exposed via Engine.Stats.
 type EngineStats struct {
-	EventsReceived  int64
-	EventsExported  int64
-	EventsDropped   int64
-	ActiveTargets   int
-	ExporterFailure int64
+	EventsReceived   int64
+	EventsExported   int64
+	EventsDropped    int64
+	ActiveTargets    int
+	ExporterFailure  int64
+	CgroupsAttached  int64
+	CgroupsDetached  int64
 }
 
 // Engine orchestrates a TracerBackend + Exporters over a stream of
@@ -41,13 +36,8 @@ type EngineStats struct {
 // CLI invocations, agent DaemonSet processes, and session Jobs each
 // construct an Engine with mode-appropriate backend/exporters/stream.
 type Engine interface {
-	// Run blocks until ctx is cancelled or the target stream closes.
-	// Returns nil on clean shutdown, otherwise the first terminal error
-	// encountered (backend attach failure, backend start failure).
 	Run(ctx context.Context, targets <-chan TargetSet) error
 
-	// Stats returns a snapshot of counters. Safe to call concurrently with
-	// Run; values may be slightly stale.
 	Stats() EngineStats
 }
 
@@ -62,6 +52,8 @@ type engine struct {
 	eventsExported  int64
 	eventsDropped   int64
 	exporterFailure int64
+	cgroupsAttached int64
+	cgroupsDetached int64
 }
 
 // NewEngine composes a backend and a set of exporters into a runnable
@@ -92,9 +84,6 @@ func (e *engine) Run(ctx context.Context, targets <-chan TargetSet) error {
 		return errors.New("tracer: targets channel is required")
 	}
 
-	// loop running until the parent ctx is cancelled or the event channel
-	// is closed — neither of which is guaranteed by the TracerBackend
-	// contract.
 	dispatchCtx, cancelDispatch := context.WithCancel(ctx)
 
 	eventCh := make(chan *events.Event, e.cfg.EventBufferSize)
@@ -127,9 +116,6 @@ func (e *engine) Run(ctx context.Context, targets <-chan TargetSet) error {
 				return nil
 			}
 			if err := e.applyTargets(set); err != nil {
-				// Attach failures are logged-only: missing one cgroup
-				// should not tear down the whole engine when other
-				// targets are still valid.
 				e.mu.Lock()
 				e.exporterFailure++
 				e.mu.Unlock()
@@ -138,44 +124,77 @@ func (e *engine) Run(ctx context.Context, targets <-chan TargetSet) error {
 	}
 }
 
+// applyTargets reconciles the engine's view of attached cgroups with the
+// requested TargetSet via a single backend snapshot replace.
 func (e *engine) applyTargets(set TargetSet) error {
 	desired := make(map[string]Target, len(set))
+	snapshot := make([]CgroupTarget, 0, len(set))
 	for _, t := range set {
 		if t.CgroupPath == "" {
 			continue
 		}
+		if _, dup := desired[t.CgroupPath]; dup {
+			continue
+		}
 		desired[t.CgroupPath] = t
+		snapshot = append(snapshot, CgroupTarget{
+			CgroupPath:  t.CgroupPath,
+			ContainerID: t.ContainerID,
+		})
 	}
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	// Attach any new cgroups. We rely on backend idempotency: re-attaching
-	// an existing cgroup is a no-op.
-	var firstErr error
-	for path, t := range desired {
-		if _, ok := e.activeCgroups[path]; ok {
-			continue
+	added, removed := 0, 0
+	for path := range desired {
+		if _, ok := e.activeCgroups[path]; !ok {
+			added++
 		}
-		if t.ContainerID != "" {
-			if err := e.backend.SetContainerID(t.ContainerID); err != nil && firstErr == nil {
-				firstErr = err
-			}
+	}
+	for path := range e.activeCgroups {
+		if _, ok := desired[path]; !ok {
+			removed++
 		}
-		if err := e.backend.AttachToCgroup(path); err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		e.activeCgroups[path] = struct{}{}
 	}
 
-	// Detach is the backend's responsibility at Stop(); intra-run detach
-	// is not yet part of the TracerBackend contract because the existing
-	// internal/ebpf/tracer implementation holds links for lifetime. When
-	// a consumer needs dynamic detach, this is the hook point.
-	return firstErr
+	if added == 0 && removed == 0 {
+		return nil
+	}
+
+	if err := e.backend.SetCgroups(snapshot); err != nil {
+		return err
+	}
+
+	for path, t := range desired {
+		if t.ContainerID == "" {
+			continue
+		}
+		if _, alreadyActive := e.activeCgroups[path]; alreadyActive {
+			continue
+		}
+		if err := e.backend.SetContainerID(t.ContainerID); err != nil {
+			e.exporterFailure++
+		}
+	}
+
+	next := make(map[string]struct{}, len(desired))
+	for path := range desired {
+		next[path] = struct{}{}
+	}
+	e.activeCgroups = next
+	e.cgroupsAttached += int64(added)
+	e.cgroupsDetached += int64(removed)
+
+	if obs := e.cfg.Observer; obs != nil {
+		if added > 0 {
+			obs.OnCgroupsAttached(added)
+		}
+		if removed > 0 {
+			obs.OnCgroupsDetached(removed)
+		}
+	}
+	return nil
 }
 
 func (e *engine) dispatchLoop(ctx context.Context, eventCh <-chan *events.Event) {
@@ -235,5 +254,7 @@ func (e *engine) Stats() EngineStats {
 		EventsDropped:   e.eventsDropped,
 		ActiveTargets:   len(e.activeCgroups),
 		ExporterFailure: e.exporterFailure,
+		CgroupsAttached: e.cgroupsAttached,
+		CgroupsDetached: e.cgroupsDetached,
 	}
 }
