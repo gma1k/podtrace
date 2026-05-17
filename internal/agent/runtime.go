@@ -122,7 +122,10 @@ func Run(ctx context.Context, opts Options) error {
 
 	backend, backendErr := buildBackend(opts, logger)
 	if backendErr != nil {
-		logger.Error(backendErr, "tracer backend unavailable — running in degraded mode")
+		reason := tracer.ClassifyBackendError(backendErr)
+		logger.Error(backendErr, "tracer backend unavailable — running in degraded noop mode",
+			"reason", reason)
+		metrics.BackendDegraded.WithLabelValues(reason).Set(1)
 	}
 
 	exporters := []tracer.Exporter{router}
@@ -199,19 +202,25 @@ func newAgentScheme() (*runtime.Scheme, error) {
 	return s, nil
 }
 
-// buildBackend returns the TracerBackend for the agent. Precedence:
-// A non-nil factory that returns an error is not fatal: the agent
-// falls back to the noop backend so cluster operators can
-// kubectl describe the pod and see why events are not flowing.
+// buildBackend returns the TracerBackend for the agent.
+//
+// Production: the CLI always sets BackendFactory (see cmd/podtrace/agent.go
+// where the --backend flag selects between the real eBPF tracer and an
+// explicit noop). A non-nil factory that returns an error is NOT fatal:
+// the agent falls back to the noop backend so the pod stays Ready, the
+// underlying error surfaces on PodTrace.status.nodeStatus.message via
+// StatusWriter.BackendErr, and `kubectl describe pod` keeps showing the
+// real cause. CrashLoopBackOff would hide that.
 func buildBackend(opts Options, logger logr.Logger) (tracer.TracerBackend, error) {
 	if opts.BackendFactory == nil {
-		logger.Info("using noop tracer backend (real eBPF backend not yet wired)")
+		logger.Info("no BackendFactory supplied — using noop backend (library/test mode; production binaries always set this)")
 		return newNoopBackend(), nil
 	}
 	backend, err := opts.BackendFactory()
 	if err != nil {
 		return newNoopBackend(), err
 	}
+	logger.Info("tracer backend ready", "backend", fmt.Sprintf("%T", backend))
 	return backend, nil
 }
 
@@ -258,6 +267,10 @@ type NoopBackend struct {
 
 func newNoopBackend() *NoopBackend {
 	return &NoopBackend{attached: map[string]struct{}{}}
+}
+
+func NewNoopBackend() *NoopBackend {
+	return newNoopBackend()
 }
 
 func (b *NoopBackend) AttachToCgroup(path string) error {

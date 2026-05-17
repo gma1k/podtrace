@@ -110,7 +110,14 @@ Operator and agent both expose Prometheus metrics:
 - **Operator** — `/metrics` on port 8080 in the operator pod. Standard
   controller-runtime metrics (workqueue depth, reconcile latency, error rate).
 - **Agent** — `/metrics` on port 9090 in each agent pod. Per-CR event
-  counters, dropped-event counters, active-cgroup gauge, reconcile counter.
+  counters, dropped-event counters, active-cgroup gauge, reconcile counter,
+  and `podtrace_agent_backend_degraded{reason=...}` — set to `1` if the
+  agent failed to load the real eBPF backend and is running in noop
+  fallback mode. Healthy agents emit no `backend_degraded` series; alert
+  on `max by(node)(podtrace_agent_backend_degraded) > 0` and the `reason`
+  label routes to remediation (`permission_denied`, `btf_unavailable`,
+  `kernel_too_old`, `collection_failed`, `ringbuf_failed`,
+  `map_lookup_failed`, `invalid_event`, `unknown`).
 
 Enable scrape configs via Helm:
 
