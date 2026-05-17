@@ -134,6 +134,18 @@ func TestBuildBackend_FactoryErrorFallsBackToNoop(t *testing.T) {
 	}
 }
 
+// TestNewNoopBackend_ExportedConstructor guards the public surface the
+// CLI relies on for `--backend=noop`.
+func TestNewNoopBackend_ExportedConstructor(t *testing.T) {
+	b := NewNoopBackend()
+	if b == nil {
+		t.Fatal("NewNoopBackend returned nil")
+	}
+	if err := b.AttachToCgroup("/x"); err != nil {
+		t.Errorf("AttachToCgroup on exported noop: %v", err)
+	}
+}
+
 // ─── NoopBackend ─────────────────────────────────────────────────────
 
 func TestNoopBackend_BasicLifecycle(t *testing.T) {

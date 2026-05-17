@@ -1,6 +1,7 @@
 package main
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -20,11 +21,10 @@ func TestNewAgentCmd_Metadata(t *testing.T) {
 		t.Error("Long is empty")
 	}
 
-	// If any of these flags disappear without a migration, the DaemonSet
-	// template breaks silently. Keep them asserted.
 	for _, f := range []string{
 		"system-namespace", "tracer-config", "node-name",
 		"metrics-addr", "health-addr", "status-report-interval",
+		"backend",
 	} {
 		if cmd.Flag(f) == nil {
 			t.Errorf("missing flag %q", f)
@@ -86,20 +86,88 @@ func TestNewAgentCmd_StatusIntervalDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDuration status-report-interval: %v", err)
 	}
-	// Zero means "use agent.DefaultStatusReportInterval" (30s). Tests
-	// override explicitly.
 	if v != 0 {
 		t.Errorf("default status-report-interval=%v, want 0 (delegates to agent package default)", v)
 	}
-	// Sanity-check the toAgentOptions path strips unused whitespace and
-	// keeps system-namespace == "" out of the final Options.
 	if _, err := toAgentOptions(&agentOptions{nodeName: "n"}); err == nil {
-		// Missing system-namespace is caught by agent.Options.validate
-		// once Run is called; toAgentOptions itself only validates node name.
-		// This test existing guards against a future refactor that
-		// silently drops validation.
 		if !strings.Contains("", "") {
 			_ = err
 		}
+	}
+}
+
+// TestNewAgentCmd_BackendDefaultsToReal locks in the production
+// default: an operator running `podtrace agent` with no flags gets the
+// real eBPF backend.
+func TestNewAgentCmd_BackendDefaultsToReal(t *testing.T) {
+	cmd := newAgentCmd()
+	v, err := cmd.Flags().GetString("backend")
+	if err != nil {
+		t.Fatalf("GetString backend: %v", err)
+	}
+	if v != backendModeReal {
+		t.Errorf("default --backend=%q, want %q", v, backendModeReal)
+	}
+}
+
+func TestSelectBackendFactory(t *testing.T) {
+	t.Run("real", func(t *testing.T) {
+		f, err := selectBackendFactory(backendModeReal)
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if reflect.ValueOf(f).Pointer() != reflect.ValueOf(agentBackendFactory).Pointer() {
+			t.Error("real mode must return agentBackendFactory (the eBPF tracer factory)")
+		}
+	})
+	t.Run("empty-defaults-to-real", func(t *testing.T) {
+		f, err := selectBackendFactory("")
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if reflect.ValueOf(f).Pointer() != reflect.ValueOf(agentBackendFactory).Pointer() {
+			t.Error("empty backend mode must fall through to agentBackendFactory")
+		}
+	})
+	t.Run("noop", func(t *testing.T) {
+		f, err := selectBackendFactory(backendModeNoop)
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if reflect.ValueOf(f).Pointer() != reflect.ValueOf(noopBackendFactory).Pointer() {
+			t.Error("noop mode must return noopBackendFactory")
+		}
+		b, err := f()
+		if err != nil || b == nil {
+			t.Errorf("noop factory returned backend=%v err=%v", b, err)
+		}
+	})
+	t.Run("invalid-is-hard-error", func(t *testing.T) {
+		if _, err := selectBackendFactory("not-a-mode"); err == nil {
+			t.Error("invalid --backend must error at startup, not silently fall back to real")
+		}
+	})
+}
+
+// TestToAgentOptions_PropagatesBackendChoice asserts the flag value
+// reaches agent.Options.BackendFactory.
+func TestToAgentOptions_PropagatesBackendChoice(t *testing.T) {
+	t.Setenv("NODE_NAME", "n")
+	opts, err := toAgentOptions(&agentOptions{systemNamespace: "ns", backendMode: backendModeNoop})
+	if err != nil {
+		t.Fatalf("toAgentOptions: %v", err)
+	}
+	if opts.BackendFactory == nil {
+		t.Fatal("production CLI must always set BackendFactory; nil hits the library/test noop fallback")
+	}
+	if reflect.ValueOf(opts.BackendFactory).Pointer() != reflect.ValueOf(noopBackendFactory).Pointer() {
+		t.Error("backendMode=noop must inject noopBackendFactory")
+	}
+}
+
+func TestToAgentOptions_RejectsInvalidBackend(t *testing.T) {
+	t.Setenv("NODE_NAME", "n")
+	if _, err := toAgentOptions(&agentOptions{systemNamespace: "ns", backendMode: "bogus"}); err == nil {
+		t.Error("toAgentOptions must reject invalid --backend")
 	}
 }

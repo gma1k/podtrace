@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -10,6 +11,11 @@ import (
 	"github.com/podtrace/podtrace/internal/agent"
 	"github.com/podtrace/podtrace/internal/ebpf"
 	"github.com/podtrace/podtrace/pkg/tracer"
+)
+
+const (
+	backendModeReal = "real"
+	backendModeNoop = "noop"
 )
 
 // agentOptions holds flags for `podtrace agent`. Defaults mirror
@@ -22,6 +28,7 @@ type agentOptions struct {
 	metricsAddr          string
 	healthAddr           string
 	statusReportInterval time.Duration
+	backendMode          string
 }
 
 func newAgentCmd() *cobra.Command {
@@ -59,6 +66,8 @@ exporter routing).`,
 		"Address for liveness/readiness probes")
 	cmd.Flags().DurationVar(&opts.statusReportInterval, "status-report-interval", 0,
 		"How often to patch PodTrace.status.nodeStatus (default: 30s)")
+	cmd.Flags().StringVar(&opts.backendMode, "backend", backendModeReal,
+		"Tracer backend mode: 'real' loads the eBPF program (production); 'noop' skips kernel attachment and exercises only the control plane (dev/kind smoke tests)")
 
 	return cmd
 }
@@ -75,6 +84,10 @@ func toAgentOptions(c *agentOptions) (agent.Options, error) {
 	if node == "" {
 		return agent.Options{}, errors.New("node name: set --node-name, export NODE_NAME, or run where /etc/hostname is readable")
 	}
+	factory, err := selectBackendFactory(c.backendMode)
+	if err != nil {
+		return agent.Options{}, err
+	}
 	return agent.Options{
 		NodeName:             node,
 		SystemNamespace:      c.systemNamespace,
@@ -82,10 +95,27 @@ func toAgentOptions(c *agentOptions) (agent.Options, error) {
 		MetricsAddr:          c.metricsAddr,
 		HealthAddr:           c.healthAddr,
 		StatusReportInterval: c.statusReportInterval,
-		BackendFactory:       agentBackendFactory,
+		BackendFactory:       factory,
 	}, nil
+}
+
+// selectBackendFactory returns the TracerBackend factory the CLI will
+// inject into agent.Options.
+func selectBackendFactory(mode string) (func() (tracer.TracerBackend, error), error) {
+	switch mode {
+	case backendModeReal, "":
+		return agentBackendFactory, nil
+	case backendModeNoop:
+		return noopBackendFactory, nil
+	default:
+		return nil, fmt.Errorf("invalid --backend %q (must be %q or %q)", mode, backendModeReal, backendModeNoop)
+	}
 }
 
 func agentBackendFactory() (tracer.TracerBackend, error) {
 	return ebpf.NewTracer()
+}
+
+func noopBackendFactory() (tracer.TracerBackend, error) {
+	return agent.NewNoopBackend(), nil
 }

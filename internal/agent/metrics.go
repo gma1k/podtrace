@@ -19,11 +19,12 @@ import (
 type Metrics struct {
 	registry *prometheus.Registry
 
-	EventsExported *prometheus.CounterVec
-	EventsDropped  *prometheus.CounterVec
-	ActiveCgroups  *prometheus.GaugeVec
-	ActiveCRs      prometheus.Gauge
-	ReconcileTotal prometheus.Counter
+	EventsExported  *prometheus.CounterVec
+	EventsDropped   *prometheus.CounterVec
+	ActiveCgroups   *prometheus.GaugeVec
+	ActiveCRs       prometheus.Gauge
+	ReconcileTotal  prometheus.Counter
+	BackendDegraded *prometheus.GaugeVec
 
 	// lastEvents / lastDropped cache the previously-observed cumulative
 	// totals per CR so each refresh can emit the delta to the
@@ -65,10 +66,17 @@ func NewMetrics() *Metrics {
 			Name:      "reconcile_total",
 			Help:      "Reconcile ticks performed on the router regardless of outcome.",
 		}),
+		// BackendDegraded is set to 1 when buildBackend falls back to the
+		// noop tracer.
+		BackendDegraded: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: "podtrace_agent",
+			Name:      "backend_degraded",
+			Help:      "1 when this agent fell back to the noop tracer because the real eBPF backend failed to load; reason label carries a stable error class.",
+		}, []string{"reason"}),
 		lastEvents:  map[CRKey]int64{},
 		lastDropped: map[CRKey]int64{},
 	}
-	reg.MustRegister(m.EventsExported, m.EventsDropped, m.ActiveCgroups, m.ActiveCRs, m.ReconcileTotal)
+	reg.MustRegister(m.EventsExported, m.EventsDropped, m.ActiveCgroups, m.ActiveCRs, m.ReconcileTotal, m.BackendDegraded)
 	return m
 }
 
@@ -80,11 +88,6 @@ func (m *Metrics) Handler() http.Handler {
 // RefreshFromRouter walks the router's rule set + stats table and
 // updates every metric to the current snapshot. Called on each status
 // writer tick so metrics do not drift from status.
-//
-// CounterVec entries can only be incremented via Add — never set or
-// reset. Since the router's per-CR stats are the authoritative
-// monotonic source, we track the previously-emitted total per CR and
-// Add only the positive delta on each refresh.
 func (m *Metrics) RefreshFromRouter(router *Router) {
 	rules := router.RulesSnapshot()
 	stats := router.Stats().snapshot()

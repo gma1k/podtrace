@@ -96,6 +96,27 @@ func TestMetrics_ActiveCRsTracksRouterSize(t *testing.T) {
 	}
 }
 
+// TestMetrics_BackendDegraded_NoSeriesByDefault locks in the contract
+// that keeps `max by(node)(podtrace_agent_backend_degraded) > 0` alerts
+// quiet on healthy agents.
+func TestMetrics_BackendDegraded_NoSeriesByDefault(t *testing.T) {
+	m := NewMetrics()
+	body := scrape(t, m)
+	if strings.Contains(body, "podtrace_agent_backend_degraded") {
+		t.Errorf("untouched backend_degraded GaugeVec must emit no output; got:\n%s", body)
+	}
+}
+
+func TestMetrics_BackendDegraded_SetByReason(t *testing.T) {
+	m := NewMetrics()
+	m.BackendDegraded.WithLabelValues("permission_denied").Set(1)
+
+	got := scrapeMetric(t, m, `backend_degraded{reason="permission_denied"}`)
+	if got != 1 {
+		t.Errorf("backend_degraded{reason=permission_denied} = %d, want 1", got)
+	}
+}
+
 func TestMetrics_HandlerServesText(t *testing.T) {
 	m := NewMetrics()
 	srv := httptest.NewServer(m.Handler())
