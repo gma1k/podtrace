@@ -13,10 +13,11 @@ area/operator:
           - 'api/**'
 
 area/agent:
-  - changed-files:
-      - all:
+  - all:
+      - changed-files:
           - any-glob-to-any-file:
               - 'internal/agent/**'
+      - changed-files:
           - all-globs-to-all-files:
               - '!internal/agent/bpf/**'
 

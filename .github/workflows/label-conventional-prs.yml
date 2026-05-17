@@ -22,8 +22,9 @@ jobs:
 
           ALL_TYPES="feat fix perf docs test ci build chore refactor style security deprecate remove revert"
 
-          # Conventional-commit subject regex: type(scope)?!?: subject
-          if [[ ! "$TITLE" =~ ^([a-z]+)(\([^)]+\))?(!)?: ]]; then
+          # Conventional-commit subject regex: type(scope)?!?: subject.
+          RE='^([a-z]+)(\([^)]+\))?(!)?:'
+          if [[ ! "$TITLE" =~ $RE ]]; then
             echo "PR title does not match conventional-commit format; stripping any stale type labels."
             for L in $ALL_TYPES breaking; do
               gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "$L" 2>/dev/null || true
