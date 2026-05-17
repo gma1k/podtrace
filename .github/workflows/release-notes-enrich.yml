@@ -1,0 +1,116 @@
+name: Enrich Release Notes
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Target tag (e.g. v0.12.0)"
+        required: true
+        type: string
+      previous_tag:
+        description: "Override previous tag (leave blank to auto-compute)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'release' &&
+        endsWith(github.event.release.tag_name, '.0'))
+    steps:
+      - name: Resolve tag inputs
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_PREV: ${{ inputs.previous_tag }}
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG:-$EVENT_TAG}"
+          PREV="${INPUT_PREV:-}"
+
+          if [ -z "$PREV" ]; then
+            VER="${TAG#v}"
+            MAJOR="${VER%%.*}"
+            REST="${VER#*.}"
+            MINOR="${REST%%.*}"
+            if [ "$MINOR" -gt 0 ]; then
+              CANDIDATE="v${MAJOR}.$((MINOR - 1)).0"
+              # Fall back to the highest patch of the previous minor if
+              # the .0 wasn't tagged (e.g. project went straight to .1).
+              if gh release view "$CANDIDATE" --repo "$REPO" >/dev/null 2>&1; then
+                PREV="$CANDIDATE"
+              else
+                PREV=$(gh release list --repo "$REPO" --limit 200 \
+                  --json tagName --jq '.[].tagName' \
+                  | grep -E "^v${MAJOR}\\.$((MINOR - 1))\\.[0-9]+$" \
+                  | sort -V | tail -n 1)
+              fi
+            elif [ "$MAJOR" -gt 0 ]; then
+              # vN.0.0 → highest v(N-1).X.X
+              PREV=$(gh release list --repo "$REPO" --limit 200 \
+                --json tagName --jq '.[].tagName' \
+                | grep -E "^v$((MAJOR - 1))\\.[0-9]+\\.[0-9]+$" \
+                | sort -V | tail -n 1)
+            else
+              echo "::error::Cannot compute previous tag for $TAG"
+              exit 1
+            fi
+          fi
+
+          if [ -z "$PREV" ]; then
+            echo "::error::Previous tag is empty after resolution; aborting."
+            exit 1
+          fi
+
+          echo "tag=$TAG"        >> "$GITHUB_OUTPUT"
+          echo "previous=$PREV"  >> "$GITHUB_OUTPUT"
+          echo "Spanning $PREV -> $TAG"
+
+      - name: Capture original release body (for rollback audit)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          echo "--- Original release body for ${TAG} (kept in this log for manual rollback) ---"
+          gh release view "$TAG" --repo "$REPO" --json body --jq '.body' || true
+          echo "--- End original body ---"
+
+      - name: Generate release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+          PREV: ${{ steps.resolve.outputs.previous }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPO}/releases/generate-notes" \
+            -f tag_name="${TAG}" \
+            -f previous_tag_name="${PREV}" \
+            --jq '.body' > "${RUNNER_TEMP}/release-notes.md"
+          echo "--- Generated body (preview) ---"
+          head -c 4000 "${RUNNER_TEMP}/release-notes.md"
+          echo
+          echo "--- End preview ---"
+
+      - name: Overwrite release body
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" \
+            --repo "$REPO" \
+            --notes-file "${RUNNER_TEMP}/release-notes.md"

@@ -1,0 +1,57 @@
+# Path globs area label mapping consumed by actions/labeler.
+
+area/bpf:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'bpf/**'
+          - 'internal/agent/bpf/**'
+
+area/operator:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'internal/operator/**'
+          - 'api/**'
+
+area/agent:
+  - changed-files:
+      - all:
+          - any-glob-to-any-file:
+              - 'internal/agent/**'
+          - all-globs-to-all-files:
+              - '!internal/agent/bpf/**'
+
+area/cli:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'cmd/**'
+          - 'internal/cli/**'
+
+area/helm:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'deploy/charts/**'
+
+area/olm:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'deploy/olm/**'
+          - 'hack/olm/**'
+
+area/docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'docs/**'
+          - 'README.md'
+          - 'CONTRIBUTING.md'
+
+area/tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'test/**'
+
+area/ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/**'
+          - 'Makefile'
+          - 'scripts/**'

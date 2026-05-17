@@ -223,6 +223,34 @@ lands on `main`:
 Zero manual clicks per release. All artifacts are cosign-signed keyless
 and recorded in the [Sigstore Rekor transparency log](https://search.sigstore.dev/).
 
+### Cutting a minor or major release
+
+The flow above describes patch releases, where release-please reacts to
+each `feat:`/`fix:` merge on `main`. For minor (`0.Y.0`) and major
+(`X.0.0`) cuts, use the manual trigger so the version bump is intentional:
+
+1. **Actions → "Release-As" → Run workflow**, enter the target version (e.g. `0.12.0`)
+2. release-please opens a `chore(release): release X.Y.Z` PR; review and merge it
+3. After the tag is created, `release-notes-enrich.yml` fires automatically
+   and overwrites the GitHub Release body with the full cross-minor PR list
+   grouped per [`.github/release.yml`](.github/release.yml)
+
+The enriched Release body is broader than `CHANGELOG.md` — it includes
+docs, test, CI, build, and maintenance PRs that are intentionally hidden
+from the user-facing changelog. Two artifacts, two audiences.
+
+PRs also receive an `area/*` label automatically based on the paths they
+touch (driven by [`.github/labeler.yml`](.github/labeler.yml)) — e.g. a
+PR editing `internal/operator/**` gets `area/operator`. Filter merged
+work with `gh pr list --label area/bpf` etc. Area labels are independent
+of the conventional-commit type label and do not affect release-note
+grouping.
+
+If the auto-computed previous tag is wrong (e.g. you want to span more
+than one minor), re-run `release-notes-enrich.yml` manually with both
+inputs filled in. Patch releases skip enrichment entirely and keep
+release-please's per-patch body.
+
 ### Rehearsing the release pipeline
 
 To exercise the workflow without burning a real version, push a tag
