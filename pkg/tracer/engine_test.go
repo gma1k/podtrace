@@ -15,14 +15,17 @@ import (
 // mockBackend is a minimal TracerBackend implementation that records
 // attach/start/stop activity for assertions.
 type mockBackend struct {
-	mu          sync.Mutex
-	attached    []string
-	started     bool
-	stopped     bool
-	startErr    error
-	attachErr   error
+	mu              sync.Mutex
+	active          map[string]struct{}
+	attachHistory   []string
+	setCalls        int
+	started         bool
+	stopped         bool
+	startErr        error
+	attachErr       error
+	setCgroupsErr   error
 	setContainerErr error
-	eventCh     chan<- *events.Event
+	eventCh         chan<- *events.Event
 }
 
 func (m *mockBackend) AttachToCgroup(path string) error {
@@ -31,7 +34,32 @@ func (m *mockBackend) AttachToCgroup(path string) error {
 	if m.attachErr != nil {
 		return m.attachErr
 	}
-	m.attached = append(m.attached, path)
+	if m.active == nil {
+		m.active = map[string]struct{}{}
+	}
+	m.active[path] = struct{}{}
+	m.attachHistory = append(m.attachHistory, path)
+	return nil
+}
+
+func (m *mockBackend) SetCgroups(targets []tracer.CgroupTarget) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.setCgroupsErr != nil {
+		return m.setCgroupsErr
+	}
+	m.setCalls++
+	next := make(map[string]struct{}, len(targets))
+	for _, t := range targets {
+		if t.CgroupPath == "" {
+			continue
+		}
+		next[t.CgroupPath] = struct{}{}
+		if _, was := m.active[t.CgroupPath]; !was {
+			m.attachHistory = append(m.attachHistory, t.CgroupPath)
+		}
+	}
+	m.active = next
 	return nil
 }
 
@@ -69,11 +97,25 @@ func (m *mockBackend) emit(t *testing.T, ev *events.Event) {
 	ch <- ev
 }
 
+// activePaths returns the current active set (after the most recent
+// SetCgroups call).
+func (m *mockBackend) activePaths() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, 0, len(m.active))
+	for p := range m.active {
+		out = append(out, p)
+	}
+	return out
+}
+
+// attachedPaths returns the cumulative history of paths the backend has
+// seen attached at any point.
 func (m *mockBackend) attachedPaths() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]string, len(m.attached))
-	copy(out, m.attached)
+	out := make([]string, len(m.attachHistory))
+	copy(out, m.attachHistory)
 	return out
 }
 
@@ -162,25 +204,40 @@ func TestEngine_TargetAttachment(t *testing.T) {
 		{CgroupPath: "/sys/fs/cgroup/a", ContainerID: "a"},
 		{CgroupPath: "/sys/fs/cgroup/b", ContainerID: "b"},
 	}
-	waitUntil(t, 2*time.Second, func() bool { return len(backend.attachedPaths()) == 2 })
+	waitUntil(t, 2*time.Second, func() bool { return len(backend.activePaths()) == 2 })
 
-	// Add c, keep a; b removed — engine does not detach today (intra-run
-	// detach is future work) so b stays attached. But c must be attached.
 	targets <- tracer.TargetSet{
 		{CgroupPath: "/sys/fs/cgroup/a", ContainerID: "a"},
 		{CgroupPath: "/sys/fs/cgroup/c", ContainerID: "c"},
 	}
-	waitUntil(t, 2*time.Second, func() bool { return len(backend.attachedPaths()) == 3 })
+	waitUntil(t, 2*time.Second, func() bool {
+		ap := backend.activePaths()
+		return len(ap) == 2 && hasAll(ap, "/sys/fs/cgroup/a", "/sys/fs/cgroup/c")
+	})
 
-	paths := backend.attachedPaths()
-	want := map[string]bool{"/sys/fs/cgroup/a": true, "/sys/fs/cgroup/b": true, "/sys/fs/cgroup/c": true}
-	for _, p := range paths {
-		if !want[p] {
-			t.Errorf("unexpected attached path %q", p)
+	active := backend.activePaths()
+	if len(active) != 2 {
+		t.Errorf("expected active set of 2 after replace, got %d (%v)", len(active), active)
+	}
+	for _, p := range active {
+		if p == "/sys/fs/cgroup/b" {
+			t.Errorf("stale cgroup %q remained in active set after replace", p)
 		}
 	}
-	if len(paths) != 3 {
-		t.Errorf("expected 3 attaches, got %d (%v)", len(paths), paths)
+
+	history := backend.attachedPaths()
+	wantHistory := map[string]bool{"/sys/fs/cgroup/a": true, "/sys/fs/cgroup/b": true, "/sys/fs/cgroup/c": true}
+	for _, p := range history {
+		if !wantHistory[p] {
+			t.Errorf("unexpected path in attach history %q", p)
+		}
+	}
+	if len(history) != 3 {
+		t.Errorf("expected 3 paths in attach history, got %d (%v)", len(history), history)
+	}
+
+	if s := eng.Stats(); s.CgroupsDetached != 1 {
+		t.Errorf("CgroupsDetached=%d, want 1", s.CgroupsDetached)
 	}
 
 	cancel()
@@ -216,8 +273,6 @@ func TestEngine_EventDispatch(t *testing.T) {
 
 	waitUntil(t, 2*time.Second, func() bool { return len(backend.attachedPaths()) == 1 })
 
-	// Emit 10 events; ExportBatchSize=4 means 2 full batches flush inline
-	// and 2 events remain in the pending batch until shutdown flushes them.
 	for i := 0; i < 10; i++ {
 		backend.emit(t, &events.Event{Type: events.EventDNS})
 	}
@@ -290,6 +345,21 @@ func waitUntil(t *testing.T, d time.Duration, pred func() bool) {
 	}
 }
 
+// hasAll reports whether got contains every value in want (order- and
+// duplicate-insensitive).
+func hasAll(got []string, want ...string) bool {
+	have := make(map[string]struct{}, len(got))
+	for _, g := range got {
+		have[g] = struct{}{}
+	}
+	for _, w := range want {
+		if _, ok := have[w]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 func containsSub(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {
@@ -303,8 +373,7 @@ func containsSub(s, sub string) bool {
 var _ = fmt.Sprint(tracer.Config{})
 
 // TestEngine_Stats asserts that Stats() reflects accumulated counters and
-// active target count. This is the metric surface agent mode will scrape
-// for per-CR status reporting, so the contract matters.
+// active target count.
 func TestEngine_Stats(t *testing.T) {
 	backend := &mockBackend{}
 	exp := &recordingExporter{name: "rec"}
@@ -313,7 +382,6 @@ func TestEngine_Stats(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Zero-state snapshot is all zeros.
 	if s := eng.Stats(); s.EventsReceived != 0 || s.EventsExported != 0 || s.ActiveTargets != 0 {
 		t.Fatalf("pre-run stats non-zero: %+v", s)
 	}
@@ -354,9 +422,7 @@ func TestEngine_Stats(t *testing.T) {
 }
 
 // TestEngine_MultiExporterFanout asserts every registered exporter
-// receives every batch. Agent mode will compose per-CR exporters behind
-// the engine; a silent fan-out bug would mean one CR's exporter stops
-// getting events.
+// receives every batch.
 func TestEngine_MultiExporterFanout(t *testing.T) {
 	backend := &mockBackend{}
 	a := &recordingExporter{name: "a"}
@@ -389,7 +455,6 @@ func TestEngine_MultiExporterFanout(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Every exporter must have received identical event counts and been closed.
 	for _, ex := range []*recordingExporter{a, b, c} {
 		if ex.totalEvents() != 4 {
 			t.Errorf("%s: received %d, want 4", ex.name, ex.totalEvents())
@@ -402,7 +467,7 @@ func TestEngine_MultiExporterFanout(t *testing.T) {
 
 // TestEngine_ExporterFailureCounted ensures that when an exporter's
 // Export returns error, the engine continues pumping events and bumps
-// ExporterFailure. Exporter outage must not tear down the tracer.
+// ExporterFailure.
 func TestEngine_ExporterFailureCounted(t *testing.T) {
 	backend := &mockBackend{}
 	bad := &recordingExporter{name: "bad", exportErr: errors.New("broken")}
@@ -425,7 +490,6 @@ func TestEngine_ExporterFailureCounted(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		backend.emit(t, &events.Event{Type: events.EventDNS})
 	}
-	// Good exporter still gets all events; bad one has failure count.
 	waitUntil(t, 2*time.Second, func() bool { return good.totalEvents() == 4 })
 	waitUntil(t, 2*time.Second, func() bool { return eng.Stats().ExporterFailure > 0 })
 
@@ -438,11 +502,11 @@ func TestEngine_ExporterFailureCounted(t *testing.T) {
 	}
 }
 
-// TestEngine_AttachErrorDoesNotAbortRun ensures that a backend attach
-// failure for one cgroup does not prevent the engine from processing
-// later target sets (the error is tracked, not fatal).
+// TestEngine_AttachErrorDoesNotAbortRun ensures that a backend
+// SetCgroups failure does not prevent the engine from processing later
+// target sets
 func TestEngine_AttachErrorDoesNotAbortRun(t *testing.T) {
-	backend := &mockBackend{attachErr: errors.New("attach broken")}
+	backend := &mockBackend{setCgroupsErr: errors.New("attach broken")}
 	exp := &recordingExporter{name: "x"}
 	eng, err := tracer.NewEngine(backend, []tracer.Exporter{exp}, tracer.Config{})
 	if err != nil {
@@ -458,11 +522,9 @@ func TestEngine_AttachErrorDoesNotAbortRun(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- eng.Run(ctx, targets) }()
 
-	// Recovery: clear the attach error and push a second snapshot. The
-	// engine must still process it.
 	waitUntil(t, 2*time.Second, func() bool { return eng.Stats().ExporterFailure > 0 })
 	backend.mu.Lock()
-	backend.attachErr = nil
+	backend.setCgroupsErr = nil
 	backend.mu.Unlock()
 
 	targets <- tracer.TargetSet{{CgroupPath: "/will/succeed"}}
@@ -525,7 +587,6 @@ func TestEngine_EmptyTargetSetIsNoOp(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- eng.Run(ctx, targets) }()
 
-	// Let it settle.
 	time.Sleep(50 * time.Millisecond)
 	if s := eng.Stats(); s.ActiveTargets != 0 || s.ExporterFailure != 0 {
 		t.Errorf("empty TargetSet disturbed stats: %+v", s)
@@ -538,8 +599,7 @@ func TestEngine_EmptyTargetSetIsNoOp(t *testing.T) {
 }
 
 // TestEngine_ConcurrentTargetUpdates is a smoke test for the race
-// detector. Run with `go test -race`; any data race in applyTargets'
-// bookkeeping will fire.
+// detector.
 func TestEngine_ConcurrentTargetUpdates(t *testing.T) {
 	backend := &mockBackend{}
 	eng, err := tracer.NewEngine(backend, []tracer.Exporter{&recordingExporter{name: "x"}}, tracer.Config{})
@@ -554,7 +614,6 @@ func TestEngine_ConcurrentTargetUpdates(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- eng.Run(ctx, targets) }()
 
-	// Multiple producers hammer the engine with overlapping target sets.
 	producers := 4
 	perProducer := 25
 	var wg sync.WaitGroup
@@ -573,7 +632,7 @@ func TestEngine_ConcurrentTargetUpdates(t *testing.T) {
 	wg.Wait()
 
 	waitUntil(t, 3*time.Second, func() bool {
-		return eng.Stats().ActiveTargets >= producers*perProducer/2
+		return eng.Stats().CgroupsAttached >= int64(producers*perProducer/2)
 	})
 
 	cancel()
@@ -584,4 +643,201 @@ func TestEngine_ConcurrentTargetUpdates(t *testing.T) {
 
 func fmtPath(a, b int) string {
 	return fmt.Sprintf("/c/%d/%d", a, b)
+}
+
+// TestEngine_EmptySnapshotDetachesAll asserts that an empty TargetSet
+// arriving after a non-empty one fully detaches the previously active
+// cgroups.
+func TestEngine_EmptySnapshotDetachesAll(t *testing.T) {
+	backend := &mockBackend{}
+	exp := &recordingExporter{name: "x"}
+	eng, err := tracer.NewEngine(backend, []tracer.Exporter{exp}, tracer.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	targets := make(chan tracer.TargetSet, 2)
+	done := make(chan error, 1)
+	go func() { done <- eng.Run(ctx, targets) }()
+
+	targets <- tracer.TargetSet{
+		{CgroupPath: "/c/a"},
+		{CgroupPath: "/c/b"},
+	}
+	waitUntil(t, 2*time.Second, func() bool { return eng.Stats().ActiveTargets == 2 })
+
+	targets <- tracer.TargetSet{}
+	waitUntil(t, 2*time.Second, func() bool { return eng.Stats().ActiveTargets == 0 })
+
+	if active := backend.activePaths(); len(active) != 0 {
+		t.Errorf("backend still has active paths after empty snapshot: %v", active)
+	}
+	if s := eng.Stats(); s.CgroupsDetached != 2 {
+		t.Errorf("CgroupsDetached=%d, want 2", s.CgroupsDetached)
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+}
+
+// TestEngine_PodRecreateRotatesCgroup simulates the pod delete-and-recreate
+// scenario the user originally flagged: same pod name, different cgroup
+// path.
+func TestEngine_PodRecreateRotatesCgroup(t *testing.T) {
+	backend := &mockBackend{}
+	exp := &recordingExporter{name: "x"}
+	eng, err := tracer.NewEngine(backend, []tracer.Exporter{exp}, tracer.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	targets := make(chan tracer.TargetSet, 2)
+	done := make(chan error, 1)
+	go func() { done <- eng.Run(ctx, targets) }()
+
+	targets <- tracer.TargetSet{
+		{PodName: "web", CgroupPath: "/cg/pod-uid-1"},
+	}
+	waitUntil(t, 2*time.Second, func() bool { return eng.Stats().ActiveTargets == 1 })
+
+	targets <- tracer.TargetSet{
+		{PodName: "web", CgroupPath: "/cg/pod-uid-2"},
+	}
+	waitUntil(t, 2*time.Second, func() bool {
+		ap := backend.activePaths()
+		return len(ap) == 1 && ap[0] == "/cg/pod-uid-2"
+	})
+
+	if s := eng.Stats(); s.CgroupsAttached != 2 || s.CgroupsDetached != 1 {
+		t.Errorf("attach/detach counters wrong: %+v", s)
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+}
+
+// recordingObserver captures observer callbacks for assertion.
+type recordingObserver struct {
+	mu                sync.Mutex
+	attachedTotal     int
+	detachedTotal     int
+	attachedCallbacks int
+	detachedCallbacks int
+}
+
+func (r *recordingObserver) OnCgroupsAttached(n int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.attachedTotal += n
+	r.attachedCallbacks++
+}
+
+func (r *recordingObserver) OnCgroupsDetached(n int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.detachedTotal += n
+	r.detachedCallbacks++
+}
+
+func (r *recordingObserver) snapshot() (attachedTotal, detachedTotal, attachedCalls, detachedCalls int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.attachedTotal, r.detachedTotal, r.attachedCallbacks, r.detachedCallbacks
+}
+
+// TestEngine_ObserverNotifiedOnChurn asserts the optional EngineObserver
+// is fed only when the active set actually changes.
+func TestEngine_ObserverNotifiedOnChurn(t *testing.T) {
+	backend := &mockBackend{}
+	obs := &recordingObserver{}
+	eng, err := tracer.NewEngine(backend, []tracer.Exporter{&recordingExporter{name: "x"}}, tracer.Config{
+		Observer: obs,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	targets := make(chan tracer.TargetSet, 4)
+	done := make(chan error, 1)
+	go func() { done <- eng.Run(ctx, targets) }()
+
+	targets <- tracer.TargetSet{{CgroupPath: "/c/a"}, {CgroupPath: "/c/b"}}
+	waitUntil(t, 2*time.Second, func() bool {
+		a, _, _, _ := obs.snapshot()
+		return a == 2
+	})
+
+	targets <- tracer.TargetSet{{CgroupPath: "/c/a"}, {CgroupPath: "/c/b"}}
+	time.Sleep(50 * time.Millisecond)
+	a, d, ac, dc := obs.snapshot()
+	if a != 2 || d != 0 || ac != 1 || dc != 0 {
+		t.Errorf("idempotent re-send disturbed observer: attached=%d detached=%d ac=%d dc=%d", a, d, ac, dc)
+	}
+
+	targets <- tracer.TargetSet{{CgroupPath: "/c/a"}, {CgroupPath: "/c/c"}}
+	waitUntil(t, 2*time.Second, func() bool {
+		_, dt, _, _ := obs.snapshot()
+		return dt == 1
+	})
+	a, d, _, _ = obs.snapshot()
+	if a != 3 || d != 1 {
+		t.Errorf("after churn: attached=%d detached=%d, want 3/1", a, d)
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+}
+
+// TestEngine_BackendSetCgroupsErrorPreservesActiveSet asserts that when
+// SetCgroups fails, the engine does NOT clobber its previous active set
+// — the next snapshot retry can still converge.
+func TestEngine_BackendSetCgroupsErrorPreservesActiveSet(t *testing.T) {
+	backend := &mockBackend{}
+	eng, err := tracer.NewEngine(backend, []tracer.Exporter{&recordingExporter{name: "x"}}, tracer.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	targets := make(chan tracer.TargetSet, 2)
+	done := make(chan error, 1)
+	go func() { done <- eng.Run(ctx, targets) }()
+
+	targets <- tracer.TargetSet{{CgroupPath: "/c/a"}, {CgroupPath: "/c/b"}}
+	waitUntil(t, 2*time.Second, func() bool { return eng.Stats().ActiveTargets == 2 })
+
+	backend.mu.Lock()
+	backend.setCgroupsErr = errors.New("transient kernel hiccup")
+	backend.mu.Unlock()
+
+	targets <- tracer.TargetSet{{CgroupPath: "/c/c"}}
+	waitUntil(t, 2*time.Second, func() bool { return eng.Stats().ExporterFailure > 0 })
+
+	// Active set must still be {a, b} — failed replace did not poison
+	// engine state.
+	if s := eng.Stats(); s.ActiveTargets != 2 {
+		t.Errorf("ActiveTargets=%d after failed replace, want 2", s.ActiveTargets)
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
 }

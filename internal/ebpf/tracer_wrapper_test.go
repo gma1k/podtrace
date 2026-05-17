@@ -48,6 +48,10 @@ func (m *mockTracerForInterface) AttachToCgroup(cgroupPath string) error {
 	return nil
 }
 
+func (m *mockTracerForInterface) SetCgroups(cgroupPaths []string) error {
+	return nil
+}
+
 func (m *mockTracerForInterface) SetContainerID(containerID string) error {
 	return nil
 }

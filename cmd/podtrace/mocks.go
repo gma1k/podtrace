@@ -27,14 +27,22 @@ func (m *mockPodResolver) ResolvePod(ctx context.Context, podName, namespace, co
 
 type mockTracer struct {
 	attachToCgroupFunc func(cgroupPath string) error
-	setContainerIDFunc  func(containerID string) error
-	startFunc           func(ctx context.Context, eventChan chan<- *events.Event) error
-	stopFunc            func() error
+	setCgroupsFunc     func(cgroupPaths []string) error
+	setContainerIDFunc func(containerID string) error
+	startFunc          func(ctx context.Context, eventChan chan<- *events.Event) error
+	stopFunc           func() error
 }
 
 func (m *mockTracer) AttachToCgroup(cgroupPath string) error {
 	if m.attachToCgroupFunc != nil {
 		return m.attachToCgroupFunc(cgroupPath)
+	}
+	return nil
+}
+
+func (m *mockTracer) SetCgroups(cgroupPaths []string) error {
+	if m.setCgroupsFunc != nil {
+		return m.setCgroupsFunc(cgroupPaths)
 	}
 	return nil
 }
