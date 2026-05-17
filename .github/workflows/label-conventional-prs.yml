@@ -6,6 +6,7 @@ on:
 
 permissions:
   pull-requests: write
+  issues: write
 
 jobs:
   label:
@@ -22,6 +23,10 @@ jobs:
 
           ALL_TYPES="feat fix perf docs test ci build chore refactor style security deprecate remove revert"
 
+          ensure_label() {
+            gh label create "$1" --repo "$REPO" --color ededed --description "conventional-commit type" >/dev/null 2>&1 || true
+          }
+
           # Conventional-commit subject regex: type(scope)?!?: subject.
           RE='^([a-z]+)(\([^)]+\))?(!)?:'
           if [[ ! "$TITLE" =~ $RE ]]; then
@@ -35,8 +40,6 @@ jobs:
           TYPE="${BASH_REMATCH[1]}"
           BANG="${BASH_REMATCH[3]}"
 
-          # Strip any other conventional-type labels first so a rename
-          # leaves the PR with only the current type label.
           for L in $ALL_TYPES; do
             if [[ "$L" != "$TYPE" ]]; then
               gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "$L" 2>/dev/null || true
@@ -45,6 +48,7 @@ jobs:
 
           case "$TYPE" in
             feat|fix|perf|docs|test|ci|build|chore|refactor|style|security|deprecate|remove|revert)
+              ensure_label "$TYPE"
               gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label "$TYPE"
               ;;
             *)
@@ -54,6 +58,7 @@ jobs:
 
           # Breaking-change marker: `!` before the colon in the subject.
           if [[ -n "$BANG" ]]; then
+            ensure_label breaking
             gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label breaking
           else
             gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label breaking 2>/dev/null || true
