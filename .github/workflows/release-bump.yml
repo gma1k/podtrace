@@ -1,0 +1,42 @@
+name: Release-As
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Target version (e.g. 0.12.0 or 1.0.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  push-release-as:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PLEASE_PAT }}
+
+      - name: Validate version format
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
+            echo "::error::Version must be semver (e.g. 0.12.0, 1.0.0, 1.0.0-rc.1)"
+            exit 1
+          fi
+
+      - name: Push Release-As commit
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit --allow-empty -m "chore: announce ${VERSION}
+
+          Release-As: ${VERSION}"
+          git push

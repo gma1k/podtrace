@@ -123,15 +123,15 @@ no trailing period, ≤ 72 chars.
 
 | Type | Visible in changelog? | Effect on version (pre-1.0) |
 |---|---|---|
-| `feat:` | ✅ Added section | patch bump |
-| `fix:` | ✅ Fixed section | patch bump |
+| `feat:` | ✅ Features section | patch bump |
+| `fix:` | ✅ Bug Fixes section | patch bump |
 | `perf:` | ✅ Performance section | patch bump |
+| `security:` | ✅ Security section | patch bump |
 | `deprecate:` | ✅ Deprecated section | patch bump |
 | `remove:` | ✅ Removed section | patch bump |
-| `security:` | ✅ Security section | patch bump |
-| `revert:` | ✅ Changed section | patch bump |
-| `refactor:`, `chore:`, `docs:`, `style:`, `test:`, `build:`, `ci:` | ❌ Hidden | no bump |
-| Footer `BREAKING CHANGE:` | ✅ called out | **minor bump** (your only path to `v0.X+1.0`) |
+| `revert:` | ✅ Maintenance section | patch bump |
+| `refactor:`, `chore:`, `docs:`, `style:`, `test:`, `build:`, `ci:` | ❌ Hidden in CHANGELOG, ✅ shown on Release page | no bump |
+| Title suffix `feat!:` / footer `BREAKING CHANGE:` | ✅ ⚠ BREAKING CHANGES section | **minor bump** (your only path to `v0.X+1.0`) |
 | Footer `Release-As: 0.X.Y` | overrides version explicitly | Forces release-please to propose the named version |
 
 A few notes on type choice:
@@ -153,6 +153,11 @@ A few notes on type choice:
   extensions** to the standard Conventional Commits vocabulary. They
   exist because Keep-a-Changelog defines Security / Deprecated /
   Removed sections that the upstream spec has no native types for.
+- **CHANGELOG.md sections align with the enriched Release page** —
+  both use Features / Bug Fixes / Performance / Security / Deprecated
+  / Removed / Maintenance. The Release page additionally surfaces the
+  types hidden from CHANGELOG (Documentation, Tests, CI/Build), which
+  is why the two artifacts look similar but not identical.
 
 Examples:
 
@@ -222,6 +227,34 @@ lands on `main`:
 
 Zero manual clicks per release. All artifacts are cosign-signed keyless
 and recorded in the [Sigstore Rekor transparency log](https://search.sigstore.dev/).
+
+### Cutting a minor or major release
+
+The flow above describes patch releases, where release-please reacts to
+each `feat:`/`fix:` merge on `main`. For minor (`0.Y.0`) and major
+(`X.0.0`) cuts, use the manual trigger so the version bump is intentional:
+
+1. **Actions → "Release-As" → Run workflow**, enter the target version (e.g. `0.12.0`)
+2. release-please opens a `chore(release): release X.Y.Z` PR; review and merge it
+3. After the tag is created, `release-notes-enrich.yml` fires automatically
+   and overwrites the GitHub Release body with the full cross-minor PR list
+   grouped per [`.github/release.yml`](.github/release.yml)
+
+The enriched Release body is broader than `CHANGELOG.md` — it includes
+docs, test, CI, build, and maintenance PRs that are intentionally hidden
+from the user-facing changelog. Two artifacts, two audiences.
+
+PRs also receive an `area/*` label automatically based on the paths they
+touch (driven by [`.github/labeler.yml`](.github/labeler.yml)) — e.g. a
+PR editing `internal/operator/**` gets `area/operator`. Filter merged
+work with `gh pr list --label area/bpf` etc. Area labels are independent
+of the conventional-commit type label and do not affect release-note
+grouping.
+
+If the auto-computed previous tag is wrong (e.g. you want to span more
+than one minor), re-run `release-notes-enrich.yml` manually with both
+inputs filled in. Patch releases skip enrichment entirely and keep
+release-please's per-patch body.
 
 ### Rehearsing the release pipeline
 

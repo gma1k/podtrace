@@ -1,0 +1,33 @@
+# Category vocabulary consumed by the GitHub `generate-notes` API.
+changelog:
+  exclude:
+    authors:
+      - dependabot
+      - github-actions
+    labels:
+      - ignore-for-release
+  categories:
+    - title: Breaking Changes
+      labels: [breaking]
+    - title: Features
+      labels: [feat, feature]
+    - title: Bug Fixes
+      labels: [fix, bug]
+    - title: Performance
+      labels: [perf, performance]
+    - title: Security
+      labels: [security]
+    - title: Deprecated
+      labels: [deprecate, deprecated]
+    - title: Removed
+      labels: [remove, removed]
+    - title: Documentation
+      labels: [docs, documentation]
+    - title: Tests
+      labels: [test, tests]
+    - title: CI / Build
+      labels: [ci, build]
+    - title: Maintenance
+      labels: [chore, refactor, style, revert]
+    - title: Other Changes
+      labels: ["*"]

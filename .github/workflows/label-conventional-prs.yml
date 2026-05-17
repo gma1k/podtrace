@@ -1,0 +1,59 @@
+name: Label Conventional PRs
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Apply conventional-commit label from PR title
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          ALL_TYPES="feat fix perf docs test ci build chore refactor style security deprecate remove revert"
+
+          # Conventional-commit subject regex: type(scope)?!?: subject
+          if [[ ! "$TITLE" =~ ^([a-z]+)(\([^)]+\))?(!)?: ]]; then
+            echo "PR title does not match conventional-commit format; stripping any stale type labels."
+            for L in $ALL_TYPES breaking; do
+              gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "$L" 2>/dev/null || true
+            done
+            exit 0
+          fi
+
+          TYPE="${BASH_REMATCH[1]}"
+          BANG="${BASH_REMATCH[3]}"
+
+          # Strip any other conventional-type labels first so a rename
+          # leaves the PR with only the current type label.
+          for L in $ALL_TYPES; do
+            if [[ "$L" != "$TYPE" ]]; then
+              gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "$L" 2>/dev/null || true
+            fi
+          done
+
+          case "$TYPE" in
+            feat|fix|perf|docs|test|ci|build|chore|refactor|style|security|deprecate|remove|revert)
+              gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label "$TYPE"
+              ;;
+            *)
+              echo "Unknown type $TYPE; no label applied."
+              ;;
+          esac
+
+          # Breaking-change marker: `!` before the colon in the subject.
+          if [[ -n "$BANG" ]]; then
+            gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label breaking
+          else
+            gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label breaking 2>/dev/null || true
+          fi
