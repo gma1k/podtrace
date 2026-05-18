@@ -9,6 +9,19 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.11.11](https://github.com/gma1k/podtrace/compare/v0.11.10...v0.11.11) (2026-05-18)
+
+
+### Features
+
+* **agent:** add --backend flag, backend_degraded metric, and typed startup-error classes for explicit production safety and degraded-mode observability ([#122](https://github.com/gma1k/podtrace/issues/122)) ([170de33](https://github.com/gma1k/podtrace/commit/170de33688d45b85af090a8487025b86e3a539e2))
+* **tracer:** snapshot-replace cgroup lifecycle with atomic filter set prunes stale attachments on pod churn and closes a kernel-cgroup-ID-recycling correctness bug ([#124](https://github.com/gma1k/podtrace/issues/124)) ([97690f4](https://github.com/gma1k/podtrace/commit/97690f4545d9bcb85c2a14874f883321ca143a4e))
+
+
+### Bug Fixes
+
+* **olm:** point bundle builder at templates/crds/ and register PodTraceSchedule in the CSV ([#119](https://github.com/gma1k/podtrace/issues/119)) ([4b36ffa](https://github.com/gma1k/podtrace/commit/4b36ffa94adb7e8867ce0ef938e4991208f5c375))
+
 ## [0.11.10](https://github.com/gma1k/podtrace/compare/v0.11.9...v0.11.10) (2026-05-15)
 
 
