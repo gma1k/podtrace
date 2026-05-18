@@ -12,6 +12,17 @@ metadata:
     repository: https://github.com/gma1k/podtrace
     support: https://github.com/gma1k/podtrace/issues
     olm.skipRange: ">=0.11.0 <__SKIP_RANGE_UPPER__"
+    operatorframework.io/suggested-namespace: podtrace-system
+    features.operators.openshift.io/disconnected: "false"
+    features.operators.openshift.io/fips-compliant: "false"
+    features.operators.openshift.io/proxy-aware: "false"
+    features.operators.openshift.io/tls-profiles: "false"
+    features.operators.openshift.io/token-auth-aws: "false"
+    features.operators.openshift.io/token-auth-azure: "false"
+    features.operators.openshift.io/token-auth-gcp: "false"
+    features.operators.openshift.io/cnf: "false"
+    features.operators.openshift.io/cni: "false"
+    features.operators.openshift.io/csi: "false"
     alm-examples: |-
       [
         {
@@ -150,7 +161,7 @@ spec:
     ## Resources
 
     - [Source code & docs](https://github.com/gma1k/podtrace)
-    - [CRD reference](https://github.com/gma1k/podtrace/tree/main/doc)
+    - [CRD reference](https://github.com/gma1k/podtrace/tree/main/docs)
     - [Issue tracker](https://github.com/gma1k/podtrace/issues)
 
   version: __VERSION__
@@ -182,11 +193,17 @@ spec:
     - name: Source
       url: https://github.com/gma1k/podtrace
     - name: Documentation
-      url: https://github.com/gma1k/podtrace/tree/main/doc
+      url: https://github.com/gma1k/podtrace/tree/main/docs
     - name: Container image
       url: https://github.com/gma1k/podtrace/pkgs/container/podtrace
     - name: Helm chart
       url: https://github.com/gma1k/podtrace/pkgs/container/charts%2Fpodtrace
+    - name: Artifact Hub
+      url: https://artifacthub.io/packages/helm/podtrace/podtrace
+
+  relatedImages:
+    - name: operator
+      image: ghcr.io/gma1k/podtrace:__VERSION__
 
   icon:
     - base64data: __ICON_BASE64__
