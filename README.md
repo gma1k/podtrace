@@ -7,6 +7,7 @@
 <p align="center">
   <a href="https://artifacthub.io/packages/search?repo=podtrace"><img src="https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/podtrace" alt="Artifact Hub"/></a>
   <a href="https://www.bestpractices.dev/projects/12882"><img src="https://www.bestpractices.dev/projects/12882/badge" alt="OpenSSF Best Practices"/></a>
+<a href="https://app.fossa.com/projects/git%2Bgithub.com%2Fgma1k%2Fpodtrace?ref=badge_shield" alt="FOSSA Status"><img src="https://app.fossa.com/api/projects/git%2Bgithub.com%2Fgma1k%2Fpodtrace.svg?type=shield"/></a>
 </p>
 
 A lightweight yet powerful eBPF-driven diagnostic tool for Kubernetes applications. Podtrace delivers full-stack observability from kernel events to application-layer behavior, all activated on demand, with no prior configuration or instrumentation. With a single command, it uncovers insights across the entire lifecycle of a pod, including network flows, TCP/UDP performance, file system activity, memory behavior, latency patterns, system calls, and high-level application events such as HTTP, DNS, and database queries.
@@ -384,3 +385,7 @@ After building, set capabilities to run without sudo:
 sudo ./scripts/setup-capabilities.sh
 ```
 
+
+
+## License
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fgma1k%2Fpodtrace.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fgma1k%2Fpodtrace?ref=badge_large)
