@@ -32,7 +32,7 @@ maintainers:
   - name: podtrace maintainers
     url: https://github.com/gma1k/podtrace
 
-icon: https://raw.githubusercontent.com/gma1k/podtrace/main/assets/logo.png
+icon: https://raw.githubusercontent.com/gma1k/podtrace/main/assets/podtrace-logo.png
 
 annotations:
   artifacthub.io/changes: |
