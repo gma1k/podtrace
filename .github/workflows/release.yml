@@ -239,8 +239,32 @@ jobs:
           prerelease: ${{ startsWith(github.ref_name, 'test') || contains(github.ref_name, '-') }}
 
       - name: Update plugin manifest in krew-index
+        id: krew_submit
         if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') && !startsWith(github.ref_name, 'test')
+        continue-on-error: true
         uses: rajatjindal/krew-release-bot@c970b8a8f6dbc2f2285a26e3ae160903b87002c3  # v0.0.51
+
+      - name: Treat existing krew-index PR as idempotent success
+        if: |
+          steps.krew_submit.outcome == 'failure' &&
+          startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # krew-release-bot is not idempotent across re-runs. If a PR for
+          # this version already exists upstream, the bot's push fails with
+          # a non-fast-forward error. Look upstream to decide if the bot
+          # failure is benign (PR already filed) or a real problem.
+          branch="gma1k-podtrace-podtrace-${VERSION}"
+          existing=$(gh api repos/kubernetes-sigs/krew-index/pulls --paginate \
+            --jq "[.[] | select(.head.ref == \"${branch}\")] | length")
+          if [ "${existing:-0}" -eq 0 ]; then
+            echo "::error::krew-release-bot failed and no PR exists upstream for ${VERSION}"
+            exit 1
+          fi
+          echo "krew-index PR for ${VERSION} already exists — treating bot failure as idempotent re-run"
 
   olm-bundle:
     if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') && !startsWith(github.ref_name, 'test')
