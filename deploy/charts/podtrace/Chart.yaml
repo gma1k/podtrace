@@ -11,7 +11,7 @@ type: application
 kubeVersion: ">=1.28.0-0"
 
 # chart version — bumped per chart change, decoupled from appVersion.
-version: 0.1.0
+version: 0.1.1
 # appVersion tracks the podtrace binary release this chart targets.
 # Managed by release-please via the marker below.
 appVersion: "0.11.10" # x-release-please-version
