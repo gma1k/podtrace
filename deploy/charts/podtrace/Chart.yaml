@@ -3,10 +3,10 @@ name: podtrace
 description: |
   Podtrace — eBPF-based Kubernetes pod observability and diagnostics.
 
-  This chart installs the podtrace operator, its CustomResourceDefinitions,
-  and (in later releases) the tracer agent DaemonSet. The operator
-  reconciles PodTrace (continuous), PodTraceSession (bounded diagnose),
-  ExporterConfig, and TracerConfig resources.
+  Installs the podtrace operator and its CustomResourceDefinitions. The
+  operator reconciles PodTrace, PodTraceSession, PodTraceSchedule,
+  ExporterConfig, and TracerConfig resources, and rolls out the
+  podtrace-agent DaemonSet on demand when a TracerConfig is created.
 type: application
 kubeVersion: ">=1.28.0-0"
 
