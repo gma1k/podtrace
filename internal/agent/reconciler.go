@@ -42,6 +42,10 @@ type AgentReconciler struct {
 
 	CgroupResolver func(pods []*corev1.Pod) (map[uint64]struct{}, error)
 
+	PodAttributor func(pods []*corev1.Pod) []PodCgroupEntry
+
+	Enricher *PodEnricher
+
 	exporterCacheMu sync.Mutex
 	exporterCache   map[CRKey]cachedExporter
 }
@@ -59,6 +63,9 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	if r.CgroupResolver == nil {
 		r.CgroupResolver = resolveCgroupIDs
+	}
+	if r.PodAttributor == nil {
+		r.PodAttributor = scanPodCgroups
 	}
 	r.exporterCache = map[CRKey]cachedExporter{}
 
@@ -182,9 +189,17 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	r.reapStaleExporters(activeKeys)
 
+	var podEntries []PodCgroupEntry
+	if r.PodAttributor != nil {
+		podEntries = r.PodAttributor(localPods)
+	}
+	if r.Enricher != nil {
+		r.Enricher.Snapshot(podEntries)
+	}
+
 	r.Router.Publish(rules)
 
-	targets := buildTargetSet(rules, localPods)
+	targets := buildTargetSet(rules, localPods, podEntries)
 	select {
 	case r.TargetsCh <- targets:
 	default:
@@ -200,6 +215,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	if r.Metrics != nil {
 		r.Metrics.RefreshFromRouter(r.Router)
+		r.Metrics.RefreshFromEnricher(r.Enricher)
 	}
 
 	return ctrl.Result{}, nil
@@ -222,8 +238,7 @@ func (r *AgentReconciler) enqueueAllPodTraces(ctx context.Context, _ client.Obje
 
 // enqueueOnBundleChange handles ConfigMap watches: only bundle
 // ConfigMaps (with our managed-by label) produce reconcile requests,
-// and each such event enqueues every PodTrace (the bundle label tells
-// us which CR owns the bundle but the reconcile rebuilds all anyway).
+// and each such event enqueues every PodTrace.
 func (r *AgentReconciler) enqueueOnBundleChange(ctx context.Context, obj client.Object) []reconcile.Request {
 	if obj.GetLabels()[operator.LabelManagedBy] != operator.ManagedByValue {
 		return nil
@@ -290,31 +305,112 @@ func (r *AgentReconciler) reapStaleExporters(active map[CRKey]struct{}) {
 // resolveCgroupIDs maps each matched pod's cgroup path to its inode
 // number — the value the kernel stamps on every event.
 func resolveCgroupIDs(pods []*corev1.Pod) (map[uint64]struct{}, error) {
-	out := map[uint64]struct{}{}
+	entries := scanPodCgroups(pods)
+	out := make(map[uint64]struct{}, len(entries))
+	for _, e := range entries {
+		out[e.CgroupID] = struct{}{}
+	}
+	return out, nil
+}
+
+// scanPodCgroups walks the kubepods hierarchy once and emits one
+// PodCgroupEntry per (cgroup inode, pod, container) tuple.
+func scanPodCgroups(pods []*corev1.Pod) []PodCgroupEntry {
 	root := discoverKubepodsRoot()
+	if root == "" {
+		return nil
+	}
+	out := make([]PodCgroupEntry, 0, len(pods))
 	for _, p := range pods {
 		path := cgroupPathForPod(p, root)
 		if path == "" {
 			continue
 		}
 		if id, err := cgroupIDFromPath(path); err == nil {
-			out[id] = struct{}{}
+			out = append(out, PodCgroupEntry{
+				CgroupID:   id,
+				CgroupPath: path,
+				Pod:        p,
+			})
 		}
-		entries, err := os.ReadDir(path)
+		dirEntries, err := os.ReadDir(path)
 		if err != nil {
 			continue
 		}
-		for _, e := range entries {
+		statuses := containerStatusIndex(p)
+		for _, e := range dirEntries {
 			if !e.IsDir() {
 				continue
 			}
 			child := filepath.Join(path, e.Name())
-			if id, err := cgroupIDFromPath(child); err == nil {
-				out[id] = struct{}{}
+			id, err := cgroupIDFromPath(child)
+			if err != nil {
+				continue
 			}
+			containerName, containerID := identifyContainerCgroup(e.Name(), statuses)
+			out = append(out, PodCgroupEntry{
+				CgroupID:      id,
+				CgroupPath:    child,
+				Pod:           p,
+				ContainerName: containerName,
+				ContainerID:   containerID,
+			})
 		}
 	}
-	return out, nil
+	return out
+}
+
+// containerStatusIndex builds a containerID-prefix to container-name
+// lookup table from pod.status.containerStatuses.
+func containerStatusIndex(p *corev1.Pod) map[string]string {
+	out := map[string]string{}
+	add := func(name, rawID string) {
+		if name == "" || rawID == "" {
+			return
+		}
+		if i := strings.Index(rawID, "://"); i >= 0 {
+			rawID = rawID[i+3:]
+		}
+		if rawID == "" {
+			return
+		}
+		out[rawID] = name
+	}
+	for _, cs := range p.Status.ContainerStatuses {
+		add(cs.Name, cs.ContainerID)
+	}
+	for _, cs := range p.Status.InitContainerStatuses {
+		add(cs.Name, cs.ContainerID)
+	}
+	for _, cs := range p.Status.EphemeralContainerStatuses {
+		add(cs.Name, cs.ContainerID)
+	}
+	return out
+}
+
+// identifyContainerCgroup matches a container cgroup dir (e.g.
+// "cri-containerd-<id>.scope", "crio-<id>.scope", "docker-<id>.scope")
+// against the pod's containerStatuses index.
+func identifyContainerCgroup(dir string, statuses map[string]string) (name, id string) {
+	if len(statuses) == 0 {
+		return "", ""
+	}
+	trimmed := strings.TrimSuffix(dir, ".scope")
+	for _, prefix := range []string{"cri-containerd-", "crio-", "docker-", "containerd-"} {
+		if strings.HasPrefix(trimmed, prefix) {
+			trimmed = strings.TrimPrefix(trimmed, prefix)
+			break
+		}
+	}
+	if trimmed == "" {
+		return "", ""
+	}
+	for cid, cname := range statuses {
+		if strings.HasPrefix(cid, trimmed) || strings.HasPrefix(trimmed, cid) {
+			return cname, cid
+		}
+	}
+	return "", ""
 }
 
 // kubepodsRootCandidates lists the well-known cgroup directories
@@ -388,11 +484,20 @@ func cgroupIDFromPath(path string) (uint64, error) {
 	return sys.Ino, nil
 }
 
-// buildTargetSet turns the active rule set into a tracer.TargetSet.
-func buildTargetSet(rules []CRRule, pods []*corev1.Pod) tracer.TargetSet {
+// buildTargetSet turns the active rule set into a tracer.TargetSet,
+// using the pre-computed pod-cgroup attribution so that container,
+// owner-kind, and owner-name fields are populated alongside the
+// pod-level identifiers.
+func buildTargetSet(rules []CRRule, pods []*corev1.Pod, podEntries []PodCgroupEntry) tracer.TargetSet {
+	byCgroup := make(map[uint64]PodCgroupEntry, len(podEntries))
+	for _, e := range podEntries {
+		if existing, ok := byCgroup[e.CgroupID]; !ok || (existing.ContainerName == "" && e.ContainerName != "") {
+			byCgroup[e.CgroupID] = e
+		}
+	}
+
 	seen := map[uint64]struct{}{}
 	var out tracer.TargetSet
-	root := discoverKubepodsRoot()
 
 	for _, rule := range rules {
 		for id := range rule.CgroupIDs {
@@ -400,27 +505,49 @@ func buildTargetSet(rules []CRRule, pods []*corev1.Pod) tracer.TargetSet {
 				continue
 			}
 			seen[id] = struct{}{}
-			for _, p := range pods {
-				path := cgroupPathForPod(p, root)
-				if path == "" {
-					continue
-				}
-				pid, err := cgroupIDFromPath(path)
-				if err != nil || pid != id {
-					continue
-				}
+			if entry, ok := byCgroup[id]; ok {
+				kind, name := resolveWorkload(entry.Pod)
 				out = append(out, tracer.Target{
-					PodName:    p.Name,
-					Namespace:  p.Namespace,
-					CgroupPath: path,
-					Labels:     copyMap(p.Labels),
-					PodIP:      p.Status.PodIP,
+					PodName:       entry.Pod.Name,
+					Namespace:     entry.Pod.Namespace,
+					ContainerID:   entry.ContainerID,
+					ContainerName: entry.ContainerName,
+					CgroupPath:    entry.CgroupPath,
+					Labels:        copyMap(entry.Pod.Labels),
+					PodIP:         entry.Pod.Status.PodIP,
+					OwnerKind:     kind,
+					OwnerName:     name,
 				})
-				break
+				continue
 			}
+			fallbackLegacyTarget(&out, pods, id)
 		}
 	}
 	return out
+}
+
+// fallbackLegacyTarget reproduces the pre-enrichment buildTargetSet
+// walk for callers that did not populate PodAttributor.
+func fallbackLegacyTarget(out *tracer.TargetSet, pods []*corev1.Pod, id uint64) {
+	root := discoverKubepodsRoot()
+	for _, p := range pods {
+		path := cgroupPathForPod(p, root)
+		if path == "" {
+			continue
+		}
+		pid, err := cgroupIDFromPath(path)
+		if err != nil || pid != id {
+			continue
+		}
+		*out = append(*out, tracer.Target{
+			PodName:    p.Name,
+			Namespace:  p.Namespace,
+			CgroupPath: path,
+			Labels:     copyMap(p.Labels),
+			PodIP:      p.Status.PodIP,
+		})
+		return
+	}
 }
 
 // filtersToSet converts the CRD's EventFilter list into the

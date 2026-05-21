@@ -997,7 +997,7 @@ func TestBuildTargetSet_Deduplicates(t *testing.T) {
 	}
 	// Empty pod list: every cgroup ID is "unmatched", so the result is empty
 	// — but the function must not panic and dedup must not crash on overlap.
-	out := buildTargetSet(rules, nil)
+	out := buildTargetSet(rules, nil, nil)
 	if len(out) != 0 {
 		t.Errorf("expected empty output, got %+v", out)
 	}

@@ -20,9 +20,10 @@ import (
 //     the tracer to the subset of CR exporters whose (cgroup, filter)
 //     tuple matches.
 type Router struct {
-	mu    sync.RWMutex
-	rules []CRRule
-	stats *perCRStats
+	mu       sync.RWMutex
+	rules    []CRRule
+	stats    *perCRStats
+	enricher *PodEnricher
 }
 
 // NewRouter constructs an empty Router. The stats argument is shared
@@ -36,6 +37,13 @@ func NewRouter(stats *perCRStats) *Router {
 		rules: nil,
 		stats: stats,
 	}
+}
+
+// WithEnricher returns a Router that stamps each forwarded event with
+// the matching K8sMetadata before delegating to the per-CR exporters.
+func (r *Router) WithEnricher(e *PodEnricher) *Router {
+	r.enricher = e
+	return r
 }
 
 func (r *Router) Publish(rules []CRRule) {
@@ -107,6 +115,7 @@ func (r *Router) Name() string { return "cr-router" }
 func (r *Router) Export(ctx context.Context, batch []*events.Event) error {
 	r.mu.RLock()
 	rules := r.rules
+	enricher := r.enricher
 	r.mu.RUnlock()
 
 	if len(rules) == 0 || len(batch) == 0 {
@@ -117,6 +126,10 @@ func (r *Router) Export(ctx context.Context, batch []*events.Event) error {
 	for i := range rules {
 		filtered[i] = filtered[i][:0]
 	}
+
+	// One lookup per event regardless of how many CRs (and exporters)
+	// claim it.
+	enrichBatch(enricher, batch)
 
 	for _, ev := range batch {
 		if ev == nil {

@@ -89,7 +89,7 @@ func (e *sdkEventExporter) Export(ctx context.Context, batch []*events.Event) er
 		}
 
 		_, span := tr.Start(ctx, eventSpanName(ev), trace.WithTimestamp(startedAt))
-		span.SetAttributes(
+		attrs := []attribute.KeyValue{
 			attribute.String("podtrace.event.type", eventTypeString(ev.Type)),
 			attribute.Int64("podtrace.event.pid", int64(ev.PID)),
 			attribute.Int64("podtrace.event.cgroup_id", safeUint64ToInt64(ev.CgroupID)),
@@ -98,7 +98,9 @@ func (e *sdkEventExporter) Export(ctx context.Context, batch []*events.Event) er
 			attribute.Int64("podtrace.event.bytes", safeUint64ToInt64(ev.Bytes)),
 			attribute.Int64("podtrace.event.latency_ns", safeUint64ToInt64(ev.LatencyNS)),
 			attribute.Int("podtrace.event.error", int(ev.Error)),
-		)
+		}
+		attrs = appendK8sAttributes(attrs, ev.K8s)
+		span.SetAttributes(attrs...)
 		span.End(trace.WithTimestamp(endedAt))
 	}
 	return nil
