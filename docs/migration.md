@@ -227,6 +227,13 @@ ExporterConfig and the trace CR must live in the same namespace. To
 share one OTLP collector across many app teams, copy the
 `ExporterConfig` into each team's namespace.
 
+**`samplePercent` is resolved as the minimum of CR and ExporterConfig.**
+Setting `samplePercent: 50` on a `PodTrace` and `samplePercent: 80` on
+the referenced `ExporterConfig` produces an effective rate of 50 — the
+workload owner cannot exceed the platform-owner cap, and vice versa.
+The resolved value is surfaced on `status.policy.effectiveSampleRate`;
+inspect it there rather than inferring from `spec` alone.
+
 **`PodTrace` events are not yet flowing through the agent.** Continuous
 realtime tracing via the CR has working control-plane plumbing
 (matching, status, RBAC) but events are stubbed (`NoopBackend`). For

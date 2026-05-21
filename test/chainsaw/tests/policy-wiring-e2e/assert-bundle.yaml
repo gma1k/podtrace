@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: podtrace-system
+  labels:
+    podtrace.io/managed-by: podtrace-operator
+    podtrace.io/component: exporter-bundle
+    podtrace.io/podtrace: policy-pt
+    podtrace.io/exporter-config: policy-otlp
+data:
+  type: otlp
+  endpoint: otel-collector:4318
+  sample_percent: "50"
+  filters: "dns,fs"
+  threshold_error_rate_percent: "5"
+  threshold_rtt_spike_ms: "100"
+  threshold_fs_slow_ms: "25"
+  policy_generation: "1"
+  (length(policy_hash) > `0`): true

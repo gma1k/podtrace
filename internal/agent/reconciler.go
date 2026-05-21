@@ -25,6 +25,7 @@ import (
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/internal/operator"
+	bundlepkg "github.com/podtrace/podtrace/pkg/exporter/bundle"
 	"github.com/podtrace/podtrace/pkg/tracer"
 )
 
@@ -59,7 +60,10 @@ type cachedExporter struct {
 // three watched sources.
 func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.ExporterBuilder == nil {
-		r.ExporterBuilder = BuildExporter
+		metrics := r.Metrics
+		r.ExporterBuilder = func(b *BundlePayload, key CRKey) (tracer.Exporter, error) {
+			return BuildExporter(b, key, withMetrics(metrics))
+		}
 	}
 	if r.CgroupResolver == nil {
 		r.CgroupResolver = resolveCgroupIDs
@@ -148,12 +152,15 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			continue
 		}
 
+		policy := policySnapshotFromBundle(bundle)
+
 		cgroupIDs, err := r.CgroupResolver(matched)
 		if err != nil {
 			logger.Error(err, "resolve cgroup IDs", "cr", key)
 			rules = append(rules, CRRule{
 				Key:         key,
 				Filters:     filtersToSet(pt.Spec.Filters),
+				Policy:      policy,
 				MatchedPods: lenToInt32(len(matched)),
 				Err:         fmt.Errorf("resolve cgroup IDs: %w", err),
 			})
@@ -168,6 +175,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 				Key:            key,
 				CgroupIDs:      cgroupIDs,
 				Filters:        filtersToSet(pt.Spec.Filters),
+				Policy:         policy,
 				BundleRevision: bundle.ResourceVer,
 				MatchedPods:    lenToInt32(len(matched)),
 				Err:            fmt.Errorf("build exporter: %w", err),
@@ -180,6 +188,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			Key:            key,
 			CgroupIDs:      cgroupIDs,
 			Filters:        filtersToSet(pt.Spec.Filters),
+			Policy:         policy,
 			Exporter:       exporter,
 			BundleRevision: bundle.ResourceVer,
 			MatchedPods:    lenToInt32(len(matched)),
@@ -548,6 +557,62 @@ func fallbackLegacyTarget(out *tracer.TargetSet, pods []*corev1.Pod, id uint64) 
 		})
 		return
 	}
+}
+
+// policySnapshotFromBundle lifts the policy fields off a BundlePayload
+// into the PolicySnapshot the router and exporters consume.
+func policySnapshotFromBundle(b *BundlePayload) PolicySnapshot {
+	out := PolicySnapshot{
+		Hash:       bundlePolicyHash(b),
+		Generation: bundlePolicyGeneration(b),
+	}
+	if b == nil {
+		return out
+	}
+	if b.Sample > 0 {
+		pct := int32(b.Sample*100 + 0.5)
+		out.EffectiveSamplePercent = &pct
+	}
+	if len(b.Filters) > 0 {
+		filters := make([]string, 0, len(b.Filters))
+		for _, f := range b.Filters {
+			filters = append(filters, string(f))
+		}
+		out.Filters = filters
+	}
+	if !b.Thresholds.IsZero() {
+		t := PolicyThresholds{}
+		if b.Thresholds.ErrorRatePercent != nil {
+			v := *b.Thresholds.ErrorRatePercent
+			t.ErrorRatePercent = &v
+		}
+		if b.Thresholds.RTTSpikeMs != nil {
+			v := *b.Thresholds.RTTSpikeMs
+			t.RTTSpikeMs = &v
+		}
+		if b.Thresholds.FSSlowMs != nil {
+			v := *b.Thresholds.FSSlowMs
+			t.FSSlowMs = &v
+		}
+		out.Thresholds = &t
+	}
+	return out
+}
+
+// bundlePolicyHash returns a stable hash over the policy fields of a
+// BundlePayload, equivalent to the operator-stamped policy_hash key.
+func bundlePolicyHash(b *BundlePayload) string {
+	if b == nil {
+		return ""
+	}
+	return bundlepkg.PolicyHash(b)
+}
+
+func bundlePolicyGeneration(b *BundlePayload) int64 {
+	if b == nil {
+		return 0
+	}
+	return b.PolicyGeneration
 }
 
 // filtersToSet converts the CRD's EventFilter list into the

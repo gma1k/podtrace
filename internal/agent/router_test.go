@@ -331,3 +331,40 @@ func equalUints(a, b []uint64) bool {
 	}
 	return true
 }
+
+// TestRouter_PolicySnapshotSurvivesPublish pins that the PolicySnapshot
+// attached to a published rule is deep-cloned, so post-Publish mutation
+// of the caller's struct cannot leak into the router.
+func TestRouter_PolicySnapshotSurvivesPublish(t *testing.T) {
+	five := int32(5)
+	r := NewRouter(nil)
+	original := CRRule{
+		Key: CRKey{Namespace: "ns", Name: "n"},
+		Policy: PolicySnapshot{
+			EffectiveSamplePercent: &five,
+			Filters:                []string{"dns"},
+			Thresholds:             &PolicyThresholds{FSSlowMs: &five},
+			Hash:                   "h1",
+			Generation:             3,
+		},
+	}
+	r.Publish([]CRRule{original})
+
+	*original.Policy.EffectiveSamplePercent = 99
+	original.Policy.Filters[0] = "tampered"
+	original.Policy.Hash = "h2"
+
+	snap := r.RulesSnapshot()
+	if len(snap) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(snap))
+	}
+	if snap[0].Policy.Hash != "h1" {
+		t.Errorf("router policy.Hash leaked caller mutation: got %q want h1", snap[0].Policy.Hash)
+	}
+	if *snap[0].Policy.EffectiveSamplePercent != 5 {
+		t.Errorf("router policy.EffectiveSamplePercent leaked: got %d", *snap[0].Policy.EffectiveSamplePercent)
+	}
+	if snap[0].Policy.Filters[0] != "dns" {
+		t.Errorf("router policy.Filters leaked: %v", snap[0].Policy.Filters)
+	}
+}

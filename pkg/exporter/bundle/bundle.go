@@ -11,6 +11,8 @@
 package bundle
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strconv"
@@ -25,7 +27,6 @@ const CredentialKey = "credential"
 
 const CurrentVersion = "v2"
 
-// Type names the exporter implementation a Payload targets.
 type Type string
 
 const (
@@ -36,34 +37,48 @@ const (
 	TypeDataDog Type = "datadog"
 )
 
+// FilterCategory enumerates the event categories an operator may push into
+// the bundle.
+type FilterCategory string
+
+const (
+	FilterDNS  FilterCategory = "dns"
+	FilterNet  FilterCategory = "net"
+	FilterFS   FilterCategory = "fs"
+	FilterCPU  FilterCategory = "cpu"
+	FilterProc FilterCategory = "proc"
+)
+
+// Thresholds carries the anomaly-detection rules an agent applies to
+// every event it forwards on behalf of a CR.
+type Thresholds struct {
+	ErrorRatePercent *int32 `yaml:"errorRatePercent,omitempty"`
+	RTTSpikeMs       *int32 `yaml:"rttSpikeMs,omitempty"`
+	FSSlowMs         *int32 `yaml:"fsSlowMs,omitempty"`
+}
+
+// IsZero reports whether the thresholds carry any configured value.
+func (t *Thresholds) IsZero() bool {
+	return t == nil || (t.ErrorRatePercent == nil && t.RTTSpikeMs == nil && t.FSSlowMs == nil)
+}
+
 type Payload struct {
 	Version string `yaml:"version,omitempty"`
 
-	// Type selects the exporter implementation.
 	Type Type `yaml:"type"`
 
-	// Endpoint is the target URL or host:port. Required for all types.
 	Endpoint string `yaml:"endpoint,omitempty"`
 
-	// Protocol selects the OTLP transport (http | grpc). OTLP only.
 	Protocol string `yaml:"protocol,omitempty"`
 
-	// Insecure disables TLS for OTLP. OTLP only.
 	Insecure bool `yaml:"insecure,omitempty"`
 
-	// Site selects the DataDog intake region. DataDog only.
 	Site string `yaml:"site,omitempty"`
 
-	// Sample is the sample rate as a fraction in [0, 1]. The upstream
-	// ExporterConfig spec carries an integer percent; Parse converts it.
 	Sample float64 `yaml:"sample,omitempty"`
 
-	// Headers are literal OTLP export headers. OTLP only.
 	Headers map[string]string `yaml:"headers,omitempty"`
 
-	// HeaderName names the OTLP header whose value is sourced from the
-	// companion Secret's CredentialKey. Empty when no Secret-backed
-	// header is configured.
 	HeaderName string `yaml:"headerName,omitempty"`
 
 	// TargetNamespaces is the resolved allowlist of namespace names a
@@ -79,14 +94,14 @@ type Payload struct {
 	//	["a", "b"]  — spec.namespaceSelector matched these namespaces.
 	TargetNamespaces []string `yaml:"targetNamespaces,omitempty"`
 
-	// Credential is the resolved secret material (Splunk token,
-	// DataDog API key, or OTLP Secret-backed header value). Transport
-	// is the companion Secret; Payload carries it opaquely.
+	Filters []FilterCategory `yaml:"filters,omitempty"`
+
+	Thresholds *Thresholds `yaml:"thresholds,omitempty"`
+
+	PolicyGeneration int64 `yaml:"policyGeneration,omitempty"`
+
 	Credential []byte `yaml:"-"`
 
-	// ResourceVer is the ConfigMap ResourceVersion the payload was read
-	// from, used by agent-side caches to dedupe unchanged bundles. Not
-	// serialized to YAML — only populated by ConfigMap readers.
 	ResourceVer string `yaml:"-"`
 }
 
@@ -128,12 +143,32 @@ func FromConfigMapData(data map[string]string) (*Payload, error) {
 			p.Headers[rest] = v
 		}
 	}
-	// TargetNamespaces uses key-presence semantics on "target_namespaces"
-	// to distinguish the three states the agent needs to act on:
-	//
-	//	key absent         → nil result        (selector not set)
-	//	key present, ""    → []string{} result (selector set, no match)
-	//	key present, "a,b" → ["a","b"] result  (selector matched)
+	if raw, ok := data["filters"]; ok && raw != "" {
+		parts := strings.Split(raw, ",")
+		filters := make([]FilterCategory, 0, len(parts))
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			filters = append(filters, FilterCategory(part))
+		}
+		if len(filters) > 0 {
+			p.Filters = filters
+		}
+	}
+	thresholds, err := readThresholds(data)
+	if err != nil {
+		return nil, err
+	}
+	p.Thresholds = thresholds
+	if raw, ok := data["policy_generation"]; ok && raw != "" {
+		n, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("bundle: policy_generation %q not an integer: %w", raw, err)
+		}
+		p.PolicyGeneration = n
+	}
 	if raw, ok := data["target_namespaces"]; ok {
 		if raw == "" {
 			p.TargetNamespaces = []string{}
@@ -144,10 +179,68 @@ func FromConfigMapData(data map[string]string) (*Payload, error) {
 	return p, nil
 }
 
+// readThresholds reconstructs the Thresholds struct from the flat
+// ConfigMap data, preserving key-presence semantics so "unset" round-trips
+// distinctly from "0".
+func readThresholds(data map[string]string) (*Thresholds, error) {
+	var t Thresholds
+	var anyPresent bool
+	for _, spec := range thresholdFields() {
+		raw, ok := data[spec.key]
+		if !ok || raw == "" {
+			continue
+		}
+		parsed, err := strconv.ParseInt(raw, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("bundle: %s %q not a 32-bit integer: %w", spec.key, raw, err)
+		}
+		if parsed < 0 {
+			return nil, fmt.Errorf("bundle: %s %d must be non-negative", spec.key, parsed)
+		}
+		if spec.max > 0 && parsed > int64(spec.max) {
+			return nil, fmt.Errorf("bundle: %s %d out of range 0-%d", spec.key, parsed, spec.max)
+		}
+		val := int32(parsed)
+		spec.set(&t, &val)
+		anyPresent = true
+	}
+	if !anyPresent {
+		return nil, nil
+	}
+	return &t, nil
+}
+
+type thresholdField struct {
+	key string
+	max int
+	get func(*Thresholds) *int32
+	set func(*Thresholds, *int32)
+}
+
+func thresholdFields() []thresholdField {
+	return []thresholdField{
+		{
+			key: "threshold_error_rate_percent",
+			max: 100,
+			get: func(t *Thresholds) *int32 { return t.ErrorRatePercent },
+			set: func(t *Thresholds, v *int32) { t.ErrorRatePercent = v },
+		},
+		{
+			key: "threshold_rtt_spike_ms",
+			get: func(t *Thresholds) *int32 { return t.RTTSpikeMs },
+			set: func(t *Thresholds, v *int32) { t.RTTSpikeMs = v },
+		},
+		{
+			key: "threshold_fs_slow_ms",
+			get: func(t *Thresholds) *int32 { return t.FSSlowMs },
+			set: func(t *Thresholds, v *int32) { t.FSSlowMs = v },
+		},
+	}
+}
+
 // ToConfigMapData renders a Payload back into the flat ConfigMap schema.
 // Inverse of FromConfigMapData for all fields operator-side bundle
-// reconcilers care about. Sample is stored as an integer percent for
-// stable round-trip with the CRD schema.
+// reconcilers care about.
 func ToConfigMapData(p *Payload) map[string]string {
 	if p == nil {
 		return nil
@@ -191,11 +284,76 @@ func ToConfigMapData(p *Payload) map[string]string {
 		sort.Strings(sorted)
 		out["target_namespaces"] = strings.Join(sorted, ",")
 	}
+	if len(p.Filters) > 0 {
+		filters := make([]string, 0, len(p.Filters))
+		for _, f := range p.Filters {
+			if f == "" {
+				continue
+			}
+			filters = append(filters, string(f))
+		}
+		sort.Strings(filters)
+		filters = dedupeSortedStrings(filters)
+		out["filters"] = strings.Join(filters, ",")
+	}
+	if !p.Thresholds.IsZero() {
+		for _, spec := range thresholdFields() {
+			if v := spec.get(p.Thresholds); v != nil {
+				out[spec.key] = strconv.FormatInt(int64(*v), 10)
+			}
+		}
+	}
+	if p.PolicyGeneration > 0 {
+		out["policy_generation"] = strconv.FormatInt(p.PolicyGeneration, 10)
+	}
+	out["policy_hash"] = PolicyHash(p)
 	return out
 }
 
-// FromYAML parses a Payload from its YAML serialization. Used by the
-// CLI's --exporter-from-file flag, which mounts a ConfigMap as a file.
+// dedupeSortedStrings removes adjacent duplicates from a sorted slice.
+func dedupeSortedStrings(in []string) []string {
+	if len(in) <= 1 {
+		return in
+	}
+	out := in[:1]
+	for _, s := range in[1:] {
+		if s != out[len(out)-1] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// PolicyHash returns a stable hex sha256 over the policy-bearing fields
+// of a Payload.
+func PolicyHash(p *Payload) string {
+	if p == nil {
+		return ""
+	}
+	h := sha256.New()
+	if len(p.Filters) > 0 {
+		filters := make([]string, len(p.Filters))
+		for i, f := range p.Filters {
+			filters[i] = string(f)
+		}
+		sort.Strings(filters)
+		filters = dedupeSortedStrings(filters)
+		_, _ = fmt.Fprintf(h, "filters=%s\n", strings.Join(filters, ","))
+	}
+	if p.Sample > 0 {
+		_, _ = fmt.Fprintf(h, "sample_percent=%d\n", int(p.Sample*100+0.5))
+	}
+	if !p.Thresholds.IsZero() {
+		for _, spec := range thresholdFields() {
+			if v := spec.get(p.Thresholds); v != nil {
+				_, _ = fmt.Fprintf(h, "%s=%d\n", spec.key, *v)
+			}
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// FromYAML parses a Payload from its YAML serialization.
 func FromYAML(raw []byte) (*Payload, error) {
 	var p Payload
 	if err := yaml.Unmarshal(raw, &p); err != nil {

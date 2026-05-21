@@ -47,7 +47,7 @@ func SessionBundleName(sessionUID types.UID) string {
 func ensureSessionExporterBundle(ctx context.Context, c client.Client, s *podtracev1alpha1.PodTraceSession, ec *podtracev1alpha1.ExporterConfig, systemNS string) error {
 	name := SessionBundleName(s.UID)
 
-	payload, credSecretRef, err := renderBundlePayload(ec, nil)
+	payload, credSecretRef, err := renderBundlePayload(policyFromSession(s), ec, nil)
 	if err != nil {
 		return fmt.Errorf("render session bundle payload: %w", err)
 	}
@@ -66,9 +66,6 @@ func ensureSessionExporterBundle(ctx context.Context, c client.Client, s *podtra
 		cm.Annotations = mergeLabels(cm.Annotations, map[string]string{
 			BundleAnnotationSourceRef: ec.Namespace + "/" + ec.Name,
 		})
-		// bundle.yaml holds the same schema the agent's BundlePayload
-		// reads from ConfigMap.data. The Job mounts this single key so
-		// the CLI's --exporter-from-file can parse it directly.
 		bundleYAML, err := marshalBundleToYAML(payload)
 		if err != nil {
 			return err
@@ -77,9 +74,6 @@ func ensureSessionExporterBundle(ctx context.Context, c client.Client, s *podtra
 			cm.Data = map[string]string{}
 		}
 		cm.Data["bundle.yaml"] = bundleYAML
-		// Preserve the map-form keys too: agents (and future tooling
-		// that reads ConfigMaps directly) continue to work even if they
-		// do not know about the YAML blob.
 		for k, v := range payload {
 			cm.Data[k] = v
 		}
@@ -88,9 +82,6 @@ func ensureSessionExporterBundle(ctx context.Context, c client.Client, s *podtra
 		return fmt.Errorf("session bundle ConfigMap: %w", err)
 	}
 
-	// Companion Secret only when the ExporterConfig actually references
-	// credential material. Plain Jaeger/Zipkin/OTLP-literal bundles get
-	// a ConfigMap-only bundle.
 	if credSecretRef != nil {
 		credData, err := loadCredentialSecret(ctx, c, ec.Namespace, *credSecretRef)
 		if err != nil {
@@ -122,9 +113,7 @@ func ensureSessionExporterBundle(ctx context.Context, c client.Client, s *podtra
 
 // loadCredentialSecret fetches exactly the one SecretKeySelector an
 // ExporterConfig references and returns the value under the fixed
-// "credential" key. Mirrors PodTraceReconciler.loadCredentialSecret;
-// duplicated here so the session bundle path does not depend on the
-// PodTraceReconciler's concrete struct.
+// "credential" key.
 func loadCredentialSecret(ctx context.Context, c client.Client, namespace string, ref podtracev1alpha1.SecretKeySelector) (map[string][]byte, error) {
 	var src corev1.Secret
 	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: ref.Name}, &src); err != nil {

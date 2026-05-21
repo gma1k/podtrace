@@ -119,6 +119,20 @@ Operator and agent both expose Prometheus metrics:
   `kernel_too_old`, `collection_failed`, `ringbuf_failed`,
   `map_lookup_failed`, `invalid_event`, `unknown`).
 
+  Policy-wiring observability (one series per CR):
+
+  - `podtrace_agent_effective_sample_rate{cr_namespace,cr_name}` — the
+    sample rate (0.0–1.0) the agent is actually applying, after the
+    operator-side min(CR, ExporterConfig) resolution.
+  - `podtrace_agent_policy_generation{cr_namespace,cr_name}` —
+    `metadata.generation` of the source CR at bundle-read time. Compare
+    against the CR's live generation to detect bundle-propagation lag.
+  - `podtrace_agent_threshold_tripped_total{cr_namespace,cr_name,threshold}` —
+    counter, bumped once per event that exceeds a configured threshold
+    (`threshold ∈ {fs_slow, rtt_spike, error_rate}`). Stateless per-event
+    evaluation: a counter delta over a window is the trip frequency
+    directly.
+
 Enable scrape configs via Helm:
 
 ```bash

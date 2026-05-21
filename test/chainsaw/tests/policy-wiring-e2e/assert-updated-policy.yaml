@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: podtrace-system
+  labels:
+    podtrace.io/managed-by: podtrace-operator
+    podtrace.io/component: exporter-bundle
+    podtrace.io/podtrace: policy-pt
+data:
+  threshold_fs_slow_ms: "10"
+  policy_generation: "2"
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: policy-pt
+status:
+  observedGeneration: 2
+  policy:
+    generation: 2
+    thresholds:
+      fsSlowMs: 10
+  (conditions[?type == 'PolicyApplied'].status | [0]): "True"

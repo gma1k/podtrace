@@ -11,7 +11,10 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/events"
+	"github.com/podtrace/podtrace/internal/safeconv"
+	bundlepkg "github.com/podtrace/podtrace/pkg/exporter/bundle"
 	"github.com/podtrace/podtrace/pkg/tracer"
 )
 
@@ -19,15 +22,32 @@ import (
 // agent-side tracer.Exporter that emits OpenTelemetry SDK spans
 // (OTLP, Jaeger via OTLP, Zipkin, DataDog, Splunk).
 type sdkEventExporter struct {
-	name string
-	tp   *sdktrace.TracerProvider
+	name       string
+	cr         CRKey
+	tp         *sdktrace.TracerProvider
+	thresholds *PolicyThresholds
+	metrics    *Metrics
+}
+
+type sdkOption func(*sdkOptions)
+
+type sdkOptions struct {
+	metrics *Metrics
+}
+
+func withMetrics(m *Metrics) sdkOption {
+	return func(o *sdkOptions) { o.metrics = m }
 }
 
 // newSDKEventExporter wires an SDK SpanExporter (the wire-format
 // adapter — OTLP, Zipkin, etc.) into a TracerProvider shaped to the
 // bundle's sampling, resource attribution, and batch settings, then
 // returns a tracer.Exporter that emits one span per event.
-func newSDKEventExporter(name string, cr CRKey, b *BundlePayload, spanExporter sdktrace.SpanExporter) (tracer.Exporter, error) {
+func newSDKEventExporter(name string, cr CRKey, b *BundlePayload, spanExporter sdktrace.SpanExporter, opts ...sdkOption) (tracer.Exporter, error) {
+	var cfg sdkOptions
+	for _, opt := range opts {
+		opt(&cfg)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -57,11 +77,49 @@ func newSDKEventExporter(name string, cr CRKey, b *BundlePayload, spanExporter s
 		sdktrace.WithResource(res),
 	)
 
-	return &sdkEventExporter{
-		name: fmt.Sprintf("%s/%s", name, cr.String()),
-		tp:   tp,
-	}, nil
+	exp := &sdkEventExporter{
+		name:    fmt.Sprintf("%s/%s", name, cr.String()),
+		cr:      cr,
+		tp:      tp,
+		metrics: cfg.metrics,
+	}
+	if b != nil && !b.Thresholds.IsZero() {
+		exp.thresholds = policyThresholdsFromBundle(b.Thresholds)
+	}
+	if cfg.metrics != nil {
+		cfg.metrics.ObserveEffectiveSampleRate(cr, b)
+	}
+	return exp, nil
 }
+
+// policyThresholdsFromBundle deep-copies the bundle's Thresholds into
+// the agent-side struct. Decoupling the typed reference here means the
+// SDK exporter is never holding a pointer into a BundlePayload that may
+// be reused by a later reconcile.
+func policyThresholdsFromBundle(in *bundleThresholds) *PolicyThresholds {
+	if in == nil {
+		return nil
+	}
+	out := &PolicyThresholds{}
+	if in.ErrorRatePercent != nil {
+		v := *in.ErrorRatePercent
+		out.ErrorRatePercent = &v
+	}
+	if in.RTTSpikeMs != nil {
+		v := *in.RTTSpikeMs
+		out.RTTSpikeMs = &v
+	}
+	if in.FSSlowMs != nil {
+		v := *in.FSSlowMs
+		out.FSSlowMs = &v
+	}
+	return out
+}
+
+// bundleThresholds aliases the bundle package's Thresholds so the SDK
+// exporter does not need to import that package directly (it already
+// reaches it through BundlePayload).
+type bundleThresholds = bundlepkg.Thresholds
 
 func (e *sdkEventExporter) Name() string { return e.name }
 
@@ -100,10 +158,88 @@ func (e *sdkEventExporter) Export(ctx context.Context, batch []*events.Event) er
 			attribute.Int("podtrace.event.error", int(ev.Error)),
 		}
 		attrs = appendK8sAttributes(attrs, ev.K8s)
+		attrs = e.appendThresholdAttributes(attrs, ev)
 		span.SetAttributes(attrs...)
 		span.End(trace.WithTimestamp(endedAt))
 	}
 	return nil
+}
+
+// appendThresholdAttributes evaluates the bundle's thresholds against
+// one event and, for each one tripped, stamps a span attribute and
+// bumps the corresponding Prometheus counter.
+// Threshold semantics (per design):
+//   - fs_slow:    LatencyNS > FSSlowMs       for EventOpen/Read/Write/Fsync/Unlink/Rename/Close
+//   - rtt_spike:  LatencyNS > RTTSpikeMs     for EventTCPRecv/TCPSend/Connect
+//   - error_rate: ev.Error != 0              for any event (counts contribute to a future
+//                                            rolling-window detector; the per-event tag is
+//                                            stamped only when the threshold itself is set,
+//                                            so users can grep their backend for "errors
+//                                            sampled under an active error_rate policy")
+func (e *sdkEventExporter) appendThresholdAttributes(attrs []attribute.KeyValue, ev *events.Event) []attribute.KeyValue {
+	t := e.thresholds
+	if t == nil {
+		return attrs
+	}
+	if t.FSSlowMs != nil && isFilesystemEvent(ev.Type) {
+		thresholdNs := safeconv.Int64ToUint64(int64(*t.FSSlowMs)) * uint64(config.NSPerMS)
+		if ev.LatencyNS > thresholdNs {
+			attrs = append(attrs,
+				attribute.Bool("podtrace.threshold.fs_slow.tripped", true),
+				attribute.Int64("podtrace.threshold.fs_slow.ms", int64(*t.FSSlowMs)),
+			)
+			e.recordTrip("fs_slow")
+		}
+	}
+	if t.RTTSpikeMs != nil && isNetworkLatencyEvent(ev.Type) {
+		thresholdNs := safeconv.Int64ToUint64(int64(*t.RTTSpikeMs)) * uint64(config.NSPerMS)
+		if ev.LatencyNS > thresholdNs {
+			attrs = append(attrs,
+				attribute.Bool("podtrace.threshold.rtt_spike.tripped", true),
+				attribute.Int64("podtrace.threshold.rtt_spike.ms", int64(*t.RTTSpikeMs)),
+			)
+			e.recordTrip("rtt_spike")
+		}
+	}
+	if t.ErrorRatePercent != nil && ev.Error != 0 {
+		attrs = append(attrs,
+			attribute.Bool("podtrace.threshold.error_rate.observed", true),
+			attribute.Int64("podtrace.threshold.error_rate.percent", int64(*t.ErrorRatePercent)),
+		)
+		e.recordTrip("error_rate")
+	}
+	return attrs
+}
+
+func (e *sdkEventExporter) recordTrip(kind string) {
+	if e.metrics == nil {
+		return
+	}
+	e.metrics.RecordThresholdTripped(e.cr, kind)
+}
+
+// isFilesystemEvent reports whether the event type is one the FS-slow
+// threshold should be evaluated against.
+func isFilesystemEvent(t events.EventType) bool {
+	switch t {
+	case events.EventOpen, events.EventClose, events.EventRead,
+		events.EventWrite, events.EventFsync, events.EventUnlink, events.EventRename:
+		return true
+	default:
+		return false
+	}
+}
+
+// isNetworkLatencyEvent reports whether the event type carries a
+// meaningful latency the RTT-spike threshold should be evaluated against.
+func isNetworkLatencyEvent(t events.EventType) bool {
+	switch t {
+	case events.EventConnect, events.EventTCPSend, events.EventTCPRecv,
+		events.EventUDPSend, events.EventUDPRecv:
+		return true
+	default:
+		return false
+	}
 }
 
 func (e *sdkEventExporter) Close(ctx context.Context) error {

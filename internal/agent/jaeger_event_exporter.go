@@ -12,10 +12,10 @@ import (
 //                 (e.g. "jaeger-collector.observability:4318").
 //   - Insecure  — typically true for in-cluster collectors.
 //   - Sample    — honored via sdkEventExporter's sampler.
-func newJaegerEventExporter(cr CRKey, b *BundlePayload) (tracer.Exporter, error) {
+func newJaegerEventExporter(cr CRKey, b *BundlePayload, opts ...sdkOption) (tracer.Exporter, error) {
 	spanExporter, err := newOTLPSpanExporter(b)
 	if err != nil {
 		return nil, err
 	}
-	return newSDKEventExporter("jaeger", cr, b, spanExporter)
+	return newSDKEventExporter("jaeger", cr, b, spanExporter, opts...)
 }

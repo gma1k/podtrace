@@ -197,6 +197,7 @@ func cloneCRRule(in CRRule) CRRule {
 		BundleRevision: in.BundleRevision,
 		MatchedPods:    in.MatchedPods,
 		Err:            in.Err,
+		Policy:         clonePolicySnapshot(in.Policy),
 	}
 	if in.CgroupIDs != nil {
 		out.CgroupIDs = make(map[uint64]struct{}, len(in.CgroupIDs))
@@ -208,6 +209,39 @@ func cloneCRRule(in CRRule) CRRule {
 		out.Filters = make(map[events.EventType]struct{}, len(in.Filters))
 		for k := range in.Filters {
 			out.Filters[k] = struct{}{}
+		}
+	}
+	return out
+}
+
+// clonePolicySnapshot deep-copies a PolicySnapshot so router consumers
+// can safely retain a reference past a Publish call.
+func clonePolicySnapshot(in PolicySnapshot) PolicySnapshot {
+	out := PolicySnapshot{
+		Hash:       in.Hash,
+		Generation: in.Generation,
+	}
+	if in.EffectiveSamplePercent != nil {
+		v := *in.EffectiveSamplePercent
+		out.EffectiveSamplePercent = &v
+	}
+	if in.Filters != nil {
+		out.Filters = append([]string(nil), in.Filters...)
+	}
+	if in.Thresholds != nil {
+		t := *in.Thresholds
+		out.Thresholds = &t
+		if t.ErrorRatePercent != nil {
+			v := *t.ErrorRatePercent
+			out.Thresholds.ErrorRatePercent = &v
+		}
+		if t.RTTSpikeMs != nil {
+			v := *t.RTTSpikeMs
+			out.Thresholds.RTTSpikeMs = &v
+		}
+		if t.FSSlowMs != nil {
+			v := *t.FSSlowMs
+			out.Thresholds.FSSlowMs = &v
 		}
 	}
 	return out

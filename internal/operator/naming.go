@@ -43,11 +43,12 @@ const (
 	ConditionPaused         = "Paused"
 	ConditionReportUploaded = "ReportUploaded"
 	ConditionReferenced     = "Referenced"
+
+	ConditionPolicyApplied = "PolicyApplied"
 )
 
 // AgentDaemonSetName is the fixed DaemonSet name created by
-// TracerConfigReconciler. Agents discover each other and the operator
-// discovers them by this name — do not derive per-TracerConfig names.
+// TracerConfigReconciler.
 func AgentDaemonSetName() string { return "podtrace-agent" }
 
 // AgentServiceAccountName is the ServiceAccount the agent DaemonSet runs as.

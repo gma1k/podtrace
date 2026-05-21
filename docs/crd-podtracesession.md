@@ -53,10 +53,16 @@ spec:
 | `duration` | Go duration string | required | Wall-clock run time, e.g. `"30s"`, `"5m"`. Webhook rejects `0s` and bounded by `TracerConfig.spec.session.maxDuration`. |
 | `filters` | `[dns,net,fs,cpu,proc]` | optional | Event categories to record. |
 | `exporterRef.name` | string | required | Names an `ExporterConfig` in the same namespace. |
-| `samplePercent` | int 0-100 | optional | Sampling rate for exporter delivery. |
+| `samplePercent` | int 0-100 | optional | Workload-owner sampling intent. The operator combines this with `ExporterConfig.spec.samplePercent` (platform-owner cap) and writes the **minimum** of the two to the session bundle. Unset on either side is treated as 100%. The resolved value is echoed at `status.policy.effectiveSampleRate`. |
 | `reportRef` | object | optional | Persistent artifact sink — see "Report sinks" below. |
 | `ttlSecondsAfterFinished` | int | optional | When to GC the CR after Completed/Failed (default 300). |
-| `thresholds` | object | optional | Override anomaly thresholds. |
+| `thresholds.errorRatePercent` | int 0-100 | optional | The session Job tags spans for events carrying a non-zero error code; identical semantics to [PodTrace thresholds](crd-podtrace.md#spec-reference). |
+| `thresholds.rttSpikeMs` | int ≥0 | optional | Tag network-latency spans whose source event latency exceeds this threshold. |
+| `thresholds.fsSlowMs` | int ≥0 | optional | Tag FS spans whose source event latency exceeds this threshold. |
+
+Per-session policy is also surfaced on `status.policy` (`effectiveSampleRate`,
+`filters`, `thresholds`, `generation`, `hash`) with the same semantics as
+[PodTrace.status.policy](crd-podtrace.md#status-reference).
 
 ## Report sinks
 

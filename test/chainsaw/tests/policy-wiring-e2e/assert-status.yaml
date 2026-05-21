@@ -1,0 +1,19 @@
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: policy-pt
+status:
+  observedGeneration: 1
+  policy:
+    effectiveSampleRate: 50
+    filters:
+      - dns
+      - fs
+    thresholds:
+      errorRatePercent: 5
+      rttSpikeMs: 100
+      fsSlowMs: 25
+    generation: 1
+    (length(hash) > `0`): true
+  (conditions[?type == 'PolicyApplied'].status | [0]): "True"
+  (conditions[?type == 'Reconciled'].status | [0]): "True"
