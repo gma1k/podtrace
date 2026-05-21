@@ -36,7 +36,9 @@ else
 endif
 
 LIBBPF_INCLUDE ?= /usr/include
-BPF_CFLAGS = -O2 -g -target bpf $(BPF_ARCH_DEFINE) -mcpu=$(BPF_MCPU) -I$(LIBBPF_INCLUDE) -I$(BPF_GEN_DIR)
+BPF_CFLAGS = -O2 -g -target bpf $(BPF_ARCH_DEFINE) -mcpu=$(BPF_MCPU) \
+	-Wno-missing-declarations \
+	-I$(LIBBPF_INCLUDE) -I$(BPF_GEN_DIR)
 
 all: check-go build
 

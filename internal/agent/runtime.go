@@ -116,7 +116,8 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	stats := newPerCRStats()
-	router := NewRouter(stats)
+	enricher := NewPodEnricher()
+	router := NewRouter(stats).WithEnricher(enricher)
 	probes := NewProbeServer(opts.HealthAddr, 0)
 	metrics := NewMetrics()
 
@@ -146,6 +147,7 @@ func Run(ctx context.Context, opts Options) error {
 		TargetsCh:       targetsCh,
 		Metrics:         metrics,
 		ExporterBuilder: BuildExporter,
+		Enricher:        enricher,
 	}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("setup reconciler: %w", err)

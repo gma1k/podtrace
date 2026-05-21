@@ -86,6 +86,8 @@ type Event struct {
 	ParentSpanID string
 	TraceFlags   uint8
 	TraceState   string
+
+	K8s *K8sMetadata
 }
 
 func (e *Event) Latency() time.Duration {

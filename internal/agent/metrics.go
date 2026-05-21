@@ -22,9 +22,20 @@ type Metrics struct {
 	CgroupsAttached  prometheus.Counter
 	CgroupsDetached  prometheus.Counter
 
+	EnrichmentLookups       *prometheus.CounterVec
+	EnrichmentCacheSize     prometheus.Gauge
+	EnrichmentSnapshots     prometheus.Counter
+	EnrichmentOwnerResolved *prometheus.CounterVec
+
 	mu          sync.Mutex
 	lastEvents  map[CRKey]int64
 	lastDropped map[CRKey]int64
+
+	lastEnrichHits     int64
+	lastEnrichMisses   int64
+	lastEnrichSnaps    int64
+	lastOwnerResolved  int64
+	lastOwnerOrphaned  int64
 }
 
 // NewMetrics constructs the full metric surface and registers it
@@ -73,11 +84,70 @@ func NewMetrics() *Metrics {
 			Name:      "cgroups_detached_total",
 			Help:      "Cumulative cgroups removed from the tracer filter set (pod churn).",
 		}),
+		EnrichmentLookups: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "podtrace_agent",
+			Name:      "enrichment_lookups_total",
+			Help:      "Cgroup→k8s metadata lookups performed on the export hot path. Misses are events that arrived before the reconciler observed the pod; a sustained miss rate >1%% indicates the enricher is not keeping up with pod churn.",
+		}, []string{"result"}),
+		EnrichmentCacheSize: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: "podtrace_agent",
+			Name:      "enrichment_cache_size",
+			Help:      "Cgroup IDs currently held by the k8s metadata cache. Roughly equals (local pods × (1 + containers per pod)).",
+		}),
+		EnrichmentSnapshots: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "podtrace_agent",
+			Name:      "enrichment_snapshots_total",
+			Help:      "Atomic replacements of the enrichment cache (one per Reconcile pass that observed pods).",
+		}),
+		EnrichmentOwnerResolved: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "podtrace_agent",
+			Name:      "enrichment_owner_resolution_total",
+			Help:      "Workload-owner resolution outcomes. result=resolved means OwnerReferences yielded a workload kind+name; result=orphaned means the pod had no controller ref and degraded to kind=Pod.",
+		}, []string{"result"}),
 		lastEvents:  map[CRKey]int64{},
 		lastDropped: map[CRKey]int64{},
 	}
-	reg.MustRegister(m.EventsExported, m.EventsDropped, m.ActiveCgroups, m.ActiveCRs, m.ReconcileTotal, m.BackendDegraded, m.CgroupsAttached, m.CgroupsDetached)
+	reg.MustRegister(
+		m.EventsExported, m.EventsDropped, m.ActiveCgroups, m.ActiveCRs,
+		m.ReconcileTotal, m.BackendDegraded, m.CgroupsAttached, m.CgroupsDetached,
+		m.EnrichmentLookups, m.EnrichmentCacheSize, m.EnrichmentSnapshots,
+		m.EnrichmentOwnerResolved,
+	)
 	return m
+}
+
+// RefreshFromEnricher emits the deltas from the enricher's atomic
+// counters to the Prometheus metric set.
+func (m *Metrics) RefreshFromEnricher(e *PodEnricher) {
+	if m == nil || e == nil {
+		return
+	}
+	stats := e.Stats()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if delta := stats.Hits - m.lastEnrichHits; delta > 0 {
+		m.EnrichmentLookups.WithLabelValues("hit").Add(float64(delta))
+	}
+	if delta := stats.Misses - m.lastEnrichMisses; delta > 0 {
+		m.EnrichmentLookups.WithLabelValues("miss").Add(float64(delta))
+	}
+	if delta := stats.Snapshots - m.lastEnrichSnaps; delta > 0 {
+		m.EnrichmentSnapshots.Add(float64(delta))
+	}
+	if delta := stats.OwnerResolved - m.lastOwnerResolved; delta > 0 {
+		m.EnrichmentOwnerResolved.WithLabelValues("resolved").Add(float64(delta))
+	}
+	if delta := stats.OwnerOrphaned - m.lastOwnerOrphaned; delta > 0 {
+		m.EnrichmentOwnerResolved.WithLabelValues("orphaned").Add(float64(delta))
+	}
+	m.lastEnrichHits = stats.Hits
+	m.lastEnrichMisses = stats.Misses
+	m.lastEnrichSnaps = stats.Snapshots
+	m.lastOwnerResolved = stats.OwnerResolved
+	m.lastOwnerOrphaned = stats.OwnerOrphaned
+
+	m.EnrichmentCacheSize.Set(float64(stats.CacheSize))
 }
 
 // Handler returns a promhttp.Handler bound to this Metrics' registry.
