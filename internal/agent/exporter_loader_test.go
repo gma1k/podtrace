@@ -122,39 +122,72 @@ func TestBuildExporter_OTLP(t *testing.T) {
 	_ = exp.Close(ctx)
 }
 
-func TestBuildExporter_OTLPLikeTypesBuildSuccessfully(t *testing.T) {
-	cases := []struct {
-		ty       bundle.Type
-		endpoint string
-	}{
-		{bundle.TypeJaeger, "jaeger-collector:4318"},
-		{bundle.TypeDataDog, "datadog-agent:4318"},
-		{bundle.TypeSplunk, "splunk-otel-collector:4318"},
+func TestBuildExporter_Jaeger(t *testing.T) {
+	p := &BundlePayload{
+		Type:     bundle.TypeJaeger,
+		Endpoint: "jaeger-collector.observability:4318",
+		Insecure: true,
 	}
-	for _, tc := range cases {
-		t.Run(string(tc.ty), func(t *testing.T) {
-			p := &BundlePayload{
-				Type:     tc.ty,
-				Endpoint: tc.endpoint,
-				Insecure: true,
-			}
-			exp, err := BuildExporter(p, CRKey{"ns", "cr"})
-			if err != nil {
-				t.Fatalf("expected exporter to build, got: %v", err)
-			}
-			if exp == nil {
-				t.Fatal("nil exporter")
-			}
-			// The exporter's Name() should mention the backend type so
-			// log lines and Degraded conditions are attributable.
-			if !strings.Contains(exp.Name(), string(tc.ty)) {
-				t.Errorf("Name() = %q; expected to contain %q", exp.Name(), tc.ty)
-			}
-			ctx, cancel := contextWithTimeout(1)
-			defer cancel()
-			_ = exp.Close(ctx)
-		})
+	exp, err := BuildExporter(p, CRKey{"ns", "cr"})
+	if err != nil {
+		t.Fatalf("BuildExporter: %v", err)
 	}
+	if exp == nil {
+		t.Fatal("nil exporter")
+	}
+	if !strings.Contains(exp.Name(), "jaeger") {
+		t.Errorf("Name() = %q; expected to contain %q", exp.Name(), "jaeger")
+	}
+	ctx, cancel := contextWithTimeout(1)
+	defer cancel()
+	_ = exp.Close(ctx)
+}
+
+func TestBuildExporter_DataDog(t *testing.T) {
+	p := &BundlePayload{
+		Type:       bundle.TypeDataDog,
+		Endpoint:   "datadog-agent.datadog:4318",
+		Site:       "datadoghq.com",
+		Insecure:   true,
+		HeaderName: "DD-API-KEY",
+		Credential: []byte("dd-api-key-redacted"),
+	}
+	exp, err := BuildExporter(p, CRKey{"ns", "cr"})
+	if err != nil {
+		t.Fatalf("BuildExporter: %v", err)
+	}
+	if exp == nil {
+		t.Fatal("nil exporter")
+	}
+	if !strings.Contains(exp.Name(), "datadog") {
+		t.Errorf("Name() = %q; expected to contain %q", exp.Name(), "datadog")
+	}
+	ctx, cancel := contextWithTimeout(1)
+	defer cancel()
+	_ = exp.Close(ctx)
+}
+
+func TestBuildExporter_Splunk(t *testing.T) {
+	p := &BundlePayload{
+		Type:       bundle.TypeSplunk,
+		Endpoint:   "splunk-otel-collector.splunk:4318",
+		Insecure:   true,
+		HeaderName: "X-SF-TOKEN",
+		Credential: []byte("splunk-token-redacted"),
+	}
+	exp, err := BuildExporter(p, CRKey{"ns", "cr"})
+	if err != nil {
+		t.Fatalf("BuildExporter: %v", err)
+	}
+	if exp == nil {
+		t.Fatal("nil exporter")
+	}
+	if !strings.Contains(exp.Name(), "splunk") {
+		t.Errorf("Name() = %q; expected to contain %q", exp.Name(), "splunk")
+	}
+	ctx, cancel := contextWithTimeout(1)
+	defer cancel()
+	_ = exp.Close(ctx)
 }
 
 func TestBuildExporter_ZipkinReturnsHelpfulError(t *testing.T) {

@@ -48,10 +48,12 @@ supported per OTLP exporter.
 spec:
   type: jaeger
   jaeger:
-    endpoint: http://jaeger-collector.observability:14268/api/traces
+    endpoint: jaeger-collector.observability:4318
 ```
 
-No credentials. Bundle is ConfigMap-only.
+Agent mode ships to Jaeger's **OTLP/HTTP receiver** (port 4318 by
+default), not the legacy Thrift `/api/traces` endpoint. Jaeger 1.35+
+ships an OTLP receiver out of the box. No credentials.
 
 ### Zipkin
 
@@ -62,22 +64,29 @@ spec:
     endpoint: http://zipkin.observability:9411/api/v2/spans
 ```
 
-No credentials. Bundle is ConfigMap-only.
+Direct Zipkin export **is not supported in agent mode**. The upstream
+OTel SDK Zipkin exporter is deprecated. To route spans to Zipkin,
+deploy an OpenTelemetry Collector with the `zipkin` exporter and
+configure podtrace with `type: otlp` pointing at the Collector. See
+[Agent-mode exporter support](./tracing-exporters.md#agent-mode-exporter-support).
 
-### Splunk HEC
+### Splunk
 
 ```yaml
 spec:
   type: splunk
   splunk:
-    endpoint: https://splunk.example.com:8088/services/collector
+    endpoint: splunk-otel-collector.splunk:4318
     tokenSecretRef:
-      name: splunk-hec-token
+      name: splunk-access-token
       key: token
 ```
 
-The bundle's companion Secret carries the resolved HEC token under the
-`credential` key.
+Agent mode ships to the **Splunk OpenTelemetry Collector** over
+OTLP/HTTP. The token in `tokenSecretRef` is forwarded as the
+`X-SF-TOKEN` header. Direct HEC (`:8088/services/collector`) is not
+the agent's wire format; deploy the Splunk OTel Collector and route to
+its OTLP port instead.
 
 ### DataDog
 
@@ -85,13 +94,17 @@ The bundle's companion Secret carries the resolved HEC token under the
 spec:
   type: datadog
   datadog:
-    site: datadoghq.com           # or datadoghq.eu, etc.
+    endpoint: datadog-agent.datadog:4318  # optional; defaults to this
+    site: datadoghq.com                    # or datadoghq.eu, etc.
     apiKeySecretRef:
       name: dd-api-key
       key: api_key
 ```
 
-The companion Secret carries the resolved API key under `credential`.
+Agent mode ships to the **DataDog Agent's OTLP intake**. Enable the
+OTLP receiver in your Datadog Agent Helm values (the receiver is off
+by default on older Agent versions). The API key in
+`apiKeySecretRef` is forwarded as the `DD-API-KEY` header.
 
 ## Optional fields shared by all types
 
