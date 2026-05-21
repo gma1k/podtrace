@@ -22,6 +22,10 @@ type Metrics struct {
 	CgroupsAttached  prometheus.Counter
 	CgroupsDetached  prometheus.Counter
 
+	ThresholdTripped    *prometheus.CounterVec
+	EffectiveSampleRate *prometheus.GaugeVec
+	PolicyGeneration    *prometheus.GaugeVec
+
 	EnrichmentLookups       *prometheus.CounterVec
 	EnrichmentCacheSize     prometheus.Gauge
 	EnrichmentSnapshots     prometheus.Counter
@@ -104,6 +108,21 @@ func NewMetrics() *Metrics {
 			Name:      "enrichment_owner_resolution_total",
 			Help:      "Workload-owner resolution outcomes. result=resolved means OwnerReferences yielded a workload kind+name; result=orphaned means the pod had no controller ref and degraded to kind=Pod.",
 		}, []string{"result"}),
+		ThresholdTripped: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "podtrace_agent",
+			Name:      "threshold_tripped_total",
+			Help:      "Events exceeding a configured threshold, labeled by the CR that scoped them and the threshold kind (fs_slow|rtt_spike|error_rate). Stateless per-event evaluation — a counter delta over a window is a direct measure of how frequently the threshold trips.",
+		}, []string{"cr_namespace", "cr_name", "threshold"}),
+		EffectiveSampleRate: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: "podtrace_agent",
+			Name:      "effective_sample_rate",
+			Help:      "Sample rate (0.0–1.0) the agent applies for each CR — the operator-resolved minimum of PodTrace.spec.samplePercent and ExporterConfig.spec.samplePercent.",
+		}, []string{"cr_namespace", "cr_name"}),
+		PolicyGeneration: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: "podtrace_agent",
+			Name:      "policy_generation",
+			Help:      "metadata.generation of the source PodTrace at the time the agent loaded its bundle. Compare to .metadata.generation on the CR to verify propagation.",
+		}, []string{"cr_namespace", "cr_name"}),
 		lastEvents:  map[CRKey]int64{},
 		lastDropped: map[CRKey]int64{},
 	}
@@ -112,8 +131,52 @@ func NewMetrics() *Metrics {
 		m.ReconcileTotal, m.BackendDegraded, m.CgroupsAttached, m.CgroupsDetached,
 		m.EnrichmentLookups, m.EnrichmentCacheSize, m.EnrichmentSnapshots,
 		m.EnrichmentOwnerResolved,
+		m.ThresholdTripped, m.EffectiveSampleRate, m.PolicyGeneration,
 	)
 	return m
+}
+
+// RecordThresholdTripped bumps the per-CR-per-kind counter once for an
+// event that exceeded a configured threshold.
+func (m *Metrics) RecordThresholdTripped(cr CRKey, kind string) {
+	if m == nil || m.ThresholdTripped == nil {
+		return
+	}
+	m.ThresholdTripped.WithLabelValues(cr.Namespace, cr.Name, kind).Inc()
+}
+
+// ObserveEffectiveSampleRate sets the per-CR sample-rate gauge to the
+// rate the bundle resolved at construction time.
+func (m *Metrics) ObserveEffectiveSampleRate(cr CRKey, b *BundlePayload) {
+	if m == nil || m.EffectiveSampleRate == nil {
+		return
+	}
+	rate := 1.0
+	if b != nil && b.Sample > 0 {
+		rate = b.Sample
+	}
+	m.EffectiveSampleRate.WithLabelValues(cr.Namespace, cr.Name).Set(rate)
+	if m.PolicyGeneration != nil && b != nil {
+		m.PolicyGeneration.WithLabelValues(cr.Namespace, cr.Name).Set(float64(b.PolicyGeneration))
+	}
+}
+
+// dropPolicyMetrics removes the per-CR policy gauges + counters when a
+// CR is deleted.
+func (m *Metrics) dropPolicyMetrics(cr CRKey) {
+	if m == nil {
+		return
+	}
+	lbls := prometheus.Labels{"cr_namespace": cr.Namespace, "cr_name": cr.Name}
+	if m.EffectiveSampleRate != nil {
+		m.EffectiveSampleRate.Delete(lbls)
+	}
+	if m.PolicyGeneration != nil {
+		m.PolicyGeneration.Delete(lbls)
+	}
+	if m.ThresholdTripped != nil {
+		m.ThresholdTripped.DeletePartialMatch(lbls)
+	}
 }
 
 // RefreshFromEnricher emits the deltas from the enricher's atomic
@@ -219,5 +282,24 @@ func (m *Metrics) RefreshFromRouter(router *Router) {
 		m.ActiveCgroups.Delete(lbls)
 		delete(m.lastEvents, key)
 		delete(m.lastDropped, key)
+		m.dropPolicyMetrics(key)
+	}
+	for _, rule := range rules {
+		if m.EffectiveSampleRate != nil {
+			rate := 1.0
+			if pct := rule.Policy.EffectiveSamplePercent; pct != nil {
+				rate = float64(*pct) / 100.0
+			}
+			m.EffectiveSampleRate.With(prometheus.Labels{
+				"cr_namespace": rule.Key.Namespace,
+				"cr_name":      rule.Key.Name,
+			}).Set(rate)
+		}
+		if m.PolicyGeneration != nil {
+			m.PolicyGeneration.With(prometheus.Labels{
+				"cr_namespace": rule.Key.Namespace,
+				"cr_name":      rule.Key.Name,
+			}).Set(float64(rule.Policy.Generation))
+		}
 	}
 }

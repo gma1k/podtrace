@@ -146,8 +146,7 @@ func Run(ctx context.Context, opts Options) error {
 		Router:          router,
 		TargetsCh:       targetsCh,
 		Metrics:         metrics,
-		ExporterBuilder: BuildExporter,
-		Enricher:        enricher,
+		Enricher: enricher,
 	}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("setup reconciler: %w", err)

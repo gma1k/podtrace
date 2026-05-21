@@ -213,3 +213,17 @@ func TestBuildNodeStatusEntry(t *testing.T) {
 		})
 	}
 }
+
+// TestBuildNodeStatusEntry_EchoesPolicyHash pins the agent → operator
+// echo of policy_hash on every per-node status patch.
+func TestBuildNodeStatusEntry_EchoesPolicyHash(t *testing.T) {
+	rule := &CRRule{
+		Key:       CRKey{Namespace: "ns", Name: "n"},
+		CgroupIDs: map[uint64]struct{}{1: {}},
+		Policy:    PolicySnapshot{Hash: "deadbeef"},
+	}
+	entry := buildNodeStatusEntry("node-x", rule, crCounters{}, true, nil, time.Now())
+	if entry.PolicyHash != "deadbeef" {
+		t.Errorf("PolicyHash = %q, want %q", entry.PolicyHash, "deadbeef")
+	}
+}

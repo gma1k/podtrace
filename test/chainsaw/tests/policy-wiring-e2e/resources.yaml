@@ -1,0 +1,28 @@
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: policy-otlp
+spec:
+  type: otlp
+  otlp:
+    endpoint: otel-collector:4318
+    protocol: http
+    insecure: true
+  samplePercent: 80
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: policy-pt
+spec:
+  selector:
+    matchLabels:
+      app: policy-target
+  filters: [fs, dns]
+  samplePercent: 50
+  thresholds:
+    errorRatePercent: 5
+    rttSpikeMs: 100
+    fsSlowMs: 25
+  exporterRef:
+    name: policy-otlp

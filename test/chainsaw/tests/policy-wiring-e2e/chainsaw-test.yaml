@@ -1,0 +1,65 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: policy-wiring-e2e
+spec:
+  description: |
+    End-to-end gate on the policy-wiring contract (filters, sample
+    percent, thresholds):
+
+      1. Create a PodTrace with filters + samplePercent + thresholds,
+         pointing at an ExporterConfig that caps samplePercent. Assert
+         the bundle ConfigMap carries every policy key, sample_percent
+         is the operator-resolved min(CR, EC), and PodTrace.status.policy
+         mirrors those values byte-for-byte (same hash).
+
+      2. Patch spec.thresholds.fsSlowMs. Assert the bundle ConfigMap
+         updates and policy_generation increments — proves the
+         end-to-end propagation path triggers on policy edits, not just
+         on Create.
+
+      3. Delete the CR. The bundle ConfigMap is reaped by the existing
+         finalizer (already covered by continuous-cr-lifecycle, so
+         only a smoke-level delete-and-wait here).
+  timeouts:
+    apply: 30s
+    assert: 60s
+    delete: 60s
+  steps:
+    - name: create-policy-cr
+      try:
+        - apply:
+            file: ./resources.yaml
+        - assert:
+            file: ./assert-bundle.yaml
+        - assert:
+            file: ./assert-status.yaml
+
+    - name: update-threshold
+      try:
+        - patch:
+            resource:
+              apiVersion: podtrace.io/v1alpha1
+              kind: PodTrace
+              metadata:
+                name: policy-pt
+              spec:
+                thresholds:
+                  errorRatePercent: 5
+                  rttSpikeMs: 100
+                  fsSlowMs: 10
+        - assert:
+            file: ./assert-updated-policy.yaml
+
+    - name: cleanup
+      try:
+        - delete:
+            ref:
+              apiVersion: podtrace.io/v1alpha1
+              kind: PodTrace
+              name: policy-pt
+        - delete:
+            ref:
+              apiVersion: podtrace.io/v1alpha1
+              kind: ExporterConfig
+              name: policy-otlp

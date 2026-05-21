@@ -61,17 +61,13 @@ spec:
               PodTraceSpec defines a continuous, realtime tracing intent over a set of pods.
               PodTrace is the continuous-observability counterpart of PodTraceSession: it
               has no bounded duration and remains active until the resource is deleted or
-              paused. Agents on each node watch PodTrace resources and feed matching pods
-              into their local tracer.
+              paused.
             properties:
               containerName:
-                description: |-
-                  ContainerName restricts tracing to a specific container within each
-                  matched pod. If empty, the first container is used.
                 type: string
               exporterRef:
-                description: ExporterRef names an ExporterConfig in the same namespace.
-                  Required.
+                description: LocalObjectReference references an object in the same
+                  namespace as the referent.
                 properties:
                   name:
                     type: string
@@ -79,9 +75,6 @@ spec:
                 - name
                 type: object
               filters:
-                description: |-
-                  Filters restricts the event categories captured. When empty, all
-                  categories are captured.
                 items:
                   description: EventFilter enumerates the event categories podtrace
                     can capture.
@@ -95,8 +88,9 @@ spec:
                 type: array
               namespaceSelector:
                 description: |-
-                  NamespaceSelector scopes the Selector across namespaces. When unset
-                  the selector is evaluated within the PodTrace's own namespace only.
+                  A label selector is a label query over a set of resources. The result of matchLabels and
+                  matchExpressions are ANDed. An empty label selector matches all objects. A null
+                  label selector matches no objects.
                 properties:
                   matchExpressions:
                     description: matchExpressions is a list of label selector requirements.
@@ -142,11 +136,8 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
               paused:
-                description: Paused suspends tracing for this resource without deleting
-                  it.
                 type: boolean
               podRefs:
-                description: PodRefs explicitly enumerates target pods.
                 items:
                   description: PodRef references a specific pod by namespace/name.
                   properties:
@@ -163,16 +154,15 @@ spec:
                   type: object
                 type: array
               samplePercent:
-                description: SamplePercent sets the sampling rate for exported traces,
-                  0-100.
                 format: int32
                 maximum: 100
                 minimum: 0
                 type: integer
               selector:
                 description: |-
-                  Selector picks target pods by label. Mutually exclusive with PodRefs;
-                  exactly one of the two must be set.
+                  A label selector is a label query over a set of resources. The result of matchLabels and
+                  matchExpressions are ANDed. An empty label selector matches all objects. A null
+                  label selector matches no objects.
                 properties:
                   matchExpressions:
                     description: matchExpressions is a list of label selector requirements.
@@ -218,8 +208,7 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
               thresholds:
-                description: Thresholds override the agent's default anomaly-detection
-                  settings.
+                description: Thresholds control anomaly detection on the agent side.
                 properties:
                   errorRatePercent:
                     description: |-
@@ -251,9 +240,6 @@ spec:
             description: PodTraceStatus reflects the observed state of a PodTrace.
             properties:
               conditions:
-                description: |-
-                  Conditions is the latest available observations of the PodTrace state.
-                  Common types: Ready, Reconciled, Paused, Degraded.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -313,51 +299,32 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               matchedPods:
-                description: MatchedPods is the total number of pods currently matched
-                  across all nodes.
                 format: int32
                 type: integer
               nodeStatus:
-                description: |-
-                  NodeStatus aggregates per-node agent reports. Agents patch their own
-                  entry every StatusReportInterval (see TracerConfig).
                 items:
                   description: PodTraceNodeStatus reports one agent's view of this
                     PodTrace.
                   properties:
                     activeCgroups:
-                      description: ActiveCgroups is the count of cgroups the agent
-                        is currently tracing for this PodTrace.
                       format: int32
                       type: integer
                     droppedEvents:
-                      description: |-
-                        DroppedEvents counts events that were produced by the kernel but could
-                        not be forwarded to an exporter (buffer full or exporter backpressure).
                       format: int64
                       type: integer
                     eventsTotal:
-                      description: |-
-                        EventsTotal is the cumulative number of events captured by this agent
-                        for this PodTrace since the agent last started.
                       format: int64
                       type: integer
                     lastHeartbeat:
-                      description: LastHeartbeat is the time this entry was last updated
-                        by its agent.
                       format: date-time
                       type: string
                     message:
-                      description: Message provides human-readable detail, typically
-                        an error cause when Ready is false.
                       type: string
                     node:
-                      description: Node is the name of the node reporting this status.
-                        Unique within the array.
+                      type: string
+                    policyHash:
                       type: string
                     ready:
-                      description: Ready indicates the agent has successfully attached
-                        to the local matched cgroups.
                       type: boolean
                   required:
                   - activeCgroups
@@ -372,14 +339,62 @@ spec:
                 - node
                 x-kubernetes-list-type: map
               observedGeneration:
-                description: ObservedGeneration is the most recent generation observed
-                  for this PodTrace.
                 format: int64
                 type: integer
-              targetNamespaces:
+              policy:
                 description: |-
-                  TargetNamespaces is the sorted list of namespace names the operator
-                  resolved spec.namespaceSelector to at the last successful reconcile.
+                  PolicyStatus is the operator-side view of the effective policy a
+                  PodTrace imposes on the bundle.
+                properties:
+                  effectiveSampleRate:
+                    format: int32
+                    type: integer
+                  filters:
+                    items:
+                      description: EventFilter enumerates the event categories podtrace
+                        can capture.
+                      enum:
+                      - dns
+                      - net
+                      - fs
+                      - cpu
+                      - proc
+                      type: string
+                    type: array
+                  generation:
+                    format: int64
+                    type: integer
+                  hash:
+                    type: string
+                  thresholds:
+                    description: Thresholds control anomaly detection on the agent
+                      side.
+                    properties:
+                      errorRatePercent:
+                        description: |-
+                          ErrorRatePercent triggers issue detection when errors exceed this
+                          percentage over the rolling window. 0-100.
+                        format: int32
+                        maximum: 100
+                        minimum: 0
+                        type: integer
+                      fsSlowMs:
+                        description: |-
+                          FSSlowMs triggers issue detection when a filesystem operation takes
+                          longer than this value in milliseconds.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      rttSpikeMs:
+                        description: |-
+                          RTTSpikeMs triggers issue detection when network RTT exceeds this
+                          value in milliseconds.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                    type: object
+                type: object
+              targetNamespaces:
                 items:
                   type: string
                 type: array

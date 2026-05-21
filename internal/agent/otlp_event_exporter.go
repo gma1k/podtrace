@@ -16,12 +16,12 @@ import (
 
 // newOTLPEventExporter builds a tracer.Exporter that ships per-event
 // spans over OTLP HTTP.
-func newOTLPEventExporter(cr CRKey, b *BundlePayload) (tracer.Exporter, error) {
+func newOTLPEventExporter(cr CRKey, b *BundlePayload, opts ...sdkOption) (tracer.Exporter, error) {
 	spanExporter, err := newOTLPSpanExporter(b)
 	if err != nil {
 		return nil, err
 	}
-	return newSDKEventExporter("otlp", cr, b, spanExporter)
+	return newSDKEventExporter("otlp", cr, b, spanExporter, opts...)
 }
 
 // newOTLPSpanExporter wires an otlptrace HTTP client from a bundle.

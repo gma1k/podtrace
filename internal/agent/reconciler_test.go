@@ -18,6 +18,7 @@ import (
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/internal/operator"
+	bundlepkg "github.com/podtrace/podtrace/pkg/exporter/bundle"
 	"github.com/podtrace/podtrace/pkg/tracer"
 )
 
@@ -1000,5 +1001,62 @@ func TestBuildTargetSet_Deduplicates(t *testing.T) {
 	out := buildTargetSet(rules, nil, nil)
 	if len(out) != 0 {
 		t.Errorf("expected empty output, got %+v", out)
+	}
+}
+
+// TestPolicySnapshotFromBundle_FullRoundTrip pins the operator→bundle
+// →agent path: a bundle populated by the operator with effective
+// sample, filters, thresholds, and generation surfaces in a
+// PolicySnapshot the router carries on every CRRule.
+func TestPolicySnapshotFromBundle_FullRoundTrip(t *testing.T) {
+	five := int32(5)
+	twenty := int32(20)
+	hundred := int32(100)
+	b := &BundlePayload{
+		Type:             "otlp",
+		Endpoint:         "x:4318",
+		Sample:           0.5,
+		PolicyGeneration: 9,
+		Filters: []bundlepkg.FilterCategory{
+			bundlepkg.FilterDNS,
+			bundlepkg.FilterFS,
+		},
+		Thresholds: &bundlepkg.Thresholds{
+			ErrorRatePercent: &five,
+			RTTSpikeMs:       &hundred,
+			FSSlowMs:         &twenty,
+		},
+	}
+	snap := policySnapshotFromBundle(b)
+	if snap.EffectiveSamplePercent == nil || *snap.EffectiveSamplePercent != 50 {
+		t.Errorf("EffectiveSamplePercent=%v want 50", snap.EffectiveSamplePercent)
+	}
+	if len(snap.Filters) != 2 || snap.Filters[0] != "dns" || snap.Filters[1] != "fs" {
+		t.Errorf("Filters=%v want [dns fs]", snap.Filters)
+	}
+	if snap.Thresholds == nil ||
+		*snap.Thresholds.ErrorRatePercent != 5 ||
+		*snap.Thresholds.RTTSpikeMs != 100 ||
+		*snap.Thresholds.FSSlowMs != 20 {
+		t.Errorf("Thresholds=%+v incorrect", snap.Thresholds)
+	}
+	if snap.Generation != 9 {
+		t.Errorf("Generation=%d want 9", snap.Generation)
+	}
+	if snap.Hash == "" {
+		t.Error("Hash must be computed from bundle")
+	}
+}
+
+// TestPolicySnapshotFromBundle_NilSafe documents the agent contract:
+// a nil bundle yields a zero-value snapshot, never panics.
+func TestPolicySnapshotFromBundle_NilSafe(t *testing.T) {
+	snap := policySnapshotFromBundle(nil)
+	if snap.EffectiveSamplePercent != nil ||
+		snap.Filters != nil ||
+		snap.Thresholds != nil ||
+		snap.Generation != 0 ||
+		snap.Hash != "" {
+		t.Errorf("nil bundle should yield zero snapshot, got %+v", snap)
 	}
 }

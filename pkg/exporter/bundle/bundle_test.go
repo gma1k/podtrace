@@ -357,3 +357,167 @@ func TestTargetNamespaces_AgentRejectV1BundleAfterV2Migration(t *testing.T) {
 }
 
 func contains(s, sub string) bool { return strings.Contains(s, sub) }
+
+// TestFilters_RoundTrip locks the wire contract for the filters field:
+// empty in / empty out, populated list goes through sorted-dedup-CSV.
+func TestFilters_RoundTrip(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []FilterCategory
+		want []FilterCategory
+	}{
+		{name: "nil", in: nil, want: nil},
+		{name: "empty", in: []FilterCategory{}, want: nil},
+		{
+			name: "sorted",
+			in:   []FilterCategory{FilterNet, FilterDNS},
+			want: []FilterCategory{FilterDNS, FilterNet},
+		},
+		{
+			name: "dedupe",
+			in:   []FilterCategory{FilterFS, FilterFS, FilterDNS},
+			want: []FilterCategory{FilterDNS, FilterFS},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &Payload{Type: TypeOTLP, Endpoint: "x:4318", Filters: tc.in}
+			data := ToConfigMapData(p)
+			parsed, err := FromConfigMapData(data)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if !reflect.DeepEqual(parsed.Filters, tc.want) {
+				t.Errorf("filters round-trip = %v, want %v", parsed.Filters, tc.want)
+			}
+		})
+	}
+}
+
+// TestThresholds_TriStateRoundTrip pins key-presence semantics so
+// "unset threshold" survives round-trip distinct from "threshold=0".
+func TestThresholds_TriStateRoundTrip(t *testing.T) {
+	five := int32(5)
+	zero := int32(0)
+	cases := []struct {
+		name string
+		in   *Thresholds
+	}{
+		{name: "nil", in: nil},
+		{name: "only_error_rate", in: &Thresholds{ErrorRatePercent: &five}},
+		{name: "zero_is_distinct_from_unset", in: &Thresholds{FSSlowMs: &zero}},
+		{name: "all", in: &Thresholds{ErrorRatePercent: &five, RTTSpikeMs: &five, FSSlowMs: &five}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &Payload{Type: TypeOTLP, Endpoint: "x:4318", Thresholds: tc.in}
+			data := ToConfigMapData(p)
+			parsed, err := FromConfigMapData(data)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if tc.in == nil {
+				if parsed.Thresholds != nil {
+					t.Fatalf("expected nil thresholds, got %+v", parsed.Thresholds)
+				}
+				return
+			}
+			if parsed.Thresholds == nil {
+				t.Fatalf("expected non-nil thresholds")
+			}
+			if !int32PtrEq(parsed.Thresholds.ErrorRatePercent, tc.in.ErrorRatePercent) ||
+				!int32PtrEq(parsed.Thresholds.RTTSpikeMs, tc.in.RTTSpikeMs) ||
+				!int32PtrEq(parsed.Thresholds.FSSlowMs, tc.in.FSSlowMs) {
+				t.Errorf("threshold round-trip mismatch:\ngot  %+v\nwant %+v", parsed.Thresholds, tc.in)
+			}
+		})
+	}
+}
+
+func int32PtrEq(a, b *int32) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+// TestThresholds_NegativeRejected guards the wire format from being
+// usable for sentinel-style negative values that downstream consumers
+// would have to special-case.
+func TestThresholds_NegativeRejected(t *testing.T) {
+	_, err := FromConfigMapData(map[string]string{
+		"type":                   "otlp",
+		"endpoint":               "x:4318",
+		"threshold_rtt_spike_ms": "-1",
+	})
+	if err == nil {
+		t.Fatal("expected error for negative threshold_rtt_spike_ms")
+	}
+}
+
+// TestPolicyHash_StableAcrossEquivalentPolicies pins the
+// "different exporters, same policy ⇒ same hash" property. Users diff
+// status.policy.hash against agent-side PodTraceNodeStatus.PolicyHash;
+// if endpoint or credentials affected the hash the diff would drift.
+func TestPolicyHash_StableAcrossEquivalentPolicies(t *testing.T) {
+	five := int32(5)
+	a := &Payload{
+		Type: TypeOTLP, Endpoint: "a:4318",
+		Sample:     0.5,
+		Filters:    []FilterCategory{FilterDNS, FilterNet},
+		Thresholds: &Thresholds{FSSlowMs: &five},
+	}
+	b := &Payload{
+		Type: TypeJaeger, Endpoint: "b:14268",
+		Sample:     0.5,
+		Filters:    []FilterCategory{FilterNet, FilterDNS}, // unsorted
+		Thresholds: &Thresholds{FSSlowMs: &five},
+	}
+	if PolicyHash(a) != PolicyHash(b) {
+		t.Errorf("equivalent policies produced different hashes:\nA=%s\nB=%s", PolicyHash(a), PolicyHash(b))
+	}
+}
+
+// TestPolicyHash_ChangesWhenAnyPolicyFieldChanges guards against the
+// hash silently ignoring a policy field.
+func TestPolicyHash_ChangesWhenAnyPolicyFieldChanges(t *testing.T) {
+	five := int32(5)
+	ten := int32(10)
+	base := &Payload{
+		Type: TypeOTLP, Endpoint: "x:4318",
+		Sample:     0.5,
+		Filters:    []FilterCategory{FilterDNS},
+		Thresholds: &Thresholds{FSSlowMs: &five},
+	}
+	mutations := map[string]func(*Payload){
+		"sample_changed":     func(p *Payload) { p.Sample = 0.25 },
+		"filter_added":       func(p *Payload) { p.Filters = append(p.Filters, FilterNet) },
+		"threshold_changed":  func(p *Payload) { p.Thresholds.FSSlowMs = &ten },
+		"threshold_removed":  func(p *Payload) { p.Thresholds = nil },
+	}
+	baseHash := PolicyHash(base)
+	for name, mutate := range mutations {
+		t.Run(name, func(t *testing.T) {
+			copy := *base
+			copyThresholds := *base.Thresholds
+			copy.Thresholds = &copyThresholds
+			copy.Filters = append([]FilterCategory(nil), base.Filters...)
+			mutate(&copy)
+			if PolicyHash(&copy) == baseHash {
+				t.Errorf("hash unchanged after %s", name)
+			}
+		})
+	}
+}
+
+// TestPolicyGeneration_RoundTrip pins the new policy_generation key.
+func TestPolicyGeneration_RoundTrip(t *testing.T) {
+	p := &Payload{Type: TypeOTLP, Endpoint: "x:4318", PolicyGeneration: 42}
+	parsed, err := FromConfigMapData(ToConfigMapData(p))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if parsed.PolicyGeneration != 42 {
+		t.Errorf("policy_generation round-trip = %d, want 42", parsed.PolicyGeneration)
+	}
+}

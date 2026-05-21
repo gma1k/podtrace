@@ -54,22 +54,21 @@ func LoadBundle(ctx context.Context, c client.Client, systemNamespace string, po
 
 // BuildExporter turns a BundlePayload into a tracer.Exporter that
 // accepts []*events.Event.
-// sees the cause on kubectl describe.
-func BuildExporter(payload *BundlePayload, crKey CRKey) (tracer.Exporter, error) {
+func BuildExporter(payload *BundlePayload, crKey CRKey, opts ...sdkOption) (tracer.Exporter, error) {
 	if payload == nil {
 		return nil, fmt.Errorf("nil bundle payload")
 	}
 	switch payload.Type {
 	case bundle.TypeOTLP:
-		return newOTLPEventExporter(crKey, payload)
+		return newOTLPEventExporter(crKey, payload, opts...)
 	case bundle.TypeJaeger:
-		return newJaegerEventExporter(crKey, payload)
+		return newJaegerEventExporter(crKey, payload, opts...)
 	case bundle.TypeZipkin:
-		return newZipkinEventExporter(crKey, payload)
+		return newZipkinEventExporter(crKey, payload, opts...)
 	case bundle.TypeDataDog:
-		return newDataDogEventExporter(crKey, payload)
+		return newDataDogEventExporter(crKey, payload, opts...)
 	case bundle.TypeSplunk:
-		return newSplunkEventExporter(crKey, payload)
+		return newSplunkEventExporter(crKey, payload, opts...)
 	default:
 		return nil, fmt.Errorf("unknown exporter type %q", payload.Type)
 	}

@@ -78,6 +78,7 @@ func buildNodeStatusEntry(node string, rule *CRRule, counters crCounters, agentR
 		EventsTotal:   counters.Events,
 		DroppedEvents: counters.Dropped,
 		LastHeartbeat: metav1.NewTime(now),
+		PolicyHash:    rule.Policy.Hash,
 	}
 	switch {
 	case backendErr != nil:

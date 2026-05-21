@@ -113,11 +113,14 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	if err := r.syncExporterBundle(ctx, &pt, &ec, targetNamespaces); err != nil {
 		r.setCondition(&pt, ConditionDegraded, metav1.ConditionTrue, "BundleSync", err.Error())
+		r.setCondition(&pt, ConditionPolicyApplied, metav1.ConditionFalse, "BundleSync", err.Error())
 		_ = r.Status().Update(ctx, &pt)
 		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
 	}
 
 	pt.Status.TargetNamespaces = targetNamespaces
+	pt.Status.Policy = resolvePolicyStatus(policyFromPodTrace(&pt), &ec)
+	r.setCondition(&pt, ConditionPolicyApplied, metav1.ConditionTrue, "Reconciled", "policy resolved and written to bundle")
 
 	if node, msg, ok := firstDegradedNode(pt.Status.NodeStatus); ok {
 		r.setCondition(&pt, ConditionDegraded, metav1.ConditionTrue, "AgentNodeStatus",
@@ -203,7 +206,7 @@ func (r *PodTraceReconciler) syncExporterBundle(ctx context.Context, pt *podtrac
 	systemNS := r.SystemNamespace
 	name := ExporterBundleName(pt.UID)
 
-	payload, credSecretRef, err := renderBundlePayload(ec, targetNamespaces)
+	payload, credSecretRef, err := renderBundlePayload(policyFromPodTrace(pt), ec, targetNamespaces)
 	if err != nil {
 		return err
 	}

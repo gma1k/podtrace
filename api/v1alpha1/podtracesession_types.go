@@ -162,6 +162,9 @@ type PodTraceSessionStatus struct {
 
 	// ObservedGeneration is the most recent generation observed for this session.
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// +optional
+	Policy *PolicyStatus `json:"policy,omitempty"`
 }
 
 // +genclient

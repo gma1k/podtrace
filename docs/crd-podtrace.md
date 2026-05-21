@@ -49,20 +49,42 @@ spec:
 | `selector` | LabelSelector | one of selector/podRefs | Pods labeled to trace. Empty selector is rejected. |
 | `podRefs` | `[{namespace, name}]` | one of selector/podRefs | Explicit pod list. Cross-namespace allowed. |
 | `namespaceSelector` | LabelSelector | optional | Widens `selector` across namespaces. Field's expressions are not yet evaluated; presence alone enables cluster-wide search. |
-| `filters` | `[dns,net,fs,cpu,proc]` | optional | Empty = all categories. |
+| `filters` | `[dns,net,fs,cpu,proc]` | optional | Empty = all categories. Agents enforce the set per-event in userspace and only the listed categories reach the configured exporter. |
 | `exporterRef.name` | string | required | Names an `ExporterConfig` in the same namespace. |
 | `paused` | bool | optional | Stop emitting events without deleting the CR. |
-| `samplePercent` | int 0-100 | optional | Sample rate forwarded to the exporter. |
-| `thresholds` | object | optional | Override anomaly-detection knobs (errorRate, RTT spike, FS slow). |
+| `samplePercent` | int 0-100 | optional | Workload-owner sampling intent. The operator combines this with `ExporterConfig.spec.samplePercent` (platform-owner cap) and writes the **minimum** of the two to the bundle — that minimum is what every exporter applies. Unset on either side is treated as 100%. The resolved value is echoed at `status.policy.effectiveSampleRate`. |
+| `thresholds.errorRatePercent` | int 0-100 | optional | When set, the agent stamps `podtrace.threshold.error_rate.observed=true` on every span whose source event carries a non-zero error code and bumps `podtrace_agent_threshold_tripped_total{threshold="error_rate"}`. |
+| `thresholds.rttSpikeMs` | int ≥0 | optional | When set, the agent tags spans whose source event latency exceeds this threshold (Connect/TCPSend/TCPRecv/UDPSend/UDPRecv) and bumps `podtrace_agent_threshold_tripped_total{threshold="rtt_spike"}`. |
+| `thresholds.fsSlowMs` | int ≥0 | optional | When set, the agent tags FS-event spans (Open/Read/Write/Close/Fsync/Unlink/Rename) whose latency exceeds the threshold and bumps `podtrace_agent_threshold_tripped_total{threshold="fs_slow"}`. |
 
 ## Status reference
 
 | Field | Notes |
 |---|---|
 | `matchedPods` | Sum of `activeCgroups` across all reporting nodes. |
-| `nodeStatus[]` | One entry per node hosting a matched pod. Each carries `node`, `ready`, `activeCgroups`, `eventsTotal`, `droppedEvents`, `lastHeartbeat`, `message`. |
-| `conditions` | Standard Kubernetes condition objects. `Ready=True` once at least one node reports healthy. `Degraded=True` on bundle sync errors. `Paused` mirrors `spec.paused`. |
+| `nodeStatus[]` | One entry per node hosting a matched pod. Each carries `node`, `ready`, `activeCgroups`, `eventsTotal`, `droppedEvents`, `lastHeartbeat`, `message`, and `policyHash` (the hash of the bundle the agent last observed — see "Verifying policy propagation" below). |
+| `conditions` | Standard Kubernetes condition objects. `Ready=True` once at least one node reports healthy. `Degraded=True` on bundle sync errors. `Paused` mirrors `spec.paused`. `PolicyApplied=True` once the operator has resolved `spec.filters`/`spec.samplePercent`/`spec.thresholds` and written them to the bundle. |
 | `observedGeneration` | Most recent generation reconciled. |
+| `policy.effectiveSampleRate` | The operator-resolved sample rate (0–100), already reduced to the minimum of `spec.samplePercent` and `ExporterConfig.spec.samplePercent`. This is what every agent and exporter actually applies — do not infer effective sampling from `spec` alone. |
+| `policy.filters` | Sorted, deduplicated copy of `spec.filters` written to the bundle. |
+| `policy.thresholds` | Echo of `spec.thresholds` written to the bundle. |
+| `policy.generation` | `metadata.generation` of the CR at bundle-write time. Pair with `nodeStatus[].policyHash` to verify propagation reached every node. |
+| `policy.hash` | sha256 over the bundle's policy fields. Two CRs with identical filters/sample/thresholds produce the same hash regardless of exporter. |
+
+### Verifying policy propagation
+
+`status.policy.hash` is what the operator wrote; each
+`status.nodeStatus[].policyHash` is what that node's agent observed. When
+they agree, the bundle has propagated:
+
+```bash
+kubectl get podtrace watch-api -n my-app -o jsonpath='
+status.policy.hash = {.status.policy.hash}{"\n"}
+{range .status.nodeStatus[*]}{.node}: {.policyHash}{"\n"}{end}'
+```
+
+A node showing an empty or stale hash means the agent has not yet
+re-read the bundle ConfigMap — usually a transient state during edits.
 
 ## Multi-CR merging on shared targets
 

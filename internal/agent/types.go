@@ -32,16 +32,38 @@ type CRRule struct {
 
 	BundleRevision string
 
-	// MatchedPods is the count of local pods currently satisfying the
-	// CR's selector. Status writer reports this on status.nodeStatus.
+	// Policy is the resolved effective policy as read from the bundle.
+	Policy PolicySnapshot
+
 	MatchedPods int32
 
 	Err error
 }
 
+// PolicySnapshot is the agent's view of the policy fields carried by a
+// bundle.
+type PolicySnapshot struct {
+	EffectiveSamplePercent *int32
+
+	Filters []string
+
+	Thresholds *PolicyThresholds
+
+	Hash string
+
+	Generation int64
+}
+
+// PolicyThresholds is the agent-side counterpart of the bundle's
+// Thresholds struct: same fields, same nil-means-unset semantics.
+type PolicyThresholds struct {
+	ErrorRatePercent *int32
+	RTTSpikeMs       *int32
+	FSSlowMs         *int32
+}
+
 // NodeReport aggregates the counters the status writer reports on one
-// tick. Mirrors the fields of PodTraceNodeStatus so the writer can
-// marshal it directly.
+// tick.
 type NodeReport struct {
 	Node           string
 	Ready          bool
@@ -53,7 +75,7 @@ type NodeReport struct {
 }
 
 // perCRStats tracks per-CR event counts for status reporting. Keyed by
-// CRKey. Shared between the router (writer) and status writer (reader).
+// CRKey.
 type perCRStats struct {
 	mu     sync.Mutex
 	counts map[CRKey]*crCounters

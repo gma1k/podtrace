@@ -10,6 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/pkg/exporter/bundle"
 )
@@ -391,5 +395,176 @@ func TestSDKEventExporter_NameIncludesBackend(t *testing.T) {
 				t.Errorf("Name() = %q; want substring %q", exp.Name(), tc.wantSub)
 			}
 		})
+	}
+}
+
+// noopSpanExporter is the minimal sdktrace.SpanExporter the threshold
+// tests use: it discards every batch silently so the SDK pipeline
+// completes without a network.
+type noopSpanExporter struct{}
+
+func (n *noopSpanExporter) ExportSpans(_ context.Context, _ []sdktrace.ReadOnlySpan) error {
+	return nil
+}
+func (n *noopSpanExporter) Shutdown(_ context.Context) error { return nil }
+
+// counterValue reads a single labeled counter cell, returning 0 if no
+// observation has been made yet.
+func counterValue(t *testing.T, cv *prometheus.CounterVec, labels prometheus.Labels) float64 {
+	t.Helper()
+	m, err := cv.GetMetricWith(labels)
+	if err != nil {
+		t.Fatalf("GetMetricWith: %v", err)
+	}
+	var pb dto.Metric
+	if err := m.Write(&pb); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	return pb.GetCounter().GetValue()
+}
+
+func gaugeValue(t *testing.T, gv *prometheus.GaugeVec, labels prometheus.Labels) float64 {
+	t.Helper()
+	g, err := gv.GetMetricWith(labels)
+	if err != nil {
+		t.Fatalf("GetMetricWith: %v", err)
+	}
+	var pb dto.Metric
+	if err := g.Write(&pb); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	return pb.GetGauge().GetValue()
+}
+
+// TestSDKEventExporter_ThresholdTripsCounter is the agent-side
+// end-to-end gate on Phase A threshold wiring: a bundle carrying an
+// FS-slow threshold yields a Prometheus counter increment for an FS
+// event whose latency exceeds the threshold, and no increment for one
+// that doesn't.
+func TestSDKEventExporter_ThresholdTripsCounter(t *testing.T) {
+	fsMs := int32(10)
+	b := &bundle.Payload{
+		Type:     bundle.TypeOTLP,
+		Endpoint: "x:4318",
+		Insecure: true,
+		Thresholds: &bundle.Thresholds{
+			FSSlowMs: &fsMs,
+		},
+	}
+	cr := CRKey{Namespace: "ns", Name: "cr"}
+	m := NewMetrics()
+
+	exp, err := newSDKEventExporter("otlp", cr, b, &noopSpanExporter{}, withMetrics(m))
+	if err != nil {
+		t.Fatalf("newSDKEventExporter: %v", err)
+	}
+	defer func() { _ = exp.Close(context.Background()) }()
+
+	tripping := &events.Event{
+		Type:      events.EventWrite,
+		Timestamp: uint64(time.Now().UnixNano()),
+		LatencyNS: 50 * 1_000_000,
+	}
+	clean := &events.Event{
+		Type:      events.EventWrite,
+		Timestamp: uint64(time.Now().UnixNano()),
+		LatencyNS: 1 * 1_000_000,
+	}
+	wrongKind := &events.Event{
+		Type:      events.EventDNS,
+		Timestamp: uint64(time.Now().UnixNano()),
+		LatencyNS: 50 * 1_000_000,
+	}
+
+	if err := exp.Export(context.Background(), []*events.Event{tripping, clean, wrongKind}); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+
+	got := counterValue(t, m.ThresholdTripped, prometheus.Labels{
+		"cr_namespace": cr.Namespace,
+		"cr_name":      cr.Name,
+		"threshold":    "fs_slow",
+	})
+	if got != 1 {
+		t.Errorf("fs_slow trip count = %v, want 1 (only the 50ms write should have tripped)", got)
+	}
+	for _, kind := range []string{"rtt_spike", "error_rate"} {
+		got := counterValue(t, m.ThresholdTripped, prometheus.Labels{
+			"cr_namespace": cr.Namespace,
+			"cr_name":      cr.Name,
+			"threshold":    kind,
+		})
+		if got != 0 {
+			t.Errorf("%s trip count = %v, want 0", kind, got)
+		}
+	}
+}
+
+// TestSDKEventExporter_EffectiveSampleRateGauge verifies the per-CR
+// sample-rate gauge and the policy_generation gauge are emitted at
+// constructor time.
+func TestSDKEventExporter_EffectiveSampleRateGauge(t *testing.T) {
+	b := &bundle.Payload{
+		Type:             bundle.TypeOTLP,
+		Endpoint:         "x:4318",
+		Insecure:         true,
+		Sample:           0.25,
+		PolicyGeneration: 3,
+	}
+	cr := CRKey{Namespace: "ns", Name: "cr"}
+	m := NewMetrics()
+
+	exp, err := newSDKEventExporter("otlp", cr, b, &noopSpanExporter{}, withMetrics(m))
+	if err != nil {
+		t.Fatalf("newSDKEventExporter: %v", err)
+	}
+	defer func() { _ = exp.Close(context.Background()) }()
+
+	if got := gaugeValue(t, m.EffectiveSampleRate, prometheus.Labels{
+		"cr_namespace": cr.Namespace,
+		"cr_name":      cr.Name,
+	}); got != 0.25 {
+		t.Errorf("effective_sample_rate gauge = %v, want 0.25", got)
+	}
+	if got := gaugeValue(t, m.PolicyGeneration, prometheus.Labels{
+		"cr_namespace": cr.Namespace,
+		"cr_name":      cr.Name,
+	}); got != 3 {
+		t.Errorf("policy_generation gauge = %v, want 3", got)
+	}
+}
+
+// TestSDKEventExporter_NoThresholdsNoMetricChurn ensures the
+// nil-thresholds fast-path doesn't accidentally tag spans or bump
+// counters — important because most CRs won't set thresholds.
+func TestSDKEventExporter_NoThresholdsNoMetricChurn(t *testing.T) {
+	b := &bundle.Payload{
+		Type:     bundle.TypeOTLP,
+		Endpoint: "x:4318",
+		Insecure: true,
+	}
+	cr := CRKey{Namespace: "ns", Name: "cr"}
+	m := NewMetrics()
+	exp, err := newSDKEventExporter("otlp", cr, b, &noopSpanExporter{}, withMetrics(m))
+	if err != nil {
+		t.Fatalf("newSDKEventExporter: %v", err)
+	}
+	defer func() { _ = exp.Close(context.Background()) }()
+
+	if err := exp.Export(context.Background(), []*events.Event{
+		{Type: events.EventWrite, LatencyNS: 1_000_000_000},
+		{Type: events.EventTCPRecv, LatencyNS: 1_000_000_000, Error: -5},
+	}); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	for _, kind := range []string{"fs_slow", "rtt_spike", "error_rate"} {
+		got := counterValue(t, m.ThresholdTripped, prometheus.Labels{
+			"cr_namespace": cr.Namespace,
+			"cr_name":      cr.Name,
+			"threshold":    kind,
+		})
+		if got != 0 {
+			t.Errorf("unexpected %s trip when no thresholds set: %v", kind, got)
+		}
 	}
 }

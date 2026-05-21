@@ -450,6 +450,59 @@ spec:
                   for this session.
                 format: int64
                 type: integer
+              policy:
+                description: |-
+                  PolicyStatus is the operator-side view of the effective policy a
+                  PodTrace imposes on the bundle.
+                properties:
+                  effectiveSampleRate:
+                    format: int32
+                    type: integer
+                  filters:
+                    items:
+                      description: EventFilter enumerates the event categories podtrace
+                        can capture.
+                      enum:
+                      - dns
+                      - net
+                      - fs
+                      - cpu
+                      - proc
+                      type: string
+                    type: array
+                  generation:
+                    format: int64
+                    type: integer
+                  hash:
+                    type: string
+                  thresholds:
+                    description: Thresholds control anomaly detection on the agent
+                      side.
+                    properties:
+                      errorRatePercent:
+                        description: |-
+                          ErrorRatePercent triggers issue detection when errors exceed this
+                          percentage over the rolling window. 0-100.
+                        format: int32
+                        maximum: 100
+                        minimum: 0
+                        type: integer
+                      fsSlowMs:
+                        description: |-
+                          FSSlowMs triggers issue detection when a filesystem operation takes
+                          longer than this value in milliseconds.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      rttSpikeMs:
+                        description: |-
+                          RTTSpikeMs triggers issue detection when network RTT exceeds this
+                          value in milliseconds.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                    type: object
+                type: object
               reportLocation:
                 description: |-
                   ReportLocation is the resolved object URI of the uploaded session
