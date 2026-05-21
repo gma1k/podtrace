@@ -61,13 +61,24 @@ type OTLPHeader struct {
 }
 
 // JaegerExporter configures the Jaeger exporter.
+//
+// Agent mode ships spans to Jaeger over OTLP/HTTP, so the endpoint must
+// point at Jaeger's OTLP receiver (port 4318 by default), not the legacy
+// Thrift collector endpoint. See docs/tracing-exporters.md.
 type JaegerExporter struct {
-	// Endpoint, e.g. "http://jaeger-collector.observability:14268/api/traces".
+	// Endpoint of Jaeger's OTLP/HTTP receiver, e.g.
+	// "jaeger-collector.observability:4318".
 	// +kubebuilder:validation:Required
 	Endpoint string `json:"endpoint"`
 }
 
 // ZipkinExporter configures the Zipkin exporter.
+//
+// Direct export to Zipkin is not supported in agent mode (the upstream
+// OTel SDK Zipkin exporter is deprecated). To route spans to Zipkin,
+// deploy an OpenTelemetry Collector with the 'zipkin' exporter and
+// configure podtrace with type=otlp pointing at the Collector. See
+// docs/tracing-exporters.md.
 type ZipkinExporter struct {
 	// Endpoint, e.g. "http://zipkin.observability:9411/api/v2/spans".
 	// +kubebuilder:validation:Required

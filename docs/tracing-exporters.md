@@ -18,6 +18,28 @@ For Zipkin: the agent returns a structured error explaining the OTel Collector p
 
 CLI / one-shot diagnose mode (`podtrace diagnose`) continues to support every backend including direct Zipkin, since that path uses its own hand-rolled exporters rather than the agent's SDK-based pipeline.
 
+### OTLP-only in agent mode
+
+The continuous DaemonSet path commits to one wire format on purpose:
+
+- **One transport to maintain.** Every backend listed above offers a
+  first-class OTLP receiver today, either natively (Jaeger 1.35+) or
+  through a vendor-supplied Collector distribution (Splunk OpenTelemetry
+  Collector, Datadog Agent OTLP intake). Speaking OTLP everywhere means
+  one client library, one set of golden tests, and one upgrade path.
+- **Vendors are deprecating their native formats.** Jaeger Thrift is on
+  the upstream deprecation path; the OTel SDK's Zipkin exporter is
+  already scheduled for removal. Building native parity in the agent
+  would be investing in formats whose owners are moving on.
+- **Auth and tenant routing are header concerns, not protocol
+  concerns.** `DD-API-KEY`, `X-SF-TOKEN`, and arbitrary `headers[]`
+  cover every backend's authentication model without per-backend wire
+  code in the agent.
+
+If your environment can't run a Collector or vendor Agent (air-gapped,
+strict footprint constraints), use CLI/diagnose mode for one-shot
+captures, it speaks each backend's native protocol directly.
+
 ## Table of Contents
 
 - [OpenTelemetry (OTLP)](#opentelemetry-otlp)
