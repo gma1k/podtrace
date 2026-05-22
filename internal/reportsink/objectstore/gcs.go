@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 
 	"cloud.google.com/go/auth/credentials"
 	"cloud.google.com/go/storage"
@@ -16,10 +17,7 @@ const (
 )
 
 // gcsScopes lists the OAuth2 scopes the storage client needs. Hardcoding
-// them keeps the credentials-construction path explicit; the older
-// option.WithCredentialsJSON helper looked up scopes implicitly but is
-// deprecated as of the auth-library v0.20 because it surfaces JSON
-// material through chains where it can be logged or cached unintendedly.
+// them keeps the credentials-construction path explicit.
 var gcsScopes = []string{
 	"https://www.googleapis.com/auth/devstorage.read_write",
 	"https://www.googleapis.com/auth/cloud-platform",
@@ -37,11 +35,6 @@ func newGCSSink(ctx context.Context, cfg Config, d destination) (Sink, error) {
 	var opts []option.ClientOption
 	saJSON := stringFromCreds(creds, gcsSecretKeyServiceAccountJSON)
 	if saJSON != "" {
-		// Use the modern cloud.google.com/go/auth/credentials path
-		// instead of the deprecated option.WithCredentialsJSON: the
-		// new helper validates the payload, derives an explicit token
-		// source, and avoids the security-review concerns documented
-		// in the v0.20 deprecation notice.
 		ac, err := credentials.DetectDefault(&credentials.DetectOptions{
 			CredentialsJSON: []byte(saJSON),
 			Scopes:          gcsScopes,
@@ -53,9 +46,6 @@ func newGCSSink(ctx context.Context, cfg Config, d destination) (Sink, error) {
 	}
 	if endpoint := stringFromCreds(creds, gcsSecretKeyEndpoint); endpoint != "" {
 		opts = append(opts, option.WithEndpoint(endpoint))
-		// Test endpoints (fake-gcs-server) speak plaintext HTTP with
-		// no auth handshake. Skip auth when the user provided no
-		// explicit service account.
 		if saJSON == "" {
 			opts = append(opts, option.WithoutAuthentication())
 		}
@@ -66,11 +56,27 @@ func newGCSSink(ctx context.Context, cfg Config, d destination) (Sink, error) {
 		return nil, fmt.Errorf("gcs: new client: %w", err)
 	}
 
+	client.SetRetry(storage.WithErrorFunc(loggingGCSShouldRetry))
+
 	return &gcsSink{
 		client:    client,
 		dest:      d,
 		uriPrefix: SchemeGCS + "://" + d.bucket,
 	}, nil
+}
+
+// loggingGCSShouldRetry mirrors storage.ShouldRetry's decision while
+// emitting one structured log line per evaluation.
+func loggingGCSShouldRetry(err error) bool {
+	if err == nil {
+		return false
+	}
+	shouldRetry := storage.ShouldRetry(err)
+	_, _ = fmt.Fprintf(os.Stderr,
+		`{"component":"objectstore.retry","backend":"gs","retry":%v,"error":%q}`+"\n",
+		shouldRetry, err.Error(),
+	)
+	return shouldRetry
 }
 
 func (g *gcsSink) Upload(ctx context.Context, keyHint, contentType string, body io.Reader) (string, error) {

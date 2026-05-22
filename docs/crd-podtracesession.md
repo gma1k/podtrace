@@ -71,9 +71,9 @@ end of diagnose. Mutually exclusive with itself — exactly one of:
 
 | Field | What it produces |
 |---|---|
-| `configMap.name` | A ConfigMap in the session's namespace with `data["report.txt"]` populated. The CLI patches it via a per-session Role + RoleBinding scoped to that exact name. |
-| `secret.name` | A Secret in the session's namespace with `data["report.txt"]`. Use this when the report may carry sensitive data (private hostnames, paths, payloads). |
-| `objectStore` | **Reserved.** Schema accepts S3/GCS/Azure URIs ahead of upload-path delivery; webhook rejects these today. |
+| `configMap.name` | A ConfigMap in the session's namespace with `data["report.txt"]` populated. The CLI patches it via a per-session Role + RoleBinding scoped to that exact name. Capped at the etcd ConfigMap limit (~1MiB). |
+| `secret.name` | A Secret in the session's namespace with `data["report.txt"]`. Use this when the report may carry sensitive data (private hostnames, paths, payloads). Same size cap as ConfigMap. |
+| `objectStore` | Uploads to an S3-, GCS-, or Azure-Blob–compatible bucket via a [native sidecar](object-store-reports.md). The only sink that escapes the etcd object-size limit. Requires `TracerConfig.spec.session.sidecarUploader=true` and either ambient cloud credentials (IRSA / Workload Identity / Managed Identity) or an explicit `credentialsSecretRef`. |
 
 When `reportRef` is unset, only the exporter receives event spans and
 the session status keeps the small inline summary.
@@ -186,8 +186,9 @@ exfiltrate any sink other than its own.
   the upstream `ExporterConfig` does not retroactively change a
   Completed session's bundle.
 - **Webhook validation.** A webhook rejects `duration <= 0`, missing
-  `exporterRef`, both selector AND podRefs set, or
-  `reportRef.objectStore` set.
+  `exporterRef`, both selector AND podRefs set, or a malformed
+  `reportRef.objectStore.uri`. Well-formed objectStore URIs are
+  accepted — see [Object-store report sinks](object-store-reports.md).
 - **Webhook needs the operator running.** Sessions cannot be applied
   while the operator is down (webhook callout fails).
 - **Sample workloads.** A `pause:3.9` pod produces no events. Use

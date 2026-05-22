@@ -118,18 +118,12 @@ spec:
                       reconciles this into one privileged Job per node hosting matched pods.
                     properties:
                       containerName:
-                        description: ContainerName restricts tracing to a specific
-                          container.
                         type: string
                       duration:
-                        description: |-
-                          Duration is the total wall-clock time the session should run. Required.
-                          Format: Go duration, e.g. "30s", "5m". Maximum is enforced by the
-                          operator against TracerConfig.spec.session.maxDuration.
                         type: string
                       exporterRef:
-                        description: ExporterRef names an ExporterConfig in the same
-                          namespace. Required.
+                        description: LocalObjectReference references an object in
+                          the same namespace as the referent.
                         properties:
                           name:
                             type: string
@@ -137,8 +131,6 @@ spec:
                         - name
                         type: object
                       filters:
-                        description: Filters restricts the event categories captured.
-                          When empty, all are captured.
                         items:
                           description: EventFilter enumerates the event categories
                             podtrace can capture.
@@ -152,8 +144,9 @@ spec:
                         type: array
                       namespaceSelector:
                         description: |-
-                          NamespaceSelector scopes the Selector across namespaces. When unset
-                          the selector is evaluated within the session's own namespace only.
+                          A label selector is a label query over a set of resources. The result of matchLabels and
+                          matchExpressions are ANDed. An empty label selector matches all objects. A null
+                          label selector matches no objects.
                         properties:
                           matchExpressions:
                             description: matchExpressions is a list of label selector
@@ -199,7 +192,6 @@ spec:
                         type: object
                         x-kubernetes-map-type: atomic
                       podRefs:
-                        description: PodRefs explicitly enumerates target pods.
                         items:
                           description: PodRef references a specific pod by namespace/name.
                           properties:
@@ -217,9 +209,8 @@ spec:
                         type: array
                       reportRef:
                         description: |-
-                          ReportRef points at where the diagnose report summary should be persisted.
-                          If unset, only the exporter receives events and the session status
-                          retains a small inline summary.
+                          ReportReference describes where a session's diagnose report is persisted.
+                          Exactly one sink should be set.
                         properties:
                           configMap:
                             description: |-
@@ -295,15 +286,15 @@ spec:
                             x-kubernetes-map-type: atomic
                         type: object
                       samplePercent:
-                        description: SamplePercent sets the sampling rate for exported
-                          traces, 0-100.
                         format: int32
                         maximum: 100
                         minimum: 0
                         type: integer
                       selector:
-                        description: Selector picks target pods by label. Mutually
-                          exclusive with PodRefs.
+                        description: |-
+                          A label selector is a label query over a set of resources. The result of matchLabels and
+                          matchExpressions are ANDed. An empty label selector matches all objects. A null
+                          label selector matches no objects.
                         properties:
                           matchExpressions:
                             description: matchExpressions is a list of label selector
@@ -349,8 +340,8 @@ spec:
                         type: object
                         x-kubernetes-map-type: atomic
                       thresholds:
-                        description: Thresholds override the session's default anomaly-detection
-                          settings.
+                        description: Thresholds control anomaly detection on the agent
+                          side.
                         properties:
                           errorRatePercent:
                             description: |-
@@ -376,9 +367,6 @@ spec:
                             type: integer
                         type: object
                       ttlSecondsAfterFinished:
-                        description: |-
-                          TTLSecondsAfterFinished cleans up the session resource after completion.
-                          If unset, the operator default applies.
                         format: int32
                         minimum: 0
                         type: integer

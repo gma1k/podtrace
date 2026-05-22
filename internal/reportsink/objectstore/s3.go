@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 
@@ -16,8 +17,6 @@ import (
 // S3 credential keys read from the user-supplied Secret. All optional —
 // missing keys mean "fall back to the SDK default credential chain"
 // (which discovers IRSA, env vars, EC2 instance profile, etc.).
-//
-// Documented as a public API surface in docs/object-store-reports.md.
 const (
 	s3SecretKeyAccessKeyID     = "access_key_id"
 	s3SecretKeySecretAccessKey = "secret_access_key"
@@ -29,13 +28,6 @@ const (
 
 // s3Sink uploads to AWS S3 or any S3-compatible bucket via the
 // low-level s3.Client.PutObject API.
-//
-// We deliberately do not use feature/s3/manager.Uploader (now
-// deprecated) or its successor feature/s3/transfermanager: session
-// reports are text artifacts a few hundred KB at most, well below the
-// 5 MiB single-part PutObject limit. Multipart adds round-trips and
-// complexity (CompleteMultipartUpload, error recovery on partial
-// uploads) that buy nothing for our payload size.
 type s3Sink struct {
 	client    *s3.Client
 	dest      destination
@@ -46,6 +38,10 @@ func newS3Sink(ctx context.Context, cfg Config, d destination) (Sink, error) {
 	creds := cfg.Credentials
 
 	loadOpts := []func(*awsconfig.LoadOptions) error{}
+
+	loadOpts = append(loadOpts, awsconfig.WithHTTPClient(&http.Client{
+		Transport: newLoggingTransport(http.DefaultTransport, SchemeS3, nil),
+	}))
 
 	region := stringFromCreds(creds, s3SecretKeyRegion)
 	if region == "" {
