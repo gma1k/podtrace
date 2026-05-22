@@ -22,9 +22,6 @@ import (
 	"github.com/podtrace/podtrace/pkg/tracer"
 )
 
-// fakeExporter is a tracer.Exporter that records every Export call and
-// surfaces a Close counter so we can assert the reconciler's
-// release/reap paths properly free downstream resources.
 type fakeExporter struct {
 	mu      sync.Mutex
 	name    string
@@ -58,8 +55,6 @@ func newScheme(t *testing.T) *runtime.Scheme {
 	return s
 }
 
-// makeBundleCM produces a managed ConfigMap whose name matches the
-// PodTrace UID so LoadBundle finds it.
 func makeBundleCM(systemNS string, uid types.UID, rv string) *corev1.ConfigMap {
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -132,7 +127,6 @@ func TestPodChangePredicates(t *testing.T) {
 		t.Error("Generic predicate should reject events")
 	}
 
-	// UpdateFunc: same labels + same state → false; different labels → true; different state → true.
 	old := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"a": "1"}},
 		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
@@ -154,17 +148,11 @@ func TestPodChangePredicates(t *testing.T) {
 		t.Error("state-change Update should pass")
 	}
 
-	// Non-Pod ObjectOld/New → false.
 	if p.Update(event.UpdateEvent{ObjectOld: &corev1.ConfigMap{}, ObjectNew: &corev1.Pod{}}) {
 		t.Error("non-Pod Update should be rejected")
 	}
 }
 
-// TestReconcile_HappyPath runs the reconcile loop end-to-end against a
-// fake controller-runtime client. It seeds two pods on the local node,
-// one PodTrace selecting them by label, and a bundle ConfigMap. The
-// injected ExporterBuilder returns a fakeExporter and the injected
-// CgroupResolver maps each pod to a synthetic ID.
 func TestReconcile_HappyPath(t *testing.T) {
 	const node, sysNS, ns = "node-1", "podtrace-system", "default"
 	uid := types.UID("uid-1")
@@ -245,7 +233,6 @@ func TestReconcile_HappyPath(t *testing.T) {
 		t.Errorf("BundleRevision = %q, want 10", rules[0].BundleRevision)
 	}
 
-	// TargetsCh should have received a (possibly empty) set.
 	select {
 	case <-r.TargetsCh:
 	default:
@@ -263,9 +250,6 @@ func TestReconcile_HappyPath(t *testing.T) {
 	}
 }
 
-// TestReconcile_BundleRotationRebuildsExporter changes the ConfigMap
-// ResourceVersion between reconciles and asserts the cached exporter
-// is closed and a fresh one is built.
 func TestReconcile_BundleRotationRebuildsExporter(t *testing.T) {
 	const node, sysNS, ns = "node-1", "podtrace-system", "default"
 	uid := types.UID("uid-1")
@@ -311,7 +295,6 @@ func TestReconcile_BundleRotationRebuildsExporter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Bump RV via Update (fake client auto-increments ResourceVersion).
 	var current corev1.ConfigMap
 	if err := c.Get(context.Background(), types.NamespacedName{Name: cm.Name, Namespace: cm.Namespace}, &current); err != nil {
 		t.Fatalf("get: %v", err)
@@ -338,9 +321,6 @@ func TestReconcile_BundleRotationRebuildsExporter(t *testing.T) {
 	}
 }
 
-// TestReconcile_PausedCRSkipped covers the early-continue branch that
-// drops paused CRs from the active rule set without consulting the
-// bundle.
 func TestReconcile_PausedCRSkipped(t *testing.T) {
 	const node, sysNS, ns = "node-1", "podtrace-system", "default"
 	pt := &podtracev1alpha1.PodTrace{
@@ -385,9 +365,6 @@ func TestReconcile_PausedCRSkipped(t *testing.T) {
 	}
 }
 
-// TestReconcile_NoMatchedPodsReleasesExporter exercises the
-// match-empty branch: the cached exporter for that CR must be closed
-// and removed.
 func TestReconcile_NoMatchedPodsReleasesExporter(t *testing.T) {
 	const node, sysNS, ns = "node-1", "podtrace-system", "default"
 	uid := types.UID("uid-empty")
@@ -429,9 +406,6 @@ func TestReconcile_NoMatchedPodsReleasesExporter(t *testing.T) {
 	}
 }
 
-// TestReconcile_BundleNotFoundIsNonFatal verifies that a missing
-// bundle ConfigMap (e.g. the operator hasn't synced it yet) returns
-// without error and without publishing a rule for the affected CR.
 func TestReconcile_BundleNotFoundIsNonFatal(t *testing.T) {
 	const node, sysNS, ns = "node-1", "podtrace-system", "default"
 	pt := &podtracev1alpha1.PodTrace{
@@ -447,8 +421,6 @@ func TestReconcile_BundleNotFoundIsNonFatal(t *testing.T) {
 		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
 	}
 	c := fake.NewClientBuilder().WithScheme(newScheme(t)).WithObjects(pt, pod).Build()
-	// No bundle ConfigMap → LoadBundle returns NotFound which the
-	// reconciler must treat as transient.
 
 	r := &AgentReconciler{
 		Client: c, NodeName: node, SystemNamespace: sysNS,
@@ -476,14 +448,6 @@ func TestReconcile_BundleNotFoundIsNonFatal(t *testing.T) {
 	}
 }
 
-// TestReconcile_ExporterBuilderErrorIsNonFatal: builder failure logs
-// and continues; no rule is published for that CR.
-// TestReconcile_ExporterBuilderErrorPublishesTombstone covers the
-// agent's failure-visibility contract for the most common case: a
-// bundle the agent does not know how to build (e.g. unsupported
-// exporter type). The reconcile must not crash, must publish a
-// tombstone rule (so the status writer can surface the cause on
-// NodeStatus.Message), and must not cache the failed exporter.
 func TestReconcile_ExporterBuilderErrorPublishesTombstone(t *testing.T) {
 	const node, sysNS, ns = "n", "ns-sys", "default"
 	uid := types.UID("uid-err")
@@ -548,10 +512,6 @@ func TestReconcile_ExporterBuilderErrorPublishesTombstone(t *testing.T) {
 	}
 }
 
-// TestReconcile_CgroupResolverErrorPublishesTombstone: resolver failure
-// produces a tombstone rule that carries the wrapped error and a nil
-// exporter. CgroupIDs is empty because resolution failed before we
-// could obtain them.
 func TestReconcile_CgroupResolverErrorPublishesTombstone(t *testing.T) {
 	const node, sysNS, ns = "n", "ns-sys", "default"
 	uid := types.UID("uid-cgerr")
@@ -601,10 +561,6 @@ func TestReconcile_CgroupResolverErrorPublishesTombstone(t *testing.T) {
 	}
 }
 
-// TestReconcile_BundleLoadErrorPublishesTombstone covers the non-
-// NotFound bundle load failure path: a real apiserver / network error
-// must tombstone the rule, but NotFound (operator hasn't synced yet)
-// must stay a silent skip — see TestReconcile_BundleNotFoundIsNonFatal.
 func TestReconcile_BundleLoadErrorPublishesTombstone(t *testing.T) {
 	const node, sysNS, ns = "n", "ns-sys", "default"
 	uid := types.UID("uid-bundle-err")
@@ -662,10 +618,6 @@ func TestReconcile_BundleLoadErrorPublishesTombstone(t *testing.T) {
 	}
 }
 
-// TestReconcile_MatchPodsErrorPublishesTombstone covers the defensive
-// tombstone for selector evaluation. The webhook normally catches bad
-// label selectors at admission; this test verifies the agent's belt-
-// and-braces behaviour when an invalid selector somehow reaches it.
 func TestReconcile_MatchPodsErrorPublishesTombstone(t *testing.T) {
 	const node, sysNS, ns = "n", "ns-sys", "default"
 	uid := types.UID("uid-match-err")
@@ -714,9 +666,6 @@ func TestReconcile_MatchPodsErrorPublishesTombstone(t *testing.T) {
 	}
 }
 
-// TestReconcile_ReapsExportersForDeletedCRs seeds a stale cached
-// exporter with a key that no longer corresponds to any CR; the
-// reaper must close and drop it.
 func TestReconcile_ReapsExportersForDeletedCRs(t *testing.T) {
 	const node, sysNS, ns = "n", "ns-sys", "default"
 	c := fake.NewClientBuilder().WithScheme(newScheme(t)).Build()
@@ -743,9 +692,6 @@ func TestReconcile_ReapsExportersForDeletedCRs(t *testing.T) {
 	}
 }
 
-// TestReconcile_TargetsChannelKeepLatest stresses the keep-latest
-// fallback by calling Reconcile against a 1-buffer channel that no
-// consumer is draining. Two reconciles must succeed.
 func TestReconcile_TargetsChannelKeepLatest(t *testing.T) {
 	const node, sysNS, ns = "n", "s", "default"
 	uid := types.UID("uid-ch")
@@ -783,8 +729,6 @@ func TestReconcile_TargetsChannelKeepLatest(t *testing.T) {
 	}
 }
 
-// TestEnqueueAllPodTraces returns one request per existing PodTrace,
-// regardless of the triggering object.
 func TestEnqueueAllPodTraces(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(newScheme(t)).WithObjects(
 		&podtracev1alpha1.PodTrace{ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns1"}},
@@ -797,21 +741,18 @@ func TestEnqueueAllPodTraces(t *testing.T) {
 	}
 }
 
-// TestEnqueueOnBundleChange filters out non-bundle ConfigMaps.
 func TestEnqueueOnBundleChange(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(newScheme(t)).WithObjects(
 		&podtracev1alpha1.PodTrace{ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"}},
 	).Build()
 	r := &AgentReconciler{Client: c}
 
-	// Unmanaged ConfigMap → 0 requests.
 	if got := r.enqueueOnBundleChange(context.Background(), &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "ns"},
 	}); len(got) != 0 {
 		t.Errorf("unmanaged CM enqueued %d", len(got))
 	}
 
-	// Managed but wrong component → 0 requests.
 	if got := r.enqueueOnBundleChange(context.Background(), &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "x", Namespace: "ns",
@@ -824,7 +765,6 @@ func TestEnqueueOnBundleChange(t *testing.T) {
 		t.Errorf("wrong-component CM enqueued %d", len(got))
 	}
 
-	// Bundle CM → enqueues all PodTraces.
 	got := r.enqueueOnBundleChange(context.Background(), &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "x", Namespace: "ns",
@@ -839,7 +779,6 @@ func TestEnqueueOnBundleChange(t *testing.T) {
 	}
 }
 
-// TestObtainAndReleaseExporter exercises cache miss → hit → bundle-RV change.
 func TestObtainAndReleaseExporter(t *testing.T) {
 	calls := 0
 	r := &AgentReconciler{
@@ -851,12 +790,10 @@ func TestObtainAndReleaseExporter(t *testing.T) {
 	}
 	key := CRKey{Namespace: "ns", Name: "pt"}
 
-	// Miss.
 	exp1, err := r.obtainExporter(key, &BundlePayload{ResourceVer: "1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Hit (same RV).
 	exp2, err := r.obtainExporter(key, &BundlePayload{ResourceVer: "1"})
 	if err != nil {
 		t.Fatal(err)
@@ -868,7 +805,6 @@ func TestObtainAndReleaseExporter(t *testing.T) {
 		t.Errorf("calls = %d, want 1", calls)
 	}
 
-	// Rotation.
 	exp3, err := r.obtainExporter(key, &BundlePayload{ResourceVer: "2"})
 	if err != nil {
 		t.Fatal(err)
@@ -879,12 +815,10 @@ func TestObtainAndReleaseExporter(t *testing.T) {
 	if calls != 2 {
 		t.Errorf("calls = %d, want 2", calls)
 	}
-	// The old exporter must have been closed.
 	if exp1.(*fakeExporter).Closes() != 1 {
 		t.Errorf("old exporter Close count = %d, want 1", exp1.(*fakeExporter).Closes())
 	}
 
-	// Release.
 	r.releaseExporter(key)
 	if _, ok := r.exporterCache[key]; ok {
 		t.Error("releaseExporter did not remove the entry")
@@ -892,12 +826,9 @@ func TestObtainAndReleaseExporter(t *testing.T) {
 	if exp3.(*fakeExporter).Closes() != 1 {
 		t.Errorf("released exporter Close count = %d, want 1", exp3.(*fakeExporter).Closes())
 	}
-	// Releasing an absent key is a no-op.
 	r.releaseExporter(key)
 }
 
-// TestObtainExporter_BuildErrorPropagates verifies builder errors are
-// surfaced and nothing is cached on failure.
 func TestObtainExporter_BuildErrorPropagates(t *testing.T) {
 	r := &AgentReconciler{
 		exporterCache: map[CRKey]cachedExporter{},
@@ -914,8 +845,6 @@ func TestObtainExporter_BuildErrorPropagates(t *testing.T) {
 	}
 }
 
-// TestReapStaleExporters exercises both the no-op-when-active path and
-// the close-on-stale path.
 func TestReapStaleExporters(t *testing.T) {
 	a := &fakeExporter{name: "a"}
 	b := &fakeExporter{name: "b"}
@@ -938,8 +867,6 @@ func TestReapStaleExporters(t *testing.T) {
 	}
 }
 
-// TestCgroupIDFromPath_Errors covers the bad-path branch (Stat failure)
-// and a happy path resolved against the test's own working directory.
 func TestCgroupIDFromPath_Errors(t *testing.T) {
 	if _, err := cgroupIDFromPath("/non/existent/path/should/not/exist"); err == nil {
 		t.Error("expected error for missing path")
@@ -954,8 +881,6 @@ func TestCgroupIDFromPath_Errors(t *testing.T) {
 	}
 }
 
-// TestCgroupPathForPod_NoMatch covers the all-candidates-miss branch
-// by passing a synthetic UID that cannot exist on the host.
 func TestCgroupPathForPod_NoMatch(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -968,9 +893,6 @@ func TestCgroupPathForPod_NoMatch(t *testing.T) {
 	}
 }
 
-// TestResolveCgroupIDs_SkipsUnresolvable confirms that pods whose
-// cgroup paths cannot be resolved are silently dropped (the next
-// reconcile picks them up).
 func TestResolveCgroupIDs_SkipsUnresolvable(t *testing.T) {
 	pods := []*corev1.Pod{
 		{
@@ -989,25 +911,17 @@ func TestResolveCgroupIDs_SkipsUnresolvable(t *testing.T) {
 	}
 }
 
-// TestBuildTargetSet_Deduplicates verifies the seen-cgroup-id guard
-// keeps the same target out of the output twice.
 func TestBuildTargetSet_Deduplicates(t *testing.T) {
 	rules := []CRRule{
 		{CgroupIDs: map[uint64]struct{}{1: {}, 2: {}}},
 		{CgroupIDs: map[uint64]struct{}{2: {}, 3: {}}},
 	}
-	// Empty pod list: every cgroup ID is "unmatched", so the result is empty
-	// — but the function must not panic and dedup must not crash on overlap.
 	out := buildTargetSet(rules, nil, nil)
 	if len(out) != 0 {
 		t.Errorf("expected empty output, got %+v", out)
 	}
 }
 
-// TestPolicySnapshotFromBundle_FullRoundTrip pins the operator→bundle
-// →agent path: a bundle populated by the operator with effective
-// sample, filters, thresholds, and generation surfaces in a
-// PolicySnapshot the router carries on every CRRule.
 func TestPolicySnapshotFromBundle_FullRoundTrip(t *testing.T) {
 	five := int32(5)
 	twenty := int32(20)
@@ -1048,8 +962,69 @@ func TestPolicySnapshotFromBundle_FullRoundTrip(t *testing.T) {
 	}
 }
 
-// TestPolicySnapshotFromBundle_NilSafe documents the agent contract:
-// a nil bundle yields a zero-value snapshot, never panics.
+func TestUnionCategoriesFromRules_NoFilterWidensToAll(t *testing.T) {
+	rules := []CRRule{
+		{Key: CRKey{Namespace: "ns", Name: "a"}, Policy: PolicySnapshot{Filters: []string{"dns"}}},
+		{Key: CRKey{Namespace: "ns", Name: "b"}, Policy: PolicySnapshot{}},
+	}
+	got := unionCategoriesFromRules(rules)
+	want := []string{"cpu", "dns", "fs", "net", "proc"}
+	if !equalStrings(got, want) {
+		t.Errorf("union = %v, want %v", got, want)
+	}
+}
+
+func TestUnionCategoriesFromRules_SortedDeduped(t *testing.T) {
+	rules := []CRRule{
+		{Key: CRKey{Namespace: "ns", Name: "a"}, Policy: PolicySnapshot{Filters: []string{"net", "fs"}}},
+		{Key: CRKey{Namespace: "ns", Name: "b"}, Policy: PolicySnapshot{Filters: []string{"fs", "dns"}}},
+		{Key: CRKey{Namespace: "ns", Name: "c"}, Policy: PolicySnapshot{Filters: []string{"net"}}},
+	}
+	got := unionCategoriesFromRules(rules)
+	want := []string{"dns", "fs", "net"}
+	if !equalStrings(got, want) {
+		t.Errorf("union = %v, want %v", got, want)
+	}
+}
+
+func TestUnionCategoriesFromRules_SkipsErroredRules(t *testing.T) {
+	rules := []CRRule{
+		{Key: CRKey{Namespace: "ns", Name: "ok"}, Policy: PolicySnapshot{Filters: []string{"dns"}}},
+		{
+			Key:    CRKey{Namespace: "ns", Name: "bad"},
+			Policy: PolicySnapshot{Filters: []string{"net", "fs"}},
+			Err:    errors.New("bundle load failed"),
+		},
+	}
+	got := unionCategoriesFromRules(rules)
+	want := []string{"dns"}
+	if !equalStrings(got, want) {
+		t.Errorf("errored rule must not contribute: got %v want %v", got, want)
+	}
+}
+
+func TestUnionCategoriesFromRules_EmptyRulesEmptyUnion(t *testing.T) {
+	got := unionCategoriesFromRules(nil)
+	if got == nil {
+		t.Fatal("union must return a non-nil slice so the gate can act on it")
+	}
+	if len(got) != 0 {
+		t.Errorf("union = %v, want []", got)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestPolicySnapshotFromBundle_NilSafe(t *testing.T) {
 	snap := policySnapshotFromBundle(nil)
 	if snap.EffectiveSamplePercent != nil ||

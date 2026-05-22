@@ -71,3 +71,10 @@ type EngineObserver interface {
 	OnCgroupsAttached(n int)
 	OnCgroupsDetached(n int)
 }
+
+// CategoryGateable is an optional capability a TracerBackend can
+// implement to support kernel-side gating of probe groups by CRD
+// filter category.
+type CategoryGateable interface {
+	SetEnabledCategories(categories []string) error
+}

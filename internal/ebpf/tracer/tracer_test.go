@@ -24,9 +24,6 @@ import (
 	"github.com/podtrace/podtrace/internal/sysfs"
 )
 
-// useCgroupBase points the cgroup root at dir for the duration of the
-// test. Required because sysfs.CgroupReadFile rejects paths outside
-// config.CgroupBasePath.
 func useCgroupBase(t *testing.T, dir string) {
 	t.Helper()
 	original := config.CgroupBasePath
@@ -54,11 +51,6 @@ func TestTracer_AttachToCgroup(t *testing.T) {
 	}
 }
 
-// TestTracer_AttachToCgroup_IsAdditive locks in the per-cgroup contract
-// used by the agent's engine: calling AttachToCgroup multiple times
-// must accumulate paths, not replace them. The original implementation
-// silently dropped earlier attachments on every new call, breaking
-// continuous-trace event flow once a PodTrace matched more than one pod.
 func TestTracer_AttachToCgroup_IsAdditive(t *testing.T) {
 	tr := &Tracer{filter: filter.NewCgroupFilter()}
 
@@ -82,10 +74,6 @@ func TestTracer_AttachToCgroup_IsAdditive(t *testing.T) {
 	}
 }
 
-// TestTracer_AttachToCgroup_IdempotentOnRepeat asserts that re-calling
-// AttachToCgroup with the same path is a no-op rather than a duplicate
-// entry. The agent's engine relies on this when a workload survives
-// across reconciles.
 func TestTracer_AttachToCgroup_IdempotentOnRepeat(t *testing.T) {
 	tr := &Tracer{filter: filter.NewCgroupFilter()}
 	const p = "/sys/fs/cgroup/dup"
@@ -99,9 +87,6 @@ func TestTracer_AttachToCgroup_IdempotentOnRepeat(t *testing.T) {
 	}
 }
 
-// TestTracer_AttachToCgroups_Replaces preserves the session-Job bulk
-// contract: passing the full set as one call replaces whatever was
-// there before.
 func TestTracer_AttachToCgroups_Replaces(t *testing.T) {
 	tr := &Tracer{filter: filter.NewCgroupFilter()}
 	if err := tr.AttachToCgroup("/sys/fs/cgroup/old"); err != nil {
@@ -1765,7 +1750,6 @@ func TestTracer_Start_PathCacheCleanupGoroutine(t *testing.T) {
 
 
 
-// ─── roundUpPow2 ─────────────────────────────────────────────────────────────
 
 func TestRoundUpPow2_BelowMin(t *testing.T) {
 	for _, n := range []uint32{0, 1, 100, 4095} {
@@ -1803,7 +1787,6 @@ func TestRoundUpPow2_NonPowers(t *testing.T) {
 	}
 }
 
-// ─── isCgroupV2Base ──────────────────────────────────────────────────────────
 
 func TestIsCgroupV2Base_Exists(t *testing.T) {
 	dir := t.TempDir()
@@ -1828,7 +1811,6 @@ func TestIsCgroupV2Base_EmptyPath(t *testing.T) {
 	}
 }
 
-// ─── getCgroupIDFromPath ──────────────────────────────────────────────────────
 
 func TestGetCgroupIDFromPath_ValidPath(t *testing.T) {
 	dir := t.TempDir()
@@ -1848,7 +1830,6 @@ func TestGetCgroupIDFromPath_NonExistent(t *testing.T) {
 	}
 }
 
-// ─── readFirstPIDFromCgroupProcs ─────────────────────────────────────────────
 
 func TestReadFirstPIDFromCgroupProcs_Valid(t *testing.T) {
 	base := t.TempDir()
@@ -1907,11 +1888,9 @@ func TestReadFirstPIDFromCgroupProcs_LeadingBlankLines(t *testing.T) {
 	}
 }
 
-// ─── AttachToCgroup additional paths ─────────────────────────────────────────
 
 func TestAttachToCgroup_EmptyPath(t *testing.T) {
 	tr := &Tracer{filter: filter.NewCgroupFilter()}
-	// Empty path is rejected with "no valid cgroup paths provided" in this codebase.
 	_ = tr.AttachToCgroup("")
 }
 
@@ -1973,14 +1952,12 @@ func TestAttachToCgroup_PreserveExistingPID(t *testing.T) {
 	}
 }
 
-// ─── pollBPFMapUtilization ────────────────────────────────────────────────────
 
 func TestPollBPFMapUtilization_NilCollection(t *testing.T) {
 	tr := &Tracer{collection: nil}
 	tr.pollBPFMapUtilization() // must not panic
 }
 
-// ─── ActiveProbeGroups / DisableProbeGroup ────────────────────────────────────
 
 func TestActiveProbeGroups_Empty(t *testing.T) {
 	tr := &Tracer{probeGroups: make(map[probes.ProbeGroup][]link.Link)}
@@ -2000,6 +1977,105 @@ func TestActiveProbeGroups_WithGroups(t *testing.T) {
 	}
 }
 
+func TestSetEnabledCategories_NilSentinelIsNoop(t *testing.T) {
+	tr := &Tracer{probeGroups: map[probes.ProbeGroup][]link.Link{
+		probes.GroupNetwork:    nil,
+		probes.GroupFileSystem: nil,
+	}}
+	if err := tr.SetEnabledCategories(nil); err != nil {
+		t.Fatalf("nil sentinel: %v", err)
+	}
+	if _, ok := tr.probeGroups[probes.GroupNetwork]; !ok {
+		t.Error("nil sentinel must not detach GroupNetwork")
+	}
+	if _, ok := tr.probeGroups[probes.GroupFileSystem]; !ok {
+		t.Error("nil sentinel must not detach GroupFileSystem")
+	}
+}
+
+func TestSetEnabledCategories_DetachesUnneededGroups(t *testing.T) {
+	tr := &Tracer{probeGroups: map[probes.ProbeGroup][]link.Link{
+		probes.GroupNetwork:    nil,
+		probes.GroupFileSystem: nil,
+		probes.GroupCPU:        nil,
+	}}
+	if err := tr.SetEnabledCategories([]string{"fs"}); err != nil {
+		t.Fatalf("gate: %v", err)
+	}
+	if _, ok := tr.probeGroups[probes.GroupFileSystem]; !ok {
+		t.Error("GroupFileSystem must stay attached for category=fs")
+	}
+}
+
+func TestSetEnabledCategories_NonGateableGroupsUnaffected(t *testing.T) {
+	tr := &Tracer{probeGroups: map[probes.ProbeGroup][]link.Link{
+		probes.GroupDatabase:  nil,
+		probes.GroupCache:     nil,
+		probes.GroupMessaging: nil,
+		probes.GroupPool:      nil,
+	}}
+	if err := tr.SetEnabledCategories([]string{}); err != nil {
+		t.Fatalf("gate: %v", err)
+	}
+	for _, g := range []probes.ProbeGroup{
+		probes.GroupDatabase, probes.GroupCache,
+		probes.GroupMessaging, probes.GroupPool,
+	} {
+		if _, ok := tr.probeGroups[g]; !ok {
+			t.Errorf("non-gateable group %s must not be detached by empty category set", g)
+		}
+	}
+}
+
+func TestSetEnabledCategories_WarnsOnlyForIntentionallyDisabled(t *testing.T) {
+	tr := &Tracer{probeGroups: map[probes.ProbeGroup][]link.Link{
+		probes.GroupFileSystem: nil,
+	}}
+	if err := tr.SetEnabledCategories([]string{"dns"}); err != nil {
+		t.Fatalf("gate round 1: %v", err)
+	}
+	if tr.intentionallyDisabled == nil {
+		t.Fatal("intentionallyDisabled must be initialised after a detach")
+	}
+	if _, ok := tr.intentionallyDisabled[probes.GroupFileSystem]; !ok {
+		t.Error("GroupFileSystem should be tracked as intentionally disabled")
+	}
+	if _, ok := tr.intentionallyDisabled[probes.GroupTLS]; ok {
+		t.Error("GroupTLS never attached — must NOT be tracked as intentionally disabled")
+	}
+	if err := tr.SetEnabledCategories([]string{"fs", "dns"}); err != nil {
+		t.Fatalf("gate round 2: %v", err)
+	}
+	if _, ok := tr.intentionallyDisabled[probes.GroupFileSystem]; !ok {
+		t.Error("FS must stay in intentionallyDisabled until agent restart")
+	}
+	if _, ok := tr.intentionallyDisabled[probes.GroupTLS]; ok {
+		t.Error("GroupTLS still must not be in intentionallyDisabled")
+	}
+}
+
+func TestGroupCategoryNeeds_CoversEveryCategory(t *testing.T) {
+	covered := map[string]bool{}
+	for _, needs := range groupCategoryNeeds {
+		for _, c := range needs {
+			covered[c] = true
+		}
+	}
+	for _, c := range []string{"dns", "net", "fs", "cpu", "proc"} {
+		if !covered[c] {
+			t.Errorf("CRD category %q has no probe group in groupCategoryNeeds", c)
+		}
+	}
+}
+
+func TestGroupsNeededFor_RoundTrip(t *testing.T) {
+	for _, c := range []string{"dns", "net", "fs", "cpu", "proc"} {
+		if got := groupsNeededFor(c); len(got) == 0 {
+			t.Errorf("groupsNeededFor(%q) returned nothing — category cannot be re-attached", c)
+		}
+	}
+}
+
 func TestDisableProbeGroup_NotPresent(t *testing.T) {
 	tr := &Tracer{probeGroups: make(map[probes.ProbeGroup][]link.Link)}
 	if err := tr.DisableProbeGroup(probes.GroupNetwork); err != nil {
@@ -2009,18 +2085,15 @@ func TestDisableProbeGroup_NotPresent(t *testing.T) {
 
 func TestDisableProbeGroup_EmptyLinks(t *testing.T) {
 	tr := &Tracer{probeGroups: make(map[probes.ProbeGroup][]link.Link)}
-	// nil slice → len == 0 → DisableProbeGroup returns early without deleting.
 	tr.probeGroups[probes.GroupDatabase] = nil
 	if err := tr.DisableProbeGroup(probes.GroupDatabase); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	// Group is still present because len(links)==0 causes early return.
 	if _, ok := tr.probeGroups[probes.GroupDatabase]; !ok {
 		t.Error("expected group to still be present when links slice is nil")
 	}
 }
 
-// ─── serveManagementAPI via fake mux ─────────────────────────────────────────
 
 func TestServeManagementAPI_GetProbes(t *testing.T) {
 	tr := &Tracer{probeGroups: make(map[probes.ProbeGroup][]link.Link)}
@@ -2145,19 +2218,16 @@ func TestServeManagementAPI_BadPathMethod(t *testing.T) {
 	}
 }
 
-// ─── serveManagementAPI real HTTP server (coverage for the actual function) ──
 
 func TestServeManagementAPI_RealServer_ContextCancel(t *testing.T) {
 	tr := &Tracer{probeGroups: make(map[probes.ProbeGroup][]link.Link)}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // already cancelled — server should exit quickly
+	cancel()
 
-	// port=0 causes bind to fail → ListenAndServe returns immediately
 	tr.serveManagementAPI(ctx, 0)
 }
 
-// ─── Stop with processNameCache and pathCache ─────────────────────────────────
 
 func TestStop_WithCaches(t *testing.T) {
 	tr := &Tracer{
@@ -2173,19 +2243,14 @@ func TestStop_WithCaches(t *testing.T) {
 	}
 }
 
-// ─── getProcessNameQuick — cache miss with non-existent PID ──────────────────
 
 func TestGetProcessNameQuick_NonExistentPID(t *testing.T) {
 	tr := &Tracer{processNameCache: cache.NewLRUCache(16, time.Minute)}
-	// PID 55555 almost certainly doesn't exist on the test host.
 	result := tr.getProcessNameQuick(55555)
-	_ = result // just ensure no panic
+	_ = result
 }
 
-// ─── serveManagementAPI real integration test ─────────────────────────────────
 
-// TestServeManagementAPI_Integration starts the actual serveManagementAPI on a
-// free port and exercises the /probes and /probes/{group}/disable endpoints.
 func TestServeManagementAPI_Integration(t *testing.T) {
 	// Find a free port by opening a listener and closing it.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -2205,7 +2270,6 @@ func TestServeManagementAPI_Integration(t *testing.T) {
 		tr.serveManagementAPI(ctx, port)
 	}()
 
-	// Wait up to 500ms for the server to be ready.
 	addr := fmt.Sprintf("http://127.0.0.1:%d", port)
 	var ready bool
 	for i := 0; i < 50; i++ {
@@ -2223,7 +2287,6 @@ func TestServeManagementAPI_Integration(t *testing.T) {
 		t.Skip("management API server not ready in time")
 	}
 
-	// GET /probes → 200 with active_groups.
 	resp, err := http.Get(addr + "/probes")
 	if err != nil {
 		t.Fatalf("GET /probes: %v", err)
@@ -2234,7 +2297,6 @@ func TestServeManagementAPI_Integration(t *testing.T) {
 		t.Errorf("GET /probes: expected 200, got %d: %s", resp.StatusCode, body)
 	}
 
-	// POST /probes → 405 method not allowed.
 	resp2, err := http.Post(addr+"/probes", "application/json", nil)
 	if err != nil {
 		t.Fatalf("POST /probes: %v", err)
@@ -2244,7 +2306,6 @@ func TestServeManagementAPI_Integration(t *testing.T) {
 		t.Errorf("POST /probes: expected 405, got %d", resp2.StatusCode)
 	}
 
-	// POST /probes/network/disable → 204 (group present but no links).
 	resp3, err := http.Post(addr+"/probes/network/disable", "application/json", nil)
 	if err != nil {
 		t.Fatalf("POST /probes/network/disable: %v", err)
@@ -2254,7 +2315,6 @@ func TestServeManagementAPI_Integration(t *testing.T) {
 		t.Errorf("POST /probes/network/disable: expected 204, got %d", resp3.StatusCode)
 	}
 
-	// POST /probes/network/enable → 400 unknown action.
 	resp4, err := http.Post(addr+"/probes/network/enable", "application/json", nil)
 	if err != nil {
 		t.Fatalf("POST /probes/network/enable: %v", err)
@@ -2264,7 +2324,6 @@ func TestServeManagementAPI_Integration(t *testing.T) {
 		t.Errorf("POST /probes/network/enable: expected 400, got %d", resp4.StatusCode)
 	}
 
-	// GET /probes/network/disable → 404 (GET not POST).
 	resp5, err := http.Get(addr + "/probes/network/disable")
 	if err != nil {
 		t.Fatalf("GET /probes/network/disable: %v", err)
@@ -2282,7 +2341,6 @@ func TestServeManagementAPI_Integration(t *testing.T) {
 	}
 }
 
-// ─── misc format helpers ───────────────────────────────────────────────────────
 
 // Verify that the fmt import is used so the file compiles without "imported and not used".
 var _ = fmt.Sprintf

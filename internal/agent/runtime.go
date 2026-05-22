@@ -31,38 +31,23 @@ import (
 )
 
 // Options configure a single agent run. Defaults are applied by
-// DefaultOptions; callers override only what the CLI flags customised.
+// DefaultOptions.
 type Options struct {
-	// NodeName is the node this agent runs on. Required — comes from
-	// $NODE_NAME via the DaemonSet's downward API.
 	NodeName string
 
-	// SystemNamespace is where exporter bundles live (and where
-	// podtrace-system resources are reconciled by the operator).
 	SystemNamespace string
 
-	// TracerConfigName lets the agent read infra defaults (currently
-	// unused; reserved for bundle cache invalidation policies).
 	TracerConfigName string
 
 	MetricsAddr string
 	HealthAddr  string
 
-	// StatusReportInterval overrides the default 30s cadence. Tests set
-	// this short; production leaves it at zero for the default.
 	StatusReportInterval time.Duration
 
-	// BackendFactory produces the TracerBackend the Engine will drive.
-	// When nil, the agent falls back to a noop backend and logs a
-	// one-line warning: the DaemonSet pod stays Ready so operators can
-	// inspect it via kubectl, but no kernel-space tracing happens.
-	// Tests inject a fake backend through this hook.
 	BackendFactory func() (tracer.TracerBackend, error)
 }
 
-// DefaultOptions returns production defaults. NodeName and
-// SystemNamespace are NOT defaulted because they have no reasonable
-// static value — the CLI validates both.
+// DefaultOptions returns production defaults.
 func DefaultOptions() Options {
 	return Options{
 		MetricsAddr: ":9090",
@@ -86,13 +71,7 @@ func Run(ctx context.Context, opts Options) error {
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
-		// LeaderElection OFF: each agent acts on its own node only, no
-		// coordination needed across DaemonSet replicas.
 		LeaderElection: false,
-		// Pod cache is filtered to this node; the bundle ConfigMap/Secret
-		// caches are filtered to the system namespace. PodTrace is
-		// watched cluster-wide — that's the cross-namespace resource we
-		// cannot narrow.
 		Cache: cache.Options{
 			ByObject: map[client.Object]cache.ByObject{
 				&corev1.Pod{}: {
@@ -106,9 +85,6 @@ func Run(ctx context.Context, opts Options) error {
 				},
 			},
 		},
-		// Metrics are served on the agent's own registry (not
-		// controller-runtime's default) so the Prometheus scrape
-		// surface is deterministic — see Metrics.NewMetrics.
 		Metrics: metricsserver.Options{BindAddress: "0"},
 	})
 	if err != nil {
@@ -146,7 +122,8 @@ func Run(ctx context.Context, opts Options) error {
 		Router:          router,
 		TargetsCh:       targetsCh,
 		Metrics:         metrics,
-		Enricher: enricher,
+		Enricher:        enricher,
+		CategoryGate:    makeCategoryGate(backend),
 	}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("setup reconciler: %w", err)
@@ -170,8 +147,6 @@ func Run(ctx context.Context, opts Options) error {
 	g.Go(func() error { return probes.Run(gctx) })
 	g.Go(func() error { return serveMetrics(gctx, opts.MetricsAddr, metrics, logger) })
 
-	// Mark ready once informers have synced — the manager's cache
-	// Start is async, so we wait here. Until then /readyz returns 503.
 	g.Go(func() error {
 		if !mgr.GetCache().WaitForCacheSync(gctx) {
 			return errors.New("informer cache sync failed")
@@ -206,14 +181,6 @@ func newAgentScheme() (*runtime.Scheme, error) {
 }
 
 // buildBackend returns the TracerBackend for the agent.
-//
-// Production: the CLI always sets BackendFactory (see cmd/podtrace/agent.go
-// where the --backend flag selects between the real eBPF tracer and an
-// explicit noop). A non-nil factory that returns an error is NOT fatal:
-// the agent falls back to the noop backend so the pod stays Ready, the
-// underlying error surfaces on PodTrace.status.nodeStatus.message via
-// StatusWriter.BackendErr, and `kubectl describe pod` keeps showing the
-// real cause. CrashLoopBackOff would hide that.
 func buildBackend(opts Options, logger logr.Logger) (tracer.TracerBackend, error) {
 	if opts.BackendFactory == nil {
 		logger.Info("no BackendFactory supplied — using noop backend (library/test mode; production binaries always set this)")
@@ -258,10 +225,20 @@ func serveMetrics(ctx context.Context, addr string, metrics *Metrics, logger log
 	return nil
 }
 
-// NoopBackend is the default TracerBackend when none is injected. It
-// accepts every Attach/SetContainerID call and never produces events,
-// so the agent's routing + status machinery is exercised end-to-end
-// without requiring a privileged eBPF load.
+// makeCategoryGate returns a closure suitable for
+// AgentReconciler.CategoryGate.
+func makeCategoryGate(backend tracer.TracerBackend) func(categories []string) error {
+	if backend == nil {
+		return nil
+	}
+	gate, ok := backend.(tracer.CategoryGateable)
+	if !ok {
+		return nil
+	}
+	return gate.SetEnabledCategories
+}
+
+// NoopBackend is the default TracerBackend when none is injected.
 type NoopBackend struct {
 	mu       sync.Mutex
 	eventCh  chan<- *events.Event
@@ -313,7 +290,7 @@ func (b *NoopBackend) Stop() error {
 }
 
 // Inject lets tests push synthetic events through the backend's
-// channel. Returns false if Start has not yet been called.
+// channel.
 func (b *NoopBackend) Inject(ev *events.Event) bool {
 	b.mu.Lock()
 	ch := b.eventCh

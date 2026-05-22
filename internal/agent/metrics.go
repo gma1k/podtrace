@@ -26,6 +26,11 @@ type Metrics struct {
 	EffectiveSampleRate *prometheus.GaugeVec
 	PolicyGeneration    *prometheus.GaugeVec
 
+	ErrorRateBreached *prometheus.CounterVec
+
+	detectorsMu sync.Mutex
+	detectors   map[CRKey]*errorRateDetector
+
 	EnrichmentLookups       *prometheus.CounterVec
 	EnrichmentCacheSize     prometheus.Gauge
 	EnrichmentSnapshots     prometheus.Counter
@@ -123,6 +128,12 @@ func NewMetrics() *Metrics {
 			Name:      "policy_generation",
 			Help:      "metadata.generation of the source PodTrace at the time the agent loaded its bundle. Compare to .metadata.generation on the CR to verify propagation.",
 		}, []string{"cr_namespace", "cr_name"}),
+		ErrorRateBreached: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "podtrace_agent",
+			Name:      "error_rate_breached_total",
+			Help:      "Edges where a CR's rolling-window error rate transitioned from below to above its configured spec.thresholds.errorRatePercent. One increment per transition (edge-triggered), so a sustained breach does not inflate this counter.",
+		}, []string{"cr_namespace", "cr_name"}),
+		detectors: map[CRKey]*errorRateDetector{},
 		lastEvents:  map[CRKey]int64{},
 		lastDropped: map[CRKey]int64{},
 	}
@@ -132,8 +143,43 @@ func NewMetrics() *Metrics {
 		m.EnrichmentLookups, m.EnrichmentCacheSize, m.EnrichmentSnapshots,
 		m.EnrichmentOwnerResolved,
 		m.ThresholdTripped, m.EffectiveSampleRate, m.PolicyGeneration,
+		m.ErrorRateBreached,
 	)
 	return m
+}
+
+// ObserveErrorRate feeds one event into the per-CR rolling-window
+// error-rate detector.
+func (m *Metrics) ObserveErrorRate(cr CRKey, thresholdPercent int32, isError bool) (justBreached bool) {
+	if m == nil {
+		return false
+	}
+	m.detectorsMu.Lock()
+	d, ok := m.detectors[cr]
+	if !ok {
+		d = newErrorRateDetector(thresholdPercent)
+		m.detectors[cr] = d
+	} else {
+		d.setThreshold(thresholdPercent)
+	}
+	m.detectorsMu.Unlock()
+
+	justBreached = d.Observe(isError)
+	if justBreached && m.ErrorRateBreached != nil {
+		m.ErrorRateBreached.WithLabelValues(cr.Namespace, cr.Name).Inc()
+	}
+	return justBreached
+}
+
+// dropErrorRateDetector removes the per-CR detector when a CR is no
+// longer scheduled on this node.
+func (m *Metrics) dropErrorRateDetector(cr CRKey) {
+	if m == nil {
+		return
+	}
+	m.detectorsMu.Lock()
+	delete(m.detectors, cr)
+	m.detectorsMu.Unlock()
 }
 
 // RecordThresholdTripped bumps the per-CR-per-kind counter once for an
@@ -177,6 +223,10 @@ func (m *Metrics) dropPolicyMetrics(cr CRKey) {
 	if m.ThresholdTripped != nil {
 		m.ThresholdTripped.DeletePartialMatch(lbls)
 	}
+	if m.ErrorRateBreached != nil {
+		m.ErrorRateBreached.DeletePartialMatch(lbls)
+	}
+	m.dropErrorRateDetector(cr)
 }
 
 // RefreshFromEnricher emits the deltas from the enricher's atomic

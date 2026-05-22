@@ -70,6 +70,8 @@ type Tracer struct {
 	links                    []link.Link
 	probeGroupsMu            sync.Mutex
 	probeGroups              map[probes.ProbeGroup][]link.Link
+
+	intentionallyDisabled map[probes.ProbeGroup]struct{}
 	reader                   *ringbuf.Reader
 	filter                   *filter.CgroupFilter
 	containerID              string
@@ -205,10 +207,14 @@ func NewTracer() (*Tracer, error) {
 		}
 	}
 
-	links, err := probes.AttachProbes(coll)
+	probeGroups, err := probes.AttachProbesByGroup(coll)
 	if err != nil {
 		coll.Close()
 		return nil, err
+	}
+	var links []link.Link
+	for _, ls := range probeGroups {
+		links = append(links, ls...)
 	}
 
 	rd, err := ringbuf.NewReader(coll.Maps["events"])
@@ -226,7 +232,8 @@ func NewTracer() (*Tracer, error) {
 	t := &Tracer{
 		collection:               coll,
 		links:                    links,
-		probeGroups:              make(map[probes.ProbeGroup][]link.Link),
+		probeGroups:              probeGroups,
+		intentionallyDisabled:    map[probes.ProbeGroup]struct{}{},
 		reader:                   rd,
 		filter:                   filter.NewCgroupFilter(),
 		processNameCache:         processCache,
@@ -933,6 +940,118 @@ func (t *Tracer) ActiveProbeGroups() []probes.ProbeGroup {
 	return result
 }
 
+// SetEnabledCategories disables probe groups whose CRD-filter categories
+// are absent from `categories`. This is the kernel-side counterpart to
+// the Router's per-event userspace filtering — when no CR on this node
+// asks for a category, the corresponding kprobes can stay un-attached,
+// saving the per-event kernel overhead.
+//
+// Semantics:
+//
+//   - `categories == nil` is a sentinel: "do not gate anything" — the
+//     bootstrap default before the agent has observed any CRs. Calling
+//     with nil is a no-op so a freshly-started agent does not strip the
+//     default attach set out from under in-flight events.
+//   - An empty (non-nil) slice means "no CR needs any category here",
+//     and disables every gateable group.
+//   - Currently this is detach-only: groups newly absent from the
+//     active set are closed; groups newly present in the active set
+//     but previously closed are NOT re-attached. A warning is logged
+//     so operators know to restart the agent to pick up the new
+//     category. Hot re-attach is a separate change because the
+//     attach-while-events-flow race is non-trivial.
+//
+// SetEnabledCategories is safe to call concurrently with event
+// processing — only the probeGroups map is mutated, under its mutex.
+func (t *Tracer) SetEnabledCategories(categories []string) error {
+	if categories == nil {
+		return nil
+	}
+	wanted := make(map[string]struct{}, len(categories))
+	for _, c := range categories {
+		wanted[c] = struct{}{}
+	}
+
+	t.probeGroupsMu.Lock()
+	active := make([]probes.ProbeGroup, 0, len(t.probeGroups))
+	for g := range t.probeGroups {
+		active = append(active, g)
+	}
+	t.probeGroupsMu.Unlock()
+
+	for _, g := range active {
+		if probeGroupNeededBy(g, wanted) {
+			continue
+		}
+		if err := t.DisableProbeGroup(g); err != nil {
+			logger.Warn("SetEnabledCategories: disable failed",
+				zap.String("group", string(g)), zap.Error(err))
+			continue
+		}
+		t.probeGroupsMu.Lock()
+		if t.intentionallyDisabled == nil {
+			t.intentionallyDisabled = map[probes.ProbeGroup]struct{}{}
+		}
+		t.intentionallyDisabled[g] = struct{}{}
+		t.probeGroupsMu.Unlock()
+	}
+
+	for c := range wanted {
+		needs := groupsNeededFor(c)
+		for _, g := range needs {
+			t.probeGroupsMu.Lock()
+			_, disabled := t.intentionallyDisabled[g]
+			t.probeGroupsMu.Unlock()
+			if disabled {
+				logger.Warn("SetEnabledCategories: category needs a group that is currently detached; restart agent to re-attach",
+					zap.String("category", c), zap.String("group", string(g)))
+			}
+		}
+	}
+	return nil
+}
+
+// probeGroupNeededBy reports whether a group should stay attached
+// given the set of categories currently desired by some active CR.
+func probeGroupNeededBy(g probes.ProbeGroup, wanted map[string]struct{}) bool {
+	needs, gated := groupCategoryNeeds[g]
+	if !gated {
+		return true // not gateable by category
+	}
+	for _, c := range needs {
+		if _, ok := wanted[c]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// groupsNeededFor returns the probe groups required to surface a
+// given CRD category.
+func groupsNeededFor(category string) []probes.ProbeGroup {
+	var out []probes.ProbeGroup
+	for g, needs := range groupCategoryNeeds {
+		for _, c := range needs {
+			if c == category {
+				out = append(out, g)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// groupCategoryNeeds maps each probe group to the CRD filter
+// categories that require it.
+var groupCategoryNeeds = map[probes.ProbeGroup][]string{
+	probes.GroupNetwork:    {"net"},
+	probes.GroupFileSystem: {"fs"},
+	probes.GroupCPU:        {"cpu", "proc"},
+	probes.GroupMemory:     {"proc"},
+	probes.GroupFastCGI:    {"net"},
+	probes.GroupTLS: {"dns", "cpu"},
+}
+
 // DisableProbeGroup closes all links associated with the given group.
 func (t *Tracer) DisableProbeGroup(g probes.ProbeGroup) error {
 	t.probeGroupsMu.Lock()
@@ -966,7 +1085,6 @@ func (t *Tracer) serveManagementAPI(ctx context.Context, port int) {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{"active_groups": strs})
 	})
 	mux.HandleFunc("/probes/", func(w http.ResponseWriter, r *http.Request) {
-		// Expect /probes/{group}/disable
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/probes/"), "/")
 		if len(parts) != 2 || r.Method != http.MethodPost {
 			http.Error(w, "not found", http.StatusNotFound)
@@ -986,7 +1104,6 @@ func (t *Tracer) serveManagementAPI(ctx context.Context, port int) {
 		}
 	})
 
-	// Wire profiling endpoints when a controller has been registered.
 	if t.profilingCtrl != nil {
 		mux.HandleFunc("/profile/start", t.profilingCtrl.HTTPStart)
 		mux.HandleFunc("/profile/status", t.profilingCtrl.HTTPStatus)

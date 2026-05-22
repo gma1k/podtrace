@@ -37,7 +37,7 @@ CLI strengths the CRDs don't replace:
 ```
 
 ```yaml
-# Continuous CR equivalent (control plane only today; events stubbed)
+# Continuous CR equivalent — events flow through the agent to the exporter
 apiVersion: podtrace.io/v1alpha1
 kind: ExporterConfig
 metadata: { name: my-otlp, namespace: my-app }
@@ -234,11 +234,12 @@ workload owner cannot exceed the platform-owner cap, and vice versa.
 The resolved value is surfaced on `status.policy.effectiveSampleRate`;
 inspect it there rather than inferring from `spec` alone.
 
-**`PodTrace` events are not yet flowing through the agent.** Continuous
-realtime tracing via the CR has working control-plane plumbing
-(matching, status, RBAC) but events are stubbed (`NoopBackend`). For
-real eBPF flow today, use `PodTraceSession` (works end-to-end) or stay
-on the CLI.
+**`PodTrace` events flow end-to-end through the agent.** Continuous
+realtime tracing via the CR is wired through the real eBPF backend by
+default — events from matched pods become OpenTelemetry spans on the
+configured exporter, with sampling, filters, and per-event threshold
+tagging applied per `spec.policy`. A `--backend=noop` flag exists for
+debugging on clusters where eBPF cannot be loaded.
 
 ## Related
 

@@ -147,22 +147,17 @@ no-op rather than a hard install failure.
 
 ## Current limits (where we are vs the long-term shape)
 
-Two limits to be honest about:
+One limit to be honest about:
 
-1. **Continuous PodTrace events are not yet emitted to exporters.** The
-   agent's continuous-tracing path uses a `NoopBackend` today; the control
-   plane (matching, bundle sync, status writes, multi-CR merge) all works
-   and is observable, but events do not flow through the agent to the
-   configured exporter. Phase 5+ work plumbs the same eBPF stack the
-   session Job already runs into the agent's event loop.
-2. **`spec.reportRef.objectStore` is reserved.** The CRD schema accepts an
-   `objectStore` sink field (S3/GCS/Azure) so clients can adopt it ahead
-   of the upload path going live. The validating webhook rejects sessions
-   that set it today — Phase 7+ work.
+- **`spec.reportRef.objectStore` is reserved.** The CRD schema accepts an
+  `objectStore` sink field (S3/GCS/Azure) so clients can adopt it ahead
+  of the upload path going live. The validating webhook rejects sessions
+  that set it today — Phase 7+ work.
 
-For real eBPF-active tracing today, use [PodTraceSession](crd-podtracesession.md)
-(Phase 4 — works end-to-end with summary + reportRef artifacts) or the
-standalone [CLI binary](usage.md).
+Both [PodTrace](crd-podtrace.md) (continuous) and
+[PodTraceSession](crd-podtracesession.md) (bounded) drive the real eBPF
+backend by default, with events surfacing as OpenTelemetry spans on the
+configured exporter.
 
 ## Going further
 

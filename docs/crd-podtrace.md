@@ -5,13 +5,12 @@ operator creates an exporter bundle in `podtrace-system`, the agent
 DaemonSet matches the selector, and per-node status entries roll up into
 the CR's `.status.nodeStatus` array.
 
-> **Current status (honest):** The control plane is fully functional —
-> matching, bundle sync, multi-CR merging, per-node status writes all
-> work. **Event emission to the configured exporter is stubbed** in the
-> agent's continuous path (NoopBackend); no spans reach the exporter
-> today. For a working end-to-end trace including event flow, use
-> [PodTraceSession](crd-podtracesession.md). The plumbing for real
-> events through this path is upcoming work.
+The agent loads the real eBPF backend by default and emits one
+OpenTelemetry span per kernel event to the configured exporter. A
+no-op backend remains available for clusters where loading eBPF
+programs is undesirable — opt in by passing `--backend=noop` to the
+agent (DaemonSet-template override; production deployments leave this
+unset).
 
 ## Minimal example
 
@@ -146,11 +145,17 @@ the same namespace. Cross-namespace exporter references are not allowed.
 exporter bundle in `podtrace-system`. Likely a missing user-namespace
 Secret referenced by the ExporterConfig. Check the operator log.
 
-**Events stay at zero:** Expected today — see status note at the top.
-For real eBPF-active tracing, use a [PodTraceSession](crd-podtracesession.md).
+**Events stay at zero:** The agent matched no pods, the matched pods
+generate no kernel events of the configured `filters`, or
+`podtrace_agent_backend_degraded` is non-zero on the agent's node
+(check `kubectl -n podtrace-system logs daemonset/podtrace-agent` for
+the failure reason). The continuous CR uses the real eBPF backend by
+default — confirm with
+`kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.spec.template.spec.containers[0].args}'`
+that `--backend=noop` is not present.
 
 ## Related
 
-- [crd-podtracesession.md](crd-podtracesession.md) — bounded diagnose CR (the live event path)
+- [crd-podtracesession.md](crd-podtracesession.md) — bounded diagnose CR for one-shot traces
 - [crd-exporterconfig.md](crd-exporterconfig.md) — exporter setup
 - [operator.md](operator.md) — operator architecture
