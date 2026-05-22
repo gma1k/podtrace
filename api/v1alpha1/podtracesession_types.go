@@ -9,6 +9,22 @@ import (
 // +kubebuilder:validation:Enum=Pending;Running;Completed;Failed
 type SessionState string
 
+// ReportFailureReason is the stable enum the operator stamps onto
+// status.reportFailureReason when an objectStore sidecar terminates
+// non-zero. Operators consume this for alerting and runbooks; the
+// free-text cause stays in conditions[type=ReportUploaded].message.
+// +kubebuilder:validation:Enum=InvalidURI;CredentialMissing;BucketNotFound;AccessDenied;NetworkTimeout;Unknown
+type ReportFailureReason string
+
+var (
+	ReportFailureReasonInvalidURI        = ReportFailureReason("InvalidURI")
+	ReportFailureReasonCredentialMissing = ReportFailureReason("CredentialMissing")
+	ReportFailureReasonBucketNotFound    = ReportFailureReason("BucketNotFound")
+	ReportFailureReasonAccessDenied      = ReportFailureReason("AccessDenied")
+	ReportFailureReasonNetworkTimeout    = ReportFailureReason("NetworkTimeout")
+	ReportFailureReasonUnknown           = ReportFailureReason("Unknown")
+)
+
 const (
 	SessionStatePending   SessionState = "Pending"
 	SessionStateRunning   SessionState = "Running"
@@ -19,55 +35,38 @@ const (
 // PodTraceSessionSpec defines a bounded diagnose-mode trace. The operator
 // reconciles this into one privileged Job per node hosting matched pods.
 type PodTraceSessionSpec struct {
-	// Selector picks target pods by label. Mutually exclusive with PodRefs.
 	// +optional
 	Selector *metav1.LabelSelector `json:"selector,omitempty"`
 
-	// PodRefs explicitly enumerates target pods.
 	// +optional
 	PodRefs []PodRef `json:"podRefs,omitempty"`
 
-	// NamespaceSelector scopes the Selector across namespaces. When unset
-	// the selector is evaluated within the session's own namespace only.
 	// +optional
 	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
 
-	// ContainerName restricts tracing to a specific container.
 	// +optional
 	ContainerName string `json:"containerName,omitempty"`
 
-	// Duration is the total wall-clock time the session should run. Required.
-	// Format: Go duration, e.g. "30s", "5m". Maximum is enforced by the
-	// operator against TracerConfig.spec.session.maxDuration.
 	// +kubebuilder:validation:Required
 	Duration metav1.Duration `json:"duration"`
 
-	// Filters restricts the event categories captured. When empty, all are captured.
 	// +optional
 	Filters []EventFilter `json:"filters,omitempty"`
 
-	// ExporterRef names an ExporterConfig in the same namespace. Required.
 	// +kubebuilder:validation:Required
 	ExporterRef LocalObjectReference `json:"exporterRef"`
 
-	// Thresholds override the session's default anomaly-detection settings.
 	// +optional
 	Thresholds *Thresholds `json:"thresholds,omitempty"`
 
-	// SamplePercent sets the sampling rate for exported traces, 0-100.
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=100
 	// +optional
 	SamplePercent *int32 `json:"samplePercent,omitempty"`
 
-	// ReportRef points at where the diagnose report summary should be persisted.
-	// If unset, only the exporter receives events and the session status
-	// retains a small inline summary.
 	// +optional
 	ReportRef *ReportReference `json:"reportRef,omitempty"`
 
-	// TTLSecondsAfterFinished cleans up the session resource after completion.
-	// If unset, the operator default applies.
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
@@ -75,36 +74,28 @@ type PodTraceSessionSpec struct {
 
 // SessionJobRef describes a child Job created by the session reconciler.
 type SessionJobRef struct {
-	// Node the Job is pinned to. Unique within the array.
 	// +kubebuilder:validation:Required
 	Node string `json:"node"`
 
-	// Name of the Job resource.
 	// +kubebuilder:validation:Required
 	Name string `json:"name"`
 
-	// Completed indicates whether the Job has finished (success or failure).
 	Completed bool `json:"completed"`
 
-	// EventCount is the number of events this Job's tracer reported.
 	// +optional
 	EventCount int64 `json:"eventCount,omitempty"`
 
-	// StartTime of the Job's pod.
 	// +optional
 	StartTime *metav1.Time `json:"startTime,omitempty"`
 
-	// CompletionTime of the Job's pod, if finished.
 	// +optional
 	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
 
-	// Message carries Job-level error text when Completed is true and the Job failed.
 	// +optional
 	Message string `json:"message,omitempty"`
 }
 
 // SessionSummary is a compact roll-up of what the session observed.
-// The full report is written to ReportRef, if set.
 type SessionSummary struct {
 	TotalEvents    int64 `json:"totalEvents"`
 	DNSEvents      int64 `json:"dnsEvents,omitempty"`
@@ -117,19 +108,15 @@ type SessionSummary struct {
 
 // PodTraceSessionStatus reflects the observed state of a PodTraceSession.
 type PodTraceSessionStatus struct {
-	// State is the high-level lifecycle state of the session.
 	// +optional
 	State SessionState `json:"state,omitempty"`
 
-	// StartTime is set when the first child Job enters Running.
 	// +optional
 	StartTime *metav1.Time `json:"startTime,omitempty"`
 
-	// CompletionTime is set when all child Jobs have finished.
 	// +optional
 	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
 
-	// Jobs lists the per-node Job children managed by this session.
 	// +optional
 	// +patchMergeKey=node
 	// +patchStrategy=merge
@@ -137,22 +124,20 @@ type PodTraceSessionStatus struct {
 	// +listMapKey=node
 	Jobs []SessionJobRef `json:"jobs,omitempty" patchStrategy:"merge" patchMergeKey:"node"`
 
-	// Summary is a compact per-category event roll-up for this session.
 	// +optional
 	Summary *SessionSummary `json:"summary,omitempty"`
 
-	// TargetNamespaces is the sorted list of namespace names the operator
-	// resolved spec.namespaceSelector.
 	TargetNamespaces []string `json:"targetNamespaces,omitempty"`
 
-	// ReportLocation is the resolved object URI of the uploaded session
-	// report when spec.reportRef.objectStore is set and the sidecar
-	// uploader has succeeded. Empty for ConfigMap/Secret sinks (the
-	// report lives at .spec.reportRef itself) and before upload completes.
 	// +optional
 	ReportLocation string `json:"reportLocation,omitempty"`
 
-	// Conditions is the latest available observations of session state.
+	// +optional
+	ReportFailureReason ReportFailureReason `json:"reportFailureReason,omitempty"`
+
+	// +optional
+	ReportAttempts int32 `json:"reportAttempts,omitempty"`
+
 	// +optional
 	// +patchMergeKey=type
 	// +patchStrategy=merge
@@ -160,7 +145,6 @@ type PodTraceSessionStatus struct {
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 
-	// ObservedGeneration is the most recent generation observed for this session.
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// +optional

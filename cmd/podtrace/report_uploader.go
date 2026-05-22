@@ -24,6 +24,8 @@ const reportLocationFile = "/var/run/podtrace/report-location.txt"
 
 const terminationLogPath = "/dev/termination-log"
 
+var keyHintStateFile = "/var/run/podtrace/upload-key-hint.txt"
+
 func newReportUploaderCmd() *cobra.Command {
 	var (
 		reportFile     string
@@ -201,13 +203,46 @@ func loadObjectStoreCredentials() (map[string][]byte, error) {
 	return out, nil
 }
 
+// buildObjectKeyHint returns a stable per-session object-key suffix.
 func buildObjectKeyHint() string {
+	if existing, ok := readPersistedKeyHint(); ok {
+		return existing
+	}
+	hint := freshObjectKeyHint(time.Now)
+	persistKeyHint(hint)
+	return hint
+}
+
+func freshObjectKeyHint(nowFn func() time.Time) string {
 	pod := os.Getenv("HOSTNAME")
 	if pod == "" {
 		pod = "session"
 	}
-	stamp := time.Now().UTC().Format("2006-01-02T15-04-05Z")
+	stamp := nowFn().UTC().Format("2006-01-02T15-04-05Z")
 	return fmt.Sprintf("%s-%s.txt", pod, stamp)
+}
+
+// readPersistedKeyHint loads a previously-stored key suffix from the
+// state file in the shared volume.
+func readPersistedKeyHint() (string, bool) {
+	raw, err := hostfs.ReadFile(keyHintStateFile)
+	if err != nil {
+		return "", false
+	}
+	hint := strings.TrimSpace(string(raw))
+	if hint == "" {
+		return "", false
+	}
+	return hint, true
+}
+
+// persistKeyHint writes the key suffix to the state file. Failures
+// are logged but non-fatal: a sidecar that cannot persist the hint
+// will simply pick a fresh one on restart (duplicate object).
+func persistKeyHint(hint string) {
+	if err := hostfs.WriteFile(keyHintStateFile, []byte(hint), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: persist key hint: %v\n", err)
+	}
 }
 
 func writeResolvedLocation(uri string) error {

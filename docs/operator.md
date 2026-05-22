@@ -145,19 +145,12 @@ Both templates are gated on `monitoring.coreos.com/v1` being installed —
 flipping the toggle on a cluster without prometheus-operator is a silent
 no-op rather than a hard install failure.
 
-## Current limits (where we are vs the long-term shape)
-
-One limit to be honest about:
-
-- **`spec.reportRef.objectStore` is reserved.** The CRD schema accepts an
-  `objectStore` sink field (S3/GCS/Azure) so clients can adopt it ahead
-  of the upload path going live. The validating webhook rejects sessions
-  that set it today — Phase 7+ work.
-
 Both [PodTrace](crd-podtrace.md) (continuous) and
 [PodTraceSession](crd-podtracesession.md) (bounded) drive the real eBPF
 backend by default, with events surfacing as OpenTelemetry spans on the
-configured exporter.
+configured exporter. Session reports can also be uploaded directly to
+S3-, GCS-, or Azure-Blob–compatible object stores — see
+[Object-store report sinks](object-store-reports.md).
 
 ## Going further
 

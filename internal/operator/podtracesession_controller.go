@@ -62,6 +62,7 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if err := cleanupPodTraceSessionChildren(ctx, r.Client, &session, r.SystemNamespace); err != nil {
 			return ctrl.Result{}, err
 		}
+		forgetReportObservations(session.Namespace, session.Name)
 		if removeFinalizer(&session) {
 			if err := r.Update(ctx, &session); err != nil {
 				if apierrors.IsConflict(err) {
@@ -195,10 +196,11 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		fmt.Sprintf("%d Job(s) on %d node(s)", len(jobs), len(targetNodes)))
 	r.setCondition(&session, ConditionDegraded, metav1.ConditionFalse, "Reconciled", "")
 
-	if uri, terminated, ok, err := harvestReportLocation(ctx, r.Client, &session, systemNS); err != nil {
+	if obs, err := harvestReportLocation(ctx, r.Client, &session, systemNS); err != nil {
 		logger.Error(err, "harvest report location")
 	} else {
-		applyReportUploadStatus(&session, uri, terminated, ok)
+		applyReportUploadStatus(&session, obs)
+		observeReportUploadMetrics(&session, obs)
 	}
 
 	if err := r.Status().Update(ctx, &session); err != nil {

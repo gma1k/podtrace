@@ -4,10 +4,16 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
+	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
@@ -42,6 +48,12 @@ func newAzureSink(_ context.Context, cfg Config, d destination) (Sink, error) {
 	}
 	endpoint = strings.TrimRight(endpoint, "/")
 
+	azClientOpts := &azblob.ClientOptions{
+		ClientOptions: azcore.ClientOptions{
+			PerRetryPolicies: []policy.Policy{newAzureRetryLogPolicy()},
+		},
+	}
+
 	var client *azblob.Client
 	switch {
 	case stringFromCreds(creds, azureSecretKeyAccountKey) != "":
@@ -49,7 +61,7 @@ func newAzureSink(_ context.Context, cfg Config, d destination) (Sink, error) {
 		if err != nil {
 			return nil, fmt.Errorf("azblob: shared key credential: %w", err)
 		}
-		client, err = azblob.NewClientWithSharedKeyCredential(endpoint, key, nil)
+		client, err = azblob.NewClientWithSharedKeyCredential(endpoint, key, azClientOpts)
 		if err != nil {
 			return nil, fmt.Errorf("azblob: new shared-key client: %w", err)
 		}
@@ -65,7 +77,7 @@ func newAzureSink(_ context.Context, cfg Config, d destination) (Sink, error) {
 		if err != nil {
 			return nil, fmt.Errorf("azblob: SPN credential: %w", err)
 		}
-		client, err = azblob.NewClient(endpoint, spn, nil)
+		client, err = azblob.NewClient(endpoint, spn, azClientOpts)
 		if err != nil {
 			return nil, fmt.Errorf("azblob: new SPN client: %w", err)
 		}
@@ -74,7 +86,7 @@ func newAzureSink(_ context.Context, cfg Config, d destination) (Sink, error) {
 		if err != nil {
 			return nil, fmt.Errorf("azblob: default credential: %w", err)
 		}
-		client, err = azblob.NewClient(endpoint, def, nil)
+		client, err = azblob.NewClient(endpoint, def, azClientOpts)
 		if err != nil {
 			return nil, fmt.Errorf("azblob: new default-cred client: %w", err)
 		}
@@ -111,3 +123,45 @@ func (a *azureSink) Close() error {
 func toPtr[T any](v T) *T { return &v }
 
 var _ = azcore.NullValue[int]
+
+type azureRetryLogPolicy struct {
+	attempts sync.Map
+}
+
+func newAzureRetryLogPolicy() *azureRetryLogPolicy {
+	return &azureRetryLogPolicy{}
+}
+
+func (p *azureRetryLogPolicy) Do(req *policy.Request) (*http.Response, error) {
+	raw := req.Raw()
+	key := raw.Method + " " + raw.URL.Host + raw.URL.Path
+	counter := p.counterFor(key)
+	attempt := int(counter.Add(1))
+
+	started := time.Now()
+	resp, err := req.Next()
+	took := time.Since(started)
+
+	status := 0
+	if resp != nil {
+		status = resp.StatusCode
+	}
+	errStr := ""
+	if err != nil {
+		errStr = err.Error()
+	}
+	_, _ = fmt.Fprintf(os.Stderr,
+		`{"component":"objectstore.retry","backend":%q,"method":%q,"url":%q,"status":%d,"attempt":%d,"took_ms":%d,"error":%q}`+"\n",
+		SchemeAzure, raw.Method, raw.URL.String(), status, attempt, took.Milliseconds(), errStr,
+	)
+	return resp, err
+}
+
+func (p *azureRetryLogPolicy) counterFor(key string) *atomic.Int32 {
+	if v, ok := p.attempts.Load(key); ok {
+		return v.(*atomic.Int32)
+	}
+	fresh := new(atomic.Int32)
+	actual, _ := p.attempts.LoadOrStore(key, fresh)
+	return actual.(*atomic.Int32)
+}

@@ -217,15 +217,15 @@ func TestHarvestReportLocation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := sessionWithObjectStore("")
 			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tc.pod).Build()
-			uri, term, ok, err := harvestReportLocation(context.Background(), c, s, "podtrace-system")
+			obs, err := harvestReportLocation(context.Background(), c, s, "podtrace-system")
 			if err != nil {
 				t.Fatalf("harvest: %v", err)
 			}
-			if term != tc.wantTerm || ok != tc.wantOK || uri != tc.wantURI {
+			if obs.Terminated != tc.wantTerm || obs.Succeeded != tc.wantOK || obs.ResolvedURI != tc.wantURI {
 				t.Errorf("got (uri=%q, term=%v, ok=%v); want (uri=%q, term=%v, ok=%v)",
-					uri, term, ok, tc.wantURI, tc.wantTerm, tc.wantOK)
+					obs.ResolvedURI, obs.Terminated, obs.Succeeded, tc.wantURI, tc.wantTerm, tc.wantOK)
 			}
-			applyReportUploadStatus(s, uri, term, ok)
+			applyReportUploadStatus(s, obs)
 			var got *metav1.Condition
 			for i := range s.Status.Conditions {
 				if s.Status.Conditions[i].Type == ConditionReportUploaded {
@@ -263,11 +263,11 @@ func TestHarvestReportLocation_NonObjectStoreIsNoop(t *testing.T) {
 			},
 		},
 	}
-	uri, term, ok, err := harvestReportLocation(context.Background(), c, s, "podtrace-system")
-	if err != nil || uri != "" || term || ok {
-		t.Errorf("expected silent no-op, got uri=%q term=%v ok=%v err=%v", uri, term, ok, err)
+	obs, err := harvestReportLocation(context.Background(), c, s, "podtrace-system")
+	if err != nil || obs.ResolvedURI != "" || obs.Terminated || obs.Succeeded {
+		t.Errorf("expected silent no-op, got %+v err=%v", obs, err)
 	}
-	applyReportUploadStatus(s, uri, term, ok)
+	applyReportUploadStatus(s, obs)
 	for _, c := range s.Status.Conditions {
 		if c.Type == ConditionReportUploaded {
 			t.Errorf("non-ObjectStore session must not get a ReportUploaded condition: %+v", c)
