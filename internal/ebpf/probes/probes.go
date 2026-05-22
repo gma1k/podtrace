@@ -62,8 +62,52 @@ func attachKprobe(progName, symbol string, prog *ebpf.Program) (link.Link, error
 	return link.Kprobe(symbol, prog, nil)
 }
 
+// AttachProbes attaches every probe whose program is present in the
+// collection and returns a flat slice of the resulting links.
 func AttachProbes(coll *ebpf.Collection) ([]link.Link, error) {
-	var links []link.Link
+	groups, err := AttachProbesByGroup(coll)
+	if err != nil {
+		return nil, err
+	}
+	return flattenGroupedLinks(groups), nil
+}
+
+// flattenGroupedLinks concatenates a group→links map into a single
+// slice.
+func flattenGroupedLinks(groups map[ProbeGroup][]link.Link) []link.Link {
+	var out []link.Link
+	for _, g := range allProbeGroups() {
+		out = append(out, groups[g]...)
+	}
+	return out
+}
+
+// allProbeGroups returns the canonical ordering of probe groups. New
+// groups added to groups.go must be added here too.
+func allProbeGroups() []ProbeGroup {
+	return []ProbeGroup{
+		GroupNetwork, GroupFileSystem, GroupDatabase, GroupTLS,
+		GroupMemory, GroupCPU, GroupPool, GroupCache,
+		GroupMessaging, GroupFastCGI,
+	}
+}
+
+// AttachProbesByGroup performs the same attach work as AttachProbes but
+// returns the resulting links bucketed by the ProbeGroup each program
+// belongs to.
+func AttachProbesByGroup(coll *ebpf.Collection) (map[ProbeGroup][]link.Link, error) {
+	groups := map[ProbeGroup][]link.Link{}
+	appendLink := func(progName string, l link.Link) {
+		g := GroupForProbe(progName)
+		groups[g] = append(groups[g], l)
+	}
+	closeAll := func() {
+		for _, ls := range groups {
+			for _, l := range ls {
+				_ = l.Close()
+			}
+		}
+	}
 
 	// --- Mandatory kprobes: all must attach or we return an error. ---
 	for progName, symbol := range mandatoryProbes {
@@ -76,9 +120,7 @@ func AttachProbes(coll *ebpf.Collection) ([]link.Link, error) {
 
 		l, err := attachKprobe(progName, symbol, prog)
 		if err != nil {
-			for _, existing := range links {
-				_ = existing.Close()
-			}
+			closeAll()
 			return nil, fmt.Errorf(
 				"%w\n\n"+
 					"Hint: mandatory kprobe %q could not attach to kernel symbol %q.\n"+
@@ -89,7 +131,7 @@ func AttachProbes(coll *ebpf.Collection) ([]link.Link, error) {
 					"  • On OpenShift ensure the pod SCC allows CAP_BPF and CAP_SYS_ADMIN",
 				NewProbeAttachError(progName, err), progName, symbol, symbol, kernelVersionString())
 		}
-		links = append(links, l)
+		appendLink(progName, l)
 		logger.Debug("Mandatory probe attached", zap.String("prog", progName), zap.String("symbol", symbol))
 	}
 
@@ -109,7 +151,7 @@ func AttachProbes(coll *ebpf.Collection) ([]link.Link, error) {
 				zap.String("prog", progName), zap.String("symbol", symbol), zap.Error(err))
 			continue
 		}
-		links = append(links, l)
+		appendLink(progName, l)
 		logger.Debug("Optional probe attached", zap.String("prog", progName), zap.String("symbol", symbol))
 	}
 
@@ -125,7 +167,7 @@ func AttachProbes(coll *ebpf.Collection) ([]link.Link, error) {
 				logger.Info("CPU/scheduling tracking unavailable", zap.Error(err))
 			}
 		} else {
-			links = append(links, tp)
+			appendLink("tracepoint_sched_switch", tp)
 		}
 	}
 
@@ -136,7 +178,7 @@ func AttachProbes(coll *ebpf.Collection) ([]link.Link, error) {
 				logger.Debug("TCP state tracking unavailable", zap.Error(err))
 			}
 		} else {
-			links = append(links, tp)
+			appendLink("tracepoint_tcp_set_state", tp)
 		}
 	}
 
@@ -147,7 +189,7 @@ func AttachProbes(coll *ebpf.Collection) ([]link.Link, error) {
 				logger.Info("TCP retransmission tracking unavailable", zap.Error(err))
 			}
 		} else {
-			links = append(links, tp)
+			appendLink("tracepoint_tcp_retransmit_skb", tp)
 		}
 	}
 
@@ -158,7 +200,7 @@ func AttachProbes(coll *ebpf.Collection) ([]link.Link, error) {
 				logger.Info("Network device error tracking unavailable", zap.Error(err))
 			}
 		} else {
-			links = append(links, tp)
+			appendLink("tracepoint_net_dev_xmit", tp)
 		}
 	}
 
@@ -169,7 +211,7 @@ func AttachProbes(coll *ebpf.Collection) ([]link.Link, error) {
 				logger.Info("Page fault tracking unavailable", zap.Error(err))
 			}
 		} else {
-			links = append(links, tp)
+			appendLink("tracepoint_page_fault_user", tp)
 		}
 	}
 
@@ -180,7 +222,7 @@ func AttachProbes(coll *ebpf.Collection) ([]link.Link, error) {
 				logger.Debug("OOM kill tracking unavailable", zap.Error(err))
 			}
 		} else {
-			links = append(links, tp)
+			appendLink("tracepoint_oom_kill_process", tp)
 		}
 	}
 
@@ -191,11 +233,11 @@ func AttachProbes(coll *ebpf.Collection) ([]link.Link, error) {
 				logger.Info("Process fork tracking unavailable", zap.Error(err))
 			}
 		} else {
-			links = append(links, tp)
+			appendLink("tracepoint_sched_process_fork", tp)
 		}
 	}
 
-	return links, nil
+	return groups, nil
 }
 
 func AttachDNSProbes(coll *ebpf.Collection, containerID string) []link.Link {

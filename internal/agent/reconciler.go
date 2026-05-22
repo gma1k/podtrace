@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -46,6 +47,8 @@ type AgentReconciler struct {
 	PodAttributor func(pods []*corev1.Pod) []PodCgroupEntry
 
 	Enricher *PodEnricher
+
+	CategoryGate func(categories []string) error
 
 	exporterCacheMu sync.Mutex
 	exporterCache   map[CRKey]cachedExporter
@@ -207,6 +210,14 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	r.Router.Publish(rules)
+
+	if r.CategoryGate != nil {
+		categories := unionCategoriesFromRules(rules)
+		if err := r.CategoryGate(categories); err != nil {
+			logger.V(1).Info("category gate apply failed",
+				"error", err, "categories", categories)
+		}
+	}
 
 	targets := buildTargetSet(rules, localPods, podEntries)
 	select {
@@ -613,6 +624,45 @@ func bundlePolicyGeneration(b *BundlePayload) int64 {
 		return 0
 	}
 	return b.PolicyGeneration
+}
+
+// unionCategoriesFromRules returns the sorted, deduplicated union of
+// CRD-filter category strings (dns/net/fs/cpu/proc) across every active
+// CRRule.
+func unionCategoriesFromRules(rules []CRRule) []string {
+	seen := make(map[string]struct{}, len(rules))
+	for _, r := range rules {
+		if r.Err != nil {
+			continue
+		}
+		if len(r.Policy.Filters) == 0 {
+			for _, c := range knownFilterCategories() {
+				seen[c] = struct{}{}
+			}
+			break
+		}
+		for _, c := range r.Policy.Filters {
+			seen[c] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for c := range seen {
+		out = append(out, c)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// knownFilterCategories returns the canonical list of CRD filter
+// category strings, in stable order.
+func knownFilterCategories() []string {
+	return []string{
+		string(podtracev1alpha1.FilterDNS),
+		string(podtracev1alpha1.FilterNet),
+		string(podtracev1alpha1.FilterFS),
+		string(podtracev1alpha1.FilterCPU),
+		string(podtracev1alpha1.FilterProc),
+	}
 }
 
 // filtersToSet converts the CRD's EventFilter list into the

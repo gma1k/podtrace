@@ -152,6 +152,19 @@ func (a *ebpfBackendAdapter) Stop() error {
 	return a.tr.Stop()
 }
 
+// SetEnabledCategories implements the optional pkg/tracer.CategoryGateable
+// interface by delegating to the eBPF tracer's runtime probe-group gate.
+func (a *ebpfBackendAdapter) SetEnabledCategories(categories []string) error {
+	type categoryGateable interface {
+		SetEnabledCategories([]string) error
+	}
+	g, ok := a.tr.(categoryGateable)
+	if !ok {
+		return nil
+	}
+	return g.SetEnabledCategories(categories)
+}
+
 func noopBackendFactory() (tracer.TracerBackend, error) {
 	return agent.NewNoopBackend(), nil
 }

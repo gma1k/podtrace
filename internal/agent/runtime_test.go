@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -25,7 +26,6 @@ import (
 	"github.com/podtrace/podtrace/pkg/tracer"
 )
 
-// ─── Options + DefaultOptions + validate ─────────────────────────────
 
 func TestDefaultOptions_NonEmptyAddrs(t *testing.T) {
 	o := DefaultOptions()
@@ -70,7 +70,6 @@ func TestRun_RejectsInvalidOptions(t *testing.T) {
 	}
 }
 
-// ─── newAgentScheme ───────────────────────────────────────────────────
 
 func TestNewAgentScheme_RegistersBothAPIs(t *testing.T) {
 	s, err := newAgentScheme()
@@ -85,7 +84,6 @@ func TestNewAgentScheme_RegistersBothAPIs(t *testing.T) {
 	}
 }
 
-// ─── buildBackend ────────────────────────────────────────────────────
 
 type fakeBackend struct{ name string }
 
@@ -132,8 +130,6 @@ func TestBuildBackend_FactoryErrorFallsBackToNoop(t *testing.T) {
 	}
 }
 
-// TestNewNoopBackend_ExportedConstructor guards the public surface the
-// CLI relies on for `--backend=noop`.
 func TestNewNoopBackend_ExportedConstructor(t *testing.T) {
 	b := NewNoopBackend()
 	if b == nil {
@@ -144,7 +140,6 @@ func TestNewNoopBackend_ExportedConstructor(t *testing.T) {
 	}
 }
 
-// ─── NoopBackend ─────────────────────────────────────────────────────
 
 func TestNoopBackend_BasicLifecycle(t *testing.T) {
 	b := newNoopBackend()
@@ -160,7 +155,6 @@ func TestNoopBackend_BasicLifecycle(t *testing.T) {
 	if err := b.SetContainerID("abc"); err != nil {
 		t.Fatal(err)
 	}
-	// Inject before Start: must report not-started.
 	if b.Inject(&events.Event{}) {
 		t.Error("Inject should return false before Start")
 	}
@@ -187,7 +181,6 @@ func TestNoopBackend_BasicLifecycle(t *testing.T) {
 	}
 }
 
-// ─── serveMetrics ────────────────────────────────────────────────────
 
 func TestServeMetrics_EmptyAddrIsNoop(t *testing.T) {
 	if err := serveMetrics(context.Background(), "", NewMetrics(), logr.Discard()); err != nil {
@@ -244,7 +237,6 @@ func TestServeMetrics_ServesAndShutsDown(t *testing.T) {
 	}
 }
 
-// ─── otlp_event_exporter ─────────────────────────────────────────────
 
 func TestNormalizeOTLPEndpoint(t *testing.T) {
 	cases := []struct {
@@ -277,7 +269,6 @@ func TestEventTypeString(t *testing.T) {
 	if got := eventTypeString(events.EventConnect); got != "net.connect" {
 		t.Errorf("Connect = %q, want net.connect", got)
 	}
-	// Unknown type falls back to "event_<N>".
 	got := eventTypeString(events.EventType(9999))
 	if !strings.HasPrefix(got, "event_") {
 		t.Errorf("unknown type = %q, want event_NNNN", got)
@@ -305,9 +296,6 @@ func TestNewOTLPEventExporter_RejectsBadEndpoint(t *testing.T) {
 	}
 }
 
-// TestNewOTLPEventExporter_RoundTrip drives the full exporter against a
-// local httptest server. We don't decode the OTLP payload — only assert
-// that Export delivers a request before Close, exercising Name/Export/Close.
 func TestNewOTLPEventExporter_RoundTrip(t *testing.T) {
 	hits := make(chan struct{}, 16)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -324,7 +312,7 @@ func TestNewOTLPEventExporter_RoundTrip(t *testing.T) {
 		Type:     bundle.TypeOTLP,
 		Endpoint: host,
 		Insecure: true,
-		Sample:   0.5, // covers the TraceIDRatioBased branch
+		Sample:   0.5,
 	})
 	if err != nil {
 		t.Fatalf("newOTLPEventExporter: %v", err)
@@ -338,8 +326,6 @@ func TestNewOTLPEventExporter_RoundTrip(t *testing.T) {
 		_ = exp.Close(ctx)
 	}()
 
-	// Emit a batch — span gets queued by the batcher; Force-flush via Close
-	// in defer above sends it before we return.
 	if err := exp.Export(context.Background(), []*events.Event{
 		{Type: events.EventDNS, Target: "example.com", Timestamp: uint64(time.Now().UnixNano())},
 		{Type: events.EventConnect, PID: 42},
@@ -347,7 +333,6 @@ func TestNewOTLPEventExporter_RoundTrip(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Export: %v", err)
 	}
-	// Empty batch is a fast no-op.
 	if err := exp.Export(context.Background(), nil); err != nil {
 		t.Errorf("nil batch: %v", err)
 	}
@@ -368,7 +353,6 @@ func TestNewOTLPEventExporter_HeadersAndCredential(t *testing.T) {
 	_ = exp.Close(context.Background())
 }
 
-// ─── status_writer ────────────────────────────────────────────────────
 
 func TestStatusWriter_EmitOnce_NoRulesIsNoop(t *testing.T) {
 	router := NewRouter(nil)
@@ -379,8 +363,6 @@ func TestStatusWriter_EmitOnce_NoRulesIsNoop(t *testing.T) {
 	}
 }
 
-// recordingPatcher captures Status().Patch invocations because the
-// controller-runtime fake client does not implement Server-Side Apply.
 type recordingPatcher struct {
 	mu    sync.Mutex
 	calls []recordedPatch
@@ -489,8 +471,6 @@ func TestStatusWriter_EmitOnce_ReadyNilDefaultsTrue(t *testing.T) {
 	}
 }
 
-// TestStatusWriter_Run_StopsOnContextCancel proves Run returns nil on
-// context cancellation.
 func TestStatusWriter_Run_StopsOnContextCancel(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(newScheme(t)).Build()
 	w := &StatusWriter{
@@ -517,8 +497,6 @@ func TestStatusWriter_Run_StopsOnContextCancel(t *testing.T) {
 }
 
 func TestStatusWriter_Run_PatchErrorIsLoggedNotFatal(t *testing.T) {
-	// Force the patch to error so emitOnce reports a per-tick failure;
-	// Run must keep going and exit cleanly only on context cancellation.
 	router := NewRouter(nil)
 	router.Publish([]CRRule{{Key: CRKey{Namespace: "ns", Name: "missing"}}})
 	c := fake.NewClientBuilder().WithScheme(newScheme(t)).
@@ -542,7 +520,6 @@ func TestStatusWriter_Run_PatchErrorIsLoggedNotFatal(t *testing.T) {
 	}
 }
 
-// ─── ComputeNodeReport ───────────────────────────────────────────────
 
 func TestComputeNodeReport_AggregatesUniqueCgroups(t *testing.T) {
 	router := NewRouter(nil)
@@ -565,22 +542,18 @@ func TestComputeNodeReport_AggregatesUniqueCgroups(t *testing.T) {
 	}
 }
 
-// ─── convert.go ──────────────────────────────────────────────────────
 
 func TestSafeUint64ToInt64(t *testing.T) {
 	if got := safeUint64ToInt64(42); got != 42 {
 		t.Errorf("small = %d, want 42", got)
 	}
-	// Just below the int64 cap.
 	if got := safeUint64ToInt64(uint64(int64(1)<<62) + 1); got <= 0 {
 		t.Errorf("under-cap got %d, want positive", got)
 	}
-	// Exactly maxInt64 — should pass through.
 	max := uint64(int64(^uint64(0) >> 1))
 	if got := safeUint64ToInt64(max); int64(got) != int64(max) {
 		t.Errorf("maxint64 conversion lossy: got %d", got)
 	}
-	// Over the cap (top bit set) → clamp to maxint64 (positive, no wrap).
 	huge := uint64(1) << 63 // exactly the wrap-point
 	if got := safeUint64ToInt64(huge); got <= 0 {
 		t.Errorf("over-cap should clamp to positive maxint64, got %d", got)
@@ -596,7 +569,6 @@ func TestLenToInt32(t *testing.T) {
 	}
 }
 
-// ─── ResolveNodeName: hostname fallback ──────────────────────────────
 
 func TestResolveNodeName_HostnameFallback(t *testing.T) {
 	t.Setenv("NODE_NAME", "")
@@ -606,8 +578,6 @@ func TestResolveNodeName_HostnameFallback(t *testing.T) {
 	}
 }
 
-// guard that StatusWriter.patchCRStatus uses the SSA path with
-// a deterministic field manager.
 var _ = sync.Mutex{}
 
 func TestRouter_NameAndStats(t *testing.T) {
@@ -617,5 +587,48 @@ func TestRouter_NameAndStats(t *testing.T) {
 	}
 	if r.Stats() == nil {
 		t.Error("Stats() should never be nil")
+	}
+}
+
+type fakeGateableBackend struct {
+	*NoopBackend
+	mu       sync.Mutex
+	captured [][]string
+	err      error
+}
+
+func (f *fakeGateableBackend) SetEnabledCategories(categories []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.captured = append(f.captured, append([]string(nil), categories...))
+	return f.err
+}
+
+func TestMakeCategoryGate_BackendImplementsGateable(t *testing.T) {
+	b := &fakeGateableBackend{NoopBackend: NewNoopBackend()}
+	gate := makeCategoryGate(b)
+	if gate == nil {
+		t.Fatal("gate must be non-nil for gateable backend")
+	}
+	if err := gate([]string{"dns", "net"}); err != nil {
+		t.Fatalf("gate: %v", err)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.captured) != 1 || !reflect.DeepEqual(b.captured[0], []string{"dns", "net"}) {
+		t.Errorf("captured = %v, want [[dns net]]", b.captured)
+	}
+}
+
+func TestMakeCategoryGate_BackendDoesNotImplementGateableReturnsNil(t *testing.T) {
+	gate := makeCategoryGate(NewNoopBackend())
+	if gate != nil {
+		t.Error("gate should be nil for non-gateable backend")
+	}
+}
+
+func TestMakeCategoryGate_NilBackendReturnsNil(t *testing.T) {
+	if gate := makeCategoryGate(nil); gate != nil {
+		t.Error("nil backend must produce nil gate")
 	}
 }

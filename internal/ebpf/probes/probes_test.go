@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
 
 	"github.com/podtrace/podtrace/internal/config"
 )
@@ -133,6 +134,44 @@ func TestAttachProbes_EmptyCollection(t *testing.T) {
 	}
 	if links != nil {
 		t.Logf("AttachProbes returned %d links", len(links))
+	}
+}
+
+func TestAttachProbesByGroup_EmptyCollectionEmptyMap(t *testing.T) {
+	coll := &ebpf.Collection{Programs: make(map[string]*ebpf.Program)}
+	groups, err := AttachProbesByGroup(coll)
+	if err != nil {
+		t.Fatalf("AttachProbesByGroup: %v", err)
+	}
+	if groups == nil {
+		t.Fatal("groups map must be non-nil even when no programs attached")
+	}
+	if len(groups) != 0 {
+		t.Errorf("expected empty groups map for empty collection, got %v", groups)
+	}
+}
+
+func TestAllProbeGroups_StableOrdering(t *testing.T) {
+	got := allProbeGroups()
+	want := []ProbeGroup{
+		GroupNetwork, GroupFileSystem, GroupDatabase, GroupTLS,
+		GroupMemory, GroupCPU, GroupPool, GroupCache,
+		GroupMessaging, GroupFastCGI,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("allProbeGroups length = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("allProbeGroups[%d] = %v, want %v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestFlattenGroupedLinks_EmptyMap(t *testing.T) {
+	got := flattenGroupedLinks(map[ProbeGroup][]link.Link{})
+	if got != nil {
+		t.Errorf("flatten of empty map = %v, want nil", got)
 	}
 }
 

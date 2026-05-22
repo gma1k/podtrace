@@ -201,12 +201,22 @@ func (e *sdkEventExporter) appendThresholdAttributes(attrs []attribute.KeyValue,
 			e.recordTrip("rtt_spike")
 		}
 	}
-	if t.ErrorRatePercent != nil && ev.Error != 0 {
-		attrs = append(attrs,
-			attribute.Bool("podtrace.threshold.error_rate.observed", true),
-			attribute.Int64("podtrace.threshold.error_rate.percent", int64(*t.ErrorRatePercent)),
-		)
-		e.recordTrip("error_rate")
+	if t.ErrorRatePercent != nil {
+		isErr := ev.Error != 0
+		if isErr {
+			attrs = append(attrs,
+				attribute.Bool("podtrace.threshold.error_rate.observed", true),
+				attribute.Int64("podtrace.threshold.error_rate.percent", int64(*t.ErrorRatePercent)),
+			)
+			e.recordTrip("error_rate")
+		}
+		if e.metrics != nil {
+			if justBreached := e.metrics.ObserveErrorRate(e.cr, *t.ErrorRatePercent, isErr); justBreached {
+				attrs = append(attrs,
+					attribute.Bool("podtrace.threshold.error_rate.breached", true),
+				)
+			}
+		}
 	}
 	return attrs
 }

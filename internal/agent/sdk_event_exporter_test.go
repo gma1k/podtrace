@@ -534,6 +534,99 @@ func TestSDKEventExporter_EffectiveSampleRateGauge(t *testing.T) {
 	}
 }
 
+// TestSDKEventExporter_ErrorRateRollingWindowBreach exercises the
+// end-to-end: configure an error_rate threshold, push enough
+// error events to cross the rolling-window threshold, and assert the
+// per-CR error_rate_breached_total counter increments exactly once
+// (edge-triggered) regardless of how many error events follow.
+func TestSDKEventExporter_ErrorRateRollingWindowBreach(t *testing.T) {
+	errPct := int32(10)
+	b := &bundle.Payload{
+		Type:     bundle.TypeOTLP,
+		Endpoint: "x:4318",
+		Insecure: true,
+		Thresholds: &bundle.Thresholds{
+			ErrorRatePercent: &errPct,
+		},
+	}
+	cr := CRKey{Namespace: "ns", Name: "cr"}
+	m := NewMetrics()
+
+	exp, err := newSDKEventExporter("otlp", cr, b, &noopSpanExporter{}, withMetrics(m))
+	if err != nil {
+		t.Fatalf("newSDKEventExporter: %v", err)
+	}
+	defer func() { _ = exp.Close(context.Background()) }()
+
+	batch := make([]*events.Event, 30)
+	for i := range batch {
+		batch[i] = &events.Event{
+			Type:      events.EventTCPSend,
+			Timestamp: uint64(time.Now().UnixNano()),
+			Error:     -5,
+		}
+	}
+	if err := exp.Export(context.Background(), batch); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+
+	got := counterValue(t, m.ErrorRateBreached, prometheus.Labels{
+		"cr_namespace": cr.Namespace,
+		"cr_name":      cr.Name,
+	})
+	if got != 1 {
+		t.Errorf("error_rate_breached_total = %v, want 1 (edge-triggered)", got)
+	}
+
+	// Hammering the same exporter with more error events stays at 1.
+	if err := exp.Export(context.Background(), batch); err != nil {
+		t.Fatalf("Export 2: %v", err)
+	}
+	got = counterValue(t, m.ErrorRateBreached, prometheus.Labels{
+		"cr_namespace": cr.Namespace,
+		"cr_name":      cr.Name,
+	})
+	if got != 1 {
+		t.Errorf("sustained breach should not double-count, got %v", got)
+	}
+}
+
+// TestSDKEventExporter_ErrorRateBelowMinSampleNoBreach guards the
+// startup-noise contract end-to-end: a single error event with an
+// active error_rate policy must not breach.
+func TestSDKEventExporter_ErrorRateBelowMinSampleNoBreach(t *testing.T) {
+	errPct := int32(10)
+	b := &bundle.Payload{
+		Type:     bundle.TypeOTLP,
+		Endpoint: "x:4318",
+		Insecure: true,
+		Thresholds: &bundle.Thresholds{
+			ErrorRatePercent: &errPct,
+		},
+	}
+	cr := CRKey{Namespace: "ns", Name: "cr"}
+	m := NewMetrics()
+
+	exp, err := newSDKEventExporter("otlp", cr, b, &noopSpanExporter{}, withMetrics(m))
+	if err != nil {
+		t.Fatalf("newSDKEventExporter: %v", err)
+	}
+	defer func() { _ = exp.Close(context.Background()) }()
+
+	if err := exp.Export(context.Background(), []*events.Event{
+		{Type: events.EventTCPSend, Error: -5},
+		{Type: events.EventTCPSend, Error: -5},
+	}); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if got := counterValue(t, m.ErrorRateBreached, prometheus.Labels{
+		"cr_namespace": cr.Namespace,
+		"cr_name":      cr.Name,
+	}); got != 0 {
+		t.Errorf("expected no breach below min sample, got %v", got)
+	}
+}
+
 // TestSDKEventExporter_NoThresholdsNoMetricChurn ensures the
 // nil-thresholds fast-path doesn't accidentally tag spans or bump
 // counters — important because most CRs won't set thresholds.
