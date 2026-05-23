@@ -33,12 +33,12 @@
     },
     {
       "description": "Pin Kubernetes ecosystem updates together",
-      "matchPackagePatterns": [
-        "^k8s\\.io/",
-        "^sigs\\.k8s\\.io/"
-      ],
       "groupName": "kubernetes ecosystem",
-      "schedule": ["before 5am on monday"]
+      "schedule": ["before 5am on monday"],
+      "matchPackageNames": [
+        "/^k8s\\.io//",
+        "/^sigs\\.k8s\\.io//"
+      ]
     },
     {
       "description": "Group GitHub Actions updates",
