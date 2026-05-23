@@ -116,8 +116,21 @@ Operator and agent both expose Prometheus metrics:
   fallback mode. Healthy agents emit no `backend_degraded` series; alert
   on `max by(node)(podtrace_agent_backend_degraded) > 0` and the `reason`
   label routes to remediation (`permission_denied`, `btf_unavailable`,
-  `kernel_too_old`, `collection_failed`, `ringbuf_failed`,
-  `map_lookup_failed`, `invalid_event`, `unknown`).
+  `kernel_too_old`, `tracefs_unmounted`, `collection_failed`,
+  `ringbuf_failed`, `map_lookup_failed`, `invalid_event`, `unknown`).
+
+  Diagnostics granularity (per-program + per-CR failure surfaces):
+
+  - `podtrace_agent_program_attach_failures_total{program,reason}` —
+    counter, bumped once per failed eBPF program attach at agent boot.
+    `program` is the BPF symbol (e.g. `tracepoint_sched_switch`),
+    `reason` reuses the `backend_degraded` classifier so the same
+    alert rule covers both signals. Healthy agents emit no series.
+  - `podtrace_agent_exporter_init_failures_total{cr_namespace,cr_name,reason}` —
+    counter, **edge-triggered**: one increment per ok→fail transition.
+    `reason ∈ {unknown, nil_payload, unsupported_type, endpoint_missing,
+    tls_invalid, auth_missing}`. A sustained bad config does not inflate
+    this counter — `rate()` detects new failures, not their duration.
 
   Policy-wiring observability (one series per CR):
 
@@ -132,6 +145,18 @@ Operator and agent both expose Prometheus metrics:
     (`threshold ∈ {fs_slow, rtt_spike, error_rate}`). Stateless per-event
     evaluation: a counter delta over a window is the trip frequency
     directly.
+  - `podtrace_agent_error_rate_breached_total{cr_namespace,cr_name}` —
+    counter, edge-triggered: one increment per ok→breached transition of
+    the rolling-window error rate exceeding `spec.thresholds.errorRatePercent`.
+
+  Machine-readable failure surfaces are also stamped onto the CR itself:
+  `PodTrace.status.nodeStatus[*].reason` carries a closed enum
+  (`AgentUnready`, `BackendUnavailable`, `BundleLoadFailed`,
+  `ExporterBuildFailed`, `ProgramAttachFailed`, `PolicyParseError`,
+  `PodMatchFailed`, `CgroupResolutionFailed`, `Unknown`) alongside the
+  free-text `message`. The operator lifts that enum into the rolled-up
+  `Degraded` condition's `reason` field, so `kubectl describe podtrace`
+  surfaces the same precise class without needing to query metrics.
 
 Enable scrape configs via Helm:
 

@@ -279,15 +279,6 @@ func TestDeepCopy_NilSafety(t *testing.T) {
 	if (*SecretKeySelector)(nil).DeepCopy() != nil {
 		t.Error("SecretKeySelector nil DeepCopy")
 	}
-	if (*PodTraceCustomValidator)(nil).DeepCopy() != nil {
-		t.Error("PodTraceCustomValidator nil DeepCopy")
-	}
-	if (*PodTraceSessionCustomValidator)(nil).DeepCopy() != nil {
-		t.Error("PodTraceSessionCustomValidator nil DeepCopy")
-	}
-	if (*ExporterConfigCustomValidator)(nil).DeepCopy() != nil {
-		t.Error("ExporterConfigCustomValidator nil DeepCopy")
-	}
 }
 
 // ─── Round-trip equality, fully-populated values (covers every branch).
@@ -518,9 +509,6 @@ func TestDeepCopy_LeafTypes(t *testing.T) {
 		_ = (&ZipkinExporter{Endpoint: "z"}).DeepCopy()
 		_ = (&DataDogExporter{Site: "x"}).DeepCopy()
 		_ = (&SplunkExporter{Endpoint: "x"}).DeepCopy()
-		_ = (&PodTraceCustomValidator{}).DeepCopy()
-		_ = (&PodTraceSessionCustomValidator{}).DeepCopy()
-		_ = (&ExporterConfigCustomValidator{}).DeepCopy()
 	})
 }
 

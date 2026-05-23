@@ -14,7 +14,7 @@ For per-cloud specifics, jump to the [distro-specific notes](#distro-specific-no
 | Linux kernel     | 5.8 (BPF ring buffer)  | 6.1+              |
 | BTF              | Required for some probes (see below) | `/sys/kernel/btf/vmlinux` present |
 | Architecture     | amd64, arm64           | Same              |
-| Kubernetes       | 1.28                   | 1.30–1.34         |
+| Kubernetes       | 1.28                   | 1.32–1.36         |
 | Cgroup driver    | systemd or cgroupfs    | systemd, v2       |
 | Container runtime | containerd, CRI-O    | Same              |
 | Privileges       | `CAP_BPF` + `CAP_PERFMON` (kernel 5.8+) or `CAP_SYS_ADMIN` (older) | Distinct caps, no full privileged |
@@ -90,10 +90,11 @@ breakage and we will look at it.
 The chart [Chart.yaml](../deploy/charts/podtrace/Chart.yaml) declares
 `kubeVersion: ">=1.28.0-0"`.
 
-The Go client surfaces (`k8s.io/client-go v0.34.2`,
-`sigs.k8s.io/controller-runtime v0.19.7`) realistically support
-**Kubernetes 1.30–1.34**. We test against 1.28 in chainsaw e2e and
-have no known issues with 1.28 or 1.29.
+The Go client surfaces (`k8s.io/client-go v0.36.1`,
+`sigs.k8s.io/controller-runtime v0.24.1`) realistically support
+**Kubernetes 1.32–1.36**. Test against 1.36 in chainsaw e2e and
+envtest; 1.28–1.31 remain within the chart's `kubeVersion` floor but
+are outside the client-go test matrix.
 
 Verify your cluster version with `kubectl version --short`.
 

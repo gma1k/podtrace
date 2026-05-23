@@ -192,5 +192,5 @@ type ExporterConfigList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&ExporterConfig{}, &ExporterConfigList{})
+	SchemeBuilder.Register(addKnownTypes(&ExporterConfig{}, &ExporterConfigList{}))
 }

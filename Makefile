@@ -233,7 +233,7 @@ coverage: test-unit
 # Go type definitions under ./api/v1alpha1 and on ./deploy/charts.
 # ------------------------------------------------------------------------------
 
-CONTROLLER_GEN_VERSION ?= v0.16.5
+CONTROLLER_GEN_VERSION ?= v0.18.0
 CONTROLLER_GEN ?= $(shell go env GOPATH 2>/dev/null)/bin/controller-gen
 CRD_OUT_DIR ?= deploy/charts/podtrace/templates/crds
 BOILERPLATE ?= hack/boilerplate.go.txt
@@ -256,10 +256,17 @@ generate: operator-tools
 # Controller-runtime operators do not need this (client.Client covers CRUD),
 # but external tooling and hook scripts commonly expect a typed clientset.
 # The generated files are committed so consumers do not need codegen.
-CLIENT_GEN_VERSION ?= v0.34.2
+CLIENT_GEN_VERSION ?= v0.36.1
 CLIENT_GEN ?= $(shell go env GOPATH 2>/dev/null)/bin/client-gen
+APPLYCONFIGURATION_GEN ?= $(shell go env GOPATH 2>/dev/null)/bin/applyconfiguration-gen
 clientset:
 	@GOBIN=$(dir $(CLIENT_GEN)) $(GO) install k8s.io/code-generator/cmd/client-gen@$(CLIENT_GEN_VERSION)
+	@GOBIN=$(dir $(APPLYCONFIGURATION_GEN)) $(GO) install k8s.io/code-generator/cmd/applyconfiguration-gen@$(CLIENT_GEN_VERSION)
+	$(APPLYCONFIGURATION_GEN) \
+	  --go-header-file=$(BOILERPLATE) \
+	  --output-dir=pkg/client/applyconfiguration \
+	  --output-pkg=github.com/podtrace/podtrace/pkg/client/applyconfiguration \
+	  github.com/podtrace/podtrace/api/v1alpha1
 	$(CLIENT_GEN) \
 	  --go-header-file=$(BOILERPLATE) \
 	  --clientset-name=versioned \
@@ -276,7 +283,7 @@ manifests: operator-tools
 	@# but must stay in sync with the paths/rules kubebuilder generates
 	@# from the +kubebuilder:webhook markers. CI compares the two.
 	@mkdir -p hack/reference
-	$(CONTROLLER_GEN) webhook paths=./api/v1alpha1/... output:webhook:artifacts:config=hack/reference
+	$(CONTROLLER_GEN) webhook paths=./internal/webhook/v1alpha1/... output:webhook:artifacts:config=hack/reference
 
 # docker-build produces the container image used by the CLI, agent, operator,
 # and session Jobs. Override IMAGE_REPO / IMAGE_TAG to push to your registry.
@@ -291,11 +298,11 @@ docker-build:
 # The harness binaries are downloaded on demand by setup-envtest. Gated
 # by the `envtest` build tag so `go test ./...` stays CI-friendly when
 # the binaries are absent.
-ENVTEST_K8S_VERSION ?= 1.30.x
+ENVTEST_K8S_VERSION ?= 1.36.x
 ENVTEST_BIN_DIR ?= $(shell go env GOPATH 2>/dev/null)/envtest-assets
 SETUP_ENVTEST ?= $(shell go env GOPATH 2>/dev/null)/bin/setup-envtest
 envtest:
-	@GOBIN=$(dir $(SETUP_ENVTEST)) $(GO) install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.19
+	@GOBIN=$(dir $(SETUP_ENVTEST)) $(GO) install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.24
 	KUBEBUILDER_ASSETS=$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir=$(ENVTEST_BIN_DIR) -p path) \
 	  $(GO) test -tags=envtest -count=1 -timeout 300s \
 	    ./api/v1alpha1/... ./internal/operator/... ./internal/agent/...

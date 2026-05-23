@@ -50,7 +50,9 @@ jobs:
 
       - name: Install chainsaw
         run: |
-          go install github.com/kyverno/chainsaw@v0.2.14
+          # v0.2.14 predates Go 1.26's testing.testDeps gaining the
+          # ModulePath() method; pin >= v0.2.15 to compile under Go 1.26.
+          go install github.com/kyverno/chainsaw@v0.2.15
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Install BPF toolchain

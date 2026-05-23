@@ -6,9 +6,10 @@ spec:
   description: |
     Property tested: when an agent cannot build an exporter for a CR,
     the failure is visible on kubectl describe, Degraded=True with
-    Reason=AgentNodeStatus, NodeStatus row Ready=false with a useful
-    Message. This is the user-visible failure path the Phase 0
-    tombstone wiring guarantees.
+    Reason=ExporterBuildFailed (the closed-enum NodeStatusReason the
+    agent stamps and the operator lifts into the rolled-up condition),
+    NodeStatus row Ready=false carries the same reason plus a useful
+    free-text Message.
   timeouts:
     apply: 30s
     assert: 180s

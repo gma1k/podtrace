@@ -211,7 +211,7 @@ func TestPodTraceReconciler_FinalizerAddedThenReconciled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("1st reconcile: %v", err)
 	}
-	if !res.Requeue {
+	if res.RequeueAfter == 0 {
 		t.Error("expected Requeue=true after finalizer add")
 	}
 	var got podtracev1alpha1.PodTrace
@@ -513,7 +513,7 @@ func TestSessionReconciler_FinalizerAdded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
-	if !res.Requeue {
+	if res.RequeueAfter == 0 {
 		t.Error("expected Requeue after finalizer add")
 	}
 	var got podtracev1alpha1.PodTraceSession

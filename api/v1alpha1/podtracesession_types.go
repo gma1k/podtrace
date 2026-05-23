@@ -183,5 +183,5 @@ type PodTraceSessionList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&PodTraceSession{}, &PodTraceSessionList{})
+	SchemeBuilder.Register(addKnownTypes(&PodTraceSession{}, &PodTraceSessionList{}))
 }

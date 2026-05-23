@@ -4,9 +4,10 @@ metadata:
   name: degraded-pt
 status:
   (conditions[?type == 'Degraded'].status | [0]): "True"
-  (conditions[?type == 'Degraded'].reason | [0]): AgentNodeStatus
+  (conditions[?type == 'Degraded'].reason | [0]): ExporterBuildFailed
   (conditions[?type == 'Degraded'].message | [0]):
     (contains(@, 'OpenTelemetry Collector')): true
   nodeStatus:
   - ready: false
+    reason: ExporterBuildFailed
     (contains(message, 'OpenTelemetry Collector')): true

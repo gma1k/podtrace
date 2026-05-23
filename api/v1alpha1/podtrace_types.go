@@ -39,6 +39,24 @@ type PodTraceSpec struct {
 	Paused bool `json:"paused,omitempty"`
 }
 
+// NodeStatusReason is the stable enum the agent stamps onto
+// status.nodeStatus[].reason when a node reports unready or a CR rule
+// fails.
+// +kubebuilder:validation:Enum=AgentUnready;BackendUnavailable;BundleLoadFailed;ExporterBuildFailed;ProgramAttachFailed;PolicyParseError;PodMatchFailed;CgroupResolutionFailed;Unknown
+type NodeStatusReason string
+
+var (
+	NodeStatusReasonAgentUnready            = NodeStatusReason("AgentUnready")
+	NodeStatusReasonBackendUnavailable      = NodeStatusReason("BackendUnavailable")
+	NodeStatusReasonBundleLoadFailed        = NodeStatusReason("BundleLoadFailed")
+	NodeStatusReasonExporterBuildFailed     = NodeStatusReason("ExporterBuildFailed")
+	NodeStatusReasonProgramAttachFailed     = NodeStatusReason("ProgramAttachFailed")
+	NodeStatusReasonPolicyParseError        = NodeStatusReason("PolicyParseError")
+	NodeStatusReasonPodMatchFailed          = NodeStatusReason("PodMatchFailed")
+	NodeStatusReasonCgroupResolutionFailed  = NodeStatusReason("CgroupResolutionFailed")
+	NodeStatusReasonUnknown                 = NodeStatusReason("Unknown")
+)
+
 // PodTraceNodeStatus reports one agent's view of this PodTrace.
 type PodTraceNodeStatus struct {
 	// +kubebuilder:validation:Required
@@ -56,6 +74,9 @@ type PodTraceNodeStatus struct {
 
 	// +optional
 	Message string `json:"message,omitempty"`
+
+	// +optional
+	Reason NodeStatusReason `json:"reason,omitempty"`
 
 	PolicyHash string `json:"policyHash,omitempty"`
 }
@@ -134,5 +155,5 @@ type PodTraceList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&PodTrace{}, &PodTraceList{})
+	SchemeBuilder.Register(addKnownTypes(&PodTrace{}, &PodTraceList{}))
 }

@@ -4,7 +4,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.16.5
+    controller-gen.kubebuilder.io/version: v0.18.0
     helm.sh/resource-policy: keep
   name: podtraces.podtrace.io
 spec:
@@ -326,6 +326,22 @@ spec:
                       type: string
                     ready:
                       type: boolean
+                    reason:
+                      description: |-
+                        NodeStatusReason is the stable enum the agent stamps onto
+                        status.nodeStatus[].reason when a node reports unready or a CR rule
+                        fails.
+                      enum:
+                      - AgentUnready
+                      - BackendUnavailable
+                      - BundleLoadFailed
+                      - ExporterBuildFailed
+                      - ProgramAttachFailed
+                      - PolicyParseError
+                      - PodMatchFailed
+                      - CgroupResolutionFailed
+                      - Unknown
+                      type: string
                   required:
                   - activeCgroups
                   - droppedEvents

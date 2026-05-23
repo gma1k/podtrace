@@ -1,0 +1,55 @@
+# EditorConfig: cross-IDE whitespace + EOL normalization.
+# https://editorconfig.org/
+
+root = true
+
+# ─── Defaults (every file) ──────────────────────────────────────────
+[*]
+charset                  = utf-8
+end_of_line              = lf
+insert_final_newline     = true
+trim_trailing_whitespace = true
+indent_style             = space
+indent_size              = 2
+
+# ─── Go: tabs are mandatory (gofmt enforces this) ────────────────────
+[*.go]
+indent_style             = tab
+# gofmt has no max-line-length; long lines are normal in Go.
+
+# ─── Go modules + sums ───────────────────────────────────────────────
+[{go.mod,go.sum}]
+indent_style             = tab
+
+# ─── eBPF C source ───────────────────────────────────────────────────
+# Matches the Linux kernel style the BPF code is modelled after.
+[*.{c,h}]
+indent_style             = tab
+indent_size              = 8
+
+# ─── Makefile: tabs are required by Make ─────────────────────────────
+[{Makefile,*.mk}]
+indent_style             = tab
+
+# ─── Shell ───────────────────────────────────────────────────────────
+[*.{sh,bash}]
+indent_style             = space
+indent_size              = 2
+
+# ─── YAML (Helm, K8s manifests, GitHub Actions, chainsaw fixtures) ──
+[*.{yml,yaml}]
+indent_style             = space
+indent_size              = 2
+
+# ─── JSON ────────────────────────────────────────────────────────────
+[*.json]
+indent_style             = space
+indent_size              = 2
+
+# ─── Markdown ────────────────────────────────────────────────────────
+# Do NOT trim trailing whitespace: two trailing spaces is a Markdown
+# hard line break and must be preserved.
+[*.md]
+indent_style             = space
+indent_size              = 2
+trim_trailing_whitespace = false

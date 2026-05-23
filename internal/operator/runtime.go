@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	webhookv1alpha1 "github.com/podtrace/podtrace/internal/webhook/v1alpha1"
 )
 
 type Options struct {
@@ -148,16 +149,16 @@ func leaderElectionID(opts Options) string {
 // Each Setup* function declares a +kubebuilder:webhook marker so the
 // paths match the Helm-rendered ValidatingWebhookConfiguration.
 func registerWebhooks(mgr ctrl.Manager) error {
-	if err := podtracev1alpha1.SetupPodTraceWebhookWithManager(mgr); err != nil {
+	if err := webhookv1alpha1.SetupPodTraceWebhookWithManager(mgr); err != nil {
 		return fmt.Errorf("podtrace webhook: %w", err)
 	}
-	if err := podtracev1alpha1.SetupPodTraceSessionWebhookWithManager(mgr); err != nil {
+	if err := webhookv1alpha1.SetupPodTraceSessionWebhookWithManager(mgr); err != nil {
 		return fmt.Errorf("podtracesession webhook: %w", err)
 	}
-	if err := podtracev1alpha1.SetupExporterConfigWebhookWithManager(mgr); err != nil {
+	if err := webhookv1alpha1.SetupExporterConfigWebhookWithManager(mgr); err != nil {
 		return fmt.Errorf("exporterconfig webhook: %w", err)
 	}
-	if err := podtracev1alpha1.SetupPodTraceScheduleWebhookWithManager(mgr); err != nil {
+	if err := webhookv1alpha1.SetupPodTraceScheduleWebhookWithManager(mgr); err != nil {
 		return fmt.Errorf("podtraceschedule webhook: %w", err)
 	}
 	return nil

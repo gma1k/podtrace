@@ -15,12 +15,14 @@ import (
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	podtraceac "github.com/podtrace/podtrace/pkg/client/applyconfiguration/api/v1alpha1"
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/pkg/exporter/bundle"
 	"github.com/podtrace/podtrace/pkg/tracer"
@@ -374,14 +376,55 @@ type recordedPatch struct {
 	patchTy string
 }
 
-func (rp *recordingPatcher) record(obj client.Object, p client.Patch) {
+// recordApply unpacks an ApplyConfiguration back into a typed PodTrace
+// for assertions.
+func (rp *recordingPatcher) recordApply(ac *podtraceac.PodTraceApplyConfiguration) {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
-	pt, _ := obj.(*podtracev1alpha1.PodTrace)
+	pt := &podtracev1alpha1.PodTrace{}
+	if ac.Name != nil {
+		pt.Name = *ac.Name
+	}
+	if ac.Namespace != nil {
+		pt.Namespace = *ac.Namespace
+	}
+	if ac.Status != nil {
+		for _, n := range ac.Status.NodeStatus {
+			row := podtracev1alpha1.PodTraceNodeStatus{}
+			if n.Node != nil {
+				row.Node = *n.Node
+			}
+			if n.Ready != nil {
+				row.Ready = *n.Ready
+			}
+			if n.Message != nil {
+				row.Message = *n.Message
+			}
+			if n.Reason != nil {
+				row.Reason = *n.Reason
+			}
+			if n.ActiveCgroups != nil {
+				row.ActiveCgroups = *n.ActiveCgroups
+			}
+			if n.EventsTotal != nil {
+				row.EventsTotal = *n.EventsTotal
+			}
+			if n.DroppedEvents != nil {
+				row.DroppedEvents = *n.DroppedEvents
+			}
+			if n.LastHeartbeat != nil {
+				row.LastHeartbeat = *n.LastHeartbeat
+			}
+			if n.PolicyHash != nil {
+				row.PolicyHash = *n.PolicyHash
+			}
+			pt.Status.NodeStatus = append(pt.Status.NodeStatus, row)
+		}
+	}
 	rp.calls = append(rp.calls, recordedPatch{
-		key:     types.NamespacedName{Name: pt.GetName(), Namespace: pt.GetNamespace()},
-		pt:      pt.DeepCopy(),
-		patchTy: string(p.Type()),
+		key:     types.NamespacedName{Name: pt.Name, Namespace: pt.Namespace},
+		pt:      pt,
+		patchTy: "application/apply-patch+yaml",
 	})
 }
 
@@ -400,9 +443,11 @@ func newRecordingClient(t *testing.T, rp *recordingPatcher, seed ...client.Objec
 		WithStatusSubresource(&podtracev1alpha1.PodTrace{}).
 		WithObjects(seed...).
 		WithInterceptorFuncs(interceptor.Funcs{
-			SubResourcePatch: func(_ context.Context, _ client.Client, sub string, obj client.Object, p client.Patch, _ ...client.SubResourcePatchOption) error {
+			SubResourceApply: func(_ context.Context, _ client.Client, sub string, ac runtime.ApplyConfiguration, _ ...client.SubResourceApplyOption) error {
 				if sub == "status" {
-					rp.record(obj, p)
+					if pt, ok := ac.(*podtraceac.PodTraceApplyConfiguration); ok {
+						rp.recordApply(pt)
+					}
 				}
 				return nil
 			},

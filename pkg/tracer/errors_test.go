@@ -19,6 +19,8 @@ func TestClassifyBackendError(t *testing.T) {
 		{"wrapped eacces", fmt.Errorf("load program: %w", syscall.EACCES), BackendErrPermission},
 		{"permission denied phrase", errors.New("bpf(BPF_PROG_LOAD): permission denied"), BackendErrPermission},
 		{"operation not permitted phrase", errors.New("operation not permitted"), BackendErrPermission},
+		{"tracefs unmounted", errors.New("neither debugfs nor tracefs are mounted"), BackendErrTracefsUnmounted},
+		{"tracefs only", errors.New("tracefs not mounted at /sys/kernel/tracing"), BackendErrTracefsUnmounted},
 		{"btf unavailable", errors.New("kernel BTF not available"), BackendErrBTFUnavailable},
 		{"btf lower", errors.New("btf unsupported on this kernel"), BackendErrBTFUnavailable},
 		{"verifier rejected", errors.New("program load: verifier rejected program: invalid stack access"), BackendErrKernelTooOld},

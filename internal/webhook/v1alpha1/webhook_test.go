@@ -13,12 +13,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	webhookv1alpha1 "github.com/podtrace/podtrace/internal/webhook/v1alpha1"
 )
 
 // newClientWithExporter returns a fake client whose backing store already
-// contains the given ExporterConfig in the given namespace. Used to
-// exercise both the happy path (exporter exists) and the missing-exporter
-// rejection without wiring a real apiserver.
+// contains the given ExporterConfig in the given namespace.
 func newClientWithExporter(t *testing.T, namespace, name string) client.Client {
 	t.Helper()
 	scheme := runtime.NewScheme()
@@ -47,8 +46,8 @@ func TestPodTraceValidator_Create(t *testing.T) {
 	cases := []struct {
 		name      string
 		spec      podtracev1alpha1.PodTraceSpec
-		exporter  string // name of ExporterConfig pre-created in "default"
-		wantError string // substring expected in the error; empty means no error
+		exporter  string
+		wantError string
 	}{
 		{
 			name: "happy-path-selector",
@@ -118,7 +117,7 @@ func TestPodTraceValidator_Create(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newClientWithExporter(t, "default", tc.exporter)
-			v := &podtracev1alpha1.PodTraceCustomValidator{Client: c}
+			v := &webhookv1alpha1.PodTraceCustomValidator{Client: c}
 			obj := &podtracev1alpha1.PodTrace{
 				ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: "default"},
 				Spec:       tc.spec,
@@ -197,7 +196,7 @@ func TestPodTraceSessionValidator_Create(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newClientWithExporter(t, "default", tc.exporter)
-			v := &podtracev1alpha1.PodTraceSessionCustomValidator{Client: c}
+			v := &webhookv1alpha1.PodTraceSessionCustomValidator{Client: c}
 			spec := baseSpec()
 			tc.mutate(&spec)
 			obj := &podtracev1alpha1.PodTraceSession{
@@ -278,7 +277,7 @@ func TestPodTraceSessionValidator_ObjectStoreReportRef(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newClientWithExporter(t, "default", "prod-otlp")
-			v := &podtracev1alpha1.PodTraceSessionCustomValidator{Client: c}
+			v := &webhookv1alpha1.PodTraceSessionCustomValidator{Client: c}
 			spec := base()
 			spec.ReportRef = &podtracev1alpha1.ReportReference{ObjectStore: tc.ref}
 			obj := &podtracev1alpha1.PodTraceSession{
@@ -303,7 +302,7 @@ func TestPodTraceSessionValidator_ObjectStoreReportRef(t *testing.T) {
 // most one sink can be set.
 func TestPodTraceSessionValidator_ReportRefExclusivity(t *testing.T) {
 	c := newClientWithExporter(t, "default", "prod-otlp")
-	v := &podtracev1alpha1.PodTraceSessionCustomValidator{Client: c}
+	v := &webhookv1alpha1.PodTraceSessionCustomValidator{Client: c}
 	obj := &podtracev1alpha1.PodTraceSession{
 		ObjectMeta: metav1.ObjectMeta{Name: "pts", Namespace: "default"},
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
@@ -372,7 +371,7 @@ func TestExporterConfigValidator_Create(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			v := &podtracev1alpha1.ExporterConfigCustomValidator{}
+			v := &webhookv1alpha1.ExporterConfigCustomValidator{}
 			obj := &podtracev1alpha1.ExporterConfig{
 				ObjectMeta: metav1.ObjectMeta{Name: "ec", Namespace: "default"},
 				Spec:       tc.spec,
@@ -398,7 +397,7 @@ func TestExporterConfigValidator_Create(t *testing.T) {
 // the operator wires a validator without a client. This guards against a
 // misconfiguration where referential checks would silently succeed.
 func TestPodTraceValidator_NilClient(t *testing.T) {
-	v := &podtracev1alpha1.PodTraceCustomValidator{Client: nil}
+	v := &webhookv1alpha1.PodTraceCustomValidator{Client: nil}
 	_, err := v.ValidateCreate(context.Background(), &podtracev1alpha1.PodTrace{
 		ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: "default"},
 		Spec: podtracev1alpha1.PodTraceSpec{
@@ -411,80 +410,23 @@ func TestPodTraceValidator_NilClient(t *testing.T) {
 	}
 }
 
-// TestValidators_RejectWrongType covers the defensive type-assertion
-// branches in every validator. A caller that mis-wires a manager could
-// route a random runtime.Object into any ValidateCreate/Update; the
-// validator must refuse rather than panic.
-func TestValidators_RejectWrongType(t *testing.T) {
-	c := newClientWithExporter(t, "default", "prod-otlp")
-
-	cases := []struct {
-		name string
-		fn   func(context.Context, *corev1.ConfigMap) error
-	}{
-		{"PodTrace-Create", func(ctx context.Context, obj *corev1.ConfigMap) error {
-			v := &podtracev1alpha1.PodTraceCustomValidator{Client: c}
-			_, err := v.ValidateCreate(ctx, obj)
-			return err
-		}},
-		{"PodTrace-Update", func(ctx context.Context, obj *corev1.ConfigMap) error {
-			v := &podtracev1alpha1.PodTraceCustomValidator{Client: c}
-			_, err := v.ValidateUpdate(ctx, obj, obj)
-			return err
-		}},
-		{"PodTraceSession-Create", func(ctx context.Context, obj *corev1.ConfigMap) error {
-			v := &podtracev1alpha1.PodTraceSessionCustomValidator{Client: c}
-			_, err := v.ValidateCreate(ctx, obj)
-			return err
-		}},
-		{"PodTraceSession-Update", func(ctx context.Context, obj *corev1.ConfigMap) error {
-			v := &podtracev1alpha1.PodTraceSessionCustomValidator{Client: c}
-			_, err := v.ValidateUpdate(ctx, obj, obj)
-			return err
-		}},
-		{"ExporterConfig-Create", func(ctx context.Context, obj *corev1.ConfigMap) error {
-			v := &podtracev1alpha1.ExporterConfigCustomValidator{}
-			_, err := v.ValidateCreate(ctx, obj)
-			return err
-		}},
-		{"ExporterConfig-Update", func(ctx context.Context, obj *corev1.ConfigMap) error {
-			v := &podtracev1alpha1.ExporterConfigCustomValidator{}
-			_, err := v.ValidateUpdate(ctx, obj, obj)
-			return err
-		}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			bogus := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "bogus"}}
-			err := tc.fn(context.Background(), bogus)
-			if err == nil {
-				t.Fatal("expected error on wrong object type, got nil")
-			}
-			if !strings.Contains(err.Error(), "expected *") {
-				t.Errorf("error does not mention expected type: %q", err.Error())
-			}
-		})
-	}
-
-}
-
 // TestValidators_DeleteIsNoOp confirms all three validators accept
 // deletion unconditionally. Blocking deletes is a common source of
 // stuck resources; tests lock in the "never block delete" policy.
 func TestValidators_DeleteIsNoOp(t *testing.T) {
 	c := newClientWithExporter(t, "default", "prod-otlp")
 
-	ptv := &podtracev1alpha1.PodTraceCustomValidator{Client: c}
+	ptv := &webhookv1alpha1.PodTraceCustomValidator{Client: c}
 	if _, err := ptv.ValidateDelete(context.Background(), &podtracev1alpha1.PodTrace{}); err != nil {
 		t.Errorf("PodTrace ValidateDelete: %v", err)
 	}
 
-	ptsv := &podtracev1alpha1.PodTraceSessionCustomValidator{Client: c}
+	ptsv := &webhookv1alpha1.PodTraceSessionCustomValidator{Client: c}
 	if _, err := ptsv.ValidateDelete(context.Background(), &podtracev1alpha1.PodTraceSession{}); err != nil {
 		t.Errorf("PodTraceSession ValidateDelete: %v", err)
 	}
 
-	ecv := &podtracev1alpha1.ExporterConfigCustomValidator{}
+	ecv := &webhookv1alpha1.ExporterConfigCustomValidator{}
 	if _, err := ecv.ValidateDelete(context.Background(), &podtracev1alpha1.ExporterConfig{}); err != nil {
 		t.Errorf("ExporterConfig ValidateDelete: %v", err)
 	}
@@ -495,7 +437,7 @@ func TestValidators_DeleteIsNoOp(t *testing.T) {
 // a now-missing exporterRef must still be rejected.
 func TestPodTraceValidator_Update(t *testing.T) {
 	c := newClientWithExporter(t, "default", "prod-otlp")
-	v := &podtracev1alpha1.PodTraceCustomValidator{Client: c}
+	v := &webhookv1alpha1.PodTraceCustomValidator{Client: c}
 
 	oldPT := &podtracev1alpha1.PodTrace{
 		ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: "default"},
@@ -519,7 +461,7 @@ func TestPodTraceValidator_Update(t *testing.T) {
 // webhook must also reject it defensively so unit tests exercising the
 // helper cover the branch.
 func TestExporterConfigValidator_EmptyType(t *testing.T) {
-	v := &podtracev1alpha1.ExporterConfigCustomValidator{}
+	v := &webhookv1alpha1.ExporterConfigCustomValidator{}
 	obj := &podtracev1alpha1.ExporterConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "ec", Namespace: "default"},
 		Spec: podtracev1alpha1.ExporterConfigSpec{
@@ -552,7 +494,7 @@ func TestPodTraceValidator_RejectsMalformedNamespaceSelector(t *testing.T) {
 		{
 			name: "PodTrace",
 			run: func() error {
-				v := &podtracev1alpha1.PodTraceCustomValidator{Client: c}
+				v := &webhookv1alpha1.PodTraceCustomValidator{Client: c}
 				_, err := v.ValidateCreate(context.Background(), &podtracev1alpha1.PodTrace{
 					ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: "default"},
 					Spec: podtracev1alpha1.PodTraceSpec{
@@ -567,7 +509,7 @@ func TestPodTraceValidator_RejectsMalformedNamespaceSelector(t *testing.T) {
 		{
 			name: "PodTraceSession",
 			run: func() error {
-				v := &podtracev1alpha1.PodTraceSessionCustomValidator{Client: c}
+				v := &webhookv1alpha1.PodTraceSessionCustomValidator{Client: c}
 				_, err := v.ValidateCreate(context.Background(), &podtracev1alpha1.PodTraceSession{
 					ObjectMeta: metav1.ObjectMeta{Name: "pts", Namespace: "default"},
 					Spec: podtracev1alpha1.PodTraceSessionSpec{
@@ -594,7 +536,7 @@ func TestPodTraceValidator_RejectsMalformedNamespaceSelector(t *testing.T) {
 
 func TestPodTraceValidator_AcceptsValidNamespaceSelectors(t *testing.T) {
 	c := newClientWithExporter(t, "default", "prod-otlp")
-	v := &podtracev1alpha1.PodTraceCustomValidator{Client: c}
+	v := &webhookv1alpha1.PodTraceCustomValidator{Client: c}
 
 	cases := []struct {
 		name string

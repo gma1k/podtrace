@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+
+	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
 )
 
 // +kubebuilder:webhook:path=/validate-podtrace-io-v1alpha1-podtracesession,mutating=false,failurePolicy=fail,sideEffects=None,groups=podtrace.io,resources=podtracesessions,verbs=create;update,versions=v1alpha1,name=vpodtracesession.podtrace.io,admissionReviewVersions=v1
@@ -29,35 +29,26 @@ type PodTraceSessionCustomValidator struct {
 }
 
 func SetupPodTraceSessionWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(&PodTraceSession{}).
+	return ctrl.NewWebhookManagedBy(mgr, &podtracev1alpha1.PodTraceSession{}).
 		WithValidator(&PodTraceSessionCustomValidator{Client: mgr.GetClient()}).
 		Complete()
 }
 
-var _ webhook.CustomValidator = &PodTraceSessionCustomValidator{}
+var _ admission.Validator[*podtracev1alpha1.PodTraceSession] = &PodTraceSessionCustomValidator{}
 
-func (v *PodTraceSessionCustomValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	s, ok := obj.(*PodTraceSession)
-	if !ok {
-		return nil, fmt.Errorf("expected *PodTraceSession, got %T", obj)
-	}
+func (v *PodTraceSessionCustomValidator) ValidateCreate(ctx context.Context, s *podtracev1alpha1.PodTraceSession) (admission.Warnings, error) {
 	return v.validate(ctx, s)
 }
 
-func (v *PodTraceSessionCustomValidator) ValidateUpdate(ctx context.Context, _, newObj runtime.Object) (admission.Warnings, error) {
-	s, ok := newObj.(*PodTraceSession)
-	if !ok {
-		return nil, fmt.Errorf("expected *PodTraceSession, got %T", newObj)
-	}
-	return v.validate(ctx, s)
+func (v *PodTraceSessionCustomValidator) ValidateUpdate(ctx context.Context, _, newSession *podtracev1alpha1.PodTraceSession) (admission.Warnings, error) {
+	return v.validate(ctx, newSession)
 }
 
-func (v *PodTraceSessionCustomValidator) ValidateDelete(_ context.Context, _ runtime.Object) (admission.Warnings, error) {
+func (v *PodTraceSessionCustomValidator) ValidateDelete(_ context.Context, _ *podtracev1alpha1.PodTraceSession) (admission.Warnings, error) {
 	return nil, nil
 }
 
-func (v *PodTraceSessionCustomValidator) validate(ctx context.Context, s *PodTraceSession) (admission.Warnings, error) {
+func (v *PodTraceSessionCustomValidator) validate(ctx context.Context, s *podtracev1alpha1.PodTraceSession) (admission.Warnings, error) {
 	if err := validateSelectorExclusivity(s.Spec.Selector, s.Spec.PodRefs); err != nil {
 		return nil, err
 	}
@@ -80,7 +71,7 @@ func (v *PodTraceSessionCustomValidator) validate(ctx context.Context, s *PodTra
 // each sink shape. ObjectStore upload is wired as: URIs
 // must be syntactically well-formed against the known schemes
 // (s3, gs, azblob).
-func validateReportRef(ref *ReportReference) error {
+func validateReportRef(ref *podtracev1alpha1.ReportReference) error {
 	if ref == nil {
 		return nil
 	}
@@ -98,7 +89,7 @@ func validateReportRef(ref *ReportReference) error {
 		return fmt.Errorf("spec.reportRef: at most one of configMap, secret, objectStore may be set")
 	}
 	if ref.ObjectStore != nil {
-		if err := ValidateObjectStoreReference(ref.ObjectStore); err != nil {
+		if err := podtracev1alpha1.ValidateObjectStoreReference(ref.ObjectStore); err != nil {
 			return err
 		}
 	}

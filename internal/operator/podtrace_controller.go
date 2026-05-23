@@ -59,7 +59,7 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		if removeFinalizer(&pt) {
 			if err := r.Update(ctx, &pt); err != nil {
 				if apierrors.IsConflict(err) {
-					return ctrl.Result{Requeue: true}, nil
+					return ctrl.Result{RequeueAfter: time.Second}, nil
 				}
 				return ctrl.Result{}, fmt.Errorf("clear finalizer: %w", err)
 			}
@@ -72,11 +72,11 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			// our Get and Update. Requeue and try again on the fresh
 			// version — this is normal, not an error.
 			if apierrors.IsConflict(err) {
-				return ctrl.Result{Requeue: true}, nil
+				return ctrl.Result{RequeueAfter: time.Second}, nil
 			}
 			return ctrl.Result{}, fmt.Errorf("set finalizer: %w", err)
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
 	if pt.Spec.Paused {
@@ -122,8 +122,12 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	pt.Status.Policy = resolvePolicyStatus(policyFromPodTrace(&pt), &ec)
 	r.setCondition(&pt, ConditionPolicyApplied, metav1.ConditionTrue, "Reconciled", "policy resolved and written to bundle")
 
-	if node, msg, ok := firstDegradedNode(pt.Status.NodeStatus); ok {
-		r.setCondition(&pt, ConditionDegraded, metav1.ConditionTrue, "AgentNodeStatus",
+	if node, msg, reason, ok := firstDegradedNode(pt.Status.NodeStatus); ok {
+		condReason := string(reason)
+		if condReason == "" {
+			condReason = "AgentNodeStatus"
+		}
+		r.setCondition(&pt, ConditionDegraded, metav1.ConditionTrue, condReason,
 			fmt.Sprintf("node %s: %s", node, msg))
 	} else {
 		r.setCondition(&pt, ConditionDegraded, metav1.ConditionFalse, "Reconciled", "")
@@ -138,7 +142,7 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	if err := r.Status().Update(ctx, &pt); err != nil {
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("update status: %w", err)
 	}
@@ -304,14 +308,10 @@ func allNodesReady(ns []podtracev1alpha1.PodTraceNodeStatus) bool {
 	return true
 }
 
-// firstDegradedNode returns the (node, message) of the lexicographically
-// first NodeStatus row that an agent has tombstoned (Ready=false with a
-// non-empty Message). The lexicographic pick keeps the rolled-up
-// condition stable across reconciles when multiple nodes report errors;
-// users see one representative cause and can run
-//   kubectl get podtrace -o jsonpath
-// to enumerate the rest.
-func firstDegradedNode(ns []podtracev1alpha1.PodTraceNodeStatus) (node, message string, ok bool) {
+// firstDegradedNode returns the (node, message, reason) of the
+// lexicographically first NodeStatus row that an agent has tombstoned
+// (Ready=false with a non-empty Message).
+func firstDegradedNode(ns []podtracev1alpha1.PodTraceNodeStatus) (node, message string, reason podtracev1alpha1.NodeStatusReason, ok bool) {
 	for _, n := range ns {
 		if n.Ready || n.Message == "" {
 			continue
@@ -319,15 +319,15 @@ func firstDegradedNode(ns []podtracev1alpha1.PodTraceNodeStatus) (node, message 
 		if !ok || n.Node < node {
 			node = n.Node
 			message = n.Message
+			reason = n.Reason
 			ok = true
 		}
 	}
-	return node, message, ok
+	return node, message, reason, ok
 }
 
 // countReadyPods sums activeCgroups across all per-node reports as a
-// proxy for matchedPods. cgroups and pods are 1:1 under the current
-// target-resolution rules.
+// proxy for matchedPods.
 func countReadyPods(ns []podtracev1alpha1.PodTraceNodeStatus) int32 {
 	total := int32(0)
 	for _, n := range ns {

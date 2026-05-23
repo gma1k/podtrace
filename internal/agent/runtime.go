@@ -26,9 +26,23 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	"github.com/podtrace/podtrace/internal/ebpf/probes"
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/pkg/tracer"
 )
+
+// attachMetricsObserver bridges probes.AttachObserver into the
+// per-program metric.
+type attachMetricsObserver struct {
+	metrics *Metrics
+}
+
+func (a *attachMetricsObserver) OnAttachFailure(program, symbol string, mandatory bool, err error) {
+	if a == nil || a.metrics == nil {
+		return
+	}
+	a.metrics.RecordProgramAttachFailure(program, tracer.ClassifyBackendError(err))
+}
 
 // Options configure a single agent run. Defaults are applied by
 // DefaultOptions.
@@ -94,8 +108,10 @@ func Run(ctx context.Context, opts Options) error {
 	stats := newPerCRStats()
 	enricher := NewPodEnricher()
 	router := NewRouter(stats).WithEnricher(enricher)
-	probes := NewProbeServer(opts.HealthAddr, 0)
+	probeSrv := NewProbeServer(opts.HealthAddr, 0)
 	metrics := NewMetrics()
+
+	probes.SetAttachObserver(&attachMetricsObserver{metrics: metrics})
 
 	backend, backendErr := buildBackend(opts, logger)
 	if backendErr != nil {
@@ -134,8 +150,8 @@ func Run(ctx context.Context, opts Options) error {
 		NodeName:   opts.NodeName,
 		Interval:   opts.StatusReportInterval,
 		Router:     router,
-		Ready:      probes.IsReady,
-		Heartbeat:  probes.Heartbeat,
+		Ready:      probeSrv.IsReady,
+		Heartbeat:  probeSrv.Heartbeat,
 		BackendErr: backendErr,
 	}
 
@@ -144,14 +160,14 @@ func Run(ctx context.Context, opts Options) error {
 	g.Go(func() error { return mgr.Start(gctx) })
 	g.Go(func() error { return engine.Run(gctx, targetsCh) })
 	g.Go(func() error { return writer.Run(gctx) })
-	g.Go(func() error { return probes.Run(gctx) })
+	g.Go(func() error { return probeSrv.Run(gctx) })
 	g.Go(func() error { return serveMetrics(gctx, opts.MetricsAddr, metrics, logger) })
 
 	g.Go(func() error {
 		if !mgr.GetCache().WaitForCacheSync(gctx) {
 			return errors.New("informer cache sync failed")
 		}
-		probes.MarkReady()
+		probeSrv.MarkReady()
 		logger.Info("agent ready")
 		return nil
 	})

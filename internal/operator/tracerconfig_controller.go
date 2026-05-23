@@ -3,6 +3,7 @@ package operator
 import (
 	"context"
 	"fmt"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -70,7 +71,7 @@ func (r *TracerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		// DaemonSet — kubectl rollout restart, helm upgrade, another
 		// reconcile). Requeue silently; controller-runtime will re-list.
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
 		logger.Error(err, "ensure agent DaemonSet")
 		r.setCondition(&tc, ConditionDegraded, metav1.ConditionTrue, "DaemonSetError", err.Error())
@@ -91,7 +92,7 @@ func (r *TracerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	if err := r.Status().Update(ctx, &tc); err != nil {
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("update status: %w", err)
 	}

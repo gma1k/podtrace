@@ -2,12 +2,11 @@ package v1alpha1
 
 import (
 	"context"
-	"fmt"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+
+	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
 )
 
 // +kubebuilder:webhook:path=/validate-podtrace-io-v1alpha1-exporterconfig,mutating=false,failurePolicy=fail,sideEffects=None,groups=podtrace.io,resources=exporterconfigs,verbs=create;update,versions=v1alpha1,name=vexporterconfig.podtrace.io,admissionReviewVersions=v1
@@ -22,30 +21,21 @@ import (
 type ExporterConfigCustomValidator struct{}
 
 func SetupExporterConfigWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(&ExporterConfig{}).
+	return ctrl.NewWebhookManagedBy(mgr, &podtracev1alpha1.ExporterConfig{}).
 		WithValidator(&ExporterConfigCustomValidator{}).
 		Complete()
 }
 
-var _ webhook.CustomValidator = &ExporterConfigCustomValidator{}
+var _ admission.Validator[*podtracev1alpha1.ExporterConfig] = &ExporterConfigCustomValidator{}
 
-func (v *ExporterConfigCustomValidator) ValidateCreate(_ context.Context, obj runtime.Object) (admission.Warnings, error) {
-	ec, ok := obj.(*ExporterConfig)
-	if !ok {
-		return nil, fmt.Errorf("expected *ExporterConfig, got %T", obj)
-	}
-	return nil, ValidateExporterConfigVariant(ec.Spec)
+func (v *ExporterConfigCustomValidator) ValidateCreate(_ context.Context, ec *podtracev1alpha1.ExporterConfig) (admission.Warnings, error) {
+	return nil, podtracev1alpha1.ValidateExporterConfigVariant(ec.Spec)
 }
 
-func (v *ExporterConfigCustomValidator) ValidateUpdate(_ context.Context, _, newObj runtime.Object) (admission.Warnings, error) {
-	ec, ok := newObj.(*ExporterConfig)
-	if !ok {
-		return nil, fmt.Errorf("expected *ExporterConfig, got %T", newObj)
-	}
-	return nil, ValidateExporterConfigVariant(ec.Spec)
+func (v *ExporterConfigCustomValidator) ValidateUpdate(_ context.Context, _, newEC *podtracev1alpha1.ExporterConfig) (admission.Warnings, error) {
+	return nil, podtracev1alpha1.ValidateExporterConfigVariant(newEC.Spec)
 }
 
-func (v *ExporterConfigCustomValidator) ValidateDelete(_ context.Context, _ runtime.Object) (admission.Warnings, error) {
+func (v *ExporterConfigCustomValidator) ValidateDelete(_ context.Context, _ *podtracev1alpha1.ExporterConfig) (admission.Warnings, error) {
 	return nil, nil
 }

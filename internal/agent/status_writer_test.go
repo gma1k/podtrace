@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
 	"github.com/podtrace/podtrace/internal/events"
 )
 
@@ -95,6 +96,7 @@ func TestBuildNodeStatusEntry(t *testing.T) {
 		backendErr  error
 		wantReady   bool
 		wantMessage string
+		wantReason  podtracev1alpha1.NodeStatusReason
 		wantCgroups int32
 		wantEvents  int64
 		wantDropped int64
@@ -124,6 +126,7 @@ func TestBuildNodeStatusEntry(t *testing.T) {
 			agentReady:  true,
 			wantReady:   false,
 			wantMessage: "build exporter: not yet implemented in agent mode",
+			wantReason:  podtracev1alpha1.NodeStatusReasonExporterBuildFailed,
 			wantCgroups: 1,
 		},
 		{
@@ -136,6 +139,8 @@ func TestBuildNodeStatusEntry(t *testing.T) {
 			counters:    crCounters{Events: 1},
 			agentReady:  false,
 			wantReady:   false,
+			wantMessage: "agent not ready",
+			wantReason:  podtracev1alpha1.NodeStatusReasonAgentUnready,
 			wantEvents:  1,
 			wantCgroups: 1,
 		},
@@ -149,6 +154,7 @@ func TestBuildNodeStatusEntry(t *testing.T) {
 			agentReady:  false,
 			wantReady:   false,
 			wantMessage: "load bundle: parse error",
+			wantReason:  podtracev1alpha1.NodeStatusReasonBundleLoadFailed,
 		},
 		{
 			// Backend failure (e.g. BPF/BTF unavailable) makes every
@@ -167,6 +173,7 @@ func TestBuildNodeStatusEntry(t *testing.T) {
 			backendErr:  errors.New("BPF object not embedded in this build"),
 			wantReady:   false,
 			wantMessage: "tracer backend unavailable: BPF object not embedded in this build",
+			wantReason:  podtracev1alpha1.NodeStatusReasonBackendUnavailable,
 			wantCgroups: 1,
 		},
 		{
@@ -183,6 +190,40 @@ func TestBuildNodeStatusEntry(t *testing.T) {
 			backendErr:  errors.New("kernel missing CAP_BPF"),
 			wantReady:   false,
 			wantMessage: "tracer backend unavailable: kernel missing CAP_BPF",
+			wantReason:  podtracev1alpha1.NodeStatusReasonBackendUnavailable,
+		},
+		{
+			name: "PodMatchFailureReason",
+			rule: &CRRule{
+				Key: CRKey{"ns", "tomb"},
+				Err: errors.New("match pods: invalid selector"),
+			},
+			agentReady:  true,
+			wantReady:   false,
+			wantMessage: "match pods: invalid selector",
+			wantReason:  podtracev1alpha1.NodeStatusReasonPodMatchFailed,
+		},
+		{
+			name: "CgroupResolutionFailureReason",
+			rule: &CRRule{
+				Key: CRKey{"ns", "tomb"},
+				Err: errors.New("resolve cgroup IDs: kubepods missing"),
+			},
+			agentReady:  true,
+			wantReady:   false,
+			wantMessage: "resolve cgroup IDs: kubepods missing",
+			wantReason:  podtracev1alpha1.NodeStatusReasonCgroupResolutionFailed,
+		},
+		{
+			name: "UnclassifiedRuleErrFallsBackToUnknown",
+			rule: &CRRule{
+				Key: CRKey{"ns", "tomb"},
+				Err: errors.New("something exotic happened"),
+			},
+			agentReady:  true,
+			wantReady:   false,
+			wantMessage: "something exotic happened",
+			wantReason:  podtracev1alpha1.NodeStatusReasonUnknown,
 		},
 	}
 
@@ -197,6 +238,9 @@ func TestBuildNodeStatusEntry(t *testing.T) {
 			}
 			if got.Message != tc.wantMessage {
 				t.Errorf("Message = %q, want %q", got.Message, tc.wantMessage)
+			}
+			if got.Reason != tc.wantReason {
+				t.Errorf("Reason = %q, want %q", got.Reason, tc.wantReason)
 			}
 			if got.ActiveCgroups != tc.wantCgroups {
 				t.Errorf("ActiveCgroups = %d, want %d", got.ActiveCgroups, tc.wantCgroups)

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -114,6 +115,109 @@ func TestMetrics_BackendDegraded_SetByReason(t *testing.T) {
 	got := scrapeMetric(t, m, `backend_degraded{reason="permission_denied"}`)
 	if got != 1 {
 		t.Errorf("backend_degraded{reason=permission_denied} = %d, want 1", got)
+	}
+}
+
+// TestMetrics_ProgramAttachFailures_ByProgramAndReason locks in the
+// per-program counter contract: each (program, reason) tuple is a
+// distinct series, increments are atomic, and the metric stays silent
+// on healthy agents (no NaN/zero rows).
+func TestMetrics_ProgramAttachFailures_ByProgramAndReason(t *testing.T) {
+	m := NewMetrics()
+
+	if scrapeMetric(t, m, `program_attach_failures_total{program="kprobe_vfs_open",reason="permission_denied"}`) != 0 {
+		t.Fatal("untouched program_attach_failures_total must emit no series")
+	}
+
+	m.RecordProgramAttachFailure("kprobe_vfs_open", "permission_denied")
+	m.RecordProgramAttachFailure("kprobe_vfs_open", "permission_denied")
+	m.RecordProgramAttachFailure("kprobe_do_futex", "kernel_too_old")
+
+	if got := scrapeMetric(t, m, `program_attach_failures_total{program="kprobe_vfs_open",reason="permission_denied"}`); got != 2 {
+		t.Errorf("vfs_open permission_denied = %d, want 2", got)
+	}
+	if got := scrapeMetric(t, m, `program_attach_failures_total{program="kprobe_do_futex",reason="kernel_too_old"}`); got != 1 {
+		t.Errorf("do_futex kernel_too_old = %d, want 1", got)
+	}
+}
+
+// TestMetrics_ProgramAttachFailures_EmptyReasonNormalized guards
+// against a label cardinality regression: an empty reason from a
+// poorly-classified error must collapse to "unknown" rather than
+// emit a blank label that is hostile to Prometheus.
+func TestMetrics_ProgramAttachFailures_EmptyReasonNormalized(t *testing.T) {
+	m := NewMetrics()
+	m.RecordProgramAttachFailure("kprobe_x", "")
+	if got := scrapeMetric(t, m, `program_attach_failures_total{program="kprobe_x",reason="unknown"}`); got != 1 {
+		t.Errorf("empty reason should normalize to unknown; got %d", got)
+	}
+}
+
+// TestMetrics_ProgramAttachFailures_NilReceiverSafe is the contract for
+// the probe observer wiring: tracer construction must never panic when
+// no metrics registry is set up (e.g. unit tests that build a tracer
+// directly).
+func TestMetrics_ProgramAttachFailures_NilReceiverSafe(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("nil receiver panicked: %v", r)
+		}
+	}()
+	var m *Metrics
+	m.RecordProgramAttachFailure("kprobe_x", "permission_denied")
+}
+
+// TestMetrics_ExporterInit_EdgeTriggered pins the alert-friendly
+// counter contract: one increment per ok→fail transition, repeat
+// failures are silent until the CR returns to healthy.
+func TestMetrics_ExporterInit_EdgeTriggered(t *testing.T) {
+	m := NewMetrics()
+	cr := CRKey{Namespace: "ns", Name: "broken"}
+	bad := errors.New("unknown exporter type \"zipkin-direct\"")
+
+	m.ObserveExporterInit(cr, bad)
+	if got := scrapeMetric(t, m, `exporter_init_failures_total{cr_namespace="ns",cr_name="broken",reason="unsupported_type"}`); got != 1 {
+		t.Fatalf("first failure: counter = %d, want 1", got)
+	}
+
+	m.ObserveExporterInit(cr, bad)
+	m.ObserveExporterInit(cr, bad)
+	if got := scrapeMetric(t, m, `exporter_init_failures_total{cr_namespace="ns",cr_name="broken",reason="unsupported_type"}`); got != 1 {
+		t.Errorf("sustained failure inflated counter: %d, want 1", got)
+	}
+
+	m.ObserveExporterInit(cr, nil)
+	if got := scrapeMetric(t, m, `exporter_init_failures_total{cr_namespace="ns",cr_name="broken",reason="unsupported_type"}`); got != 1 {
+		t.Errorf("recovery should not change the counter; got %d", got)
+	}
+
+	m.ObserveExporterInit(cr, bad)
+	if got := scrapeMetric(t, m, `exporter_init_failures_total{cr_namespace="ns",cr_name="broken",reason="unsupported_type"}`); got != 2 {
+		t.Errorf("second edge: counter = %d, want 2", got)
+	}
+}
+
+// TestMetrics_ExporterInit_ReasonClassification asserts that the
+// reason label is sourced from ClassifyExporterError so dashboards
+// keyed off the closed enum stay stable.
+func TestMetrics_ExporterInit_ReasonClassification(t *testing.T) {
+	m := NewMetrics()
+	cases := []struct {
+		cr     CRKey
+		err    error
+		reason string
+	}{
+		{CRKey{"ns", "a"}, errors.New("nil bundle payload"), "nil_payload"},
+		{CRKey{"ns", "b"}, errors.New("missing endpoint for OTLP exporter"), "endpoint_missing"},
+		{CRKey{"ns", "c"}, errors.New("tls handshake failed"), "tls_invalid"},
+		{CRKey{"ns", "d"}, errors.New("missing api key"), "auth_missing"},
+	}
+	for _, tc := range cases {
+		m.ObserveExporterInit(tc.cr, tc.err)
+		sel := `exporter_init_failures_total{cr_namespace="` + tc.cr.Namespace + `",cr_name="` + tc.cr.Name + `",reason="` + tc.reason + `"}`
+		if got := scrapeMetric(t, m, sel); got != 1 {
+			t.Errorf("cr %s/%s expected reason=%q to register; got %d", tc.cr.Namespace, tc.cr.Name, tc.reason, got)
+		}
 	}
 }
 

@@ -334,7 +334,8 @@ You should see usage information.
 - Verify clang is installed: `clang --version`
 
 **Error: "Go version too old"**
-- Upgrade Go to 1.24+ (or 1.21+ with GOTOOLCHAIN=auto)
+- Upgrade Go to 1.26+, or set `GOTOOLCHAIN=auto` so `go` downloads the
+  exact toolchain (`go 1.26.0` per `go.mod`) on demand.
 - The Makefile will show upgrade instructions
 
 **Error: "permission denied" when attaching probes**

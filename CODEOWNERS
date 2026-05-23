@@ -1,0 +1,48 @@
+# GitHub uses the LAST matching rule for any given path, so the
+# catch-all stays at the top and narrower paths follow.
+
+# Catch-all — every PR routes to the maintainer until a more
+# specific rule below matches.
+*                                       @gma1k
+
+# ─── Public API surface ──────────────────────────────────────────────
+# CRD types and generated code. Schema changes ripple to the chart,
+# clientset, docs, and chainsaw fixtures — treat with extra care.
+/api/v1alpha1/                          @gma1k
+/pkg/client/                            @gma1k
+
+# ─── Operator (control plane) ────────────────────────────────────────
+/internal/operator/                     @gma1k
+/internal/webhook/                      @gma1k
+
+# ─── Agent (DaemonSet runtime) ───────────────────────────────────────
+/internal/agent/                        @gma1k
+
+# ─── eBPF (kernel-side + Go loader) ──────────────────────────────────
+# BPF C sources, vmlinux stub, loader, and the embedded objects.
+# Any change here can affect every supported kernel/arch matrix.
+/bpf/                                   @gma1k
+/internal/ebpf/                         @gma1k
+/pkg/tracer/                            @gma1k
+
+# ─── Deploy: Helm chart, CRDs, RBAC ──────────────────────────────────
+/deploy/                                @gma1k
+
+# ─── Documentation ───────────────────────────────────────────────────
+/docs/                                  @gma1k
+/README.md                              @gma1k
+/CHANGELOG.md                           @gma1k
+/CONTRIBUTING.md                        @gma1k
+/STABILITY.md                           @gma1k
+/SECURITY.md                            @gma1k
+/SUPPORT.md                             @gma1k
+
+# ─── CI, release tooling, and repo meta ──────────────────────────────
+/.github/                               @gma1k
+/Makefile                               @gma1k
+/Dockerfile                             @gma1k
+/release-please-config.json             @gma1k
+/.release-please-manifest.json          @gma1k
+
+# ─── Tests + chainsaw e2e ────────────────────────────────────────────
+/test/                                  @gma1k
