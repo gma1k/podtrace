@@ -35,14 +35,14 @@
         { "type": "security",  "section": "Security" },
         { "type": "deprecate", "section": "Deprecated" },
         { "type": "remove",    "section": "Removed" },
-        { "type": "revert",    "section": "Maintenance" },
-        { "type": "refactor",  "section": "Maintenance", "hidden": true },
-        { "type": "chore",     "section": "Maintenance", "hidden": true },
-        { "type": "docs",      "section": "Maintenance", "hidden": true },
-        { "type": "style",     "section": "Maintenance", "hidden": true },
-        { "type": "test",      "section": "Maintenance", "hidden": true },
-        { "type": "build",     "section": "Maintenance", "hidden": true },
-        { "type": "ci",        "section": "Maintenance", "hidden": true }
+        { "type": "revert",    "section": "Reverts" },
+        { "type": "refactor",  "section": "Refactors" },
+        { "type": "docs",      "section": "Documentation" },
+        { "type": "test",      "section": "Tests" },
+        { "type": "build",     "section": "Build System" },
+        { "type": "ci",        "section": "CI" },
+        { "type": "chore",     "section": "Maintenance" },
+        { "type": "style",     "section": "Maintenance" }
       ]
     }
   }
