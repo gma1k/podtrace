@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	podtraceac "github.com/podtrace/podtrace/pkg/client/applyconfiguration/api/v1alpha1"
 )
 
 func TestPodTraceReconciler_EnvtestBundleSync_OTLPLiteral(t *testing.T) {
@@ -236,25 +237,21 @@ func TestPodTraceReconciler_DegradedRollupFromNodeStatus(t *testing.T) {
 		},
 	)
 
-	agentPatch := &podtracev1alpha1.PodTrace{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: podtracev1alpha1.GroupVersion.String(),
-			Kind:       "PodTrace",
-		},
-		ObjectMeta: metav1.ObjectMeta{Name: pt.Name, Namespace: ns},
-		Status: podtracev1alpha1.PodTraceStatus{
-			NodeStatus: []podtracev1alpha1.PodTraceNodeStatus{
-				{
-					Node:          "broken-1",
-					Ready:         false,
-					Message:       "build exporter: exporter type \"jaeger\" not yet implemented in agent mode",
-					LastHeartbeat: metav1.Now(),
-				},
-			},
-		},
-	}
-	if err := c.Status().Patch(ctx, agentPatch,
-		client.Apply,
+	// PodTraceNodeStatus's int counters are non-omitempty in the CRD
+	// schema (kubebuilder rejects the patch otherwise), so set them
+	// explicitly to zero even when the row is just carrying a failure
+	// message. The production agent does the same in status_writer.go.
+	agentPatch := podtraceac.PodTrace(pt.Name, ns).
+		WithStatus(podtraceac.PodTraceStatus().
+			WithNodeStatus(podtraceac.PodTraceNodeStatus().
+				WithNode("broken-1").
+				WithReady(false).
+				WithActiveCgroups(0).
+				WithEventsTotal(0).
+				WithDroppedEvents(0).
+				WithMessage("build exporter: exporter type \"jaeger\" not yet implemented in agent mode").
+				WithLastHeartbeat(metav1.Now())))
+	if err := c.Status().Apply(ctx, agentPatch,
 		client.FieldOwner("podtrace-agent-broken-1"),
 		client.ForceOwnership,
 	); err != nil {

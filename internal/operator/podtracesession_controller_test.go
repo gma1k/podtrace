@@ -134,9 +134,7 @@ func TestPodTraceSessionReconciler_EnvtestStatusReflectsJobCompletion(t *testing
 	}
 	r := &PodTraceSessionReconciler{Client: c, Scheme: scheme, SystemNamespace: systemNS}
 
-	// Reconcile until the Job appears. The first Reconcile call only
-	// adds the finalizer and returns Requeue=true; the Job is created on
-	// the next pass. reconcileUntil makes this transparent.
+	// Reconcile until the Job appears.
 	reconcileUntil(t, 10*time.Second,
 		func() error {
 			var jobs batchv1.JobList
@@ -156,7 +154,6 @@ func TestPodTraceSessionReconciler_EnvtestStatusReflectsJobCompletion(t *testing
 		},
 	)
 
-	// Force the one Job to Succeeded.
 	var jobs batchv1.JobList
 	if err := c.List(ctx, &jobs, client.InNamespace(systemNS), client.MatchingLabels{
 		LabelSessionName: session.Name,
@@ -166,12 +163,30 @@ func TestPodTraceSessionReconciler_EnvtestStatusReflectsJobCompletion(t *testing
 	j := &jobs.Items[0]
 	j.Status.Succeeded = 1
 	now := metav1.Now()
+	startTime := metav1.NewTime(now.Add(-30 * time.Second))
+	j.Status.StartTime = &startTime
 	j.Status.CompletionTime = &now
+	j.Status.Conditions = append(j.Status.Conditions,
+		batchv1.JobCondition{
+			Type:               batchv1.JobSuccessCriteriaMet,
+			Status:             corev1.ConditionTrue,
+			LastProbeTime:      now,
+			LastTransitionTime: now,
+			Reason:             "SuccessCriteriaMet",
+		},
+		batchv1.JobCondition{
+			Type:               batchv1.JobComplete,
+			Status:             corev1.ConditionTrue,
+			LastProbeTime:      now,
+			LastTransitionTime: now,
+			Reason:             "JobCompleted",
+			Message:            "synthetic Complete condition for envtest fixture",
+		},
+	)
 	if err := c.Status().Update(ctx, j); err != nil {
 		t.Fatalf("status update job: %v", err)
 	}
 
-	// Reconcile again; session should now be Completed.
 	reconcileUntil(t, 10*time.Second,
 		func() error {
 			var got podtracev1alpha1.PodTraceSession

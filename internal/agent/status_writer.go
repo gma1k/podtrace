@@ -11,6 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	podtraceac "github.com/podtrace/podtrace/pkg/client/applyconfiguration/api/v1alpha1"
 )
 
 const DefaultStatusReportInterval = 30 * time.Second
@@ -116,18 +117,23 @@ func classifyRuleErr(err error) podtracev1alpha1.NodeStatusReason {
 }
 
 func (w *StatusWriter) patchCRStatus(ctx context.Context, key CRKey, entry podtracev1alpha1.PodTraceNodeStatus) error {
-	applyObj := &podtracev1alpha1.PodTrace{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: podtracev1alpha1.GroupVersion.String(),
-			Kind:       "PodTrace",
-		},
-		ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
-		Status: podtracev1alpha1.PodTraceStatus{
-			NodeStatus: []podtracev1alpha1.PodTraceNodeStatus{entry},
-		},
+	nodeAC := podtraceac.PodTraceNodeStatus().
+		WithNode(entry.Node).
+		WithReady(entry.Ready).
+		WithActiveCgroups(entry.ActiveCgroups).
+		WithEventsTotal(entry.EventsTotal).
+		WithDroppedEvents(entry.DroppedEvents).
+		WithLastHeartbeat(entry.LastHeartbeat).
+		WithPolicyHash(entry.PolicyHash)
+	if entry.Message != "" {
+		nodeAC = nodeAC.WithMessage(entry.Message)
 	}
-	return w.Client.Status().Patch(ctx, applyObj,
-		client.Apply,
+	if entry.Reason != "" {
+		nodeAC = nodeAC.WithReason(entry.Reason)
+	}
+	applyConfig := podtraceac.PodTrace(key.Name, key.Namespace).
+		WithStatus(podtraceac.PodTraceStatus().WithNodeStatus(nodeAC))
+	return w.Client.Status().Apply(ctx, applyConfig,
 		client.FieldOwner("podtrace-agent-"+w.NodeName),
 		client.ForceOwnership,
 	)

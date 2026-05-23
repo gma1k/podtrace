@@ -187,5 +187,5 @@ type TracerConfigList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&TracerConfig{}, &TracerConfigList{})
+	SchemeBuilder.Register(addKnownTypes(&TracerConfig{}, &TracerConfigList{}))
 }

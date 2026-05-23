@@ -3,6 +3,7 @@ package operator
 import (
 	"context"
 	"fmt"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -113,7 +114,7 @@ func (r *ExporterConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	if err := r.Status().Patch(ctx, &ec, client.MergeFrom(orig)); err != nil {
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("patch status: %w", err)
 	}

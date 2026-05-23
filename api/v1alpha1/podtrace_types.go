@@ -155,5 +155,5 @@ type PodTraceList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&PodTrace{}, &PodTraceList{})
+	SchemeBuilder.Register(addKnownTypes(&PodTrace{}, &PodTraceList{}))
 }

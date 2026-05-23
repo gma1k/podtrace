@@ -318,7 +318,7 @@ to CRs, see [docs/migration.md](docs/migration.md).
 ## Prerequisites
 
 - Linux kernel 5.8+ with BTF support
-- Go 1.24+
+- Go 1.26+ (or any earlier 1.x with `GOTOOLCHAIN=auto`)
 - Kubernetes cluster access
 
 ## Building

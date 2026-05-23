@@ -2,13 +2,12 @@ package v1alpha1
 
 import (
 	"context"
-	"fmt"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+
+	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
 )
 
 // +kubebuilder:webhook:path=/validate-podtrace-io-v1alpha1-podtrace,mutating=false,failurePolicy=fail,sideEffects=None,groups=podtrace.io,resources=podtraces,verbs=create;update,versions=v1alpha1,name=vpodtrace.podtrace.io,admissionReviewVersions=v1
@@ -32,35 +31,26 @@ type PodTraceCustomValidator struct {
 
 // SetupPodTraceWebhookWithManager registers the validator onto mgr.
 func SetupPodTraceWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(&PodTrace{}).
+	return ctrl.NewWebhookManagedBy(mgr, &podtracev1alpha1.PodTrace{}).
 		WithValidator(&PodTraceCustomValidator{Client: mgr.GetClient()}).
 		Complete()
 }
 
-var _ webhook.CustomValidator = &PodTraceCustomValidator{}
+var _ admission.Validator[*podtracev1alpha1.PodTrace] = &PodTraceCustomValidator{}
 
-func (v *PodTraceCustomValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	pt, ok := obj.(*PodTrace)
-	if !ok {
-		return nil, fmt.Errorf("expected *PodTrace, got %T", obj)
-	}
+func (v *PodTraceCustomValidator) ValidateCreate(ctx context.Context, pt *podtracev1alpha1.PodTrace) (admission.Warnings, error) {
 	return v.validate(ctx, pt)
 }
 
-func (v *PodTraceCustomValidator) ValidateUpdate(ctx context.Context, _, newObj runtime.Object) (admission.Warnings, error) {
-	pt, ok := newObj.(*PodTrace)
-	if !ok {
-		return nil, fmt.Errorf("expected *PodTrace, got %T", newObj)
-	}
-	return v.validate(ctx, pt)
+func (v *PodTraceCustomValidator) ValidateUpdate(ctx context.Context, _, newPT *podtracev1alpha1.PodTrace) (admission.Warnings, error) {
+	return v.validate(ctx, newPT)
 }
 
-func (v *PodTraceCustomValidator) ValidateDelete(_ context.Context, _ runtime.Object) (admission.Warnings, error) {
+func (v *PodTraceCustomValidator) ValidateDelete(_ context.Context, _ *podtracev1alpha1.PodTrace) (admission.Warnings, error) {
 	return nil, nil
 }
 
-func (v *PodTraceCustomValidator) validate(ctx context.Context, pt *PodTrace) (admission.Warnings, error) {
+func (v *PodTraceCustomValidator) validate(ctx context.Context, pt *podtracev1alpha1.PodTrace) (admission.Warnings, error) {
 	if err := validateSelectorExclusivity(pt.Spec.Selector, pt.Spec.PodRefs); err != nil {
 		return nil, err
 	}

@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	webhookv1alpha1 "github.com/podtrace/podtrace/internal/webhook/v1alpha1"
 )
 
 func validScheduleSpec(exporter string) podtracev1alpha1.PodTraceScheduleSpec {
@@ -104,7 +105,7 @@ func TestPodTraceScheduleValidator(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newClientWithExporter(t, "default", tc.exporter)
-			validator := &podtracev1alpha1.PodTraceScheduleCustomValidator{Client: c}
+			validator := &webhookv1alpha1.PodTraceScheduleCustomValidator{Client: c}
 			sch := &podtracev1alpha1.PodTraceSchedule{
 				ObjectMeta: metav1.ObjectMeta{Name: "sch", Namespace: "default"},
 				Spec:       validScheduleSpec("prod-otlp"),

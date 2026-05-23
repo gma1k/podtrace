@@ -135,5 +135,5 @@ type PodTraceScheduleList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&PodTraceSchedule{}, &PodTraceScheduleList{})
+	SchemeBuilder.Register(addKnownTypes(&PodTraceSchedule{}, &PodTraceScheduleList{}))
 }

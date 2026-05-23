@@ -440,7 +440,7 @@ func TestReconcile_BundleNotFoundIsNonFatal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected nil error for missing bundle, got %v", err)
 	}
-	if res.Requeue || res.RequeueAfter != 0 {
+	if res.RequeueAfter != 0 {
 		t.Errorf("expected zero result, got %+v", res)
 	}
 	if got := len(r.Router.RulesSnapshot()); got != 0 {

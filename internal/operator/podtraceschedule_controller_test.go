@@ -40,7 +40,6 @@ func makeSchedule(t *testing.T, c client.Client, ns, name string, mutators ...fu
 	if err := c.Create(ctx, sch); err != nil {
 		t.Fatalf("create schedule: %v", err)
 	}
-	sch.CreationTimestamp = metav1.NewTime(time.Now().Add(-2 * time.Minute))
 	return sch
 }
 
@@ -61,7 +60,7 @@ func TestPodTraceScheduleReconciler_RunCreatesSession(t *testing.T) {
 	ensureExporterConfig(t, c, ns, "sch-otlp")
 
 	sch := makeSchedule(t, c, ns, "sch-run")
-	now := time.Now()
+	now := time.Now().Add(2 * time.Minute)
 	r := newScheduleReconciler(t, c, now)
 
 	reconcileUntil(t, 10*time.Second,
@@ -165,7 +164,7 @@ func TestPodTraceScheduleReconciler_ForbidConcurrentBlocks(t *testing.T) {
 	sch := makeSchedule(t, c, ns, "sch-forbid", func(s *podtracev1alpha1.PodTraceSchedule) {
 		s.Spec.ConcurrencyPolicy = podtracev1alpha1.ForbidConcurrent
 	})
-	r := newScheduleReconciler(t, c, time.Now())
+	r := newScheduleReconciler(t, c, time.Now().Add(2*time.Minute))
 
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: sch.Name, Namespace: ns}}); err != nil {
 		t.Fatalf("first reconcile: %v", err)
@@ -291,7 +290,7 @@ func TestPodTraceScheduleReconciler_MaxActiveSessionsCap(t *testing.T) {
 		}
 	}
 
-	r := newScheduleReconciler(t, c, time.Now())
+	r := newScheduleReconciler(t, c, time.Now().Add(2*time.Minute))
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: sch.Name, Namespace: ns}}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -311,7 +310,6 @@ func TestPodTraceScheduleReconciler_MaxActiveSessionsCap(t *testing.T) {
 		t.Fatalf("ActiveLimitReached condition not surfaced: %+v", got.Status.Conditions)
 	}
 
-	// And no new owned session must have been created.
 	var list podtracev1alpha1.PodTraceSessionList
 	if err := c.List(ctx, &list, client.InNamespace(ns)); err != nil {
 		t.Fatalf("list: %v", err)
@@ -329,8 +327,7 @@ func TestPodTraceScheduleReconciler_MaxActiveSessionsCap(t *testing.T) {
 
 // TestPodTraceScheduleReconciler_HistoryLimitsGCOnSkippedRun is the
 // regression test for the bug where applyHistoryLimits only ran on
-// the run path. A suspended schedule (or a Forbid schedule that keeps
-// skipping) must still GC older completed children.
+// the run path.
 func TestPodTraceScheduleReconciler_HistoryLimitsGCOnSkippedRun(t *testing.T) {
 	_, c, ns := setupSharedEnvtest(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -345,8 +342,6 @@ func TestPodTraceScheduleReconciler_HistoryLimitsGCOnSkippedRun(t *testing.T) {
 	})
 	r := newScheduleReconciler(t, c, time.Now())
 
-	// Two completed children pre-seeded. The reconcile path taken here
-	// is the Suspend early-return; pre-fix it skipped GC entirely.
 	t1 := metav1.NewTime(time.Now().Add(-2 * time.Minute))
 	t2 := metav1.NewTime(time.Now().Add(-1 * time.Minute))
 	for i, ct := range []metav1.Time{t1, t2} {
@@ -396,15 +391,6 @@ func TestPodTraceScheduleReconciler_HistoryLimitsGCOnSkippedRun(t *testing.T) {
 	if completed > 1 {
 		t.Fatalf("history limit not enforced on Suspend path: %d completed owned sessions remain", completed)
 	}
-}
-
-func hasCondition(conds []metav1.Condition, t string, s metav1.ConditionStatus) bool {
-	for _, c := range conds {
-		if c.Type == t && c.Status == s {
-			return true
-		}
-	}
-	return false
 }
 
 func ptrBool(b bool) *bool { return &b }
