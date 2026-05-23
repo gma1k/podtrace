@@ -28,8 +28,14 @@ type Metrics struct {
 
 	ErrorRateBreached *prometheus.CounterVec
 
+	ProgramAttachFailures *prometheus.CounterVec
+	ExporterInitFailures  *prometheus.CounterVec
+
 	detectorsMu sync.Mutex
 	detectors   map[CRKey]*errorRateDetector
+
+	exporterInitMu     sync.Mutex
+	exporterInitLastOK map[CRKey]bool
 
 	EnrichmentLookups       *prometheus.CounterVec
 	EnrichmentCacheSize     prometheus.Gauge
@@ -133,9 +139,20 @@ func NewMetrics() *Metrics {
 			Name:      "error_rate_breached_total",
 			Help:      "Edges where a CR's rolling-window error rate transitioned from below to above its configured spec.thresholds.errorRatePercent. One increment per transition (edge-triggered), so a sustained breach does not inflate this counter.",
 		}, []string{"cr_namespace", "cr_name"}),
+		ProgramAttachFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "podtrace_agent",
+			Name:      "program_attach_failures_total",
+			Help:      "Cumulative eBPF program attach failures observed at agent startup. The program label is the BPF program symbol (closed set defined in internal/ebpf/probes); reason carries the tracer.ClassifyBackendError class (permission_denied/btf_unavailable/kernel_too_old/...). Mandatory-probe failures are also reflected by backend_degraded; this metric adds per-program granularity so fleet-wide kernel-compatibility regressions are queryable.",
+		}, []string{"program", "reason"}),
+		ExporterInitFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "podtrace_agent",
+			Name:      "exporter_init_failures_total",
+			Help:      "Per-CR exporter initialization failures, edge-triggered: one increment per transition from a previously-ok build to a failing one (or first observed failure). Reason values come from ClassifyExporterError and are a closed set. A sustained bad config does not inflate this counter — use rate() to detect new failures.",
+		}, []string{"cr_namespace", "cr_name", "reason"}),
 		detectors: map[CRKey]*errorRateDetector{},
 		lastEvents:  map[CRKey]int64{},
 		lastDropped: map[CRKey]int64{},
+		exporterInitLastOK: map[CRKey]bool{},
 	}
 	reg.MustRegister(
 		m.EventsExported, m.EventsDropped, m.ActiveCgroups, m.ActiveCRs,
@@ -144,8 +161,42 @@ func NewMetrics() *Metrics {
 		m.EnrichmentOwnerResolved,
 		m.ThresholdTripped, m.EffectiveSampleRate, m.PolicyGeneration,
 		m.ErrorRateBreached,
+		m.ProgramAttachFailures, m.ExporterInitFailures,
 	)
 	return m
+}
+
+// RecordProgramAttachFailure increments program_attach_failures_total
+// for a single failed probe attach.
+func (m *Metrics) RecordProgramAttachFailure(program, reason string) {
+	if m == nil || m.ProgramAttachFailures == nil {
+		return
+	}
+	if reason == "" {
+		reason = "unknown"
+	}
+	m.ProgramAttachFailures.WithLabelValues(program, reason).Inc()
+}
+
+// ObserveExporterInit records the outcome of one obtainExporter call.
+func (m *Metrics) ObserveExporterInit(cr CRKey, err error) {
+	if m == nil {
+		return
+	}
+	m.exporterInitMu.Lock()
+	defer m.exporterInitMu.Unlock()
+
+	prevOK, seen := m.exporterInitLastOK[cr]
+	if err == nil {
+		m.exporterInitLastOK[cr] = true
+		return
+	}
+	if !seen || prevOK {
+		if m.ExporterInitFailures != nil {
+			m.ExporterInitFailures.WithLabelValues(cr.Namespace, cr.Name, ClassifyExporterError(err)).Inc()
+		}
+	}
+	m.exporterInitLastOK[cr] = false
 }
 
 // ObserveErrorRate feeds one event into the per-CR rolling-window
@@ -226,7 +277,13 @@ func (m *Metrics) dropPolicyMetrics(cr CRKey) {
 	if m.ErrorRateBreached != nil {
 		m.ErrorRateBreached.DeletePartialMatch(lbls)
 	}
+	if m.ExporterInitFailures != nil {
+		m.ExporterInitFailures.DeletePartialMatch(lbls)
+	}
 	m.dropErrorRateDetector(cr)
+	m.exporterInitMu.Lock()
+	delete(m.exporterInitLastOK, cr)
+	m.exporterInitMu.Unlock()
 }
 
 // RefreshFromEnricher emits the deltas from the enricher's atomic

@@ -326,6 +326,22 @@ spec:
                       type: string
                     ready:
                       type: boolean
+                    reason:
+                      description: |-
+                        NodeStatusReason is the stable enum the agent stamps onto
+                        status.nodeStatus[].reason when a node reports unready or a CR rule
+                        fails.
+                      enum:
+                      - AgentUnready
+                      - BackendUnavailable
+                      - BundleLoadFailed
+                      - ExporterBuildFailed
+                      - ProgramAttachFailed
+                      - PolicyParseError
+                      - PodMatchFailed
+                      - CgroupResolutionFailed
+                      - Unknown
+                      type: string
                   required:
                   - activeCgroups
                   - droppedEvents

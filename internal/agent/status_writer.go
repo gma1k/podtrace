@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -83,10 +84,35 @@ func buildNodeStatusEntry(node string, rule *CRRule, counters crCounters, agentR
 	switch {
 	case backendErr != nil:
 		entry.Message = "tracer backend unavailable: " + backendErr.Error()
+		entry.Reason = podtracev1alpha1.NodeStatusReasonBackendUnavailable
 	case rule.Err != nil:
 		entry.Message = rule.Err.Error()
+		entry.Reason = classifyRuleErr(rule.Err)
+	case !agentReady:
+		entry.Message = "agent not ready"
+		entry.Reason = podtracev1alpha1.NodeStatusReasonAgentUnready
 	}
 	return entry
+}
+
+func classifyRuleErr(err error) podtracev1alpha1.NodeStatusReason {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	switch {
+	case strings.HasPrefix(msg, "load bundle"):
+		return podtracev1alpha1.NodeStatusReasonBundleLoadFailed
+	case strings.HasPrefix(msg, "match pods"):
+		return podtracev1alpha1.NodeStatusReasonPodMatchFailed
+	case strings.HasPrefix(msg, "resolve cgroup IDs"):
+		return podtracev1alpha1.NodeStatusReasonCgroupResolutionFailed
+	case strings.HasPrefix(msg, "build exporter"):
+		return podtracev1alpha1.NodeStatusReasonExporterBuildFailed
+	case strings.Contains(msg, "policy"):
+		return podtracev1alpha1.NodeStatusReasonPolicyParseError
+	}
+	return podtracev1alpha1.NodeStatusReasonUnknown
 }
 
 func (w *StatusWriter) patchCRStatus(ctx context.Context, key CRKey, entry podtracev1alpha1.PodTraceNodeStatus) error {

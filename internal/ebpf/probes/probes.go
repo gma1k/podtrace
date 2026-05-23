@@ -120,6 +120,7 @@ func AttachProbesByGroup(coll *ebpf.Collection) (map[ProbeGroup][]link.Link, err
 
 		l, err := attachKprobe(progName, symbol, prog)
 		if err != nil {
+			reportAttachFailure(progName, symbol, true, err)
 			closeAll()
 			return nil, fmt.Errorf(
 				"%w\n\n"+
@@ -146,6 +147,7 @@ func AttachProbesByGroup(coll *ebpf.Collection) (map[ProbeGroup][]link.Link, err
 
 		l, err := attachKprobe(progName, symbol, prog)
 		if err != nil {
+			reportAttachFailure(progName, symbol, false, err)
 			skippedOptional = append(skippedOptional, fmt.Sprintf("%s->%s", progName, symbol))
 			logger.Debug("Optional probe unavailable (skipping)",
 				zap.String("prog", progName), zap.String("symbol", symbol), zap.Error(err))
@@ -163,6 +165,7 @@ func AttachProbesByGroup(coll *ebpf.Collection) (map[ProbeGroup][]link.Link, err
 	if tracepointProg := coll.Programs["tracepoint_sched_switch"]; tracepointProg != nil {
 		tp, err := link.Tracepoint("sched", "sched_switch", tracepointProg, nil)
 		if err != nil {
+			reportAttachFailure("tracepoint_sched_switch", "sched:sched_switch", false, err)
 			if !strings.Contains(err.Error(), "permission denied") {
 				logger.Info("CPU/scheduling tracking unavailable", zap.Error(err))
 			}
@@ -174,6 +177,7 @@ func AttachProbesByGroup(coll *ebpf.Collection) (map[ProbeGroup][]link.Link, err
 	if tcpStateProg := coll.Programs["tracepoint_tcp_set_state"]; tcpStateProg != nil {
 		tp, err := link.Tracepoint("tcp", "tcp_set_state", tcpStateProg, nil)
 		if err != nil {
+			reportAttachFailure("tracepoint_tcp_set_state", "tcp:tcp_set_state", false, err)
 			if !strings.Contains(err.Error(), "permission denied") && !strings.Contains(err.Error(), "not found") {
 				logger.Debug("TCP state tracking unavailable", zap.Error(err))
 			}
@@ -185,6 +189,7 @@ func AttachProbesByGroup(coll *ebpf.Collection) (map[ProbeGroup][]link.Link, err
 	if tcpRetransProg := coll.Programs["tracepoint_tcp_retransmit_skb"]; tcpRetransProg != nil {
 		tp, err := link.Tracepoint("tcp", "tcp_retransmit_skb", tcpRetransProg, nil)
 		if err != nil {
+			reportAttachFailure("tracepoint_tcp_retransmit_skb", "tcp:tcp_retransmit_skb", false, err)
 			if !strings.Contains(err.Error(), "permission denied") && !strings.Contains(err.Error(), "not found") {
 				logger.Info("TCP retransmission tracking unavailable", zap.Error(err))
 			}
@@ -196,6 +201,7 @@ func AttachProbesByGroup(coll *ebpf.Collection) (map[ProbeGroup][]link.Link, err
 	if netDevProg := coll.Programs["tracepoint_net_dev_xmit"]; netDevProg != nil {
 		tp, err := link.Tracepoint("net", "net_dev_xmit", netDevProg, nil)
 		if err != nil {
+			reportAttachFailure("tracepoint_net_dev_xmit", "net:net_dev_xmit", false, err)
 			if !strings.Contains(err.Error(), "permission denied") && !strings.Contains(err.Error(), "not found") {
 				logger.Info("Network device error tracking unavailable", zap.Error(err))
 			}
@@ -207,6 +213,7 @@ func AttachProbesByGroup(coll *ebpf.Collection) (map[ProbeGroup][]link.Link, err
 	if pageFaultProg := coll.Programs["tracepoint_page_fault_user"]; pageFaultProg != nil {
 		tp, err := link.Tracepoint("exceptions", "page_fault_user", pageFaultProg, nil)
 		if err != nil {
+			reportAttachFailure("tracepoint_page_fault_user", "exceptions:page_fault_user", false, err)
 			if !strings.Contains(err.Error(), "permission denied") && !strings.Contains(err.Error(), "not found") {
 				logger.Info("Page fault tracking unavailable", zap.Error(err))
 			}
@@ -218,6 +225,7 @@ func AttachProbesByGroup(coll *ebpf.Collection) (map[ProbeGroup][]link.Link, err
 	if oomKillProg := coll.Programs["tracepoint_oom_kill_process"]; oomKillProg != nil {
 		tp, err := link.Tracepoint("oom", "oom_kill_process", oomKillProg, nil)
 		if err != nil {
+			reportAttachFailure("tracepoint_oom_kill_process", "oom:oom_kill_process", false, err)
 			if !strings.Contains(err.Error(), "permission denied") && !strings.Contains(err.Error(), "not found") {
 				logger.Debug("OOM kill tracking unavailable", zap.Error(err))
 			}
@@ -229,6 +237,7 @@ func AttachProbesByGroup(coll *ebpf.Collection) (map[ProbeGroup][]link.Link, err
 	if forkProg := coll.Programs["tracepoint_sched_process_fork"]; forkProg != nil {
 		tp, err := link.Tracepoint("sched", "sched_process_fork", forkProg, nil)
 		if err != nil {
+			reportAttachFailure("tracepoint_sched_process_fork", "sched:sched_process_fork", false, err)
 			if !strings.Contains(err.Error(), "permission denied") && !strings.Contains(err.Error(), "not found") {
 				logger.Info("Process fork tracking unavailable", zap.Error(err))
 			}

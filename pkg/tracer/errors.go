@@ -12,14 +12,15 @@ import (
 //   - `PodTrace.status.nodeStatus.message` (the operator's first stop),
 //   - the `podtrace_agent_backend_degraded` metric reason label.
 const (
-	BackendErrUnknown        = "unknown"
-	BackendErrPermission     = "permission_denied"
-	BackendErrBTFUnavailable = "btf_unavailable"
-	BackendErrKernelTooOld   = "kernel_too_old"
-	BackendErrCollection     = "collection_failed"
-	BackendErrRingBuffer     = "ringbuf_failed"
-	BackendErrMapLookup      = "map_lookup_failed"
-	BackendErrInvalidEvent   = "invalid_event"
+	BackendErrUnknown          = "unknown"
+	BackendErrPermission       = "permission_denied"
+	BackendErrBTFUnavailable   = "btf_unavailable"
+	BackendErrKernelTooOld     = "kernel_too_old"
+	BackendErrCollection       = "collection_failed"
+	BackendErrRingBuffer       = "ringbuf_failed"
+	BackendErrMapLookup        = "map_lookup_failed"
+	BackendErrInvalidEvent     = "invalid_event"
+	BackendErrTracefsUnmounted = "tracefs_unmounted"
 )
 
 // ClassifyBackendError maps a backend startup error to one of the
@@ -37,6 +38,9 @@ func ClassifyBackendError(err error) string {
 	case strings.Contains(msg, "permission denied"),
 		strings.Contains(msg, "operation not permitted"):
 		return BackendErrPermission
+	case strings.Contains(msg, "tracefs"),
+		strings.Contains(msg, "debugfs"):
+		return BackendErrTracefsUnmounted
 	case strings.Contains(msg, "btf"):
 		return BackendErrBTFUnavailable
 	case strings.Contains(msg, "verifier rejected"),

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -50,6 +51,46 @@ func LoadBundle(ctx context.Context, c client.Client, systemNamespace string, po
 	}
 
 	return payload, nil
+}
+
+// Exporter build error classes. These short, stable strings appear in
+// the `podtrace_agent_exporter_init_failures_total` metric reason label
+// and in the rule-error classifier that feeds
+// PodTrace.status.nodeStatus[].reason.
+const (
+	ExporterErrUnknown         = "unknown"
+	ExporterErrNilPayload      = "nil_payload"
+	ExporterErrUnsupportedType = "unsupported_type"
+	ExporterErrEndpointMissing = "endpoint_missing"
+	ExporterErrTLSInvalid      = "tls_invalid"
+	ExporterErrAuthMissing     = "auth_missing"
+)
+
+// ClassifyExporterError maps a BuildExporter error to one of the
+// ExporterErr* constants.
+func ClassifyExporterError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "nil bundle payload"),
+		strings.Contains(msg, "nil payload"):
+		return ExporterErrNilPayload
+	case strings.Contains(msg, "unknown exporter type"),
+		strings.Contains(msg, "opentelemetry collector"):
+		return ExporterErrUnsupportedType
+	case strings.Contains(msg, "endpoint"):
+		return ExporterErrEndpointMissing
+	case strings.Contains(msg, "tls"),
+		strings.Contains(msg, "certificate"):
+		return ExporterErrTLSInvalid
+	case strings.Contains(msg, "credential"),
+		strings.Contains(msg, "missing api key"),
+		strings.Contains(msg, "missing token"):
+		return ExporterErrAuthMissing
+	}
+	return ExporterErrUnknown
 }
 
 // BuildExporter turns a BundlePayload into a tracer.Exporter that

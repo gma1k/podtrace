@@ -103,10 +103,6 @@ kubectl apply -f trace.yaml
 kubectl get podtraces.podtrace.io watch-api -n my-app -o yaml
 ```
 
-> Control plane works today (matching, RBAC, status, multi-CR merge).
-> Event flow through the agent to the exporter is upcoming work — for
-> real eBPF event capture today, use pattern 3 below.
-
 Full reference: [docs/crd-podtrace.md](docs/crd-podtrace.md).
 
 ### 3. Bounded diagnose via the `PodTraceSession` CR

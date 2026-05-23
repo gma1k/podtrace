@@ -172,6 +172,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 
 		exporter, err := r.obtainExporter(key, bundle)
+		r.Metrics.ObserveExporterInit(key, err)
 		if err != nil {
 			logger.V(1).Info("build exporter (tombstoned on CR)", "cr", key, "error", err)
 			rules = append(rules, CRRule{

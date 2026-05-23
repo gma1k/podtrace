@@ -231,6 +231,32 @@ func TestBuildExporter_NilPayload(t *testing.T) {
 	}
 }
 
+func TestClassifyExporterError(t *testing.T) {
+	cases := []struct {
+		err    error
+		want   string
+	}{
+		{nil, ""},
+		{errSentinel("nil bundle payload"), ExporterErrNilPayload},
+		{errSentinel("unknown exporter type \"zipkin-direct\""), ExporterErrUnsupportedType},
+		{errSentinel("missing endpoint for OTLP exporter"), ExporterErrEndpointMissing},
+		{errSentinel("TLS handshake failed: bad certificate"), ExporterErrTLSInvalid},
+		{errSentinel("missing api key for DataDog exporter"), ExporterErrAuthMissing},
+		{errSentinel("something exotic happened"), ExporterErrUnknown},
+	}
+	for _, c := range cases {
+		if got := ClassifyExporterError(c.err); got != c.want {
+			t.Errorf("ClassifyExporterError(%v) = %q, want %q", c.err, got, c.want)
+		}
+	}
+}
+
+type errString string
+
+func (e errString) Error() string { return string(e) }
+
+func errSentinel(s string) error { return errString(s) }
+
 func contextWithTimeout(seconds int) (context.Context, func()) {
 	return context.WithCancel(context.Background()) //nolint:contextcheck // tests tolerate indefinite ctx
 }
