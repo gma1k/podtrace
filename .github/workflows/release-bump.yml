@@ -10,9 +10,10 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
-  push-release-as:
+  open-release-as-pr:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -25,18 +26,30 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
-            echo "::error::Version must be semver (e.g. 0.12.0, 1.0.0, 1.0.0-rc.1)"
+            echo "::error::Version must be semver without leading v (e.g. 0.12.0, 1.0.0, 1.0.0-rc.1)"
             exit 1
           fi
 
-      - name: Push Release-As commit
+      - name: Open Release-As PR
         env:
           VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_PAT }}
         run: |
           set -euo pipefail
+          BRANCH="release-as/${VERSION}"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout -b "${BRANCH}"
           git commit --allow-empty -m "chore: announce ${VERSION}
 
           Release-As: ${VERSION}"
-          git push
+          git push -u origin "${BRANCH}"
+          gh pr create \
+            --base main \
+            --head "${BRANCH}" \
+            --title "chore: announce ${VERSION}" \
+            --body "Triggers release-please to cut version \`${VERSION}\` (tag \`v${VERSION}\`).
+
+          Release-As: ${VERSION}
+
+          **Merge with \"Create a merge commit\" or \"Rebase and merge\"** so the \`Release-As:\` footer reaches \`main\`. If your repo only allows squash, ensure the squash commit message preserves the footer."
