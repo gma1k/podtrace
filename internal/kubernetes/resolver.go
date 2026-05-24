@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 type PodResolverInterface interface {
@@ -12,5 +13,9 @@ type PodResolverInterface interface {
 
 type ClientsetProvider interface {
 	GetClientset() kubernetes.Interface
+}
+
+type RestConfigProvider interface {
+	GetRestConfig() *rest.Config
 }
 

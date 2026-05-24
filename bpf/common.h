@@ -117,6 +117,9 @@ struct sockaddr_in {
 #ifndef BPF_MAP_TYPE_ARRAY
 #define BPF_MAP_TYPE_ARRAY 2
 #endif
+#ifndef BPF_MAP_TYPE_PERCPU_ARRAY
+#define BPF_MAP_TYPE_PERCPU_ARRAY 6
+#endif
 #ifndef BPF_MAP_TYPE_LRU_HASH
 #define BPF_MAP_TYPE_LRU_HASH 9
 #endif

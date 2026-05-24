@@ -71,9 +71,23 @@ podtrace -n production my-pod
 podtrace -n production my-pod --diagnose 30s --export json > report.json
 ```
 
+By default the CLI spawns a privileged pod on the target pod's node and
+runs eBPF there — works on Talos, EKS, GKE, AKS, OpenShift, and any
+cluster where your workstation is not the kubelet host. On kind /
+minikube / docker-desktop the workstation **is** the kubelet host, so
+add `--local` to skip the spawn and load eBPF on the workstation
+directly (faster, no privileged pod needed):
+
+```bash
+podtrace --local -n production my-pod
+```
+
 For other platforms (linux/arm64, darwin/amd64, darwin/arm64) and
 cosign-verifiable installs, see
 [docs/installation.md#install-the-cli](docs/installation.md#install-the-cli).
+The CLI architecture (when to use `--local`, RBAC needed for the spawn
+path, etc.) is documented in
+[docs/cli-architecture.md](docs/cli-architecture.md).
 Full CLI reference: [docs/usage.md](docs/usage.md).
 
 ### 2. Continuous tracing via the `PodTrace` CR

@@ -6,7 +6,6 @@
 
 CLANG ?= clang
 LLC ?= llc
-# Prefer /usr/local/go/bin/go if available (newer Go versions), otherwise use system go
 GO ?= $(shell if [ -f /usr/local/go/bin/go ]; then echo /usr/local/go/bin/go; else echo go; fi)
 BPF_SRC = bpf/podtrace.bpf.c bpf/network.c bpf/filesystem.c bpf/cpu.c bpf/memory.c
 BPF_OBJ = internal/ebpf/embedded/podtrace.$(BPF_GOARCH).bpf.o
@@ -89,9 +88,6 @@ ifeq ($(HAVE_BTF),yes)
 endif
 
 ifdef USE_BTF_VMLINUX
-# /sys/kernel/btf/vmlinux is a sysfs pseudo-file whose modification time can be
-# unreliable for make dependency checks. Use a phony intermediate so generated
-# vmlinux.h is always refreshed when bpftool is available.
 .PHONY: _vmlinux_btf_gen
 _vmlinux_btf_gen:
 	@mkdir -p "$(BPF_GEN_DIR)"
@@ -110,11 +106,14 @@ $(BPF_OBJ): $(VMLINUX_GEN) bpf/podtrace.bpf.c bpf/*.h bpf/network.c bpf/filesyst
 	@mkdir -p $(dir $(BPF_OBJ))
 	$(CLANG) $(BPF_CFLAGS) -Ibpf -I. -c bpf/podtrace.bpf.c -o $(BPF_OBJ)
 
+IMAGE_REPO ?= ghcr.io/gma1k/podtrace
+
 build: $(BPF_OBJ)
 	@mkdir -p bin
 	$(GO) build -tags embed_bpf \
 	  -ldflags "-X $(MODULE)/internal/config.Version=$(VERSION) \
-	            -X $(MODULE)/internal/config.Commit=$(COMMIT)" \
+	            -X $(MODULE)/internal/config.Commit=$(COMMIT) \
+	            -X $(MODULE)/internal/config.Image=$(IMAGE_REPO)" \
 	  -o $(BINARY) ./cmd/podtrace
 
 # Release: produce cross-arch tarballs for linux+darwin × amd64+arm64.
@@ -144,7 +143,8 @@ release: release-bpf-objects
 	    $(GO) build -trimpath -tags=embed_bpf \
 	      -ldflags "-s -w \
 	        -X $(MODULE)/internal/config.Version=$(VERSION) \
-	        -X $(MODULE)/internal/config.Commit=$(COMMIT)" \
+	        -X $(MODULE)/internal/config.Commit=$(COMMIT) \
+	        -X $(MODULE)/internal/config.Image=$(IMAGE_REPO)" \
 	      -o "$$staging/podtrace" ./cmd/podtrace; \
 	  if [ ! -s "$$staging/podtrace" ]; then \
 	    echo "::error::go build produced empty/missing binary for $$os/$$arch"; \
@@ -242,13 +242,9 @@ IMAGE_REPO ?= ghcr.io/gma1k/podtrace
 IMAGE_TAG  ?= dev
 IMAGE      ?= $(IMAGE_REPO):$(IMAGE_TAG)
 
-# operator-tools installs controller-gen at a pinned version. Safe to run on
-# every invocation; the `go install` is a no-op if already present.
 operator-tools:
 	@GOBIN=$(dir $(CONTROLLER_GEN)) $(GO) install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION)
 
-# generate (re)emits api/v1alpha1/zz_generated.deepcopy.go from the type
-# definitions. Run after any api/ type change.
 generate: operator-tools
 	$(CONTROLLER_GEN) object:headerFile=$(BOILERPLATE) paths=./api/v1alpha1/...
 
@@ -291,6 +287,7 @@ docker-build:
 	docker build \
 	  --build-arg VERSION=$(IMAGE_TAG) \
 	  --build-arg COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown) \
+	  --build-arg IMAGE_REPO=$(IMAGE_REPO) \
 	  -t $(IMAGE) .
 
 # envtest runs the CRD schema validation suite against a real

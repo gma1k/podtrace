@@ -42,7 +42,10 @@ func (v *PodTraceCustomValidator) ValidateCreate(ctx context.Context, pt *podtra
 	return v.validate(ctx, pt)
 }
 
-func (v *PodTraceCustomValidator) ValidateUpdate(ctx context.Context, _, newPT *podtracev1alpha1.PodTrace) (admission.Warnings, error) {
+func (v *PodTraceCustomValidator) ValidateUpdate(ctx context.Context, oldPT, newPT *podtracev1alpha1.PodTrace) (admission.Warnings, error) {
+	if oldPT != nil && specUnchanged(oldPT.Spec, newPT.Spec) {
+		return nil, nil
+	}
 	return v.validate(ctx, newPT)
 }
 

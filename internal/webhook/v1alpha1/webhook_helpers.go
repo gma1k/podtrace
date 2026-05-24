@@ -13,6 +13,7 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,6 +22,20 @@ import (
 
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
 )
+
+// specUnchanged reports whether old and new spec values are deep-equal. When
+// they are, validating webhooks should skip re-validation of the spec: the
+// admission request is touching only metadata (finalizers, labels, annotations)
+// or status, and re-running spec validation can wedge legacy CRs whose spec
+// pre-dates a stricter validation rule (e.g. a session created before the
+// "at most one reportRef sink" rule landed can't have its finalizer cleared
+// because the webhook rejects every UPDATE on spec grounds).
+//
+// Standard Kubernetes pattern — built-in validators use the same shortcut to
+// allow finalizer-only updates on otherwise-invalid resources.
+func specUnchanged(oldSpec, newSpec any) bool {
+	return reflect.DeepEqual(oldSpec, newSpec)
+}
 
 func validateNamespaceSelector(sel *metav1.LabelSelector) error {
 	if sel == nil {

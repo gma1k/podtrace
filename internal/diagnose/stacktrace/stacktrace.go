@@ -43,14 +43,16 @@ func (r *stackResolver) resolve(ctx context.Context, pid uint32, addr uint64) st
 	if r.cache == nil {
 		r.cache = make(map[string]string)
 	}
+	if IsKernelAddress(addr) {
+		if sym := defaultKallsyms.Resolve(addr); sym != "" {
+			return sym
+		}
+		return fmt.Sprintf("0x%x", addr)
+	}
 	exePath, err := procfs.Readlink(fmt.Sprintf("%d/exe", pid))
 	if err != nil || exePath == "" {
 		return fmt.Sprintf("0x%x", addr)
 	}
-	// Reject pathological symlink targets (relative paths, ".."
-	// segments) before passing to addr2line. The kernel won't emit
-	// these for /proc/<pid>/exe in practice, but the explicit check
-	// makes the exec invocation provably safe.
 	if _, err := hostfs.Stat(exePath); err != nil {
 		return fmt.Sprintf("0x%x", addr)
 	}
@@ -66,9 +68,6 @@ func (r *stackResolver) resolve(ctx context.Context, pid uint32, addr uint64) st
 		r.cache[key] = v
 		return v
 	}
-	// addr2lineBin is exec.LookPath-resolved; exePath was just
-	// validated by hostfs.Stat (absolute, no traversal); address is a
-	// formatted hex literal. All exec inputs are constrained.
 	cmd := exec.CommandContext(timeoutCtx, addr2lineBin, "-e", exePath, fmt.Sprintf("%#x", addr)) // #nosec G204 -- LookPath-resolved binary; exePath validated via hostfs.Stat; address is %#x-formatted
 	out, err := cmd.Output()
 	if err != nil {
@@ -152,7 +151,11 @@ func GenerateStackTraceSectionWithContext(d Diagnostician, ctx context.Context) 
 		if e == nil {
 			continue
 		}
-		report += fmt.Sprintf("  Hot stack %d: %d events, type=%s, target=%s, avg latency=%.2fms\n", i+1, s.Count, e.TypeString(), e.Target, float64(e.LatencyNS)/float64(config.NSPerMS))
+		if e.Target != "" {
+			report += fmt.Sprintf("  Hot stack %d: %d events, type=%s, target=%s, avg latency=%.2fms\n", i+1, s.Count, e.TypeString(), e.Target, float64(e.LatencyNS)/float64(config.NSPerMS))
+		} else {
+			report += fmt.Sprintf("  Hot stack %d: %d events, type=%s, avg latency=%.2fms\n", i+1, s.Count, e.TypeString(), float64(e.LatencyNS)/float64(config.NSPerMS))
+		}
 		maxFrames := config.MaxStackFramesLimit
 		if len(e.Stack) < maxFrames {
 			maxFrames = len(e.Stack)
@@ -166,4 +169,3 @@ func GenerateStackTraceSectionWithContext(d Diagnostician, ctx context.Context) 
 	report += "\n"
 	return report
 }
-

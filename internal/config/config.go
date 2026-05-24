@@ -106,21 +106,15 @@ var (
 	EventSamplingRate         = getIntEnvOrDefault("PODTRACE_EVENT_SAMPLING_RATE", DefaultEventSamplingRate)
 	ContainerPID              = getIntEnvOrDefault("PODTRACE_CONTAINER_PID", DefaultContainerPID)
 
-	// BPF resource tuning — applied to the CollectionSpec before loading.
 	RingBufferSizeKB = getIntEnvOrDefault("PODTRACE_RING_BUFFER_SIZE_KB", DefaultRingBufferSizeKB)
 	BPFHashMapSize   = getIntEnvOrDefault("PODTRACE_BPF_HASH_MAP_SIZE", DefaultBPFHashMapSize)
 
-	// Alert threshold percentages written into the alert_thresholds BPF map.
-	// Clamped to [0, 100] so the int → uint32 narrowing at the BPF call
-	// sites is provably safe; see ClampPct for why.
 	AlertWarnPct  = ClampPct(getIntEnvOrDefault("PODTRACE_ALERT_WARN_PCT", DefaultAlertWarnPct))
 	AlertCritPct  = ClampPct(getIntEnvOrDefault("PODTRACE_ALERT_CRIT_PCT", DefaultAlertCritPct))
 	AlertEmergPct = ClampPct(getIntEnvOrDefault("PODTRACE_ALERT_EMERG_PCT", DefaultAlertEmergPct))
 
-	// Optional HTTP management port for runtime probe group control (0 = disabled).
 	ManagementPort = getIntEnvOrDefault("PODTRACE_MANAGEMENT_PORT", 0)
 
-	// Language-runtime adapter options.
 	GRPCPort             = getIntEnvOrDefault("PODTRACE_GRPC_PORT", 50051)
 	USDTEnabled          = getEnvOrDefault("PODTRACE_USDT_ENABLED", "false") == "true"
 	RedactPII            = getEnvOrDefault("PODTRACE_REDACT_PII", "false") == "true"
@@ -128,12 +122,11 @@ var (
 	CriticalPathEnabled  = getEnvOrDefault("PODTRACE_CRITICAL_PATH", "true") == "true"
 	CriticalPathWindowMS = getIntEnvOrDefault("PODTRACE_CRITICAL_PATH_WINDOW_MS", 500)
 
-	// Profiling integration — pprof endpoint discovery, auto-trigger, and correlation.
-	ProfilingEnabled        = getEnvOrDefault("PODTRACE_PROFILING_ENABLED", "false") == "true"
-	ProfilingPprofPorts     = getEnvOrDefault("PODTRACE_PROFILING_PPROF_PORTS", "6060,8080,8081,9090,2345")
-	ProfilingAutoTriggerMS  = getFloatEnvOrDefault("PODTRACE_PROFILING_AUTO_TRIGGER_MS", DefaultProfilingAutoTriggerMS)
+	ProfilingEnabled         = getEnvOrDefault("PODTRACE_PROFILING_ENABLED", "false") == "true"
+	ProfilingPprofPorts      = getEnvOrDefault("PODTRACE_PROFILING_PPROF_PORTS", "6060,8080,8081,9090,2345")
+	ProfilingAutoTriggerMS   = getFloatEnvOrDefault("PODTRACE_PROFILING_AUTO_TRIGGER_MS", DefaultProfilingAutoTriggerMS)
 	ProfilingDefaultDuration = getDurationEnvOrDefault("PODTRACE_PROFILING_DEFAULT_DURATION", DefaultProfilingDuration)
-	ProfilingMaxConcurrent  = getIntEnvOrDefault("PODTRACE_PROFILING_MAX_CONCURRENT", DefaultProfilingMaxConcurrent)
+	ProfilingMaxConcurrent   = getIntEnvOrDefault("PODTRACE_PROFILING_MAX_CONCURRENT", DefaultProfilingMaxConcurrent)
 )
 
 const (
@@ -165,7 +158,7 @@ const (
 	DefaultTopTargetsLimit      = 5
 	DefaultTopFilesLimit        = 5
 	DefaultTopURLsLimit         = 5
-	DefaultTopProcessesLimit    = 5
+	DefaultTopProcessesLimit    = 10
 	DefaultTopStatesLimit       = 10
 	DefaultMaxStackTracesLimit  = 5
 	DefaultMaxStackFramesLimit  = 5
@@ -185,18 +178,15 @@ const (
 	MaxEvents                      = 1000000
 	DefaultEventSamplingRate       = 100
 
-	// BPF map sizing defaults.
 	DefaultBPFHashMapSize = 4096
 
-	// Alert threshold defaults (percentages).
 	DefaultAlertWarnPct  = 80
 	DefaultAlertCritPct  = 90
 	DefaultAlertEmergPct = 95
 
-	// Profiling defaults.
-	DefaultProfilingAutoTriggerMS  = 500.0
-	DefaultProfilingDuration       = 30 * time.Second
-	DefaultProfilingMaxConcurrent  = 1
+	DefaultProfilingAutoTriggerMS = 500.0
+	DefaultProfilingDuration      = 30 * time.Second
+	DefaultProfilingMaxConcurrent = 1
 )
 
 const (
@@ -365,15 +355,6 @@ func getIntEnvOrDefault(key string, defaultValue int) int {
 	return defaultValue
 }
 
-// ClampPct clamps an integer percentage into the [0, 100] range.
-//
-// Why: AlertWarnPct/CritPct/EmergPct are sourced from operator-supplied
-// env vars and later narrowed to uint32 when written to the BPF
-// alert_thresholds map. Without an upper bound, a misconfigured value
-// like 4294967296 would silently wrap to 0 and cause every event to
-// trip an alert. The bound also makes the int → uint32 conversion at
-// the call sites provably safe (CodeQL/gosec G115 false-positives go
-// away because the value is now constrained by a constant).
 func ClampPct(pct int) int {
 	if pct < 0 {
 		return 0
@@ -384,14 +365,6 @@ func ClampPct(pct int) int {
 	return pct
 }
 
-// ClampUint32 clamps a non-negative int into the [0, math.MaxUint32]
-// range and returns it as uint32. Negative values become 0.
-//
-// Used for BPF map sizes (BPFHashMapSize, RingBufferSizeKB*1024) which
-// are read as int via getIntEnvOrDefault but consumed as uint32 by the
-// cilium/ebpf API. Without this clamp, a configuration value above
-// math.MaxUint32 would wrap to a small map size and the BPF load could
-// silently use the wrong capacity.
 func ClampUint32(v int) uint32 {
 	if v < 0 {
 		return 0
@@ -453,6 +426,7 @@ func GetSplunkToken() string {
 var (
 	Version = "dev"
 	Commit  = "unknown"
+	Image   = "ghcr.io/gma1k/podtrace"
 )
 
 var readVCSRevision = func() string {
@@ -485,26 +459,18 @@ func GetUserAgent() string {
 	return "Podtrace/" + GetVersion()
 }
 
-// OTLPAllowInsecureNonLoopback returns true when PODTRACE_OTLP_INSECURE=1,
-// allowing http:// to non-loopback OTLP collectors (cleartext).
 func OTLPAllowInsecureNonLoopback() bool {
 	return os.Getenv("PODTRACE_OTLP_INSECURE") == "1"
 }
 
-// MetricsEnablePprof registers /debug/pprof/* when PODTRACE_METRICS_ENABLE_PPROF=1
-// or when profiling integration is enabled (--profiling / PODTRACE_PROFILING_ENABLED).
 func MetricsEnablePprof() bool {
 	return os.Getenv("PODTRACE_METRICS_ENABLE_PPROF") == "1" || ProfilingEnabled
 }
 
-// SplunkAlertAllowHTTP returns true when PODTRACE_ALERT_SPLUNK_ALLOW_HTTP=1,
-// allowing http:// Splunk HEC URLs for non-loopback hosts.
 func SplunkAlertAllowHTTP() bool {
 	return os.Getenv("PODTRACE_ALERT_SPLUNK_ALLOW_HTTP") == "1"
 }
 
-// AllowCgroupFilterAutoDisable returns true when PODTRACE_ALLOW_CGROUP_FILTER_DISABLE=1,
-// permitting the tracer to automatically disable cgroup filtering as a last-resort fallback.
 func AllowCgroupFilterAutoDisable() bool {
 	return os.Getenv("PODTRACE_ALLOW_CGROUP_FILTER_DISABLE") == "1"
 }

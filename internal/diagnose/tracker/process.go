@@ -25,15 +25,33 @@ func AnalyzeProcessActivity(events []*events.Event) []PidInfo {
 		pidMap[e.PID]++
 	}
 
+	type latestName struct {
+		ts   uint64
+		name string
+	}
+	latest := make(map[uint32]latestName)
+	transient := make(map[uint32]latestName)
+	for _, e := range events {
+		if e == nil || e.ProcessName == "" {
+			continue
+		}
+		bucket := latest
+		if isTransientName(e.ProcessName) {
+			bucket = transient
+		}
+		if cur, ok := bucket[e.PID]; !ok || e.Timestamp > cur.ts {
+			bucket[e.PID] = latestName{ts: e.Timestamp, name: e.ProcessName}
+		}
+	}
+
 	var pidInfos []PidInfo
 	for pid, count := range pidMap {
 		percentage := float64(count) / float64(totalEvents) * 100
 		name := ""
-		for _, e := range events {
-			if e.PID == pid && e.ProcessName != "" {
-				name = e.ProcessName
-				break
-			}
+		if l, ok := latest[pid]; ok {
+			name = l.name
+		} else if l, ok := transient[pid]; ok {
+			name = l.name
 		}
 		if name == "" {
 			name = getProcessName(pid)
@@ -54,6 +72,20 @@ func AnalyzeProcessActivity(events []*events.Event) []PidInfo {
 	})
 
 	return pidInfos
+}
+
+// isTransientName flags comm values that the kernel sets briefly during
+// container setup — they get superseded by the user's command after runc's
+// setns+exec dance. Aggregation prefers a stable name over these whenever
+// the same PID also has events tagged with the post-exec identity.
+func isTransientName(name string) bool {
+	if strings.HasPrefix(name, "runc-bootstrap[") {
+		return true
+	}
+	if strings.HasPrefix(name, "runc:[") {
+		return true
+	}
+	return false
 }
 
 func getProcessName(pid uint32) string {

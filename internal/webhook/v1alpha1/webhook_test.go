@@ -298,6 +298,44 @@ func TestPodTraceSessionValidator_ObjectStoreReportRef(t *testing.T) {
 	}
 }
 
+// TestPodTraceSessionValidator_FinalizerOnlyUpdateOnInvalidSpec locks in the
+// fix for a stuck-finalizer scenario: a session whose spec was created when an
+// older webhook rule allowed two reportRef sinks must still be deletable.
+func TestPodTraceSessionValidator_FinalizerOnlyUpdateOnInvalidSpec(t *testing.T) {
+	c := newClientWithExporter(t, "default", "prod-otlp")
+	v := &webhookv1alpha1.PodTraceSessionCustomValidator{Client: c}
+	legacySpec := podtracev1alpha1.PodTraceSessionSpec{
+		Selector:    validSelector(),
+		Duration:    metav1.Duration{Duration: time.Minute},
+		ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+		ReportRef: &podtracev1alpha1.ReportReference{
+			ConfigMap:   &corev1.LocalObjectReference{Name: "rpt"},
+			ObjectStore: &podtracev1alpha1.ObjectStoreReference{URI: "s3://b/"},
+		},
+	}
+	oldObj := &podtracev1alpha1.PodTraceSession{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pts", Namespace: "default",
+			Finalizers: []string{"podtrace.io/cleanup"},
+		},
+		Spec: legacySpec,
+	}
+	newObj := &podtracev1alpha1.PodTraceSession{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pts", Namespace: "default",
+		},
+		Spec: legacySpec,
+	}
+	if _, err := v.ValidateUpdate(context.Background(), oldObj, newObj); err != nil {
+		t.Fatalf("finalizer-only update on legacy invalid spec must be allowed, got: %v", err)
+	}
+	mutated := newObj.DeepCopy()
+	mutated.Spec.Duration = metav1.Duration{Duration: 2 * time.Minute}
+	if _, err := v.ValidateUpdate(context.Background(), oldObj, mutated); err == nil {
+		t.Fatalf("spec change on legacy invalid spec must still be rejected")
+	}
+}
+
 // TestPodTraceSessionValidator_ReportRefExclusivity locks in that at
 // most one sink can be set.
 func TestPodTraceSessionValidator_ReportRefExclusivity(t *testing.T) {

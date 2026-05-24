@@ -34,7 +34,10 @@ func (v *PodTraceScheduleCustomValidator) ValidateCreate(ctx context.Context, s 
 	return v.validate(ctx, s)
 }
 
-func (v *PodTraceScheduleCustomValidator) ValidateUpdate(ctx context.Context, _, newSchedule *podtracev1alpha1.PodTraceSchedule) (admission.Warnings, error) {
+func (v *PodTraceScheduleCustomValidator) ValidateUpdate(ctx context.Context, oldSchedule, newSchedule *podtracev1alpha1.PodTraceSchedule) (admission.Warnings, error) {
+	if oldSchedule != nil && specUnchanged(oldSchedule.Spec, newSchedule.Spec) {
+		return nil, nil
+	}
 	return v.validate(ctx, newSchedule)
 }
 

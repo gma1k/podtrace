@@ -32,7 +32,10 @@ func (v *ExporterConfigCustomValidator) ValidateCreate(_ context.Context, ec *po
 	return nil, podtracev1alpha1.ValidateExporterConfigVariant(ec.Spec)
 }
 
-func (v *ExporterConfigCustomValidator) ValidateUpdate(_ context.Context, _, newEC *podtracev1alpha1.ExporterConfig) (admission.Warnings, error) {
+func (v *ExporterConfigCustomValidator) ValidateUpdate(_ context.Context, oldEC, newEC *podtracev1alpha1.ExporterConfig) (admission.Warnings, error) {
+	if oldEC != nil && specUnchanged(oldEC.Spec, newEC.Spec) {
+		return nil, nil
+	}
 	return nil, podtracev1alpha1.ValidateExporterConfigVariant(newEC.Spec)
 }
 

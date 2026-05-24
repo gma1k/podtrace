@@ -144,8 +144,10 @@ struct {
 	__type(value, u32);
 } alert_thresholds SEC(".maps");
 
+/* event_buf is a scratch slot that each probe fills before pushing into the
+ * ring buffer. */
 struct {
-	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(max_entries, 1);
 	__type(key, u32);
 	__type(value, struct event);
@@ -238,8 +240,10 @@ struct {
 	__type(value, u64); /* byte count captured at uprobe entry */
 } proto_bytes SEC(".maps");
 
+/* stack_buf is a scratch slot for bpf_get_stack(). Same percpu reasoning as
+ * event_buf: a shared slot races between CPUs and produces corrupted frames. */
 struct {
-	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(max_entries, 1);
 	__type(key, u32);
 	__type(value, struct stack_trace_t);

@@ -9,12 +9,13 @@ import (
 
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/diagnose/tracker"
+	"github.com/podtrace/podtrace/internal/ebpf/cache"
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/internal/procfs"
 )
 
-func GenerateCPUUsageReport(events []*events.Event, duration time.Duration) string {
-	pidActivity := tracker.AnalyzeProcessActivity(events)
+func GenerateCPUUsageReport(allEvents []*events.Event, duration time.Duration) string {
+	pidActivity := tracker.AnalyzeProcessActivity(allEvents)
 	if len(pidActivity) == 0 {
 		return GenerateCPUUsageFromProc(duration)
 	}
@@ -24,17 +25,46 @@ func GenerateCPUUsageReport(events []*events.Event, duration time.Duration) stri
 	durationSec := duration.Seconds()
 	totalCPUPercent := 0.0
 
+	cpuTimeFromSched := make(map[uint32]uint64)
+	for _, e := range allEvents {
+		if e == nil || e.Type != events.EventSchedSwitch {
+			continue
+		}
+		cpuTimeFromSched[e.PID] += e.LatencyNS
+	}
+
 	pidCPUTimes := make(map[uint32]cpuTimeInfo)
 	for _, info := range pidActivity {
-		cpuTime := getProcessCPUTime(info.Pid)
-		if cpuTime.totalNS > 0 {
-			cpuPercent := (float64(cpuTime.totalNS) / 1e9) / durationSec * 100.0
+		var totalNS uint64
+		if ns, ok := cpuTimeFromSched[info.Pid]; ok && ns > 0 {
+			totalNS = ns
+		} else if proc := getProcessCPUTime(info.Pid); proc.totalNS > 0 {
+			totalNS = proc.totalNS
+		}
+		if totalNS > 0 {
+			cpuPercent := (float64(totalNS) / 1e9) / durationSec * 100.0
 			pidCPUTimes[info.Pid] = cpuTimeInfo{
 				cpuPercent: cpuPercent,
-				cpuTimeSec: float64(cpuTime.totalNS) / 1e9,
+				cpuTimeSec: float64(totalNS) / 1e9,
 				name:       info.Name,
 			}
 		}
+	}
+
+	if len(pidCPUTimes) == 0 && len(pidActivity) > 0 {
+		report += "  Process Activity Ranking (event count — CPU samples unavailable for short-lived processes):\n"
+		limit := config.TopProcessesLimit
+		if limit > len(pidActivity) {
+			limit = len(pidActivity)
+		}
+		for i := 0; i < limit; i++ {
+			a := pidActivity[i]
+			report += fmt.Sprintf("    PID %d (%s): %d events (%.1f%%)\n",
+				a.Pid, a.Name, a.Count, a.Percentage)
+		}
+		report += "\n  Total CPU usage: unavailable (no /proc samples)\n"
+		report += fmt.Sprintf("  Sample duration: %.2fs across %d distinct processes\n\n", durationSec, len(pidActivity))
+		return report
 	}
 
 	type cpuUsageInfo struct {
@@ -120,6 +150,9 @@ type cpuTimeInfo struct {
 func getProcessCPUTime(pid uint32) cpuTimeInfo {
 	data, err := procfs.ReadFile(fmt.Sprintf("%d/stat", pid))
 	if err != nil {
+		if cached := cache.GetCPUTime(pid); cached.TotalNS > 0 {
+			return cpuTimeInfo{totalNS: cached.TotalNS}
+		}
 		return cpuTimeInfo{}
 	}
 
