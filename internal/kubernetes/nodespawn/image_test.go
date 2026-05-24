@@ -33,10 +33,16 @@ func TestResolveImage(t *testing.T) {
 			want:      "env.example/podtrace:env",
 		},
 		{
-			name:      "linker default + released version",
+			name:      "linker default + released version strips leading v",
 			linkerVal: "ghcr.io/gma1k/podtrace",
 			opts:      ResolveImageOptions{Version: "v1.2.3"},
-			want:      "ghcr.io/gma1k/podtrace:v1.2.3",
+			want:      "ghcr.io/gma1k/podtrace:1.2.3",
+		},
+		{
+			name:      "version without leading v is used verbatim",
+			linkerVal: "ghcr.io/gma1k/podtrace",
+			opts:      ResolveImageOptions{Version: "1.2.3"},
+			want:      "ghcr.io/gma1k/podtrace:1.2.3",
 		},
 		{
 			name:      "dev version falls back to latest with warn",
@@ -53,9 +59,9 @@ func TestResolveImage(t *testing.T) {
 			wantWarn:  true,
 		},
 		{
-			name: "empty linker falls back to project default",
+			name: "empty linker falls back to project default, leading v stripped",
 			opts: ResolveImageOptions{Version: "v1.0.0"},
-			want: "ghcr.io/gma1k/podtrace:v1.0.0",
+			want: "ghcr.io/gma1k/podtrace:1.0.0",
 		},
 		{
 			name:      "empty version yields latest tag without warn (non-dev)",
@@ -109,10 +115,10 @@ func TestResolveImage(t *testing.T) {
 			wantWarn:  true,
 		},
 		{
-			name:      "clean release tag used verbatim",
+			name:      "clean release tag strips leading v for image tag",
 			linkerVal: "ghcr.io/gma1k/podtrace",
-			opts:      ResolveImageOptions{Version: "v0.11.12"},
-			want:      "ghcr.io/gma1k/podtrace:v0.11.12",
+			opts:      ResolveImageOptions{Version: "v0.12.0"},
+			want:      "ghcr.io/gma1k/podtrace:0.12.0",
 		},
 	}
 
