@@ -185,6 +185,26 @@ kubectl podtrace --version
 kubectl krew upgrade podtrace
 ```
 
+> **How `kubectl podtrace` reaches the kernel**
+>
+> - **Real clusters** (Talos, EKS, GKE, AKS, OpenShift, bare-metal): the CLI
+>   spawns a short-lived privileged pod on the target pod's node and runs
+>   eBPF there. Zero workstation caps needed; one-time namespace
+>   PodSecurity label required. See [cli-architecture.md](cli-architecture.md).
+>
+> - **kind / minikube / docker-desktop**: the workstation **is** the kubelet
+>   host (nodes are docker containers sharing the host kernel), so the
+>   spawn step is wasted overhead. Add `--local`:
+>   ```bash
+>   kubectl podtrace --local -n my-app api-pod
+>   ```
+>   Skip-the-spawn means eBPF loads on your workstation directly, no
+>   privileged pod, no PSA label, no image to load. Same UX as pre-PR
+>   podtrace on a single-node setup. Needs `CAP_BPF` / `CAP_SYS_ADMIN` on
+>   the local binary — the release tarball ships these via setcap, and
+>   `make build` + `./scripts/setup-capabilities.sh` does the same for
+>   source builds.
+
 #### Verify the tarball signature (cosign keyless + sha256sum)
 
 The release pipeline signs `checksums.txt` via cosign keyless and

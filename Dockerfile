@@ -27,7 +27,6 @@ RUN apt-get update \
 
 WORKDIR /src
 
-# Prime the module cache first for better layer reuse on source-only changes.
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
@@ -39,6 +38,7 @@ ARG TARGETARCH=amd64
 ARG TARGETOS=linux
 ARG VERSION=dev
 ARG COMMIT=unknown
+ARG IMAGE_REPO=ghcr.io/gma1k/podtrace
 
 ENV BPF_GOARCH=${TARGETARCH} \
     CGO_ENABLED=0 \
@@ -59,7 +59,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     go build \
       -trimpath \
       -tags embed_bpf \
-      -ldflags "-s -w -X github.com/podtrace/podtrace/internal/config.Version=${VERSION} -X github.com/podtrace/podtrace/internal/config.Commit=${COMMIT}" \
+      -ldflags "-s -w -X github.com/podtrace/podtrace/internal/config.Version=${VERSION} -X github.com/podtrace/podtrace/internal/config.Commit=${COMMIT} -X github.com/podtrace/podtrace/internal/config.Image=${IMAGE_REPO}" \
       -o /out/podtrace \
       ./cmd/podtrace
 
@@ -72,10 +72,5 @@ LABEL org.opencontainers.image.title="podtrace" \
       org.opencontainers.image.licenses="Apache-2.0"
 
 COPY --from=builder /out/podtrace /usr/local/bin/podtrace
-
-# CLI and operator Deployment run unprivileged as 65532:65532 (distroless
-# nonroot). The agent DaemonSet and session Jobs override runAsUser to 0
-# and add CAP_BPF/CAP_SYS_ADMIN/CAP_PERFMON in their securityContext.
-USER 65532:65532
 
 ENTRYPOINT ["/usr/local/bin/podtrace"]

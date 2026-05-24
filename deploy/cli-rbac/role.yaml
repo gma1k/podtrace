@@ -1,0 +1,51 @@
+# Optional RBAC for podtrace CLI's spawn pods.
+#
+# The CLI works out-of-the-box without this file. The workstation pre-resolves
+# every target pod's containerID and hands it to the spawn pod via a flag, so
+# the spawn pod's child binary needs **zero** Kubernetes API access for
+# tracing itself.
+#
+# Apply this ONLY if you want:
+#   - Kubernetes events to annotate traces (the "events correlator" feature)
+#   - --dynamic-spawn mode watching selector changes from inside the spawn pod
+#     (not yet implemented — currently the workstation does the poll)
+#
+# Apply per cluster:
+#   kubectl apply -f deploy/cli-rbac/role.yaml
+#
+# Then pass --service-account=podtrace-cli to the CLI, or set
+# PODTRACE_SPAWN_SA=podtrace-cli.
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: podtrace-cli
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: podtrace-cli
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: podtrace-cli
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: podtrace-cli
+subjects:
+- kind: ServiceAccount
+  name: podtrace-cli
+  namespace: kube-system

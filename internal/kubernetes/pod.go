@@ -32,13 +32,20 @@ var (
 )
 
 type PodResolver struct {
-	clientset kubernetes.Interface
+	clientset  kubernetes.Interface
+	restConfig *rest.Config
 }
 
 var _ PodResolverInterface = (*PodResolver)(nil)
 
 func (r *PodResolver) GetClientset() kubernetes.Interface {
 	return r.clientset
+}
+
+// GetRestConfig exposes the underlying client-go rest.Config so callers (like
+// nodespawn) can build SPDY executors against the same cluster.
+func (r *PodResolver) GetRestConfig() *rest.Config {
+	return r.restConfig
 }
 
 func NewPodResolver() (*PodResolver, error) {
@@ -83,7 +90,7 @@ func NewPodResolver() (*PodResolver, error) {
 		return nil, NewClientsetError(err)
 	}
 
-	return &PodResolver{clientset: clientset}, nil
+	return &PodResolver{clientset: clientset, restConfig: config}, nil
 }
 
 func (r *PodResolver) ResolvePod(ctx context.Context, podName, namespace, containerName string) (*PodInfo, error) {
@@ -188,7 +195,6 @@ func cgroupRootCandidates() []string {
 	seen := map[string]bool{base: true}
 	candidates := []string{base}
 
-	// cgroup v1 systemd hierarchy.
 	if systemdRoot := filepath.Join(base, "systemd"); dirExists(systemdRoot) {
 		if !seen[systemdRoot] {
 			seen[systemdRoot] = true
@@ -196,7 +202,6 @@ func cgroupRootCandidates() []string {
 		}
 	}
 
-	// Kubelet --cgroup-root / --cgroup-parent (GKE, AKS, EKS, custom clusters).
 	if kcp := detectKubeletCgroupParent(); kcp != "" {
 		// kcp may be a relative path like "kubepods" or absolute.
 		var full string
@@ -253,7 +258,6 @@ func readKubeletCgroupFlag() string {
 			continue
 		}
 
-		// cmdline is NUL-separated.
 		args := strings.Split(string(data), "\x00")
 		for i, arg := range args {
 			for _, flag := range []string{"--cgroup-root", "--cgroup-parent"} {
@@ -276,7 +280,6 @@ func readKubeletCgroupFlag() string {
 				}
 			}
 		}
-		// Found kubelet but no relevant flag — stop searching.
 		break
 	}
 	return ""
@@ -288,9 +291,7 @@ func dirExists(path string) bool {
 }
 
 // statCgroupDir returns true when path resolves to anything (file or
-// dir) under the configured cgroup base. The check goes through
-// sysfs.CgroupStat so the operation is os.Root-scoped rather than a
-// raw os.Stat on a tainted path.
+// dir) under the configured cgroup base.
 func statCgroupDir(path string) bool {
 	rel, ok := sysfs.CgroupRelative(path)
 	if !ok {
@@ -336,9 +337,6 @@ func resolveCgroupPathCRI(ctx context.Context, containerID string) (string, erro
 	cg := info.CgroupsPath
 	roots := cgroupRootCandidates()
 
-	// If CRI returned an absolute filesystem path (e.g. CRI-O on OpenShift may
-	// return /sys/fs/cgroup/kubepods.slice/... directly), check it first, then
-	// strip the cgroup base so the relative path is used in the searches below.
 	if strings.HasPrefix(cg, "/") {
 		if _, err := os.Stat(cg); err == nil {
 			if cg != config.CgroupBasePath {
@@ -372,10 +370,6 @@ func resolveCgroupPathCRI(ctx context.Context, containerID string) (string, erro
 		}
 	}
 
-	// Systemd parent slice expansion: CRI-O on cgroupv2+systemd (OpenShift 4.14+)
-	// returns a path relative to the kubepods.slice scope, not the cgroup root.
-	// e.g. CRI-O returns:  kubepods-besteffort.slice/kubepods-besteffort-pod<uid>.slice/crio-<id>.scope
-	// actual path is:      /sys/fs/cgroup/kubepods.slice/kubepods-besteffort.slice/...
 	for _, parent := range []string{"kubepods.slice", "kubepods"} {
 		for _, root := range roots {
 			fullPath := filepath.Join(root, parent, trimmed)

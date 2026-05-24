@@ -61,13 +61,17 @@ var (
 	showVersion           bool
 	enableProfiling       bool
 
-	// Session-mode flags. These are set by the operator when it builds a
-	// session Job's argv; end users do not typically set them. They all
-	// default to empty/disabled, preserving existing CLI behavior.
-	exporterFromFile        string
-	summaryFile             string
-	terminationMessagePath  string
-	reportTo                string
+	localMode           bool
+	spawnImage          string
+	spawnNamespace      string
+	spawnServiceAccount string
+	dynamicSpawn        bool
+	preresolvedPods     []string
+
+	exporterFromFile       string
+	summaryFile            string
+	terminationMessagePath string
+	reportTo               string
 
 	resolverFactory func() (kubernetes.PodResolverInterface, error)
 	tracerFactory   func() (ebpf.TracerInterface, error)
@@ -83,12 +87,6 @@ func init() {
 	}
 	exitFunc = os.Exit
 
-	// client-go's informers retry on RBAC denials at klog ERROR level
-	// every few seconds; in narrow per-session SA contexts (where
-	// cluster-scope list/watch is intentionally denied) those retries
-	// are expected and just spam stderr. Route klog into its own flagset
-	// so we don't conflict with cobra, lower its verbosity to fatal-only,
-	// and silence the writer.
 	klogFlags := flag.NewFlagSet("klog", flag.ContinueOnError)
 	klog.InitFlags(klogFlags)
 	_ = klogFlags.Set("logtostderr", "false")
@@ -147,6 +145,13 @@ func main() {
 	rootCmd.Flags().Float64Var(&tracingSampleRate, "tracing-sample-rate", config.DefaultTracingSampleRate, "Tracing sample rate (0.0-1.0)")
 	rootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, "Print version information")
 	rootCmd.Flags().BoolVar(&enableProfiling, "profiling", false, "Enable performance profiling: pprof endpoint discovery on the target pod, auto-trigger on latency spikes, and CPU/memory correlation in reports")
+	rootCmd.Flags().BoolVar(&localMode, "local", false, "Run eBPF on this workstation instead of spawning a privileged pod on the target node. Use for kind/minikube/docker-desktop where the workstation IS the kubelet host.")
+	rootCmd.Flags().StringVar(&spawnImage, "image", "", "Container image used when spawning on the target node (overrides PODTRACE_IMAGE and the linker default)")
+	rootCmd.Flags().StringVar(&spawnNamespace, "spawn-namespace", "", "Namespace for the ephemeral spawn pod (defaults to the target pod's namespace; overridable via PODTRACE_SPAWN_NAMESPACE)")
+	rootCmd.Flags().BoolVar(&dynamicSpawn, "dynamic-spawn", false, "Continuously poll target selection and spawn additional pods on newly-matched nodes (incompatible with --diagnose; covers new nodes only, not new pods on already-covered nodes)")
+	rootCmd.Flags().StringVar(&spawnServiceAccount, "service-account", "", "ServiceAccount the spawn pod runs as. Only required when --dynamic-spawn watches selector changes from inside the pod; otherwise the workstation pre-resolves everything and the spawn pod needs no RBAC.")
+	rootCmd.Flags().StringSliceVar(&preresolvedPods, "preresolved-pod", nil, "internal: workstation pre-resolved target as ns/name/containerID/containerName, lets the spawn pod skip its own K8s lookup")
+	_ = rootCmd.Flags().MarkHidden("preresolved-pod")
 	rootCmd.Flags().StringVar(&exporterFromFile, "exporter-from-file", "", "Load exporter config from a YAML file (set by the operator for session Jobs)")
 	_ = rootCmd.Flags().MarkHidden("exporter-from-file")
 	rootCmd.Flags().StringVar(&summaryFile, "summary-file", "", "Write a JSON summary of diagnose results to this path when diagnose completes")
@@ -171,10 +176,6 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// --exporter-from-file populates the same config.* globals the other
-	// tracing flags do, so it runs before the tracing manager is built.
-	// A parse error aborts — the operator-mounted bundle is the only
-	// source of exporter endpoint/credential in session Jobs.
 	if exporterFromFile != "" {
 		if err := applyExporterFromFile(exporterFromFile); err != nil {
 			return fmt.Errorf("load --exporter-from-file: %w", err)
@@ -256,7 +257,7 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	if argPodName != "" {
 		pods = append([]string{argPodName}, pods...)
 	}
-	if len(pods) == 0 && podSelector == "" && !allInNamespace {
+	if len(pods) == 0 && podSelector == "" && !allInNamespace && len(preresolvedPods) == 0 {
 		return fmt.Errorf("target pod selection is required: pass <pod-name>, --pods, --pod-selector, or --all-in-namespace")
 	}
 	for _, p := range pods {
@@ -324,12 +325,31 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		Pods:             pods,
 		ContainerName:    containerName,
 	}
+
+	if handled, err := maybeSpawnOnNode(ctx, cmd, resolver, selection); handled {
+		return err
+	}
+
 	targetInfos := make([]*kubernetes.PodInfo, 0, 8)
 	var targetRegistry *kubernetes.TargetRegistry
 
-	_, useDynamicTargets := resolver.(kubernetes.ClientsetProvider)
-	useDynamicTargets = useDynamicTargets && (len(selection.Pods) > 1 || selection.PodSelector != "" || selection.AllInNamespace || len(selection.Namespaces) > 1)
-	if useDynamicTargets {
+	_, hasClientset := resolver.(kubernetes.ClientsetProvider)
+	useDynamicTargets := hasClientset && (len(selection.Pods) > 1 || selection.PodSelector != "" || selection.AllInNamespace || len(selection.Namespaces) > 1)
+	usePreResolved := len(preresolvedPods) > 0
+
+	if usePreResolved {
+		for _, raw := range preresolvedPods {
+			ref, err := kubernetes.ParsePreResolvedRef(raw)
+			if err != nil {
+				return err
+			}
+			info, err := kubernetes.BuildPodInfoFromPreResolved(ref)
+			if err != nil {
+				return fmt.Errorf("preresolved resolve %s/%s: %w", ref.Namespace, ref.PodName, err)
+			}
+			targetInfos = append(targetInfos, info)
+		}
+	} else if useDynamicTargets {
 		clientset := resolver.(kubernetes.ClientsetProvider).GetClientset()
 		targetRegistry = kubernetes.NewTargetRegistry(clientset, selection)
 		if err := targetRegistry.Start(ctx); err != nil {
@@ -382,7 +402,6 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Check kernel version, BTF availability, and SELinux before loading eBPF.
 	if err := system.CheckRequirements(); err != nil {
 		return err
 	}
@@ -516,7 +535,6 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		}()
 	}
 
-	// Profiling handler — set up before tracer.Start() so management routes are ready.
 	var profilingHandler *profiling.Handler
 	if enableProfiling || config.ProfilingEnabled {
 		config.ProfilingEnabled = true // ensures MetricsEnablePprof() returns true

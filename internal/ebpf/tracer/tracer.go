@@ -66,12 +66,12 @@ type ProfilingControllerSetter interface {
 }
 
 type Tracer struct {
-	collection               *ebpf.Collection
-	links                    []link.Link
-	probeGroupsMu            sync.Mutex
-	probeGroups              map[probes.ProbeGroup][]link.Link
+	collection    *ebpf.Collection
+	links         []link.Link
+	probeGroupsMu sync.Mutex
+	probeGroups   map[probes.ProbeGroup][]link.Link
 
-	intentionallyDisabled map[probes.ProbeGroup]struct{}
+	intentionallyDisabled    map[probes.ProbeGroup]struct{}
 	reader                   *ringbuf.Reader
 	filter                   *filter.CgroupFilter
 	containerID              string
@@ -83,8 +83,8 @@ type Tracer struct {
 	cgroupPaths              []string
 	useUserspaceCgroupFilter bool
 	targetCgroupID           uint64
-	targetCgroupIDs atomic.Pointer[map[uint64]struct{}]
-	cgroupWriteMu   sync.Mutex
+	targetCgroupIDs          atomic.Pointer[map[uint64]struct{}]
+	cgroupWriteMu            sync.Mutex
 	cpAnalyzer               *criticalpath.Analyzer
 	piiRedactor              *redactor.Redactor
 	profilingCtrl            ProfilingController
@@ -740,6 +740,22 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 				}
 				event.ProcessName = validation.SanitizeProcessName(event.ProcessName)
 
+				if isLikelyTransientComm(event.ProcessName) {
+					resolved := false
+					if data, err := procfs.ReadFile(fmt.Sprintf("%d/comm", event.PID)); err == nil {
+						real := strings.TrimSpace(string(data))
+						if real != "" && !isLikelyTransientComm(real) {
+							event.ProcessName = validation.SanitizeProcessName(real)
+							resolved = true
+						}
+					}
+					if !resolved {
+						event.ProcessName = "runc-bootstrap[" + event.ProcessName + "]"
+					}
+				}
+
+				cache.SnapshotCPUTime(event.PID)
+
 				if t.piiRedactor != nil {
 					t.piiRedactor.Redact(event)
 				}
@@ -853,6 +869,20 @@ func (t *Tracer) Stop() error {
 	}
 
 	return nil
+}
+
+// isLikelyTransientComm flags single-character or single-digit comm values
+// that the kernel sets transiently during exec — most commonly runc's
+// memfd-based re-exec where comm becomes the FD basename ("6") before runc
+// calls prctl(PR_SET_NAME) to rename itself. Re-reading /proc/<pid>/comm a
+// few milliseconds later (when our userspace processes the event) returns
+// the post-prctl name.
+func isLikelyTransientComm(name string) bool {
+	if len(name) != 1 {
+		return false
+	}
+	c := name[0]
+	return c >= '0' && c <= '9'
 }
 
 func (t *Tracer) getProcessNameQuick(pid uint32) string {
@@ -1049,7 +1079,7 @@ var groupCategoryNeeds = map[probes.ProbeGroup][]string{
 	probes.GroupCPU:        {"cpu", "proc"},
 	probes.GroupMemory:     {"proc"},
 	probes.GroupFastCGI:    {"net"},
-	probes.GroupTLS: {"dns", "cpu"},
+	probes.GroupTLS:        {"dns", "cpu"},
 }
 
 // DisableProbeGroup closes all links associated with the given group.

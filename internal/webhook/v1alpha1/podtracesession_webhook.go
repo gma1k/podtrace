@@ -40,7 +40,10 @@ func (v *PodTraceSessionCustomValidator) ValidateCreate(ctx context.Context, s *
 	return v.validate(ctx, s)
 }
 
-func (v *PodTraceSessionCustomValidator) ValidateUpdate(ctx context.Context, _, newSession *podtracev1alpha1.PodTraceSession) (admission.Warnings, error) {
+func (v *PodTraceSessionCustomValidator) ValidateUpdate(ctx context.Context, oldSession, newSession *podtracev1alpha1.PodTraceSession) (admission.Warnings, error) {
+	if oldSession != nil && specUnchanged(oldSession.Spec, newSession.Spec) {
+		return nil, nil
+	}
 	return v.validate(ctx, newSession)
 }
 

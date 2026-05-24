@@ -17,27 +17,72 @@ path is. Pick the one that matches what you're doing.
 | Archived per-run snapshots over time | `PodTraceSchedule` with `reportRef.objectStore` | `aws s3 cp s3://…/<key> -` |
 | Real-time spans in a UI (production) | any CR with an `ExporterConfig` pointed at OTLP | Jaeger / Tempo / Datadog / Splunk |
 
-## Surface 1: live CLI streaming
+## Live CLI streaming
 
-The CLI is **not** operator-managed. It runs from your workstation
-against any pod in the cluster, attaches eBPF probes through the agent
-DaemonSet, and prints events as they happen.
+The CLI runs from your workstation against any pod in the cluster.
+Under the hood it spawns a short-lived privileged pod on the **target
+pod's node** (one per node when targets span multiple nodes), runs
+eBPF there against the host's `/sys/fs/cgroup`, and streams events
+back to your terminal. The spawn pod is deleted on exit.
 
 ```bash
 # One pod, real-time
 kubectl podtrace -n my-app api-pod-abc
 
-# Many pods via label selector
+# Many pods via label selector (one spawn pod per node)
 kubectl podtrace -n my-app --pod-selector app=api
 
-# Ctrl+C → final diagnostic report + clean detach
+# Ctrl+C → spawn pod deleted, final diagnostic report on stdout
 ```
 
-Pros: zero setup once the operator + agents are installed.
-Cons: ephemeral. Close the terminal, you lose the events. Use it for
-interactive debugging.
+### Why a spawn pod
+
+eBPF programs run in the kernel of the machine where they're loaded.
+The workstation kernel can't observe a pod running on a remote node,
+so the CLI loads eBPF *on that node* by way of an ephemeral pod with
+`hostPID` and the host's `/proc` + `/sys/fs/cgroup` mounted at
+`/host/*`. The child binary respects `PODTRACE_PROC_BASE` and
+`PODTRACE_CGROUP_BASE` env vars and finds the cgroup hierarchy there.
+
+### Flags that control the spawn
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--local` | off | Skip the spawn; run eBPF on the workstation. Use for kind/minikube/docker-desktop where the workstation IS the kubelet host. |
+| `--image` | linker default `ghcr.io/gma1k/podtrace:<CLI version>` | Override the image the spawn pod runs. Also settable via `PODTRACE_IMAGE` env. |
+| `--spawn-namespace` | target pod's namespace | Namespace where the spawn pod lives. Also settable via `PODTRACE_SPAWN_NAMESPACE`. |
+
+### Required cluster setup
+
+The spawn pod is privileged (`hostPID`, `CAP_BPF`, `CAP_SYS_ADMIN`,
+hostPath mounts). If the target namespace enforces PodSecurity
+"restricted" or "baseline", admission rejects the spawn pod with an
+error the CLI surfaces verbatim, including the one-line remediation:
+
+```bash
+kubectl label ns/<ns> pod-security.kubernetes.io/enforce=privileged --overwrite
+```
+
+Or use `--spawn-namespace=<centralized-ns>` to point at a namespace
+you've already labelled for privileged workloads.
+
+RBAC needed in **your kubeconfig** (the workstation): `pods` (`create`, `get`,
+`delete`, `list`, `watch`), `pods/log`, `pods/attach`. Falls back to
+`pods/log` (stream-only, no stdin) if `pods/attach` is denied. **The spawn
+pod itself runs as the default ServiceAccount and needs zero RBAC** — the
+workstation pre-resolves every target's containerID and hands it to the
+spawn pod via a flag, so the child binary never calls the K8s API.
 
 For the full CLI flag reference see [usage.md](usage.md).
+
+### Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `cgroup path not found for container <id>` | You passed `--local` on a cluster where the workstation isn't the kubelet host | Remove `--local`, or run on the kubelet host |
+| `violates PodSecurity` admission error | Spawn namespace enforces non-privileged PSA | Label the namespace (CLI prints the exact command) or use `--spawn-namespace` |
+| `ImagePullBackOff` on the spawn pod | Cluster can't pull the image | Use `--image=<reachable-ref>` or pre-pull via `talosctl image pull` / your registry mirror |
+| Spawn pod created but stdin doesn't work | RBAC denies `pods/attach` (degraded mode) | Grant `pods/attach` in the spawn namespace |
 
 ## Surface 2: a single ConfigMap (kubectl-friendly snapshot)
 

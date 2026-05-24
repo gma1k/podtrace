@@ -93,6 +93,10 @@ int tracepoint_sched_process_fork(void *ctx) {
 	e->error = 0;
 	e->bytes = 0;
 	e->tcp_state = 0;
+	/* e->pid is the child's; get_event_buf() set e->comm to the parent's name
+	 * via bpf_get_current_comm(). Overwrite with the child's comm from the
+	 * tracepoint so the pair refers to the same task. */
+	__builtin_memcpy(e->comm, args_local.child_comm, sizeof(e->comm));
 
 	bpf_probe_read_kernel_str(e->target, sizeof(e->target), args_local.child_comm);
 

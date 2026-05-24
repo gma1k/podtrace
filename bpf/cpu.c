@@ -47,7 +47,8 @@ int tracepoint_sched_switch(void *ctx) {
 				e->tcp_state = 0;
 				e->target[0] = '\0';
 				e->details[0] = '\0';
-				
+				__builtin_memcpy(e->comm, args_local.prev_comm, sizeof(e->comm));
+
 				capture_user_stack(ctx, prev_pid, 0, e);
 				bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 			}

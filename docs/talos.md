@@ -1,5 +1,74 @@
 # Running podtrace on Talos Linux
 
+## Using `kubectl podtrace`
+
+The CLI works on Talos out-of-the-box. It identifies the node
+hosting the target pod, spawns a short-lived privileged pod on that
+node, runs eBPF there, and streams events back to your terminal. The
+workstation pre-resolves the target's containerID and passes it via a
+flag so the spawn pod needs **zero RBAC** — see [cli-architecture.md](cli-architecture.md).
+This replaces the old workstation-eBPF mode that silently failed on Talos
+because Talos's container runtime is isolated from the host that ran
+`kubectl podtrace` (issue [#149](https://github.com/gma1k/podtrace/issues/149)).
+
+```bash
+# One-time: allow the spawn pod's privileged spec in the target namespace
+kubectl label ns/<your-app-ns> pod-security.kubernetes.io/enforce=privileged --overwrite
+
+# Then trace as normal
+kubectl podtrace -n <your-app-ns> <pod-name>
+```
+
+If you'd rather keep your application namespaces non-privileged,
+create a dedicated namespace once and aim the spawn at it:
+
+```bash
+kubectl create ns podtrace-cli
+kubectl label ns/podtrace-cli pod-security.kubernetes.io/enforce=privileged
+export PODTRACE_SPAWN_NAMESPACE=podtrace-cli
+kubectl podtrace -n <app-ns> <pod>
+```
+
+### Air-gapped Talos clusters
+
+The spawn pod pulls `ghcr.io/gma1k/podtrace:<CLI version>` by default.
+Pre-pull on each node or point at a mirror:
+
+```bash
+talosctl --nodes <nodes> image pull ghcr.io/gma1k/podtrace:<version>
+# or
+kubectl podtrace --image=mirror.internal/podtrace:<tag> ...
+```
+
+### Local dev/testing against a Talos cluster
+
+To exercise an in-development binary on a real Talos VM cluster:
+
+```bash
+# Build a dev image
+make docker-build IMAGE_REPO=10.5.0.1:5000/podtrace IMAGE_TAG=dev
+
+# Push to a local registry reachable from Talos VMs
+docker run -d --name pt-reg -p 10.5.0.1:5000:5000 registry:2
+docker push 10.5.0.1:5000/podtrace:dev
+
+# Tell Talos to allow the insecure registry
+talosctl --nodes <nodes> patch machineconfig --immediate -p '[
+  {"op":"add","path":"/machine/registries","value":{
+    "config":{"10.5.0.1:5000":{"tls":{"insecureSkipVerify":true}}}
+  }}
+]'
+
+# Pre-pull and run
+talosctl --nodes <nodes> image pull 10.5.0.1:5000/podtrace:dev
+./bin/podtrace --pods <ns>/<pod> --image=10.5.0.1:5000/podtrace:dev --diagnose 5s
+```
+
+A turnkey Talos QEMU cluster setup that was used to validate this fix
+lives at [`stuffs/talos-setup/`](https://github.com/gma1k/podtrace) in the user's
+local workspace; the `scripts/up.sh` script brings up a Talos v1.13.2
+cluster with Cilium in ~3 minutes.
+
 ## Overview
 
 Talos Linux is an immutable, minimal OS designed exclusively for Kubernetes.
@@ -28,81 +97,86 @@ make build GOARCH=amd64
 make build GOARCH=arm64
 ```
 
-## Deploying podtrace on Talos
+## Production deployment via Helm
 
-The recommended approach is a **DaemonSet** with the binary embedded in a
-container image.
+Use the operator + agent chart. The agent DaemonSet runs on every node and
+reconciles eBPF attachments from `PodTrace` / `PodTraceSession` /
+`PodTraceSchedule` CRs:
 
-### Container image example
+```bash
+# cert-manager is required for the validating webhook's TLS certs
+helm repo add jetstack https://charts.jetstack.io
+helm install cert-manager jetstack/cert-manager \
+  --namespace cert-manager --create-namespace \
+  --set crds.enabled=true
 
-```dockerfile
-FROM debian:12-slim AS builder
-RUN apt-get update && apt-get install -y make clang llvm libbpf-dev bpftool
-COPY . /src
-WORKDIR /src
-RUN make build
+# self-signed Issuer for the webhook cert
+kubectl create namespace podtrace-system
+kubectl apply -f - <<'EOF'
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata: {name: podtrace-selfsigned, namespace: podtrace-system}
+spec: {selfSigned: {}}
+EOF
 
-FROM debian:12-slim
-COPY --from=builder /src/bin/podtrace /podtrace
-ENTRYPOINT ["/podtrace"]
+# Install podtrace
+helm install podtrace oci://ghcr.io/gma1k/charts/podtrace \
+  --namespace podtrace-system \
+  --set webhook.enabled=true
 ```
 
-### DaemonSet
+After install you get:
 
-Talos nodes use the **cgroupfs** driver (not systemd), so cgroup paths look like:
+- **Operator** Deployment reconciling 5 CRDs (`PodTrace`, `PodTraceSession`,
+  `PodTraceSchedule`, `ExporterConfig`, `TracerConfig`)
+- **Agent** DaemonSet — one privileged pod per node, attaches eBPF locally,
+  filters events by cgroup_id
+- **Validating webhook** — admits only well-formed CRs (must have cert-manager)
+- **Default `TracerConfig`** — controls the agent image / resources
 
+Talos nodes use **cgroup v2 with the cgroupfs driver**; the agent
+auto-detects this and uses paths like
+`/sys/fs/cgroup/kubelet.slice/kubelet-kubepods.slice/.../cri-containerd-<id>.scope`.
+No env-var overrides needed for default Talos installs.
+
+### Verifying the install
+
+```bash
+kubectl -n podtrace-system get pods
+# expect: podtrace-operator Running, podtrace-agent (N) Running
+
+kubectl get crd | grep podtrace.io
+# expect: 5 CRDs
+
+kubectl get validatingwebhookconfigurations | grep podtrace
+# expect: podtrace-validating-webhook
 ```
-/sys/fs/cgroup/kubepods/burstable/pod<uid>/<container-id>/
-```
 
-```yaml
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  name: podtrace
-  namespace: kube-system
+End-to-end smoke test:
+
+```bash
+kubectl apply -f - <<'EOF'
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata: {name: smoke, namespace: default}
 spec:
-  template:
-    spec:
-      hostPID: true
-      hostNetwork: true
-      containers:
-      - name: podtrace
-        image: your-registry/podtrace:latest
-        securityContext:
-          privileged: true
-        volumeMounts:
-        - name: sys-fs-cgroup
-          mountPath: /sys/fs/cgroup
-          readOnly: true
-        - name: proc
-          mountPath: /proc
-          readOnly: true
-        - name: cri-sock
-          mountPath: /run/containerd/containerd.sock
-        env:
-        - name: PODTRACE_CGROUP_BASE
-          value: /sys/fs/cgroup
-        - name: PODTRACE_PROC_BASE
-          value: /proc
-        - name: PODTRACE_CRI_ENDPOINT
-          value: unix:///run/containerd/containerd.sock
-        # Talos may not embed container ID in cgroup path:
-        - name: PODTRACE_ALLOW_BROAD_CGROUP
-          value: "1"
-      volumes:
-      - name: sys-fs-cgroup
-        hostPath:
-          path: /sys/fs/cgroup
-      - name: proc
-        hostPath:
-          path: /proc
-      - name: cri-sock
-        hostPath:
-          path: /run/containerd/containerd.sock
-          type: Socket
-      tolerations:
-      - operator: Exists
+  type: otlp
+  otlp: {endpoint: collector.default.svc.cluster.local:4318}
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTraceSession
+metadata: {name: smoke, namespace: default}
+spec:
+  selector: {matchLabels: {app: nginx}}
+  duration: 10s
+  exporterRef: {name: smoke}
+  reportRef: {configMap: {name: smoke-report}}
+EOF
+
+# Session runs a Job on the target's node, finishes within ~15s
+kubectl wait --for=jsonpath='{.status.state}'=Completed \
+  podtracesession smoke --timeout=60s
+kubectl get cm smoke-report -o jsonpath='{.data.report\.txt}'
 ```
 
 ## BTF on Talos
@@ -121,13 +195,60 @@ bpftool btf dump file /tmp/talos-vmlinux format c > bpf/vmlinux.h
 make build
 ```
 
-## Known issues
+## Hardening trade-offs
 
-- **No systemd** — the kubelet cgroup-parent auto-detection via `/proc/<pid>/cmdline`
-  works normally since kubelet still runs as a process.
-- **cgroupfs driver** — Talos uses the cgroupfs driver. If the kubelet process is
-  not visible in `/proc` (e.g. running in a separate namespace), set
-  `PODTRACE_CGROUP_BASE=/sys/fs/cgroup` explicitly.
-- **Talos API restrictions** — some Talos machine config hardening options can
-  restrict `/proc` visibility. Ensure `hostPID: true` is allowed by your Talos
-  machine config.
+Talos's secure defaults affect what podtrace can display. Each item below is
+an intentional kernel/Kubernetes choice; podtrace surfaces a clear message and
+the workaround if you accept the security cost.
+
+### Kernel stack symbolication needs `kernel.kptr_restrict=0`
+
+Talos defaults `kernel.kptr_restrict=2`, which zeroes every address in
+`/proc/kallsyms` regardless of capability — `CAP_SYSLOG` doesn't help.
+The sysctl exists to deny userspace any address that could be used as an exploit
+primitive (ROP gadgets, SMEP/SMAP bypasses).
+
+There is no userspace API that returns real kernel addresses when
+`kptr_restrict=2` is in effect — not BTF, not `bpf_kallsyms_lookup_name`,
+not `bpf_get_func_ip`. Podtrace falls back to raw hex (`0xffffffff97dd580e`)
+and emits a one-shot warning:
+
+> Kernel symbol resolution unavailable: /proc/kallsyms returned no addresses
+> (kernel.kptr_restrict is non-zero). Stack frames at kernel addresses will
+> display as raw hex. Set kernel.kptr_restrict=0 on the node to enable symbolication.
+
+User-space frames (your app's stack) symbolicate normally via `/proc/<pid>/exe`
++ `addr2line`. To enable kernel-side symbolication, patch the machine config:
+
+```yaml
+machine:
+  sysctls:
+    kernel.kptr_restrict: "0"
+```
+
+`talosctl --nodes <node> patch machineconfig --immediate -p @patch.yaml`
+
+This is a security trade-off — `kptr_restrict=0` exposes kernel addresses to
+all processes on the node and weakens exploit mitigations. Apply per node only
+when actively debugging; revert when done. User-space stack frames (your app's
+code) symbolicate normally regardless via `/proc/<pid>/exe` + `addr2line`.
+
+### PodSecurity admission on workload namespaces
+
+The spawn pod needs `hostPID` + `CAP_BPF` + `CAP_SYS_ADMIN`, which clusters
+enforcing `restricted` PodSecurity block by default. Three options:
+
+1. Label the target namespace: `kubectl label ns/<app-ns> pod-security.kubernetes.io/enforce=privileged --overwrite`
+2. Use a dedicated namespace and set `PODTRACE_SPAWN_NAMESPACE=podtrace-cli`.
+3. Use the operator path (CR-driven sessions in `podtrace-system`) — already
+   pre-allowed by the helm chart.
+
+### What works without any extra config
+
+- cgroupfs path discovery (auto-detects Talos's `kubelet.slice/...` layout)
+- BTF loading from `/sys/kernel/btf/vmlinux` (all Talos kernels ≥ 1.3 ship BTF)
+- containerd via `/run/containerd/containerd.sock`
+- User-space stack symbolication (addr2line on `/proc/<pid>/exe`)
+- All 5 CRDs reconciling
+- Validating webhook (once cert-manager is installed)
+- Chainsaw e2e suite (validated 13/13 functional)

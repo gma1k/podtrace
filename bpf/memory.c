@@ -63,7 +63,10 @@ int tracepoint_oom_kill_process(void *ctx) {
 	e->error = 0;
 	e->bytes = args_local.totalpages * PAGE_SIZE;
 	e->tcp_state = 0;
-	
+	/* Same pattern as sched_switch: get_event_buf() filled e->comm with the
+	 * OOM-killer task's name (typically a kthread), but e->pid points at the
+	 * victim. Overwrite comm with the victim's name from the tracepoint. */
+	__builtin_memcpy(e->comm, args_local.comm, sizeof(e->comm));
 	bpf_probe_read_kernel_str(e->target, sizeof(e->target), args_local.comm);
 	
 	capture_user_stack(ctx, e->pid, 0, e);

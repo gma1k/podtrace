@@ -33,6 +33,8 @@ func GetProcessNameQuick(pid uint32) string {
 		return ""
 	}
 
+	SnapshotCPUTime(pid)
+
 	if name, ok := globalCache.Get(pid); ok {
 		return name
 	}
@@ -74,4 +76,3 @@ func GetProcessNameQuick(pid uint32) string {
 	globalCache.Set(pid, sanitized)
 	return sanitized
 }
-
