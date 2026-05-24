@@ -9,6 +9,13 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.12.1](https://github.com/gma1k/podtrace/compare/v0.12.0...v0.12.1) (2026-05-24)
+
+
+### Bug Fixes
+
+* spawn image tag v-prefix mismatch and OLM bundle push auth ([#158](https://github.com/gma1k/podtrace/issues/158)) ([9cd2f65](https://github.com/gma1k/podtrace/commit/9cd2f6531bbefb36536d237b7dcf814f405643a0))
+
 ## [0.12.0](https://github.com/gma1k/podtrace/compare/v0.11.0...v0.12.0) (2026-05-24)
 
 
