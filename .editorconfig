@@ -32,9 +32,10 @@ indent_size              = 8
 indent_style             = tab
 
 # ─── Shell ───────────────────────────────────────────────────────────
+# Tabs to match the existing scripts and the project's wider "system
+# files use tabs" convention (Go, C/H, Makefile).
 [*.{sh,bash}]
-indent_style             = space
-indent_size              = 2
+indent_style             = tab
 
 # ─── YAML (Helm, K8s manifests, GitHub Actions, chainsaw fixtures) ──
 [*.{yml,yaml}]

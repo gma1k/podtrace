@@ -40,7 +40,7 @@ func ResolveImage(opts ResolveImageOptions) (image string, warn bool) {
 	if looksLikeDevBuild(version) {
 		return repo + ":latest", true
 	}
-	return repo + ":" + version, false
+	return repo + ":" + strings.TrimPrefix(version, "v"), false
 }
 
 // looksLikeDevBuild reports whether the linker-baked version string is one
