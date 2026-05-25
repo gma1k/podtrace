@@ -3,6 +3,7 @@ package system
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -141,6 +142,126 @@ func TestCheckSELinux_NoSELinux(t *testing.T) {
 	t.Setenv("PODTRACE_SKIP_SELINUX_CHECK", "1")
 	// Should not panic or return error.
 	CheckSELinux()
+}
+
+func TestParseLockdownMode(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  LockdownMode
+	}{
+		{
+			name:  "none active (typical Linux desktop / kind / minikube)",
+			input: "[none] integrity confidentiality\n",
+			want:  LockdownNone,
+		},
+		{
+			name:  "integrity active",
+			input: "none [integrity] confidentiality\n",
+			want:  LockdownIntegrity,
+		},
+		{
+			name:  "confidentiality active (Talos default)",
+			input: "none integrity [confidentiality]\n",
+			want:  LockdownConfidentiality,
+		},
+		{
+			name:  "no trailing newline",
+			input: "none integrity [confidentiality]",
+			want:  LockdownConfidentiality,
+		},
+		{
+			name:  "extra whitespace inside brackets",
+			input: "none integrity [ confidentiality ]\n",
+			want:  LockdownConfidentiality,
+		},
+		{
+			name:  "empty file → unknown",
+			input: "",
+			want:  LockdownUnknown,
+		},
+		{
+			name:  "no brackets → unknown",
+			input: "none integrity confidentiality\n",
+			want:  LockdownUnknown,
+		},
+		{
+			name:  "unbalanced open bracket → unknown",
+			input: "none integrity [confidentiality\n",
+			want:  LockdownUnknown,
+		},
+		{
+			name:  "unknown future level → LockdownUnknown (don't guess)",
+			input: "none integrity confidentiality [tpm]\n",
+			want:  LockdownUnknown,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseLockdownMode(tc.input)
+			if got != tc.want {
+				t.Errorf("parseLockdownMode(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCheckKernelLockdown_SkipEnvBypasses(t *testing.T) {
+	t.Setenv("PODTRACE_SKIP_LOCKDOWN_CHECK", "1")
+	if err := CheckKernelLockdown(); err != nil {
+		t.Errorf("PODTRACE_SKIP_LOCKDOWN_CHECK=1 must short-circuit even on a locked-down kernel, got %v", err)
+	}
+}
+
+func TestCheckKernelLockdown_AbsentFileIsSilent(t *testing.T) {
+	// We can't reliably remove /sys/kernel/security/lockdown from a unit test,
+	// but we can confirm the function tolerates whatever the host actually has
+	// (and exercises the os.ReadFile-returns-error branch on non-Linux CI).
+	t.Setenv("PODTRACE_SKIP_LOCKDOWN_CHECK", "")
+	if _, err := os.Stat("/sys/kernel/security/lockdown"); err != nil {
+		// On a host without the LSM, the check must be silent (no error).
+		if cerr := CheckKernelLockdown(); cerr != nil {
+			t.Errorf("expected nil on host without /sys/kernel/security/lockdown, got %v", cerr)
+		}
+	}
+}
+
+func TestEvaluateLockdown_ConfidentialityProducesActionableError(t *testing.T) {
+	err := evaluateLockdown(LockdownConfidentiality)
+	if err == nil {
+		t.Fatal("expected non-nil error for confidentiality mode")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"confidentiality",
+		"/sys/kernel/security/lockdown",
+		"Talos",
+		"extraKernelArgs",
+		"PODTRACE_SKIP_LOCKDOWN_CHECK",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("lockdown error missing %q\n got: %s", want, msg)
+		}
+	}
+}
+
+func TestEvaluateLockdown_IntegrityWarnsButDoesNotBlock(t *testing.T) {
+	if err := evaluateLockdown(LockdownIntegrity); err != nil {
+		t.Errorf("integrity mode should warn but not error, got: %v", err)
+	}
+}
+
+func TestEvaluateLockdown_NoneIsSilent(t *testing.T) {
+	if err := evaluateLockdown(LockdownNone); err != nil {
+		t.Errorf("none mode must not error, got: %v", err)
+	}
+}
+
+func TestEvaluateLockdown_UnknownIsSilent(t *testing.T) {
+	if err := evaluateLockdown(LockdownUnknown); err != nil {
+		t.Errorf("unknown mode must not error (don't guess on future kernels), got: %v", err)
+	}
 }
 
 // TestIsBTFAvailable returns a boolean; just make sure it doesn't panic.

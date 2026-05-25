@@ -2,6 +2,7 @@ package nodespawn
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -18,6 +20,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	pkgkube "github.com/podtrace/podtrace/internal/kubernetes"
+	"github.com/podtrace/podtrace/internal/logger"
 )
 
 // RunOptions drives the per-CLI-invocation orchestration: figure out which
@@ -50,6 +53,8 @@ type RunOptions struct {
 
 	DynamicReSpawn bool
 	PollInterval   time.Duration
+
+	KeepSpawnPodOnFailure bool
 }
 
 // Run orchestrates the spawn + stream lifecycle. It returns when every per-node
@@ -174,10 +179,23 @@ func runOneNode(ctx context.Context, opts RunOptions, podSpec *corev1.Pod, multi
 		}
 		return fmt.Errorf("create spawn pod %s/%s: %w", podSpec.Namespace, podSpec.Name, err)
 	}
+	logger.Debug("Spawn pod created",
+		zap.String("namespace", created.Namespace),
+		zap.String("name", created.Name),
+		zap.String("node", podSpec.Spec.NodeSelector["kubernetes.io/hostname"]))
 
 	cleanupCtx, cancelCleanup := context.WithCancel(context.Background())
 	defer cancelCleanup()
 	defer func() {
+		if retErr != nil && opts.KeepSpawnPodOnFailure {
+			_, _ = fmt.Fprintf(opts.Streams.ErrOut,
+				"spawn pod preserved for debugging: kubectl -n %s logs %s (reaper will clean it up on the next podtrace invocation)\n",
+				created.Namespace, created.Name)
+			logger.Debug("Spawn pod kept on failure",
+				zap.String("namespace", created.Namespace),
+				zap.String("name", created.Name))
+			return
+		}
 		_ = DeletePod(cleanupCtx, opts.Clientset, created.Namespace, created.Name)
 	}()
 
@@ -185,6 +203,10 @@ func runOneNode(ctx context.Context, opts RunOptions, podSpec *corev1.Pod, multi
 	if err != nil {
 		return err
 	}
+	logger.Debug("Spawn pod reached terminal-or-running phase",
+		zap.String("namespace", running.Namespace),
+		zap.String("name", running.Name),
+		zap.String("phase", string(running.Status.Phase)))
 
 	if opts.OnPodRunning != nil {
 		if cbErr := opts.OnPodRunning(ctx, running); cbErr != nil {
@@ -200,7 +222,17 @@ func runOneNode(ctx context.Context, opts RunOptions, podSpec *corev1.Pod, multi
 	}
 
 	if _, err := AttachToPod(ctx, opts.RestConfig, opts.Clientset, running, streams); err != nil {
-		return fmt.Errorf("attach to %s/%s: %w", running.Namespace, running.Name, err)
+		diag := diagnoseAttachFailure(cleanupCtx, opts.Clientset, running.Namespace, running.Name, err)
+		var afe *AttachFailedError
+		if errors.As(diag, &afe) && afe.ExitCode != nil {
+			logger.Debug("Spawn container exited before attach completed",
+				zap.String("namespace", afe.Namespace),
+				zap.String("name", afe.PodName),
+				zap.Int32("exit_code", *afe.ExitCode),
+				zap.String("reason", afe.Reason),
+				zap.String("termination_message", afe.Message))
+		}
+		return diag
 	}
 
 	exit := WaitForExitCode(ctx, opts.Clientset, running.Namespace, running.Name)
