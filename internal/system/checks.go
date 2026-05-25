@@ -92,6 +92,93 @@ func CheckSELinux() {
 			"  Set PODTRACE_SKIP_SELINUX_CHECK=1 to suppress this warning.")
 }
 
+// LockdownMode is the active level of the kernel Lockdown LSM.
+type LockdownMode string
+
+const (
+	LockdownNone            LockdownMode = "none"
+	LockdownIntegrity       LockdownMode = "integrity"
+	LockdownConfidentiality LockdownMode = "confidentiality"
+	LockdownUnknown LockdownMode = ""
+)
+
+// CheckKernelLockdown reads /sys/kernel/security/lockdown and returns an error
+// when the LSM is in 'confidentiality' mode, which denies all BPF reads of
+// kernel RAM (helpers like bpf_probe_read_kernel{,_str} and BPF_CORE_READ).
+//
+// The kernel emits these denials via the Lockdown LSM path rather than the
+// normal verifier helper-allowlist check, so the verifier error users see at
+// load time is the helper-id slot from a different code path and is not a
+// reliable indicator of the actual cause. Surfacing the LSM state at startup
+// gets the real reason in front of the user before any BPF load is attempted.
+//
+// Integrity mode is warned about but does not block — some integrity-mode
+// kernels still permit the helpers podtrace uses, so failing closed would be
+// over-aggressive. None / file-missing / unknown levels are silent.
+//
+// Set PODTRACE_SKIP_LOCKDOWN_CHECK=1 to bypass; intended for power users on
+// test kernels or anyone who has verified the check is over-triggering on
+// their environment.
+func CheckKernelLockdown() error {
+	if os.Getenv("PODTRACE_SKIP_LOCKDOWN_CHECK") == "1" {
+		return nil
+	}
+
+	data, err := os.ReadFile("/sys/kernel/security/lockdown")
+	if err != nil {
+		return nil
+	}
+
+	return evaluateLockdown(parseLockdownMode(string(data)))
+}
+
+// evaluateLockdown is the pure-function half of CheckKernelLockdown: it makes
+// the block/warn/silent decision for a known LockdownMode without touching
+// the filesystem so it can be unit-tested across all branches.
+func evaluateLockdown(mode LockdownMode) error {
+	switch mode {
+	case LockdownConfidentiality:
+		return fmt.Errorf(
+			"kernel Lockdown LSM is in 'confidentiality' mode (/sys/kernel/security/lockdown). " +
+				"BPF programs cannot read kernel RAM in this mode (helpers bpf_probe_read_kernel, " +
+				"bpf_probe_read_kernel_str, and the BPF_CORE_READ pointer-chase macro are all denied), " +
+				"which podtrace requires.\n" +
+				"  On Talos: drop `lockdown=confidentiality` from .machine.install.extraKernelArgs in your " +
+				"machine config (or set it to `lockdown=none` / `lockdown=integrity`), then `talosctl upgrade`\n" +
+				"  On other distros: boot without `lockdown=` on the kernel command line, or set it to " +
+				"`none` / `integrity` — active level is in /proc/cmdline\n" +
+				"  Set PODTRACE_SKIP_LOCKDOWN_CHECK=1 to bypass; BPF load will then fail with a misleading " +
+				"verifier error, intended only for test/CI scenarios")
+	case LockdownIntegrity:
+		logger.Warn(
+			"Kernel Lockdown LSM is in 'integrity' mode (/sys/kernel/security/lockdown). " +
+				"This may restrict some BPF reads of kernel RAM depending on the helper and program type. " +
+				"If tracing fails to load programs, retry with `lockdown=none` on the kernel command line.")
+		return nil
+	default:
+		return nil
+	}
+}
+
+// parseLockdownMode extracts the active bracketed value from the
+// /sys/kernel/security/lockdown file contents.
+func parseLockdownMode(s string) LockdownMode {
+	lb := strings.IndexByte(s, '[')
+	if lb < 0 {
+		return LockdownUnknown
+	}
+	rb := strings.IndexByte(s[lb+1:], ']')
+	if rb < 0 {
+		return LockdownUnknown
+	}
+	active := strings.TrimSpace(s[lb+1 : lb+1+rb])
+	switch LockdownMode(active) {
+	case LockdownNone, LockdownIntegrity, LockdownConfidentiality:
+		return LockdownMode(active)
+	}
+	return LockdownUnknown
+}
+
 // parseKernelVersion reads the running kernel version from /proc/version
 // and returns a KernelVersion. It handles forms like:
 //   - "Linux version 6.1.0-28-amd64 ..."

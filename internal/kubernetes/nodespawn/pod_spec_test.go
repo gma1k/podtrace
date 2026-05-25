@@ -89,6 +89,18 @@ func TestBuildPodSpec_SecurityContext(t *testing.T) {
 	}
 }
 
+func TestBuildPodSpec_TerminationMessagePolicyFallsBackToLogs(t *testing.T) {
+	got, err := BuildPodSpec(baseOpts())
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	want := corev1.TerminationMessageFallbackToLogsOnError
+	if got.Spec.Containers[0].TerminationMessagePolicy != want {
+		t.Errorf("TerminationMessagePolicy: got %q, want %q (needed so the CLI can surface verifier output instead of an attach-race error)",
+			got.Spec.Containers[0].TerminationMessagePolicy, want)
+	}
+}
+
 func TestBuildPodSpec_HostMountsAndEnv(t *testing.T) {
 	got, err := BuildPodSpec(baseOpts())
 	if err != nil {

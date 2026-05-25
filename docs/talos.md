@@ -201,6 +201,59 @@ Talos's secure defaults affect what podtrace can display. Each item below is
 an intentional kernel/Kubernetes choice; podtrace surfaces a clear message and
 the workaround if you accept the security cost.
 
+### Kernel Lockdown LSM `confidentiality` mode blocks BPF entirely
+
+Talos boots with `lockdown=confidentiality` on the kernel command line, the
+strictest setting of the Lockdown LSM. In this mode the kernel denies *all*
+BPF reads of kernel RAM — including the modern `bpf_probe_read_kernel`,
+`bpf_probe_read_kernel_str` helpers, and the CO-RE `BPF_CORE_READ` macro that
+podtrace relies on for almost every program. The verifier rejects the load
+with a misleading helper-id message (the helper number printed isn't stable
+across runs), but the real cause is visible in `dmesg`:
+
+```
+Lockdown: podtrace: use of bpf to read kernel RAM is restricted; see man kernel_lockdown.7
+```
+
+Podtrace v0.12.2+ detects this at startup and fails fast:
+
+> Error: kernel Lockdown LSM is in 'confidentiality' mode
+> (/sys/kernel/security/lockdown). BPF programs cannot read kernel RAM in this
+> mode … On Talos: drop `lockdown=confidentiality` from
+> `.machine.install.extraKernelArgs` …
+
+To fix, patch the machine config to drop `lockdown=confidentiality` (or set it
+to `lockdown=none` / `lockdown=integrity`):
+
+```yaml
+machine:
+  install:
+    extraKernelArgs:
+      - lockdown=none
+```
+
+Apply and reboot the node:
+
+```bash
+talosctl --nodes <node> patch machineconfig --immediate -p @patch.yaml
+talosctl --nodes <node> reboot
+```
+
+Confirm:
+
+```bash
+talosctl --nodes <node> read /sys/kernel/security/lockdown
+# expected: [none] integrity confidentiality
+```
+
+This is the largest security trade-off in this document — confidentiality mode
+specifically exists to prevent any read of kernel RAM by any unprivileged path,
+including BPF. `integrity` (a middle ground) prevents kernel-RAM *writes* but
+permits the reads podtrace needs; it's the recommended setting for nodes you
+trace regularly. Power users on test kernels can set
+`PODTRACE_SKIP_LOCKDOWN_CHECK=1` to bypass the check (the BPF load will then
+fail with the misleading verifier error).
+
 ### Kernel stack symbolication needs `kernel.kptr_restrict=0`
 
 Talos defaults `kernel.kptr_restrict=2`, which zeroes every address in

@@ -125,18 +125,19 @@ func maybeSpawnOnNode(ctx context.Context, cmd *cobra.Command, resolver pkgkube.
 	}
 
 	err = nodespawn.Run(ctx, nodespawn.RunOptions{
-		Clientset:          clientset,
-		RestConfig:         restCfg,
-		Selection:          selection,
-		Image:              image,
-		SpawnNamespace:     ns,
-		BuildChildArgs:     build,
-		OwnerHost:          host,
-		OwnerPID:           os.Getpid(),
-		Streams:            streams,
-		OnPodRunning:       onRunning,
-		DynamicReSpawn:     dynamic,
-		ServiceAccountName: sa,
+		Clientset:             clientset,
+		RestConfig:            restCfg,
+		Selection:             selection,
+		Image:                 image,
+		SpawnNamespace:        ns,
+		BuildChildArgs:        build,
+		OwnerHost:             host,
+		OwnerPID:              os.Getpid(),
+		Streams:               streams,
+		OnPodRunning:          onRunning,
+		DynamicReSpawn:        dynamic,
+		ServiceAccountName:    sa,
+		KeepSpawnPodOnFailure: keepSpawnPodOnFailure,
 	})
 	if err != nil {
 		var exitErr *nodespawn.ExitError

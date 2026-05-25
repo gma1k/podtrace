@@ -61,12 +61,13 @@ var (
 	showVersion           bool
 	enableProfiling       bool
 
-	localMode           bool
-	spawnImage          string
-	spawnNamespace      string
-	spawnServiceAccount string
-	dynamicSpawn        bool
-	preresolvedPods     []string
+	localMode             bool
+	spawnImage            string
+	spawnNamespace        string
+	spawnServiceAccount   string
+	dynamicSpawn          bool
+	keepSpawnPodOnFailure bool
+	preresolvedPods       []string
 
 	exporterFromFile       string
 	summaryFile            string
@@ -149,6 +150,7 @@ func main() {
 	rootCmd.Flags().StringVar(&spawnImage, "image", "", "Container image used when spawning on the target node (overrides PODTRACE_IMAGE and the linker default)")
 	rootCmd.Flags().StringVar(&spawnNamespace, "spawn-namespace", "", "Namespace for the ephemeral spawn pod (defaults to the target pod's namespace; overridable via PODTRACE_SPAWN_NAMESPACE)")
 	rootCmd.Flags().BoolVar(&dynamicSpawn, "dynamic-spawn", false, "Continuously poll target selection and spawn additional pods on newly-matched nodes (incompatible with --diagnose; covers new nodes only, not new pods on already-covered nodes)")
+	rootCmd.Flags().BoolVar(&keepSpawnPodOnFailure, "keep-spawn-pod", false, "On failure, leave the spawn pod in place so its logs and state can be inspected (the reaper still cleans it up on the next podtrace invocation)")
 	rootCmd.Flags().StringVar(&spawnServiceAccount, "service-account", "", "ServiceAccount the spawn pod runs as. Only required when --dynamic-spawn watches selector changes from inside the pod; otherwise the workstation pre-resolves everything and the spawn pod needs no RBAC.")
 	rootCmd.Flags().StringSliceVar(&preresolvedPods, "preresolved-pod", nil, "internal: workstation pre-resolved target as ns/name/containerID/containerName, lets the spawn pod skip its own K8s lookup")
 	_ = rootCmd.Flags().MarkHidden("preresolved-pod")
@@ -403,6 +405,9 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := system.CheckRequirements(); err != nil {
+		return err
+	}
+	if err := system.CheckKernelLockdown(); err != nil {
 		return err
 	}
 	system.CheckSELinux()

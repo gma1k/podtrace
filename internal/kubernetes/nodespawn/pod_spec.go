@@ -112,6 +112,7 @@ func BuildPodSpec(opts PodSpecOptions) (*corev1.Pod, error) {
 		Stdin:           true,
 		StdinOnce:       true,
 		TTY:             false,
+		TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
 		SecurityContext: &corev1.SecurityContext{
 			Privileged: &priv,
 			RunAsUser:  &runAsRoot,
