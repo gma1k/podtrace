@@ -93,8 +93,11 @@ log_info "cloning fork ${FORK_OWNER}/${FORK_REPO}"
 gh repo clone "${FORK_OWNER}/${FORK_REPO}" "${WORK_DIR}/fork" -- --depth=1
 cd "${WORK_DIR}/fork"
 
-: "${GH_TOKEN:?GH_TOKEN must be set with write access to ${FORK_OWNER}/${FORK_REPO}}"
-git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${FORK_OWNER}/${FORK_REPO}.git"
+if [[ -n "${GH_TOKEN:-}" ]]; then
+	git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${FORK_OWNER}/${FORK_REPO}.git"
+else
+	gh auth setup-git
+fi
 
 if git remote get-url upstream >/dev/null 2>&1; then
 	git remote set-url upstream "https://github.com/${UPSTREAM}.git"
