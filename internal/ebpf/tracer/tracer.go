@@ -186,9 +186,11 @@ func NewTracer() (*Tracer, error) {
 			}
 		}
 	}
+	applyVerifierLogOptions(&opts)
 
 	coll, err := ebpf.NewCollectionWithOptions(spec, opts)
 	if err != nil {
+		logVerifierFailure(err)
 		return nil, NewCollectionError(err)
 	}
 
