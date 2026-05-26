@@ -29,6 +29,7 @@ var spawnControlFlags = map[string]struct{}{
 	"spawn-namespace":  {},
 	"service-account":  {},
 	"dynamic-spawn":    {},
+	"keep-spawn-pod":   {},
 	"namespace":        {},
 	"namespaces":       {},
 	"pods":             {},
