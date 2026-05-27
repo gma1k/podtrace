@@ -61,11 +61,11 @@ func CheckRequirements() error {
 
 	if !isBTFAvailable() {
 		logger.Warn(
-			"Kernel BTF not found at /sys/kernel/btf/vmlinux; podtrace will attempt "+
-				"to load eBPF programs without CO-RE type information.\n"+
-				"  On Debian/Ubuntu: sudo apt-get install linux-image-$(uname -r)-dbgsym  (or use kernel >=5.8 from a standard repo)\n"+
-				"  On RHEL/CentOS: sudo dnf install kernel-devel\n"+
-				"  On Talos: BTF is built-in for all official Talos kernels; check your Talos version.\n"+
+			"Kernel BTF not found at /sys/kernel/btf/vmlinux; podtrace will attempt " +
+				"to load eBPF programs without CO-RE type information.\n" +
+				"  On Debian/Ubuntu: sudo apt-get install linux-image-$(uname -r)-dbgsym  (or use kernel >=5.8 from a standard repo)\n" +
+				"  On RHEL/CentOS: sudo dnf install kernel-devel\n" +
+				"  On Talos: BTF is built-in for all official Talos kernels; check your Talos version.\n" +
 				"  Alternatively, supply a BTF file via PODTRACE_BTF_FILE=/path/to/vmlinux")
 	} else {
 		logger.Debug("BTF available", zap.String("path", "/sys/kernel/btf/vmlinux"))
@@ -83,12 +83,12 @@ func CheckSELinux() {
 		return
 	}
 	logger.Warn(
-		"SELinux is in Enforcing mode (detected via "+how+"). "+
-			"This may block eBPF attachment or cgroup reads.\n"+
-			"  On OpenShift: grant the pod SCC 'privileged' or create a custom SCC "+
-			"with 'allowPrivilegedContainer: true' and 'allowedCapabilities: [BPF, SYS_ADMIN]'.\n"+
-			"  On RHEL/Fedora: run 'sudo setenforce 0' temporarily or add a BPF policy module:\n"+
-			"    ausearch -c podtrace --raw | audit2allow -M podtrace && semodule -i podtrace.pp\n"+
+		"SELinux is in Enforcing mode (detected via " + how + "). " +
+			"This may block eBPF attachment or cgroup reads.\n" +
+			"  On OpenShift: grant the pod SCC 'privileged' or create a custom SCC " +
+			"with 'allowPrivilegedContainer: true' and 'allowedCapabilities: [BPF, SYS_ADMIN]'.\n" +
+			"  On RHEL/Fedora: run 'sudo setenforce 0' temporarily or add a BPF policy module:\n" +
+			"    ausearch -c podtrace --raw | audit2allow -M podtrace && semodule -i podtrace.pp\n" +
 			"  Set PODTRACE_SKIP_SELINUX_CHECK=1 to suppress this warning.")
 }
 
@@ -99,32 +99,27 @@ const (
 	LockdownNone            LockdownMode = "none"
 	LockdownIntegrity       LockdownMode = "integrity"
 	LockdownConfidentiality LockdownMode = "confidentiality"
-	LockdownUnknown LockdownMode = ""
+	LockdownUnknown         LockdownMode = ""
 )
 
-// CheckKernelLockdown reads /sys/kernel/security/lockdown and returns an error
-// when the LSM is in 'confidentiality' mode, which denies all BPF reads of
-// kernel RAM (helpers like bpf_probe_read_kernel{,_str} and BPF_CORE_READ).
-//
-// The kernel emits these denials via the Lockdown LSM path rather than the
-// normal verifier helper-allowlist check, so the verifier error users see at
-// load time is the helper-id slot from a different code path and is not a
-// reliable indicator of the actual cause. Surfacing the LSM state at startup
-// gets the real reason in front of the user before any BPF load is attempted.
-//
-// Integrity mode is warned about but does not block — some integrity-mode
-// kernels still permit the helpers podtrace uses, so failing closed would be
-// over-aggressive. None / file-missing / unknown levels are silent.
-//
-// Set PODTRACE_SKIP_LOCKDOWN_CHECK=1 to bypass; intended for power users on
-// test kernels or anyone who has verified the check is over-triggering on
-// their environment.
+const EnvSkipLockdownCheck = "PODTRACE_SKIP_LOCKDOWN_CHECK"
+
+const envNodeLocal = "PODTRACE_NODE_LOCAL"
+
 func CheckKernelLockdown() error {
-	if os.Getenv("PODTRACE_SKIP_LOCKDOWN_CHECK") == "1" {
+	if os.Getenv(EnvSkipLockdownCheck) == "1" {
 		return nil
 	}
 
-	data, err := os.ReadFile("/sys/kernel/security/lockdown")
+	var (
+		data []byte
+		err  error
+	)
+	if os.Getenv(envNodeLocal) == "1" {
+		data, err = os.ReadFile("/host/sys/kernel/security/lockdown")
+	} else {
+		data, err = os.ReadFile("/sys/kernel/security/lockdown")
+	}
 	if err != nil {
 		return nil
 	}
@@ -139,21 +134,14 @@ func evaluateLockdown(mode LockdownMode) error {
 	switch mode {
 	case LockdownConfidentiality:
 		return fmt.Errorf(
-			"kernel Lockdown LSM is in 'confidentiality' mode (/sys/kernel/security/lockdown). " +
-				"BPF programs cannot read kernel RAM in this mode (helpers bpf_probe_read_kernel, " +
-				"bpf_probe_read_kernel_str, and the BPF_CORE_READ pointer-chase macro are all denied), " +
-				"which podtrace requires.\n" +
-				"  On Talos: drop `lockdown=confidentiality` from .machine.install.extraKernelArgs in your " +
-				"machine config (or set it to `lockdown=none` / `lockdown=integrity`), then `talosctl upgrade`\n" +
-				"  On other distros: boot without `lockdown=` on the kernel command line, or set it to " +
-				"`none` / `integrity` — active level is in /proc/cmdline\n" +
-				"  Set PODTRACE_SKIP_LOCKDOWN_CHECK=1 to bypass; BPF load will then fail with a misleading " +
-				"verifier error, intended only for test/CI scenarios")
+			"kernel Lockdown LSM is in 'confidentiality' mode; BPF cannot read kernel RAM, which podtrace requires.\n" +
+				"  Talos:  remove `lockdown=confidentiality` from .machine.install.extraKernelArgs, then `talosctl upgrade`\n" +
+				"  Other:  boot without `lockdown=` on the kernel cmdline (or set it to `none` / `integrity`)\n" +
+				"  Bypass (test/CI only): PODTRACE_SKIP_LOCKDOWN_CHECK=1")
 	case LockdownIntegrity:
 		logger.Warn(
-			"Kernel Lockdown LSM is in 'integrity' mode (/sys/kernel/security/lockdown). " +
-				"This may restrict some BPF reads of kernel RAM depending on the helper and program type. " +
-				"If tracing fails to load programs, retry with `lockdown=none` on the kernel command line.")
+			"Kernel Lockdown LSM is in 'integrity' mode; some BPF reads of kernel RAM may be restricted. " +
+				"If tracing fails to load, retry with `lockdown=none` on the kernel cmdline.")
 		return nil
 	default:
 		return nil

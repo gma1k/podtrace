@@ -203,10 +203,10 @@ func runOneNode(ctx context.Context, opts RunOptions, podSpec *corev1.Pod, multi
 	if err != nil {
 		return err
 	}
-	logger.Debug("Spawn pod reached terminal-or-running phase",
+	logger.Debug("Spawn pod reached terminal-or-running state",
 		zap.String("namespace", running.Namespace),
 		zap.String("name", running.Name),
-		zap.String("phase", string(running.Status.Phase)))
+		zap.String("state", string(running.Status.Phase)))
 
 	if opts.OnPodRunning != nil {
 		if cbErr := opts.OnPodRunning(ctx, running); cbErr != nil {
