@@ -9,6 +9,20 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.12.3](https://github.com/gma1k/podtrace/compare/v0.12.2...v0.12.3) (2026-05-27)
+
+
+### Bug Fixes
+
+* **cli:** reap spawn pod orphans by owner-pid liveness ([#169](https://github.com/gma1k/podtrace/issues/169)) ([e5b8c4b](https://github.com/gma1k/podtrace/commit/e5b8c4b90208786d53df073b06ad14e5ef388a8f))
+* **cli:** spawn pod debug UX and host-aware Lockdown LSM detection ([#167](https://github.com/gma1k/podtrace/issues/167)) ([037c0e4](https://github.com/gma1k/podtrace/commit/037c0e4573ad77893b54f3beba91e6a0ebdd03d2))
+
+
+### Maintenance
+
+* **release:** align chart version with appVersion via helm extra-file ([#170](https://github.com/gma1k/podtrace/issues/170)) ([7a6c716](https://github.com/gma1k/podtrace/commit/7a6c71627a256c0dcc3a0055b961fcc7685f6f2a))
+* **release:** align chart version with appVersion via yaml updaters ([#171](https://github.com/gma1k/podtrace/issues/171)) ([3caf65d](https://github.com/gma1k/podtrace/commit/3caf65d15e263c48a22d837d2fac7e18a1d7afbb))
+
 ## [0.12.2](https://github.com/gma1k/podtrace/compare/v0.12.1...v0.12.2) (2026-05-26)
 
 
