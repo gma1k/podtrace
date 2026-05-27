@@ -70,6 +70,7 @@ func BuildPodSpec(opts PodSpecOptions) (*corev1.Pod, error) {
 	createdAt := fmt.Sprintf("%d", time.Now().UTC().Unix())
 
 	hpDir := corev1.HostPathDirectoryOrCreate
+	hpRequiredDir := corev1.HostPathDirectory
 	volumes := []corev1.Volume{
 		{Name: "bpf", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/fs/bpf"}}},
 		{Name: "btf", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/kernel/btf"}}},
@@ -78,6 +79,7 @@ func BuildPodSpec(opts PodSpecOptions) (*corev1.Pod, error) {
 		{Name: "containerd-sock", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/run/containerd"}}},
 		{Name: "debug", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/kernel/debug", Type: &hpDir}}},
 		{Name: "tracing", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/kernel/tracing", Type: &hpDir}}},
+		{Name: "securityfs", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/kernel/security", Type: &hpRequiredDir}}},
 	}
 
 	mounts := []corev1.VolumeMount{
@@ -89,6 +91,7 @@ func BuildPodSpec(opts PodSpecOptions) (*corev1.Pod, error) {
 		{Name: "containerd-sock", MountPath: "/run/containerd", ReadOnly: true},
 		{Name: "debug", MountPath: "/sys/kernel/debug"},
 		{Name: "tracing", MountPath: "/sys/kernel/tracing"},
+		{Name: "securityfs", MountPath: "/host/sys/kernel/security", ReadOnly: true},
 	}
 
 	env := []corev1.EnvVar{

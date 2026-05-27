@@ -129,12 +129,49 @@ func TestBuildPodSpec_HostMountsAndEnv(t *testing.T) {
 	for _, m := range container.VolumeMounts {
 		mountPaths[m.MountPath] = true
 	}
-	wantMounts := []string{"/sys/fs/bpf", "/sys/kernel/btf", "/host/proc", "/sys/fs/cgroup", "/host/sys/fs/cgroup", "/run/containerd"}
+	wantMounts := []string{
+		"/sys/fs/bpf",
+		"/sys/kernel/btf",
+		"/host/proc",
+		"/sys/fs/cgroup",
+		"/host/sys/fs/cgroup",
+		"/run/containerd",
+		"/host/sys/kernel/security",
+	}
 	for _, p := range wantMounts {
 		if !mountPaths[p] {
 			t.Errorf("missing mount path %s", p)
 		}
 	}
+}
+
+// TestBuildPodSpec_SecurityFSHostPathHardenedAgainstSilentEmptyMount pins the
+// securityfs volume type to HostPathDirectory (not DirectoryOrCreate).
+func TestBuildPodSpec_SecurityFSHostPathHardenedAgainstSilentEmptyMount(t *testing.T) {
+	got, err := BuildPodSpec(baseOpts())
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	for _, v := range got.Spec.Volumes {
+		if v.Name != "securityfs" {
+			continue
+		}
+		if v.HostPath == nil {
+			t.Fatal("securityfs volume must be hostPath")
+		}
+		if v.HostPath.Path != "/sys/kernel/security" {
+			t.Errorf("securityfs hostPath path = %q, want /sys/kernel/security", v.HostPath.Path)
+		}
+		if v.HostPath.Type == nil {
+			t.Fatal("securityfs hostPath type must be set (HostPathDirectory)")
+		}
+		if *v.HostPath.Type != corev1.HostPathDirectory {
+			t.Errorf("securityfs hostPath type = %q, want HostPathDirectory (not %q which would silently create empty dirs)",
+				*v.HostPath.Type, corev1.HostPathDirectoryOrCreate)
+		}
+		return
+	}
+	t.Fatal("securityfs volume not found in pod spec")
 }
 
 func TestBuildPodSpec_NodeSelectorPinsToTargetNode(t *testing.T) {
