@@ -76,7 +76,7 @@ func maybeSpawnOnNode(ctx context.Context, cmd *cobra.Command, resolver pkgkube.
 	}
 
 	host := nodespawn.HostnameFromEnv()
-	if _, err := nodespawn.ReapStale(ctx, clientset, ns, host, nodespawn.DefaultReaperMaxAge); err != nil {
+	if _, err := nodespawn.ReapStale(ctx, clientset, ns, host); err != nil {
 		logger.Debug("Reaper failed (non-fatal)", zap.Error(err))
 	}
 
