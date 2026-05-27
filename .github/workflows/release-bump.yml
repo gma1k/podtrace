@@ -1,10 +1,19 @@
 name: Release-As
 
+# Opens a PR that patches release-please-config.json with the requested
+# release-as version. Once merged, release-please picks up the version
+# override from the file and opens a release PR for that exact version.
+#
+# Why a file edit and not the `Release-As:` commit footer:
+#   commit-message footers can be silently stripped by GitHub's squash-merge
+#   default settings (PR title only, body discarded). A file diff is preserved
+#   by every merge strategy, so this workflow is robust against the merge
+#   button the maintainer happens to click.
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Target version (e.g. 0.12.0 or 1.0.0)"
+        description: "Target version, semver, no leading v (e.g. 0.13.0, 1.0.0, 1.0.0-rc.1)"
         required: true
         type: string
 
@@ -26,9 +35,31 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
-            echo "::error::Version must be semver without leading v (e.g. 0.12.0, 1.0.0, 1.0.0-rc.1)"
+            echo "::error::Version must be semver without leading v (got: '$VERSION'). Examples: 0.13.0, 1.0.0, 1.0.0-rc.1"
             exit 1
           fi
+
+      - name: Verify release-please-config.json is in the expected shape
+        run: |
+          set -euo pipefail
+          if [[ ! -f release-please-config.json ]]; then
+            echo "::error::release-please-config.json not found in repo root"
+            exit 1
+          fi
+          if ! jq -e '.packages["."]' release-please-config.json >/dev/null; then
+            echo "::error::release-please-config.json has no \".packages[\\\".\\\"]\" entry — this workflow expects a single-package manifest layout"
+            exit 1
+          fi
+
+      - name: Patch release-please-config.json with release-as
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          jq --arg v "$VERSION" '.packages["."]."release-as" = $v' release-please-config.json > release-please-config.json.tmp
+          mv release-please-config.json.tmp release-please-config.json
+          echo "--- diff after patch ---"
+          git --no-pager diff release-please-config.json
 
       - name: Open Release-As PR
         env:
@@ -40,16 +71,20 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git checkout -b "${BRANCH}"
-          git commit --allow-empty -m "chore: announce ${VERSION}
-
-          Release-As: ${VERSION}"
+          git add release-please-config.json
+          git commit -m "chore: trigger release ${VERSION}"
           git push -u origin "${BRANCH}"
           gh pr create \
             --base main \
             --head "${BRANCH}" \
-            --title "chore: announce ${VERSION}" \
-            --body "Triggers release-please to cut version \`${VERSION}\` (tag \`v${VERSION}\`).
+            --title "chore: trigger release ${VERSION}" \
+            --body "Sets \`release-as: ${VERSION}\` in [release-please-config.json](../blob/main/release-please-config.json) so the next release-please run cuts \`v${VERSION}\`.
 
-          Release-As: ${VERSION}
+          ## What happens after this PR merges
 
-          **Merge with \"Create a merge commit\" or \"Rebase and merge\"** so the \`Release-As:\` footer reaches \`main\`. If your repo only allows squash, ensure the squash commit message preserves the footer."
+          1. Release-please picks up the \`release-as\` field on its next run (triggered by any push to \`main\`).
+          2. It opens a separate PR titled \`chore(release): release ${VERSION}\` that bumps CHANGELOG / Chart.yaml / manifest.
+          3. When that PR is merged, the \`v${VERSION}\` tag is created and the release pipeline runs (image, chart, Krew, OLM bundle).
+          4. Release-please clears \`release-as\` from the config as part of its own commit, so subsequent commits resume normal patch-bump behaviour.
+
+          Any merge strategy works for this PR — the version override is in a file diff, not a commit-message footer."

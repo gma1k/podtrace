@@ -280,7 +280,7 @@ jobs:
       - name: Compute previous version from upstream catalog
         id: prev
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_PAT }}
+          GH_TOKEN: ${{ secrets.OPERATORHUB_PAT }}
         run: |
           set -euo pipefail
           # Highest existing version dir under upstream operators/podtrace/.
@@ -304,7 +304,7 @@ jobs:
 
       - name: Submit bundle to community-operators
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_PAT }}
+          GH_TOKEN: ${{ secrets.OPERATORHUB_PAT }}
           VERSION: ${{ github.ref_name }}
           PREVIOUS_VERSION: ${{ steps.prev.outputs.previous }}
         run: ./scripts/submit-olm-bundle.sh

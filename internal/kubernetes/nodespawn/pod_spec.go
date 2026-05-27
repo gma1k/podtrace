@@ -105,6 +105,11 @@ func BuildPodSpec(opts PodSpecOptions) (*corev1.Pod, error) {
 			},
 		},
 	}
+	for _, name := range []string{"PODTRACE_BPF_LOG_LEVEL", "PODTRACE_BPF_LOG_SIZE"} {
+		if v := os.Getenv(name); v != "" {
+			env = append(env, corev1.EnvVar{Name: name, Value: v})
+		}
+	}
 
 	container := corev1.Container{
 		Name:            "podtrace",

@@ -9,6 +9,28 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.12.2](https://github.com/gma1k/podtrace/compare/v0.12.1...v0.12.2) (2026-05-26)
+
+
+### Features
+
+* **cli:** improve spawn pod debug UX and detect kernel Lockdown ([#161](https://github.com/gma1k/podtrace/issues/161)) ([3dd672b](https://github.com/gma1k/podtrace/commit/3dd672b715cc9ed869dadb3ba2ef277f8e5ca8d4))
+
+
+### Bug Fixes
+
+* full BPF verifier log on failure + spawn pod argv strip ([#166](https://github.com/gma1k/podtrace/issues/166)) ([93978d8](https://github.com/gma1k/podtrace/commit/93978d8ec8a2ff6ed4828ecbe7310c80000a44ea))
+
+
+### CI
+
+* **release:** use OPERATORHUB_PAT for cross-fork OLM submission ([#164](https://github.com/gma1k/podtrace/issues/164)) ([b485016](https://github.com/gma1k/podtrace/commit/b485016406791502487d7714890d20c8fd0b8b0f))
+
+
+### Maintenance
+
+* **release:** explicit release bumps via release-as in config ([#163](https://github.com/gma1k/podtrace/issues/163)) ([be53d14](https://github.com/gma1k/podtrace/commit/be53d141db67e04010700b46accff9c699c1d4fa))
+
 ## [0.12.1](https://github.com/gma1k/podtrace/compare/v0.12.0...v0.12.1) (2026-05-24)
 
 

@@ -252,6 +252,48 @@ func TestBuildPodSpec_OwnerHostSanitized(t *testing.T) {
 	}
 }
 
+func TestBuildPodSpec_ForwardsBPFLogEnvWhenSet(t *testing.T) {
+	t.Setenv("PODTRACE_BPF_LOG_LEVEL", "verbose")
+	t.Setenv("PODTRACE_BPF_LOG_SIZE", "131072")
+
+	got, err := BuildPodSpec(baseOpts())
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+
+	want := map[string]string{
+		"PODTRACE_BPF_LOG_LEVEL": "verbose",
+		"PODTRACE_BPF_LOG_SIZE":  "131072",
+	}
+	for _, ev := range got.Spec.Containers[0].Env {
+		if v, ok := want[ev.Name]; ok {
+			if ev.Value != v {
+				t.Errorf("env %s: got %q, want %q", ev.Name, ev.Value, v)
+			}
+			delete(want, ev.Name)
+		}
+	}
+	if len(want) > 0 {
+		t.Errorf("spawn pod env missing forwarded vars: %v", want)
+	}
+}
+
+func TestBuildPodSpec_DoesNotForwardBPFLogEnvWhenUnset(t *testing.T) {
+	t.Setenv("PODTRACE_BPF_LOG_LEVEL", "")
+	t.Setenv("PODTRACE_BPF_LOG_SIZE", "")
+
+	got, err := BuildPodSpec(baseOpts())
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+
+	for _, ev := range got.Spec.Containers[0].Env {
+		if ev.Name == "PODTRACE_BPF_LOG_LEVEL" || ev.Name == "PODTRACE_BPF_LOG_SIZE" {
+			t.Errorf("spawn pod must not carry empty BPF log env (%s=%q) — keeps the pod spec clean for normal runs", ev.Name, ev.Value)
+		}
+	}
+}
+
 func TestSanitizeName(t *testing.T) {
 	tests := map[string]string{
 		"WORKER.example.com": "worker-example-com",

@@ -61,11 +61,11 @@ func CheckRequirements() error {
 
 	if !isBTFAvailable() {
 		logger.Warn(
-			"Kernel BTF not found at /sys/kernel/btf/vmlinux; podtrace will attempt "+
-				"to load eBPF programs without CO-RE type information.\n"+
-				"  On Debian/Ubuntu: sudo apt-get install linux-image-$(uname -r)-dbgsym  (or use kernel >=5.8 from a standard repo)\n"+
-				"  On RHEL/CentOS: sudo dnf install kernel-devel\n"+
-				"  On Talos: BTF is built-in for all official Talos kernels; check your Talos version.\n"+
+			"Kernel BTF not found at /sys/kernel/btf/vmlinux; podtrace will attempt " +
+				"to load eBPF programs without CO-RE type information.\n" +
+				"  On Debian/Ubuntu: sudo apt-get install linux-image-$(uname -r)-dbgsym  (or use kernel >=5.8 from a standard repo)\n" +
+				"  On RHEL/CentOS: sudo dnf install kernel-devel\n" +
+				"  On Talos: BTF is built-in for all official Talos kernels; check your Talos version.\n" +
 				"  Alternatively, supply a BTF file via PODTRACE_BTF_FILE=/path/to/vmlinux")
 	} else {
 		logger.Debug("BTF available", zap.String("path", "/sys/kernel/btf/vmlinux"))
@@ -83,12 +83,12 @@ func CheckSELinux() {
 		return
 	}
 	logger.Warn(
-		"SELinux is in Enforcing mode (detected via "+how+"). "+
-			"This may block eBPF attachment or cgroup reads.\n"+
-			"  On OpenShift: grant the pod SCC 'privileged' or create a custom SCC "+
-			"with 'allowPrivilegedContainer: true' and 'allowedCapabilities: [BPF, SYS_ADMIN]'.\n"+
-			"  On RHEL/Fedora: run 'sudo setenforce 0' temporarily or add a BPF policy module:\n"+
-			"    ausearch -c podtrace --raw | audit2allow -M podtrace && semodule -i podtrace.pp\n"+
+		"SELinux is in Enforcing mode (detected via " + how + "). " +
+			"This may block eBPF attachment or cgroup reads.\n" +
+			"  On OpenShift: grant the pod SCC 'privileged' or create a custom SCC " +
+			"with 'allowPrivilegedContainer: true' and 'allowedCapabilities: [BPF, SYS_ADMIN]'.\n" +
+			"  On RHEL/Fedora: run 'sudo setenforce 0' temporarily or add a BPF policy module:\n" +
+			"    ausearch -c podtrace --raw | audit2allow -M podtrace && semodule -i podtrace.pp\n" +
 			"  Set PODTRACE_SKIP_SELINUX_CHECK=1 to suppress this warning.")
 }
 
@@ -99,25 +99,13 @@ const (
 	LockdownNone            LockdownMode = "none"
 	LockdownIntegrity       LockdownMode = "integrity"
 	LockdownConfidentiality LockdownMode = "confidentiality"
-	LockdownUnknown LockdownMode = ""
+	LockdownUnknown         LockdownMode = ""
 )
 
-// EnvSkipLockdownCheck is the documented escape hatch — power users on test
-// kernels or anyone who has verified the check is over-triggering on their
-// environment can set this to "1" to bypass.
 const EnvSkipLockdownCheck = "PODTRACE_SKIP_LOCKDOWN_CHECK"
 
-// envNodeLocal is the sentinel pod_spec.go writes into the spawn pod env.
-// Inside the spawn pod it's "1"; on the workstation / --local path it's
-// unset. Used here to pick the right lockdown file path without accepting
-// a free-form env var (which would taint os.ReadFile and force a gosec
-// G304/G703 exception).
 const envNodeLocal = "PODTRACE_NODE_LOCAL"
 
-// CheckKernelLockdown reads the kernel Lockdown LSM state and returns an
-// error when the LSM is in 'confidentiality' mode, which denies all BPF
-// reads of kernel RAM (helpers like bpf_probe_read_kernel{,_str} and the
-// BPF_CORE_READ pointer-chase macro).
 func CheckKernelLockdown() error {
 	if os.Getenv(EnvSkipLockdownCheck) == "1" {
 		return nil
