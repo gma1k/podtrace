@@ -12,7 +12,7 @@
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
         {
-          "type": "generic",
+          "type": "helm",
           "path": "deploy/charts/podtrace/Chart.yaml"
         },
         {
