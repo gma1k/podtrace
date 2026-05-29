@@ -245,19 +245,21 @@ func runOneNode(ctx context.Context, opts RunOptions, podSpec *corev1.Pod, multi
 	return nil
 }
 
+// dumpPodLogsCap bounds how much pod stderr we read into the error message.
+const dumpPodLogsCap = 64 * 1024
+
 // dumpPodLogs returns the spawned pod's last log lines on a best-effort basis;
 // errors are swallowed because this runs on the failure path and shouldn't
 // itself fail.
-func dumpPodLogs(ctx context.Context, clientset kubernetes.Interface, namespace, name string) string {
+var dumpPodLogs = func(ctx context.Context, clientset kubernetes.Interface, namespace, name string) string {
 	req := clientset.CoreV1().Pods(namespace).GetLogs(name, &corev1.PodLogOptions{TailLines: ptrInt64(50)})
 	rc, err := req.Stream(ctx)
 	if err != nil {
 		return ""
 	}
 	defer func() { _ = rc.Close() }()
-	buf := make([]byte, 8*1024)
-	n, _ := rc.Read(buf)
-	return string(buf[:n])
+	out, _ := io.ReadAll(io.LimitReader(rc, dumpPodLogsCap))
+	return string(out)
 }
 
 func ptrInt64(v int64) *int64 { return &v }

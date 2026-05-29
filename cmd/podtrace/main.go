@@ -340,17 +340,27 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	usePreResolved := len(preresolvedPods) > 0
 
 	if usePreResolved {
-		for _, raw := range preresolvedPods {
-			ref, err := kubernetes.ParsePreResolvedRef(raw)
-			if err != nil {
-				return err
-			}
-			info, err := kubernetes.BuildPodInfoFromPreResolved(ref)
-			if err != nil {
-				return fmt.Errorf("preresolved resolve %s/%s: %w", ref.Namespace, ref.PodName, err)
-			}
-			targetInfos = append(targetInfos, info)
+		infos, skipped, parseErr := kubernetes.BuildPodInfosFromPreResolved(preresolvedPods)
+		if parseErr != nil {
+			return parseErr
 		}
+		for _, s := range skipped {
+			logger.Warn("Skipping pre-resolved target whose cgroup was not found on this node "+
+				"(pod likely rescheduled, restarted, or runs on a different node)",
+				zap.String("namespace", s.Ref.Namespace),
+				zap.String("pod", s.Ref.PodName),
+				zap.String("container_id", s.Ref.ContainerID),
+				zap.Error(s.Cause))
+		}
+		if len(infos) == 0 && len(skipped) > 0 {
+			parts := make([]string, len(skipped))
+			for i, s := range skipped {
+				parts[i] = fmt.Sprintf("%s/%s: %v", s.Ref.Namespace, s.Ref.PodName, s.Cause)
+			}
+			return fmt.Errorf("no pre-resolved targets resolvable on this node:\n  - %s",
+				strings.Join(parts, "\n  - "))
+		}
+		targetInfos = append(targetInfos, infos...)
 	} else if useDynamicTargets {
 		clientset := resolver.(kubernetes.ClientsetProvider).GetClientset()
 		targetRegistry = kubernetes.NewTargetRegistry(clientset, selection)

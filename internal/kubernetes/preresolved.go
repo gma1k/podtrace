@@ -58,3 +58,38 @@ func BuildPodInfoFromPreResolved(ref PreResolvedRef) (*PodInfo, error) {
 		Labels:        map[string]string{},
 	}, nil
 }
+
+// PreResolvedSkip records a single pre-resolved ref that couldn't be turned
+// into a PodInfo on this node. The most common reason is a stale containerID
+// (pod was rescheduled between workstation resolve time and spawn-pod start).
+type PreResolvedSkip struct {
+	Ref   PreResolvedRef
+	Cause error
+}
+
+// BuildPodInfosFromPreResolved processes a list of "ns/name/containerID[/cName]"
+// strings and returns:
+//   - infos:    the successfully-resolved targets
+//   - skipped:  per-ref failures with their reason (parse error, empty container,
+//               cgroup not found on THIS node) — caller decides whether to warn
+//               and continue, or hard-fail
+//   - parseErr: the first malformed-input error, if any (returned alongside the
+//               other slices so the caller can surface it deterministically)
+func BuildPodInfosFromPreResolved(refs []string) (infos []*PodInfo, skipped []PreResolvedSkip, parseErr error) {
+	for _, raw := range refs {
+		ref, err := ParsePreResolvedRef(raw)
+		if err != nil {
+			if parseErr == nil {
+				parseErr = err
+			}
+			continue
+		}
+		info, err := BuildPodInfoFromPreResolved(ref)
+		if err != nil {
+			skipped = append(skipped, PreResolvedSkip{Ref: ref, Cause: err})
+			continue
+		}
+		infos = append(infos, info)
+	}
+	return infos, skipped, parseErr
+}

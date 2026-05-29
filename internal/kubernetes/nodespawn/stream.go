@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -22,6 +23,11 @@ import (
 	watchtools "k8s.io/client-go/tools/watch"
 )
 
+// stuckPodEventThreshold is how long we wait in Pending without container
+// progress before consulting Events for fatal reasons (FailedMount,
+// FailedAttachVolume, etc.).
+var stuckPodEventThreshold = 5 * time.Second
+
 func waitForPodRunningOrTerminated(ctx context.Context, clientset kubernetes.Interface, namespace, name string) (*corev1.Pod, error) {
 	fieldSel := fields.OneTermEqualSelector("metadata.name", name).String()
 	lw := &cache.ListWatch{
@@ -38,6 +44,7 @@ func waitForPodRunningOrTerminated(ctx context.Context, clientset kubernetes.Int
 	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
+	pendingSince := time.Time{} // zero until we first see Pending; reset on transition
 	evt, err := watchtools.UntilWithSync(waitCtx, lw, &corev1.Pod{}, nil, func(e watch.Event) (bool, error) {
 		switch e.Type {
 		case watch.Deleted:
@@ -59,6 +66,19 @@ func waitForPodRunningOrTerminated(ctx context.Context, clientset kubernetes.Int
 			if r := imagePullFailureReason(p); r != "" {
 				return false, fmt.Errorf("spawn pod %s/%s image pull failed: %s", namespace, name, r)
 			}
+			if r := containerStartFailureReason(p); r != "" {
+				return false, fmt.Errorf("spawn pod %s/%s container failed to start: %s", namespace, name, r)
+			}
+			// Pod is in Pending without a structured container Waiting reason
+			// we recognize. After a short grace period, consult Events to
+			// catch FailedMount / FailedAttachVolume / FailedCreatePodSandBox.
+			if pendingSince.IsZero() {
+				pendingSince = time.Now()
+			} else if time.Since(pendingSince) >= stuckPodEventThreshold {
+				if r := stuckPodEventReason(ctx, clientset, p); r != "" {
+					return false, fmt.Errorf("spawn pod %s/%s stuck in Pending: %s", namespace, name, r)
+				}
+			}
 		}
 		return false, nil
 	})
@@ -67,6 +87,65 @@ func waitForPodRunningOrTerminated(ctx context.Context, clientset kubernetes.Int
 	}
 	pod, _ := evt.Object.(*corev1.Pod)
 	return pod, nil
+}
+
+// containerStartFailureReason returns a non-empty reason when any container's
+// Waiting reason indicates a permanent failure to start (vs. transient
+// ContainerCreating). These reasons signal the kubelet has rejected the
+// container outright and waiting will not help.
+func containerStartFailureReason(p *corev1.Pod) string {
+	fatal := map[string]struct{}{
+		"CreateContainerError":       {},
+		"CreateContainerConfigError": {},
+		"RunContainerError":          {},
+		"PreCreateHookError":         {},
+		"PostStartHookError":         {},
+	}
+	for _, cs := range p.Status.ContainerStatuses {
+		if w := cs.State.Waiting; w != nil {
+			if _, isFatal := fatal[w.Reason]; isFatal {
+				return w.Reason + ": " + w.Message
+			}
+		}
+	}
+	return ""
+}
+
+// stuckPodEventReason fetches recent Events for the pod and returns a
+// non-empty reason when any event signals a fatal non-progressing state
+// (volume mount failure, sandbox creation failure, etc.). Best-effort:
+// Event API failures are swallowed so the watch loop keeps running.
+var stuckPodEventReason = func(ctx context.Context, clientset kubernetes.Interface, p *corev1.Pod) string {
+	fatal := map[string]struct{}{
+		"FailedMount":            {},
+		"FailedAttachVolume":    {},
+		"FailedCreatePodSandBox": {},
+		"FailedMapVolume":        {},
+	}
+	sel := fields.AndSelectors(
+		fields.OneTermEqualSelector("involvedObject.name", p.Name),
+		fields.OneTermEqualSelector("involvedObject.kind", "Pod"),
+		fields.OneTermEqualSelector("involvedObject.namespace", p.Namespace),
+	).String()
+	events, err := clientset.CoreV1().Events(p.Namespace).List(ctx, metav1.ListOptions{FieldSelector: sel})
+	if err != nil || events == nil {
+		return ""
+	}
+	// Walk newest-first by LastTimestamp to surface the most recent diagnosis.
+	var newest *corev1.Event
+	for i := range events.Items {
+		ev := &events.Items[i]
+		if _, isFatal := fatal[ev.Reason]; !isFatal {
+			continue
+		}
+		if newest == nil || ev.LastTimestamp.After(newest.LastTimestamp.Time) {
+			newest = ev
+		}
+	}
+	if newest == nil {
+		return ""
+	}
+	return newest.Reason + ": " + strings.TrimSpace(newest.Message)
 }
 
 func unschedulableReason(p *corev1.Pod) string {

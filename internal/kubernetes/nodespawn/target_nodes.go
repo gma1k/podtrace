@@ -62,8 +62,7 @@ func ResolveTargetNodes(ctx context.Context, clientset kubernetes.Interface, sel
 			unscheduled = append(unscheduled, ref)
 			return
 		}
-		if len(pod.Status.ContainerStatuses) > 0 {
-			cs := pod.Status.ContainerStatuses[0]
+		if cs := pickRunningContainer(pod); cs != nil {
 			ref.ContainerName = cs.Name
 			if idx := indexAfterScheme(cs.ContainerID); idx >= 0 {
 				ref.ContainerID = cs.ContainerID[idx:]
@@ -131,6 +130,21 @@ func ResolveTargetNodes(ctx context.Context, clientset kubernetes.Interface, sel
 		})
 	}
 	return out, nil
+}
+
+// pickRunningContainer returns the first container in the pod whose State is
+// Running.
+func pickRunningContainer(pod *corev1.Pod) *corev1.ContainerStatus {
+	if pod == nil {
+		return nil
+	}
+	for i := range pod.Status.ContainerStatuses {
+		cs := &pod.Status.ContainerStatuses[i]
+		if cs.State.Running != nil && cs.ContainerID != "" {
+			return cs
+		}
+	}
+	return nil
 }
 
 // indexAfterScheme returns the offset right after "://" in a containerID like
