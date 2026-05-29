@@ -9,6 +9,13 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.12.4](https://github.com/gma1k/podtrace/compare/v0.12.3...v0.12.4) (2026-05-29)
+
+
+### Bug Fixes
+
+* **cli:** always surface spawn-pod failure cause instead of bare kubelet error ([#172](https://github.com/gma1k/podtrace/issues/172)) ([fbc061e](https://github.com/gma1k/podtrace/commit/fbc061efc4a39d22521105eaeb526fb03fc9ad32))
+
 ## [0.12.3](https://github.com/gma1k/podtrace/compare/v0.12.2...v0.12.3) (2026-05-27)
 
 
