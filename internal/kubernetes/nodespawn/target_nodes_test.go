@@ -156,3 +156,112 @@ func TestResolveTargetNodes_GetPodError_Propagates(t *testing.T) {
 		t.Fatalf("expected error from missing pod")
 	}
 }
+
+// podWithContainer constructs a pod whose first container is in the given
+// state — used by the pickRunningContainer tests to pin the selection logic
+// for stale-restart / crash-loop / just-starting scenarios.
+func podWithContainer(ns, name, node, cName, cID string, state corev1.ContainerState) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Spec:       corev1.PodSpec{NodeName: node},
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name:        cName,
+				ContainerID: cID,
+				State:       state,
+			}},
+		},
+	}
+}
+
+func TestPickRunningContainer_PrefersRunning(t *testing.T) {
+	p := &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{
+		{Name: "a", ContainerID: "containerd://aaa", State: corev1.ContainerState{
+			Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"},
+		}},
+		{Name: "b", ContainerID: "containerd://bbb", State: corev1.ContainerState{
+			Running: &corev1.ContainerStateRunning{},
+		}},
+		{Name: "c", ContainerID: "containerd://ccc", State: corev1.ContainerState{
+			Terminated: &corev1.ContainerStateTerminated{ExitCode: 0},
+		}},
+	}}}
+	cs := pickRunningContainer(p)
+	if cs == nil || cs.Name != "b" {
+		t.Fatalf("expected to pick the Running container, got %+v", cs)
+	}
+}
+
+func TestPickRunningContainer_RejectsAllNonRunning(t *testing.T) {
+	cases := map[string]corev1.ContainerState{
+		"Waiting":    {Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"}},
+		"Terminated": {Terminated: &corev1.ContainerStateTerminated{ExitCode: 1, Reason: "Error"}},
+	}
+	for name, st := range cases {
+		t.Run(name, func(t *testing.T) {
+			p := &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{
+				{Name: "x", ContainerID: "containerd://xxx", State: st},
+			}}}
+			if cs := pickRunningContainer(p); cs != nil {
+				t.Errorf("must not pick a %s container, got %+v", name, cs)
+			}
+		})
+	}
+}
+
+func TestPickRunningContainer_RejectsRunningWithEmptyID(t *testing.T) {
+	// A Pod can momentarily be in Status.Running with ContainerID="" right
+	// at startup. We must NOT hand the spawn pod an empty containerID.
+	p := &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{
+		{Name: "x", ContainerID: "", State: corev1.ContainerState{
+			Running: &corev1.ContainerStateRunning{},
+		}},
+	}}}
+	if cs := pickRunningContainer(p); cs != nil {
+		t.Errorf("Running container with empty ID must be rejected, got %+v", cs)
+	}
+}
+
+// TestResolveTargetNodes_SkipsNonRunningContainerIDs — the fix for the
+// cross-node "cgroup path not found" failure mode: when one matching pod's
+// container is Waiting/Terminated, the workstation must NOT hand its stale
+// containerID to the spawn pod. The pod is still routed to its node (with
+// an empty ContainerID), and main.go's preresolved loop skips it cleanly.
+func TestResolveTargetNodes_SkipsNonRunningContainerIDs(t *testing.T) {
+	running := podWithContainer("ns", "alive", "node-1", "app",
+		"containerd://aaaaaa", corev1.ContainerState{
+			Running: &corev1.ContainerStateRunning{},
+		})
+	restarting := podWithContainer("ns", "restarting", "node-1", "app",
+		"containerd://bbbbbb", corev1.ContainerState{
+			Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff"},
+		})
+	cs := fake.NewClientset(running, restarting)
+
+	sel := pkgkube.TargetSelection{
+		DefaultNamespace: "ns",
+		Pods:             []string{"alive", "restarting"},
+	}
+	out, err := ResolveTargetNodes(context.Background(), cs, sel)
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if got := len(out.ByNode["node-1"]); got != 2 {
+		t.Fatalf("expected both pods routed to node-1, got %d", got)
+	}
+	var aliveID, restartingID string
+	for _, r := range out.ByNode["node-1"] {
+		switch r.Name {
+		case "alive":
+			aliveID = r.ContainerID
+		case "restarting":
+			restartingID = r.ContainerID
+		}
+	}
+	if aliveID != "aaaaaa" {
+		t.Errorf("Running pod must propagate containerID, got %q", aliveID)
+	}
+	if restartingID != "" {
+		t.Errorf("CrashLoopBackOff pod must NOT propagate a stale containerID, got %q", restartingID)
+	}
+}
