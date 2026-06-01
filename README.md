@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://artifacthub.io/packages/search?repo=podtrace"><img src="https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/podtrace" alt="Artifact Hub"/></a>
-  <a href="https://ebpf.io/applications/"><img src="https://img.shields.io/badge/eBPF%20Landscape:-ebpf.io-blue" alt="eBPF Landscape: ebpf.io"/></a>
+  <a href="https://ebpf.io/applications/"><img src="https://img.shields.io/badge/eBPF%20Landscape-ebpf.io-blue" alt="eBPF Landscape"/></a>
   <a href="https://www.bestpractices.dev/projects/12882"><img src="https://www.bestpractices.dev/projects/12882/badge" alt="OpenSSF Best Practices"/></a>
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0"/></a>
   <a href="https://opensource.org/licenses/GPL-2.0"><img src="https://img.shields.io/badge/BPF%20License-GPL_2.0-blue.svg" alt="BPF License: GPL 2.0"/></a>
