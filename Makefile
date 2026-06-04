@@ -242,6 +242,8 @@ IMAGE_REPO ?= ghcr.io/gma1k/podtrace
 IMAGE_TAG  ?= dev
 IMAGE      ?= $(IMAGE_REPO):$(IMAGE_TAG)
 
+GO_VERSION ?= $(shell awk '/^toolchain go/{print substr($$2,3); found=1; exit} /^go /{v=$$2} END{if(!found) print v}' go.mod)
+
 operator-tools:
 	@GOBIN=$(dir $(CONTROLLER_GEN)) $(GO) install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION)
 
@@ -285,6 +287,7 @@ manifests: operator-tools
 # and session Jobs. Override IMAGE_REPO / IMAGE_TAG to push to your registry.
 docker-build:
 	docker build \
+	  --build-arg GO_VERSION=$(GO_VERSION) \
 	  --build-arg VERSION=$(IMAGE_TAG) \
 	  --build-arg COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown) \
 	  --build-arg IMAGE_REPO=$(IMAGE_REPO) \
