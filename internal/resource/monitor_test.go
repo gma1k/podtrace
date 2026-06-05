@@ -2,15 +2,40 @@ package resource
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/cilium/ebpf"
+
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/internal/sysfs"
 )
+
+func TestIsBenignMapDeleteError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"key does not exist", ebpf.ErrKeyNotExist, true},
+		{"wrapped key does not exist", fmt.Errorf("delete: %w", ebpf.ErrKeyNotExist), true},
+		{"unrelated error", errors.New("some other failure"), false},
+		{"nil error", nil, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isBenignMapDeleteError(tt.err); got != tt.want {
+				t.Errorf("isBenignMapDeleteError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
 
 // useCgroupBase points the cgroup root at base for the duration of
 // the test. Required because readCgroupFile and the V1/V2 readers go

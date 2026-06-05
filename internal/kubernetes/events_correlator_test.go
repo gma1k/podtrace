@@ -6,9 +6,46 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
+
+func TestEventsCorrelator_Start_Forbidden(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	clientset.PrependWatchReactor("events", func(k8stesting.Action) (bool, watch.Interface, error) {
+		return true, nil, apierrors.NewForbidden(
+			schema.GroupResource{Group: "", Resource: "events"},
+			"",
+			nil,
+		)
+	})
+
+	correlator := NewEventsCorrelator(clientset, "test-pod", "o11y")
+	err := correlator.Start(context.Background())
+	if err == nil {
+		t.Fatal("expected a forbidden error from Start(), got nil")
+	}
+	if !IsPermissionError(err) {
+		t.Errorf("IsPermissionError(%v) = false, want true", err)
+	}
+}
+
+func TestIsPermissionError(t *testing.T) {
+	forbidden := apierrors.NewForbidden(schema.GroupResource{Resource: "events"}, "", nil)
+	if !IsPermissionError(forbidden) {
+		t.Error("expected forbidden error to be classified as a permission error")
+	}
+	if IsPermissionError(apierrors.NewNotFound(schema.GroupResource{Resource: "events"}, "x")) {
+		t.Error("not-found error must not be classified as a permission error")
+	}
+	if IsPermissionError(nil) {
+		t.Error("nil must not be classified as a permission error")
+	}
+}
 
 func TestNewEventsCorrelator(t *testing.T) {
 	clientset := fake.NewSimpleClientset()

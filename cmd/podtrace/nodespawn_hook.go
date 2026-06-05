@@ -126,6 +126,13 @@ func maybeSpawnOnNode(ctx context.Context, cmd *cobra.Command, resolver pkgkube.
 		sa = os.Getenv("PODTRACE_SPAWN_SA")
 	}
 
+	var allTargetPods []nodespawn.PodRef
+	for _, refs := range preResolved.ByNode {
+		allTargetPods = append(allTargetPods, refs...)
+	}
+	finishEventCorrelation := startWorkstationEventCorrelation(ctx, clientset, allTargetPods, streams.Out)
+	defer finishEventCorrelation()
+
 	err = nodespawn.Run(ctx, nodespawn.RunOptions{
 		Clientset:             clientset,
 		RestConfig:            restCfg,

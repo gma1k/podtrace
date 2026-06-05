@@ -296,6 +296,36 @@ enforcing `restricted` PodSecurity block by default. Three options:
 3. Use the operator path (CR-driven sessions in `podtrace-system`) — already
    pre-allowed by the helm chart.
 
+### DNS tracking needs a libc in the traced container
+
+DNS name resolution is traced by attaching a uprobe to `getaddrinfo` in the
+**workload container's** libc. If the target is a statically-linked binary
+(common for Go images) or runs on a distroless/scratch base, there is no libc
+to probe and podtrace emits a one-shot message at startup:
+
+> DNS tracking disabled: no libc found in the target container (e.g. a
+> statically-linked binary or distroless/scratch image). DNS name resolution
+> will not be traced; other tracing is unaffected.
+
+This is expected and harmless — every other tracer (network, filesystem, CPU,
+memory, syscalls) works regardless. There is nothing to fix on the node; it is
+a property of the image being traced. To get DNS names, trace a workload whose
+image ships a dynamic glibc or musl libc.
+
+### Kubernetes event correlation runs on the workstation (no spawn-pod RBAC)
+
+As an enhancement, the CLI correlates your app's activity with Kubernetes
+`Events` on the target pod and prints a **"Kubernetes Events" section** after the
+trace. This watch runs on your **workstation**, using your kubeconfig, which can
+already watch events (you can run `kubectl get events`). The spawn pod keeps its
+**zero-RBAC** design and is never involved in this lookup.
+
+If your own kubeconfig is restricted and cannot watch events, the section is
+simply skipped with a one-shot, non-fatal message; tracing is unaffected:
+
+> Kubernetes event correlation skipped: your kubeconfig cannot watch events in
+> namespace <ns>. Tracing is unaffected.
+
 ### What works without any extra config
 
 - cgroupfs path discovery (auto-detects Talos's `kubelet.slice/...` layout)

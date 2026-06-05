@@ -3,6 +3,7 @@ package resource
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -336,6 +337,10 @@ func (rm *ResourceMonitor) syncToBPF() error {
 	return nil
 }
 
+func isBenignMapDeleteError(err error) bool {
+	return errors.Is(err, ebpf.ErrKeyNotExist)
+}
+
 func (rm *ResourceMonitor) checkAlerts() {
 	rm.mu.RLock()
 	defer rm.mu.RUnlock()
@@ -378,7 +383,7 @@ func (rm *ResourceMonitor) checkAlerts() {
 				logger.Warn("Failed to update alert map", zap.Error(err))
 			}
 		} else {
-			if err := rm.alertsMap.Delete(key); err != nil {
+			if err := rm.alertsMap.Delete(key); err != nil && !isBenignMapDeleteError(err) {
 				logger.Warn("Failed to delete alert from map", zap.Error(err))
 			}
 		}
@@ -414,15 +419,15 @@ func (rm *ResourceMonitor) checkAlerts() {
 					recommendations = append(recommendations, "Immediate action required - resource exhaustion imminent")
 				}
 				alert := &alerting.Alert{
-					Severity:        severity,
-					Title:           title,
-					Message:         message,
-					Timestamp:       time.Now(),
-					Source:          "resource_monitor",
-					PodName:         "",
-					Namespace:       rm.namespace,
+					Severity:  severity,
+					Title:     title,
+					Message:   message,
+					Timestamp: time.Now(),
+					Source:    "resource_monitor",
+					PodName:   "",
+					Namespace: rm.namespace,
 					Context: map[string]interface{}{
-						"resource_type":      resourceTypeLabel,
+						"resource_type":       resourceTypeLabel,
 						"utilization_percent": float64(utilizationUint32),
 						"usage_bytes":         limit.UsageBytes,
 						"limit_bytes":         limit.LimitBytes,
@@ -475,7 +480,6 @@ func (rm *ResourceMonitor) GetLimits() map[uint32]*ResourceLimit {
 	}
 	return result
 }
-
 
 func getCgroupInode(cgroupPath string) (uint64, error) {
 	info, err := os.Stat(cgroupPath)

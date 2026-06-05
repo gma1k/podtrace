@@ -302,10 +302,10 @@ func AttachDNSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint3
 				}
 			}
 		} else {
-			logger.Info("DNS tracking unavailable (libc not found)")
+			logger.Info("DNS tracking disabled: libc was located but could not be opened for uprobe attachment. DNS name resolution will not be traced; other tracing is unaffected.")
 		}
 	} else {
-		logger.Info("DNS tracking unavailable (libc path not found)")
+		logger.Info("DNS tracking disabled: no libc found in the target container (e.g. a statically-linked binary or distroless/scratch image). DNS name resolution will not be traced; other tracing is unaffected.")
 	}
 	return links
 }

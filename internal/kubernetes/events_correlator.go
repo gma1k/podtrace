@@ -6,6 +6,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
@@ -37,6 +38,10 @@ func NewEventsCorrelator(clientset kubernetes.Interface, podName, namespace stri
 		events:    make([]*K8sEvent, 0),
 		stopCh:    make(chan struct{}),
 	}
+}
+
+func IsPermissionError(err error) bool {
+	return apierrors.IsForbidden(err)
 }
 
 func (ec *EventsCorrelator) Start(ctx context.Context) error {
@@ -138,4 +143,3 @@ func (ec *EventsCorrelator) CorrelateWithAppEvents(appEventTime time.Time, windo
 
 	return correlated
 }
-
