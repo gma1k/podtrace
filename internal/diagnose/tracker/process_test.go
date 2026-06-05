@@ -318,3 +318,25 @@ func TestGetProcessNameFromProc_AllPathsFail(t *testing.T) {
 		t.Errorf("Expected empty string when all paths fail, got %q", result)
 	}
 }
+
+func TestAnalyzeProcessActivity_AttributesPod(t *testing.T) {
+	evs := []*events.Event{
+		{PID: 100, ProcessName: "wget", Timestamp: 1, K8s: &events.K8sMetadata{PodName: "cart-svc-abc"}},
+		{PID: 100, ProcessName: "wget", Timestamp: 2, K8s: &events.K8sMetadata{PodName: "cart-svc-abc"}},
+		{PID: 200, ProcessName: "nslookup", Timestamp: 3}, // no k8s -> no pod
+	}
+	got := AnalyzeProcessActivity(evs)
+	byPid := map[uint32]PidInfo{}
+	for _, p := range got {
+		byPid[p.Pid] = p
+	}
+	if byPid[100].Pod != "cart-svc-abc" {
+		t.Fatalf("PID 100 pod = %q, want cart-svc-abc", byPid[100].Pod)
+	}
+	if got, want := byPid[100].PodSuffix(), " [pod: cart-svc-abc]"; got != want {
+		t.Fatalf("PodSuffix = %q, want %q", got, want)
+	}
+	if byPid[200].Pod != "" || byPid[200].PodSuffix() != "" {
+		t.Fatalf("PID 200 should have no pod, got %q", byPid[200].Pod)
+	}
+}

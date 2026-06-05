@@ -98,6 +98,61 @@ process per node. The agent merges:
 Result: overlapping CRs share kernel resources, do not double-trace, and
 each independently reports `eventsTotal` on its own `nodeStatus`.
 
+## Creating a PodTrace with the CLI (`podtrace watch`)
+
+`podtrace watch` is a convenience front-end that authors a `PodTrace` for you
+and exits — no YAML to hand-write. It is the ergonomic way to express
+"trace this application everywhere, continuously". The resulting CR is an
+ordinary `PodTrace`: the operator and agents take over exactly as if you had
+applied the manifest yourself.
+
+```bash
+# --app NAME is shorthand for selector app.kubernetes.io/name=NAME
+podtrace watch --app api --all-namespaces --exporter prod-otlp
+
+# Arbitrary selector, scoped to one namespace
+podtrace watch --label app=api,tier=web -n my-app --exporter prod-otlp
+
+# Only namespaces carrying a label
+podtrace watch --app api --namespace-selector team=payments --exporter prod-otlp
+
+# Render the manifest without applying it
+podtrace watch --app api --all-namespaces --print-only
+```
+
+`--app`/`--label`/`--all-namespaces` also exist on the **root** command, but
+there they drive *ephemeral* tracing (resolve matching pods and stream events
+to your terminal), exactly like `--pod-selector`:
+
+```bash
+# ephemeral: trace the application now, stream to this terminal (no CR)
+podtrace --app api -n my-app --diagnose 30s --filter dns,net
+podtrace --label tier=web -n my-app
+```
+
+So the same targeting vocabulary works two ways: `podtrace <targeting>` traces
+now (terminal); `podtrace watch <targeting>` records continuously (exporter).
+The managed-only flags (`--exporter`, `--name`, `--namespace-selector`,
+`--sample`, `--print-only`) exist only on `watch`.
+
+| Flag | Maps to | Notes |
+|---|---|---|
+| `--app NAME` | `spec.selector.matchLabels[app.kubernetes.io/name]=NAME` | Mutually exclusive with `--label`. Also the default PodTrace name. |
+| `--label k=v,…` | `spec.selector` | Any label selector. Requires `--name`. |
+| `--all-namespaces` | `spec.namespaceSelector: {}` | Matches every namespace. Mutually exclusive with `--namespace-selector`. |
+| `--namespace-selector k=v` | `spec.namespaceSelector` | Only namespaces carrying these labels. |
+| `--exporter NAME` | `spec.exporterRef.name` | Defaults to `default`; must be an `ExporterConfig` in `-n`. Checked before create. |
+| `--name NAME` | `metadata.name` | Defaults to the `--app` value. |
+| `--filter dns,net,…` | `spec.filters` | Empty = all categories. |
+| `--sample N` | `spec.samplePercent` | 0-100; unset by default. |
+| `--print-only` | — | Print YAML, skip the exporter check and the apply. |
+
+> **Roadmap.** `podtrace watch` is phase one of richer application targeting.
+> Future phases add an additive `appSelector` matching primitive on `PodTrace`
+> (multiple selectors as one named group) and a higher-level `ApplicationTrace`
+> CR that owns child `PodTrace`s for multi-workload applications; `--app` will
+> repoint to it. The on-node merge router means these layers never conflict.
+
 ## Common operations
 
 ```bash

@@ -318,6 +318,9 @@ spec:
                     lastHeartbeat:
                       format: date-time
                       type: string
+                    matchedPods:
+                      format: int32
+                      type: integer
                     message:
                       type: string
                     node:

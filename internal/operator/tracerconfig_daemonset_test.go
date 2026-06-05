@@ -75,10 +75,12 @@ func TestBuildAgentDaemonSetSpec_PrivilegedContainer(t *testing.T) {
 func TestBuildAgentDaemonSetSpec_HostMounts(t *testing.T) {
 	spec := buildAgentDaemonSetSpec(tc(nil), "podtrace-system")
 	expected := map[string]string{
-		"bpf":    "/sys/fs/bpf",
-		"btf":    "/sys/kernel/btf",
-		"proc":   "/proc",
-		"cgroup": "/sys/fs/cgroup",
+		"bpf":     "/sys/fs/bpf",
+		"btf":     "/sys/kernel/btf",
+		"proc":    "/proc",
+		"cgroup":  "/sys/fs/cgroup",
+		"debugfs": "/sys/kernel/debug",
+		"tracefs": "/sys/kernel/tracing",
 	}
 	found := map[string]string{}
 	for _, v := range spec.Template.Spec.Volumes {

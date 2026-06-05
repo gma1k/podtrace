@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -10,9 +11,12 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
 
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/events"
+	"github.com/podtrace/podtrace/internal/logger"
+	"github.com/podtrace/podtrace/internal/profiling"
 	"github.com/podtrace/podtrace/internal/safeconv"
 	bundlepkg "github.com/podtrace/podtrace/pkg/exporter/bundle"
 	"github.com/podtrace/podtrace/pkg/tracer"
@@ -68,8 +72,15 @@ func newSDKEventExporter(name string, cr CRKey, b *BundlePayload, spanExporter s
 		return nil, fmt.Errorf("build resource: %w", err)
 	}
 
+	observed := &deliveryObservingExporter{
+		inner:   spanExporter,
+		cr:      cr,
+		name:    name,
+		metrics: cfg.metrics,
+	}
+
 	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(spanExporter,
+		sdktrace.WithBatcher(observed,
 			sdktrace.WithMaxExportBatchSize(128),
 			sdktrace.WithBatchTimeout(2*time.Second),
 		),
@@ -137,9 +148,11 @@ func (e *sdkEventExporter) Export(ctx context.Context, batch []*events.Event) er
 		if ev == nil {
 			continue
 		}
-		startedAt := time.Unix(0, safeUint64ToInt64(ev.Timestamp))
-		if startedAt.IsZero() {
+		var startedAt time.Time
+		if ev.Timestamp == 0 {
 			startedAt = time.Now()
+		} else {
+			startedAt = profiling.BPFTimestampToWall(ev.Timestamp)
 		}
 		endedAt := startedAt.Add(time.Duration(safeUint64ToInt64(ev.LatencyNS)))
 		if endedAt.Before(startedAt) {
@@ -172,10 +185,10 @@ func (e *sdkEventExporter) Export(ctx context.Context, batch []*events.Event) er
 //   - fs_slow:    LatencyNS > FSSlowMs       for EventOpen/Read/Write/Fsync/Unlink/Rename/Close
 //   - rtt_spike:  LatencyNS > RTTSpikeMs     for EventTCPRecv/TCPSend/Connect
 //   - error_rate: ev.Error != 0              for any event (counts contribute to a future
-//                                            rolling-window detector; the per-event tag is
-//                                            stamped only when the threshold itself is set,
-//                                            so users can grep their backend for "errors
-//                                            sampled under an active error_rate policy")
+//     rolling-window detector; the per-event tag is
+//     stamped only when the threshold itself is set,
+//     so users can grep their backend for "errors
+//     sampled under an active error_rate policy")
 func (e *sdkEventExporter) appendThresholdAttributes(attrs []attribute.KeyValue, ev *events.Event) []attribute.KeyValue {
 	t := e.thresholds
 	if t == nil {
@@ -263,3 +276,50 @@ func (e *sdkEventExporter) Close(ctx context.Context) error {
 }
 
 var _ tracer.Exporter = (*sdkEventExporter)(nil)
+
+// deliveryObservingExporter wraps an SDK SpanExporter to make export
+// (delivery) failures observable.
+type deliveryObservingExporter struct {
+	inner   sdktrace.SpanExporter
+	cr      CRKey
+	name    string
+	metrics *Metrics
+
+	mu      sync.Mutex
+	failing bool
+}
+
+func (e *deliveryObservingExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySpan) error {
+	err := e.inner.ExportSpans(ctx, spans)
+	if err != nil {
+		e.metrics.ObserveExportDelivery(e.cr, len(spans), err)
+		e.mu.Lock()
+		firstFailure := !e.failing
+		e.failing = true
+		e.mu.Unlock()
+		if firstFailure {
+			logger.Warn("exporter delivery failing: spans are being captured but NOT reaching the backend; "+
+				"check the ExporterConfig endpoint/credentials and that the collector is reachable",
+				zap.String("cr", e.cr.String()),
+				zap.String("exporter", e.name),
+				zap.Int("spans_dropped", len(spans)),
+				zap.Error(err))
+		}
+		return err
+	}
+	e.mu.Lock()
+	recovered := e.failing
+	e.failing = false
+	e.mu.Unlock()
+	if recovered {
+		logger.Info("exporter delivery recovered",
+			zap.String("cr", e.cr.String()), zap.String("exporter", e.name))
+	}
+	return nil
+}
+
+func (e *deliveryObservingExporter) Shutdown(ctx context.Context) error {
+	return e.inner.Shutdown(ctx)
+}
+
+var _ sdktrace.SpanExporter = (*deliveryObservingExporter)(nil)

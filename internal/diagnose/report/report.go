@@ -499,13 +499,13 @@ func GenerateIssuesSection(d Diagnostician) string {
 			}
 			alert := &alerting.Alert{
 				Severity:  severity,
-				Title:      "Diagnostic Issue Detected",
-				Message:    issue,
-				Timestamp:  time.Now(),
-				Source:     "error_detector",
-				PodName:    "",
-				Namespace:  "",
-				Context:    make(map[string]interface{}),
+				Title:     "Diagnostic Issue Detected",
+				Message:   issue,
+				Timestamp: time.Now(),
+				Source:    "error_detector",
+				PodName:   "",
+				Namespace: "",
+				Context:   make(map[string]interface{}),
 				Recommendations: []string{
 					"Review diagnostic report for details",
 					"Check application logs",
@@ -1077,8 +1077,8 @@ func formatProcessActivity(allEvents []*events.Event) string {
 		if name == "" {
 			name = "unknown"
 		}
-		result += fmt.Sprintf("    - PID %d (%s): %d events (%.1f%%)\n",
-			pidInfo.Pid, name, pidInfo.Count, pidInfo.Percentage)
+		result += fmt.Sprintf("    - PID %d (%s)%s: %d events (%.1f%%)\n",
+			pidInfo.Pid, name, pidInfo.PodSuffix(), pidInfo.Count, pidInfo.Percentage)
 	}
 	result += "\n"
 	return result

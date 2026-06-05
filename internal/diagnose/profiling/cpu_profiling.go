@@ -59,8 +59,8 @@ func GenerateCPUUsageReport(allEvents []*events.Event, duration time.Duration) s
 		}
 		for i := 0; i < limit; i++ {
 			a := pidActivity[i]
-			report += fmt.Sprintf("    PID %d (%s): %d events (%.1f%%)\n",
-				a.Pid, a.Name, a.Count, a.Percentage)
+			report += fmt.Sprintf("    PID %d (%s)%s: %d events (%.1f%%)\n",
+				a.Pid, a.Name, a.PodSuffix(), a.Count, a.Percentage)
 		}
 		report += "\n  Total CPU usage: unavailable (no /proc samples)\n"
 		report += fmt.Sprintf("  Sample duration: %.2fs across %d distinct processes\n\n", durationSec, len(pidActivity))

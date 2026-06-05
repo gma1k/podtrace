@@ -162,91 +162,117 @@ func AttachProbesByGroup(coll *ebpf.Collection) (map[ProbeGroup][]link.Link, err
 			zap.Strings("skipped", skippedOptional))
 	}
 
-	if tracepointProg := coll.Programs["tracepoint_sched_switch"]; tracepointProg != nil {
-		tp, err := link.Tracepoint("sched", "sched_switch", tracepointProg, nil)
-		if err != nil {
-			reportAttachFailure("tracepoint_sched_switch", "sched:sched_switch", false, err)
-			if !strings.Contains(err.Error(), "permission denied") {
-				logger.Info("CPU/scheduling tracking unavailable", zap.Error(err))
-			}
-		} else {
-			appendLink("tracepoint_sched_switch", tp)
-		}
-	}
-
-	if tcpStateProg := coll.Programs["tracepoint_tcp_set_state"]; tcpStateProg != nil {
-		tp, err := link.Tracepoint("tcp", "tcp_set_state", tcpStateProg, nil)
-		if err != nil {
-			reportAttachFailure("tracepoint_tcp_set_state", "tcp:tcp_set_state", false, err)
-			if !strings.Contains(err.Error(), "permission denied") && !strings.Contains(err.Error(), "not found") {
-				logger.Debug("TCP state tracking unavailable", zap.Error(err))
-			}
-		} else {
-			appendLink("tracepoint_tcp_set_state", tp)
-		}
-	}
-
-	if tcpRetransProg := coll.Programs["tracepoint_tcp_retransmit_skb"]; tcpRetransProg != nil {
-		tp, err := link.Tracepoint("tcp", "tcp_retransmit_skb", tcpRetransProg, nil)
-		if err != nil {
-			reportAttachFailure("tracepoint_tcp_retransmit_skb", "tcp:tcp_retransmit_skb", false, err)
-			if !strings.Contains(err.Error(), "permission denied") && !strings.Contains(err.Error(), "not found") {
-				logger.Info("TCP retransmission tracking unavailable", zap.Error(err))
-			}
-		} else {
-			appendLink("tracepoint_tcp_retransmit_skb", tp)
-		}
-	}
-
-	if netDevProg := coll.Programs["tracepoint_net_dev_xmit"]; netDevProg != nil {
-		tp, err := link.Tracepoint("net", "net_dev_xmit", netDevProg, nil)
-		if err != nil {
-			reportAttachFailure("tracepoint_net_dev_xmit", "net:net_dev_xmit", false, err)
-			if !strings.Contains(err.Error(), "permission denied") && !strings.Contains(err.Error(), "not found") {
-				logger.Info("Network device error tracking unavailable", zap.Error(err))
-			}
-		} else {
-			appendLink("tracepoint_net_dev_xmit", tp)
-		}
-	}
-
-	if pageFaultProg := coll.Programs["tracepoint_page_fault_user"]; pageFaultProg != nil {
-		tp, err := link.Tracepoint("exceptions", "page_fault_user", pageFaultProg, nil)
-		if err != nil {
-			reportAttachFailure("tracepoint_page_fault_user", "exceptions:page_fault_user", false, err)
-			if !strings.Contains(err.Error(), "permission denied") && !strings.Contains(err.Error(), "not found") {
-				logger.Info("Page fault tracking unavailable", zap.Error(err))
-			}
-		} else {
-			appendLink("tracepoint_page_fault_user", tp)
-		}
-	}
-
-	if oomKillProg := coll.Programs["tracepoint_oom_kill_process"]; oomKillProg != nil {
-		tp, err := link.Tracepoint("oom", "oom_kill_process", oomKillProg, nil)
-		if err != nil {
-			reportAttachFailure("tracepoint_oom_kill_process", "oom:oom_kill_process", false, err)
-			if !strings.Contains(err.Error(), "permission denied") && !strings.Contains(err.Error(), "not found") {
-				logger.Debug("OOM kill tracking unavailable", zap.Error(err))
-			}
-		} else {
-			appendLink("tracepoint_oom_kill_process", tp)
-		}
-	}
-
-	if forkProg := coll.Programs["tracepoint_sched_process_fork"]; forkProg != nil {
-		tp, err := link.Tracepoint("sched", "sched_process_fork", forkProg, nil)
-		if err != nil {
-			reportAttachFailure("tracepoint_sched_process_fork", "sched:sched_process_fork", false, err)
-			if !strings.Contains(err.Error(), "permission denied") && !strings.Contains(err.Error(), "not found") {
-				logger.Info("Process fork tracking unavailable", zap.Error(err))
-			}
-		} else {
-			appendLink("tracepoint_sched_process_fork", tp)
+	for _, tp := range tracepointProbes {
+		if l, ok := attachTracepointSpec(coll, tp); ok {
+			appendLink(tp.prog, l)
 		}
 	}
 
 	return groups, nil
+}
+
+// tracepointSpec describes a tracepoint-backed BPF program and how to
+// attach it.
+type tracepointSpec struct {
+	prog     string
+	category string
+	event    string
+	failMsg  string
+}
+
+// tracepointProbes is the single source of truth for every tracepoint
+// program, shared by AttachProbesByGroup (startup) and AttachProbeGroup
+// (hot re-attach) so the two paths can never drift.
+var tracepointProbes = []tracepointSpec{
+	{"tracepoint_sched_switch", "sched", "sched_switch", "CPU/scheduling tracking unavailable"},
+	{"tracepoint_tcp_set_state", "tcp", "tcp_set_state", ""},
+	{"tracepoint_tcp_retransmit_skb", "tcp", "tcp_retransmit_skb", "TCP retransmission tracking unavailable"},
+	{"tracepoint_net_dev_xmit", "net", "net_dev_xmit", "Network device error tracking unavailable"},
+	{"tracepoint_page_fault_user", "exceptions", "page_fault_user", "Page fault tracking unavailable"},
+	{"tracepoint_oom_kill_process", "oom", "oom_kill_process", ""},
+	{"tracepoint_sched_process_fork", "sched", "sched_process_fork", "Process fork tracking unavailable"},
+}
+
+// attachTracepointSpec attaches one tracepoint, returning (link, true) on
+// success or (nil, false) if the program is absent or the attach fails
+// (logged, non-fatal — tracepoints are best-effort).
+func attachTracepointSpec(coll *ebpf.Collection, tp tracepointSpec) (link.Link, bool) {
+	prog := coll.Programs[tp.prog]
+	if prog == nil {
+		return nil, false
+	}
+	l, err := link.Tracepoint(tp.category, tp.event, prog, nil)
+	if err != nil {
+		sym := tp.category + ":" + tp.event
+		reportAttachFailure(tp.prog, sym, false, err)
+		if !strings.Contains(err.Error(), "permission denied") && !strings.Contains(err.Error(), "not found") {
+			if tp.failMsg != "" {
+				logger.Info(tp.failMsg, zap.Error(err))
+			} else {
+				logger.Debug("tracepoint unavailable", zap.String("tracepoint", sym), zap.Error(err))
+			}
+		}
+		return nil, false
+	}
+	return l, true
+}
+
+// AttachProbeGroup attaches only the kprobes/tracepoints belonging to a
+// single ProbeGroup. It is used for hot re-attach: SetEnabledCategories
+// calls it when a CR newly needs a category whose group was previously
+// detached.
+func AttachProbeGroup(coll *ebpf.Collection, target ProbeGroup) ([]link.Link, error) {
+	var links []link.Link
+	rollback := func() {
+		for _, l := range links {
+			_ = l.Close()
+		}
+	}
+
+	for progName, symbol := range mandatoryProbes {
+		if GroupForProbe(progName) != target {
+			continue
+		}
+		prog := coll.Programs[progName]
+		if prog == nil {
+			continue
+		}
+		l, err := attachKprobe(progName, symbol, prog)
+		if err != nil {
+			reportAttachFailure(progName, symbol, true, err)
+			rollback()
+			return nil, fmt.Errorf("re-attach mandatory probe %q (%s): %w", progName, symbol, NewProbeAttachError(progName, err))
+		}
+		links = append(links, l)
+	}
+
+	for progName, symbol := range optionalProbes {
+		if GroupForProbe(progName) != target {
+			continue
+		}
+		prog := coll.Programs[progName]
+		if prog == nil {
+			continue
+		}
+		l, err := attachKprobe(progName, symbol, prog)
+		if err != nil {
+			logger.Debug("optional probe unavailable on re-attach",
+				zap.String("prog", progName), zap.String("symbol", symbol), zap.Error(err))
+			continue
+		}
+		links = append(links, l)
+	}
+
+	for _, tp := range tracepointProbes {
+		if GroupForProbe(tp.prog) != target {
+			continue
+		}
+		if l, ok := attachTracepointSpec(coll, tp); ok {
+			links = append(links, l)
+		}
+	}
+
+	return links, nil
 }
 
 func AttachDNSProbes(coll *ebpf.Collection, containerID string) []link.Link {

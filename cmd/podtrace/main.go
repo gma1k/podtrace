@@ -123,6 +123,7 @@ func main() {
 	rootCmd.AddCommand(newOperatorCmd())
 	rootCmd.AddCommand(newReportUploaderCmd())
 	rootCmd.AddCommand(newScheduleCmd())
+	rootCmd.AddCommand(newWatchCmd())
 
 	rootCmd.Flags().StringVarP(&namespace, "namespace", "n", config.DefaultNamespace, "Kubernetes namespace")
 	rootCmd.Flags().StringVar(&namespacesCSV, "namespaces", "", "Comma-separated namespaces for multi-pod tracing (e.g., default,prod)")
@@ -160,6 +161,8 @@ func main() {
 	rootCmd.Flags().StringVar(&terminationMessagePath, "termination-message-path", "", "Write a compact summary JSON to this path so Kubernetes surfaces it in pod status")
 	rootCmd.Flags().StringVar(&reportTo, "report-to", "", "Upload the full diagnose report to a sink: kind/namespace/name (kind is configmap|secret)")
 
+	registerTargetFlags(rootCmd.Flags())
+
 	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
 		if logLevel != "" {
 			logger.SetLevel(logLevel)
@@ -176,6 +179,20 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	if showVersion {
 		fmt.Println(config.GetVersion())
 		return nil
+	}
+
+	if watchAppName != "" && watchLabel != "" {
+		return fmt.Errorf("--app and --label are mutually exclusive")
+	}
+	if watchAppName != "" || watchLabel != "" {
+		if podSelector != "" {
+			return fmt.Errorf("--app/--label and --pod-selector are mutually exclusive; use one")
+		}
+		if watchAppName != "" {
+			podSelector = appNameLabel + "=" + watchAppName
+		} else {
+			podSelector = watchLabel
+		}
 	}
 
 	if exporterFromFile != "" {
@@ -319,9 +336,15 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 
 	resolveCtx, resolveCancel := context.WithTimeout(context.Background(), config.DefaultPodResolveTimeout)
 	defer resolveCancel()
+	selectionDefaultNamespace := namespace
+	selectionNamespaces := namespaces
+	if watchAllNamespaces {
+		selectionDefaultNamespace = ""
+		selectionNamespaces = nil
+	}
 	selection := kubernetes.TargetSelection{
-		DefaultNamespace: namespace,
-		Namespaces:       namespaces,
+		DefaultNamespace: selectionDefaultNamespace,
+		Namespaces:       selectionNamespaces,
 		PodSelector:      podSelector,
 		AllInNamespace:   allInNamespace,
 		Pods:             pods,
@@ -626,6 +649,7 @@ func runNormalModeWithSource(ctx context.Context, eventChan <-chan *events.Event
 		case <-ctx.Done():
 			return ctx.Err()
 		case event := <-eventChan:
+			attachSourcePod(event, resolveSource)
 			var k8sCtx map[string]interface{}
 			if enricher != nil {
 				enriched := enricher.EnrichEvent(ctx, event)
@@ -720,6 +744,7 @@ func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Eve
 			fmt.Println(report)
 			return ctx.Err()
 		case event := <-eventChan:
+			attachSourcePod(event, resolveSource)
 			eventBatch = append(eventBatch, event)
 			if len(eventBatch) >= config.EventBatchSize {
 				for _, e := range eventBatch {
@@ -954,6 +979,21 @@ func resolveSourcePod(resolve func(*events.Event) *kubernetes.PodInfo, e *events
 		return nil
 	}
 	return resolve(e)
+}
+
+// attachSourcePod stamps the resolved source-pod identity onto the event's
+// K8s metadata when it isn't already set.
+func attachSourcePod(e *events.Event, resolve func(*events.Event) *kubernetes.PodInfo) {
+	if e == nil || e.K8s != nil || resolve == nil {
+		return
+	}
+	if src := resolve(e); src != nil && src.PodName != "" {
+		e.K8s = &events.K8sMetadata{
+			Namespace:     src.Namespace,
+			PodName:       src.PodName,
+			ContainerName: src.ContainerName,
+		}
+	}
 }
 
 func buildK8sContextMap(enriched *kubernetes.EnrichedEvent, source *kubernetes.PodInfo) map[string]interface{} {

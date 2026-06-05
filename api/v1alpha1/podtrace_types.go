@@ -46,15 +46,15 @@ type PodTraceSpec struct {
 type NodeStatusReason string
 
 var (
-	NodeStatusReasonAgentUnready            = NodeStatusReason("AgentUnready")
-	NodeStatusReasonBackendUnavailable      = NodeStatusReason("BackendUnavailable")
-	NodeStatusReasonBundleLoadFailed        = NodeStatusReason("BundleLoadFailed")
-	NodeStatusReasonExporterBuildFailed     = NodeStatusReason("ExporterBuildFailed")
-	NodeStatusReasonProgramAttachFailed     = NodeStatusReason("ProgramAttachFailed")
-	NodeStatusReasonPolicyParseError        = NodeStatusReason("PolicyParseError")
-	NodeStatusReasonPodMatchFailed          = NodeStatusReason("PodMatchFailed")
-	NodeStatusReasonCgroupResolutionFailed  = NodeStatusReason("CgroupResolutionFailed")
-	NodeStatusReasonUnknown                 = NodeStatusReason("Unknown")
+	NodeStatusReasonAgentUnready           = NodeStatusReason("AgentUnready")
+	NodeStatusReasonBackendUnavailable     = NodeStatusReason("BackendUnavailable")
+	NodeStatusReasonBundleLoadFailed       = NodeStatusReason("BundleLoadFailed")
+	NodeStatusReasonExporterBuildFailed    = NodeStatusReason("ExporterBuildFailed")
+	NodeStatusReasonProgramAttachFailed    = NodeStatusReason("ProgramAttachFailed")
+	NodeStatusReasonPolicyParseError       = NodeStatusReason("PolicyParseError")
+	NodeStatusReasonPodMatchFailed         = NodeStatusReason("PodMatchFailed")
+	NodeStatusReasonCgroupResolutionFailed = NodeStatusReason("CgroupResolutionFailed")
+	NodeStatusReasonUnknown                = NodeStatusReason("Unknown")
 )
 
 // PodTraceNodeStatus reports one agent's view of this PodTrace.
@@ -63,6 +63,9 @@ type PodTraceNodeStatus struct {
 	Node string `json:"node"`
 
 	Ready bool `json:"ready"`
+
+	// +optional
+	MatchedPods int32 `json:"matchedPods,omitempty"`
 
 	ActiveCgroups int32 `json:"activeCgroups"`
 

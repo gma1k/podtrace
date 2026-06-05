@@ -22,12 +22,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
-	podtraceac "github.com/podtrace/podtrace/pkg/client/applyconfiguration/api/v1alpha1"
 	"github.com/podtrace/podtrace/internal/events"
+	podtraceac "github.com/podtrace/podtrace/pkg/client/applyconfiguration/api/v1alpha1"
 	"github.com/podtrace/podtrace/pkg/exporter/bundle"
 	"github.com/podtrace/podtrace/pkg/tracer"
 )
-
 
 func TestDefaultOptions_NonEmptyAddrs(t *testing.T) {
 	o := DefaultOptions()
@@ -72,7 +71,6 @@ func TestRun_RejectsInvalidOptions(t *testing.T) {
 	}
 }
 
-
 func TestNewAgentScheme_RegistersBothAPIs(t *testing.T) {
 	s, err := newAgentScheme()
 	if err != nil {
@@ -86,14 +84,13 @@ func TestNewAgentScheme_RegistersBothAPIs(t *testing.T) {
 	}
 }
 
-
 type fakeBackend struct{ name string }
 
-func (b *fakeBackend) AttachToCgroup(_ string) error                          { return nil }
-func (b *fakeBackend) SetCgroups(_ []tracer.CgroupTarget) error               { return nil }
-func (b *fakeBackend) SetContainerID(_ string) error                          { return nil }
-func (b *fakeBackend) Start(_ context.Context, _ chan<- *events.Event) error  { return nil }
-func (b *fakeBackend) Stop() error                                            { return nil }
+func (b *fakeBackend) AttachToCgroup(_ string) error                         { return nil }
+func (b *fakeBackend) SetCgroups(_ []tracer.CgroupTarget) error              { return nil }
+func (b *fakeBackend) SetContainerID(_ string) error                         { return nil }
+func (b *fakeBackend) Start(_ context.Context, _ chan<- *events.Event) error { return nil }
+func (b *fakeBackend) Stop() error                                           { return nil }
 
 func TestBuildBackend_NilFactoryReturnsNoop(t *testing.T) {
 	got, err := buildBackend(Options{}, logr.Discard())
@@ -142,7 +139,6 @@ func TestNewNoopBackend_ExportedConstructor(t *testing.T) {
 	}
 }
 
-
 func TestNoopBackend_BasicLifecycle(t *testing.T) {
 	b := newNoopBackend()
 	if err := b.AttachToCgroup("/c/a"); err != nil {
@@ -182,7 +178,6 @@ func TestNoopBackend_BasicLifecycle(t *testing.T) {
 		t.Error("Inject after Stop should return false")
 	}
 }
-
 
 func TestServeMetrics_EmptyAddrIsNoop(t *testing.T) {
 	if err := serveMetrics(context.Background(), "", NewMetrics(), logr.Discard()); err != nil {
@@ -239,7 +234,6 @@ func TestServeMetrics_ServesAndShutsDown(t *testing.T) {
 	}
 }
 
-
 func TestNormalizeOTLPEndpoint(t *testing.T) {
 	cases := []struct {
 		in      string
@@ -270,6 +264,12 @@ func TestEventTypeString(t *testing.T) {
 	}
 	if got := eventTypeString(events.EventConnect); got != "net.connect" {
 		t.Errorf("Connect = %q, want net.connect", got)
+	}
+	if got := eventTypeString(events.EventUDPSend); got != "net.udp.send" {
+		t.Errorf("UDPSend = %q, want net.udp.send", got)
+	}
+	if got := eventTypeString(events.EventUDPRecv); got != "net.udp.recv" {
+		t.Errorf("UDPRecv = %q, want net.udp.recv", got)
 	}
 	got := eventTypeString(events.EventType(9999))
 	if !strings.HasPrefix(got, "event_") {
@@ -354,7 +354,6 @@ func TestNewOTLPEventExporter_HeadersAndCredential(t *testing.T) {
 	}
 	_ = exp.Close(context.Background())
 }
-
 
 func TestStatusWriter_EmitOnce_NoRulesIsNoop(t *testing.T) {
 	router := NewRouter(nil)
@@ -565,7 +564,6 @@ func TestStatusWriter_Run_PatchErrorIsLoggedNotFatal(t *testing.T) {
 	}
 }
 
-
 func TestComputeNodeReport_AggregatesUniqueCgroups(t *testing.T) {
 	router := NewRouter(nil)
 	router.Publish([]CRRule{
@@ -586,7 +584,6 @@ func TestComputeNodeReport_AggregatesUniqueCgroups(t *testing.T) {
 		t.Errorf("counters = %+v", r)
 	}
 }
-
 
 func TestSafeUint64ToInt64(t *testing.T) {
 	if got := safeUint64ToInt64(42); got != 42 {
@@ -613,7 +610,6 @@ func TestLenToInt32(t *testing.T) {
 		t.Errorf("got %d, want 0", got)
 	}
 }
-
 
 func TestResolveNodeName_HostnameFallback(t *testing.T) {
 	t.Setenv("NODE_NAME", "")

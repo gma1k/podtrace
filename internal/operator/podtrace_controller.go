@@ -326,12 +326,11 @@ func firstDegradedNode(ns []podtracev1alpha1.PodTraceNodeStatus) (node, message 
 	return node, message, reason, ok
 }
 
-// countReadyPods sums activeCgroups across all per-node reports as a
-// proxy for matchedPods.
+// countReadyPods sums the per-node matched-pod counts.
 func countReadyPods(ns []podtracev1alpha1.PodTraceNodeStatus) int32 {
 	total := int32(0)
 	for _, n := range ns {
-		total += n.ActiveCgroups
+		total += n.MatchedPods
 	}
 	return total
 }

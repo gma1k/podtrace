@@ -118,6 +118,31 @@ kubectl apply -f trace.yaml
 kubectl get podtraces.podtrace.io watch-api -n my-app -o yaml
 ```
 
+Or skip the YAML and let the CLI author the `PodTrace` for you — target a
+whole application by label, across every namespace, and it keeps tracing
+through pod restarts and rollouts until you delete it:
+
+```bash
+# Trace an application everywhere, continuously:
+podtrace watch --app api --all-namespaces --exporter prod-otlp
+
+# Or target with any label selector (--label), scoped to one namespace:
+podtrace watch --label app=api,tier=web -n my-app --name api-web --exporter prod-otlp
+
+# Render the manifest instead of applying it:
+podtrace watch --app api --all-namespaces --print-only
+```
+
+The same `--app`/`--label`/`--all-namespaces` targeting also works on the plain
+`podtrace` command for **ephemeral** tracing (stream to your terminal, no CR):
+
+```bash
+podtrace --app api -n my-app --diagnose 30s --filter dns,net
+```
+
+Rule of thumb: `podtrace <targeting>` = look now (terminal);
+`podtrace watch <targeting>` = record continuously (exporter).
+
 Full reference: [docs/crd-podtrace.md](docs/crd-podtrace.md).
 
 ### 3. Bounded diagnose via the `PodTraceSession` CR
