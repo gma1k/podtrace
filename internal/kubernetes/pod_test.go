@@ -1670,3 +1670,59 @@ func TestDirExists_File(t *testing.T) {
 		t.Error("expected dirExists to return false for a regular file")
 	}
 }
+
+func writeKubeconfigWithNamespace(t *testing.T, namespace string) {
+	t.Helper()
+	nsLine := ""
+	if namespace != "" {
+		nsLine = "    namespace: " + namespace + "\n"
+	}
+	content := `apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: https://localhost:6443
+  name: test-cluster
+contexts:
+- context:
+    cluster: test-cluster
+    user: test-user
+` + nsLine + `  name: test-context
+current-context: test-context
+users:
+- name: test-user
+  user:
+    token: test-token
+`
+	path := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write kubeconfig: %v", err)
+	}
+	t.Setenv("KUBECONFIG", path)
+	t.Setenv("SUDO_USER", "")
+	t.Setenv("HOME", "")
+}
+
+func TestNamespaceFromContext_ContextNamespace(t *testing.T) {
+	writeKubeconfigWithNamespace(t, "o11y")
+
+	ns, ok := NamespaceFromContext()
+	if !ok {
+		t.Fatal("expected a namespace to be resolved from the context")
+	}
+	if ns != "o11y" {
+		t.Errorf("expected namespace %q, got %q", "o11y", ns)
+	}
+}
+
+func TestNamespaceFromContext_NoNamespaceFallsBackToDefault(t *testing.T) {
+	writeKubeconfigWithNamespace(t, "")
+
+	ns, ok := NamespaceFromContext()
+	if !ok {
+		t.Fatal("expected a namespace to be resolved when the context omits one")
+	}
+	if ns != config.DefaultNamespace {
+		t.Errorf("expected namespace %q, got %q", config.DefaultNamespace, ns)
+	}
+}
