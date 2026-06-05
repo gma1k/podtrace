@@ -9,6 +9,30 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.12.5](https://github.com/gma1k/podtrace/compare/v0.12.4...v0.12.5) (2026-06-05)
+
+
+### Features
+
+* add --app/--label application targeting (ephemeral + managed) ([#182](https://github.com/gma1k/podtrace/issues/182)) ([73aa96e](https://github.com/gma1k/podtrace/commit/73aa96e052f283474495054a7864721d04b31b56))
+
+
+### Bug Fixes
+
+* default namespace to current kubeconfig context ([#185](https://github.com/gma1k/podtrace/issues/185)) ([efa6f3a](https://github.com/gma1k/podtrace/commit/efa6f3a95bada8a89dea8b2c2af5c3897905d4f0))
+* derive docker GO_VERSION from go.mod with GOTOOLCHAIN=auto ([#180](https://github.com/gma1k/podtrace/issues/180)) ([e5da3cd](https://github.com/gma1k/podtrace/commit/e5da3cd17d3740aa84c678840d191e29a24d0b0f))
+
+
+### Maintenance
+
+* **deps:** update docker/setup-qemu-action action to v4.1.0 ([#175](https://github.com/gma1k/podtrace/issues/175)) ([9009a71](https://github.com/gma1k/podtrace/commit/9009a7167bfb02238538d28ea859805fa44c53bb))
+* **deps:** update github actions ([#177](https://github.com/gma1k/podtrace/issues/177)) ([b8df373](https://github.com/gma1k/podtrace/commit/b8df3735285d3e2ec9ffeac2ef0fa135752638c5))
+* **deps:** update github actions to v4.36.2 ([#183](https://github.com/gma1k/podtrace/issues/183)) ([118d6d2](https://github.com/gma1k/podtrace/commit/118d6d21984bb01e2335e2a6039b448a79093c01))
+* **deps:** update go modules (non-major) ([#174](https://github.com/gma1k/podtrace/issues/174)) ([3d96d9d](https://github.com/gma1k/podtrace/commit/3d96d9d5f7d1251610435d1aaca0f51818a35be8))
+* **deps:** update go modules (non-major) ([#179](https://github.com/gma1k/podtrace/issues/179)) ([0f95880](https://github.com/gma1k/podtrace/commit/0f958802b26c9fbe7d5d95963346ecf3594df24f))
+* **deps:** update go modules (non-major) ([#184](https://github.com/gma1k/podtrace/issues/184)) ([2ca4fea](https://github.com/gma1k/podtrace/commit/2ca4fea1000453916085def21f93b49dfef0ab88))
+* **deps:** update go modules (non-major) to v0.283.0 ([#178](https://github.com/gma1k/podtrace/issues/178)) ([76570d4](https://github.com/gma1k/podtrace/commit/76570d47a64329890089f68b7a8ac814f07f4e55))
+
 ## [0.12.4](https://github.com/gma1k/podtrace/compare/v0.12.3...v0.12.4) (2026-05-29)
 
 
