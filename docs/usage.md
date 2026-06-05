@@ -61,7 +61,7 @@ This will:
 Usage: ./bin/podtrace -n <namespace> <pod-name> [flags]
 
 Flags:
-  -n, --namespace string        Kubernetes namespace (default: "default")
+  -n, --namespace string        Kubernetes namespace (defaults to the current kubeconfig context's namespace, then "default")
       --namespaces string       Comma-separated namespaces for multi-pod tracing
       --pods string             Comma-separated pod references (pod or namespace/pod)
       --pod-selector string     Label selector for target pods
