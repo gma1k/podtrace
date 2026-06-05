@@ -20,6 +20,7 @@ import (
 
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
 	"github.com/podtrace/podtrace/internal/config"
+	"github.com/podtrace/podtrace/internal/kubernetes"
 	"github.com/podtrace/podtrace/internal/operator"
 	"github.com/podtrace/podtrace/internal/validation"
 )
@@ -84,12 +85,17 @@ exits. Events flow to the referenced ExporterConfig, not to this terminal.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
+			if !cmd.Flags().Changed("namespace") {
+				if ctxNamespace, ok := kubernetes.NamespaceFromContext(); ok {
+					namespace = ctxNamespace
+				}
+			}
 			return runWatch(ctx, watchOptionsFromFlags())
 		},
 	}
 	registerTargetFlags(cmd.Flags())
 	registerWatchOnlyFlags(cmd.Flags())
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", config.DefaultNamespace, "Namespace to create the PodTrace in (its ExporterConfig must live here too)")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", config.DefaultNamespace, "Namespace to create the PodTrace in (its ExporterConfig must live here too; defaults to the current kubeconfig context's namespace)")
 	cmd.Flags().StringVar(&eventFilter, "filter", "", "Event categories to capture (dns,net,fs,cpu,proc); empty = all")
 	return cmd
 }
