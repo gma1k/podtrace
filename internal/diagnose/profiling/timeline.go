@@ -46,9 +46,9 @@ func AnalyzeTimeline(events []*events.Event, startTime time.Time, duration time.
 	var timeline []TimelineBucket
 	totalEvents := len(events)
 	for i, count := range buckets {
-		startTime := startTime.Add(time.Duration(i) * bucketDuration)
-		endTime := startTime.Add(time.Duration(i+1) * bucketDuration)
-		period := fmt.Sprintf("%s-%s", startTime.Format("15:04:05"), endTime.Format("15:04:05"))
+		bucketStart := startTime.Add(time.Duration(i) * bucketDuration)
+		bucketEnd := startTime.Add(time.Duration(i+1) * bucketDuration)
+		period := fmt.Sprintf("%s-%s", bucketStart.Format("15:04:05"), bucketEnd.Format("15:04:05"))
 		percentage := float64(count) / float64(totalEvents) * 100
 		timeline = append(timeline, TimelineBucket{
 			Period:     period,

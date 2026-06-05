@@ -27,6 +27,44 @@ func TestAnalyzeTimeline_Basic(t *testing.T) {
 	}
 }
 
+func TestAnalyzeTimeline_ContiguousNonOverlappingBuckets(t *testing.T) {
+	start := time.Date(2026, 1, 1, 13, 45, 20, 0, time.UTC)
+	duration := 90 * time.Second // 5 buckets of 18s each
+
+	evs := []*events.Event{
+		{Timestamp: uint64(start.UnixNano())},
+	}
+
+	buckets := AnalyzeTimeline(evs, start, duration)
+	if len(buckets) != config.TimelineBuckets {
+		t.Fatalf("expected %d buckets, got %d", config.TimelineBuckets, len(buckets))
+	}
+
+	bucketDuration := duration / time.Duration(config.TimelineBuckets)
+	layout := "15:04:05"
+	for i, b := range buckets {
+		var got struct{ start, end string }
+		if _, err := fmt.Sscanf(b.Period, "%8s-%8s", &got.start, &got.end); err != nil {
+			t.Fatalf("bucket %d: could not parse period %q: %v", i, b.Period, err)
+		}
+
+		wantStart := start.Add(time.Duration(i) * bucketDuration).Format(layout)
+		wantEnd := start.Add(time.Duration(i+1) * bucketDuration).Format(layout)
+		if got.start != wantStart || got.end != wantEnd {
+			t.Errorf("bucket %d: got %s-%s, want %s-%s", i, got.start, got.end, wantStart, wantEnd)
+		}
+
+		if i > 0 {
+			var prev struct{ end string }
+			_, _ = fmt.Sscanf(buckets[i-1].Period, "%8s-%8s", new(string), &prev.end)
+			if got.start != prev.end {
+				t.Errorf("bucket %d starts at %s but previous bucket ended at %s (overlap/gap)",
+					i, got.start, prev.end)
+			}
+		}
+	}
+}
+
 func TestDetectBursts(t *testing.T) {
 	start := time.Now()
 	duration := 2 * time.Second
