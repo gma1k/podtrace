@@ -387,8 +387,8 @@ func TestAllNodesReady(t *testing.T) {
 
 func TestCountReadyPods(t *testing.T) {
 	in := []podtracev1alpha1.PodTraceNodeStatus{
-		{ActiveCgroups: 3},
-		{ActiveCgroups: 2},
+		{MatchedPods: 3, ActiveCgroups: 9},
+		{MatchedPods: 2, ActiveCgroups: 6},
 	}
 	if got := countReadyPods(in); got != 5 {
 		t.Errorf("countReadyPods = %d, want 5", got)

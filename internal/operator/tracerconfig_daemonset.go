@@ -149,6 +149,8 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 						{Name: "btf", MountPath: "/sys/kernel/btf", ReadOnly: true},
 						{Name: "proc", MountPath: "/host/proc", ReadOnly: true},
 						{Name: "cgroup", MountPath: "/sys/fs/cgroup", ReadOnly: false},
+						{Name: "debugfs", MountPath: "/sys/kernel/debug", ReadOnly: true},
+						{Name: "tracefs", MountPath: "/sys/kernel/tracing", ReadOnly: true},
 					},
 				}},
 				Volumes: []corev1.Volume{
@@ -156,6 +158,8 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 					{Name: "btf", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/kernel/btf", Type: &hostPathType}}},
 					{Name: "proc", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/proc", Type: &hostPathType}}},
 					{Name: "cgroup", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/fs/cgroup", Type: &hostPathType}}},
+					{Name: "debugfs", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/kernel/debug", Type: &hostPathType}}},
+					{Name: "tracefs", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/kernel/tracing", Type: &hostPathType}}},
 				},
 			},
 		},

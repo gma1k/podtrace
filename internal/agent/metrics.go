@@ -13,14 +13,14 @@ import (
 type Metrics struct {
 	registry *prometheus.Registry
 
-	EventsExported   *prometheus.CounterVec
-	EventsDropped    *prometheus.CounterVec
-	ActiveCgroups    *prometheus.GaugeVec
-	ActiveCRs        prometheus.Gauge
-	ReconcileTotal   prometheus.Counter
-	BackendDegraded  *prometheus.GaugeVec
-	CgroupsAttached  prometheus.Counter
-	CgroupsDetached  prometheus.Counter
+	EventsExported  *prometheus.CounterVec
+	EventsDropped   *prometheus.CounterVec
+	ActiveCgroups   *prometheus.GaugeVec
+	ActiveCRs       prometheus.Gauge
+	ReconcileTotal  prometheus.Counter
+	BackendDegraded *prometheus.GaugeVec
+	CgroupsAttached prometheus.Counter
+	CgroupsDetached prometheus.Counter
 
 	ThresholdTripped    *prometheus.CounterVec
 	EffectiveSampleRate *prometheus.GaugeVec
@@ -30,6 +30,7 @@ type Metrics struct {
 
 	ProgramAttachFailures *prometheus.CounterVec
 	ExporterInitFailures  *prometheus.CounterVec
+	ExportDeliveryDropped *prometheus.CounterVec
 
 	detectorsMu sync.Mutex
 	detectors   map[CRKey]*errorRateDetector
@@ -46,11 +47,11 @@ type Metrics struct {
 	lastEvents  map[CRKey]int64
 	lastDropped map[CRKey]int64
 
-	lastEnrichHits     int64
-	lastEnrichMisses   int64
-	lastEnrichSnaps    int64
-	lastOwnerResolved  int64
-	lastOwnerOrphaned  int64
+	lastEnrichHits    int64
+	lastEnrichMisses  int64
+	lastEnrichSnaps   int64
+	lastOwnerResolved int64
+	lastOwnerOrphaned int64
 }
 
 // NewMetrics constructs the full metric surface and registers it
@@ -149,9 +150,14 @@ func NewMetrics() *Metrics {
 			Name:      "exporter_init_failures_total",
 			Help:      "Per-CR exporter initialization failures, edge-triggered: one increment per transition from a previously-ok build to a failing one (or first observed failure). Reason values come from ClassifyExporterError and are a closed set. A sustained bad config does not inflate this counter — use rate() to detect new failures.",
 		}, []string{"cr_namespace", "cr_name", "reason"}),
-		detectors: map[CRKey]*errorRateDetector{},
-		lastEvents:  map[CRKey]int64{},
-		lastDropped: map[CRKey]int64{},
+		ExportDeliveryDropped: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "podtrace_agent",
+			Name:      "export_delivery_dropped_total",
+			Help:      "Spans that were captured and handed to an exporter but FAILED to be delivered to the backend (e.g. collector unreachable). events_exported_total counts spans queued to the SDK; this counts spans the SDK could not ship. A non-zero rate here with events_exported_total climbing means the backend endpoint is wrong/down — data is being lost silently otherwise. Reason comes from ClassifyExporterError.",
+		}, []string{"cr_namespace", "cr_name", "reason"}),
+		detectors:          map[CRKey]*errorRateDetector{},
+		lastEvents:         map[CRKey]int64{},
+		lastDropped:        map[CRKey]int64{},
 		exporterInitLastOK: map[CRKey]bool{},
 	}
 	reg.MustRegister(
@@ -161,9 +167,20 @@ func NewMetrics() *Metrics {
 		m.EnrichmentOwnerResolved,
 		m.ThresholdTripped, m.EffectiveSampleRate, m.PolicyGeneration,
 		m.ErrorRateBreached,
-		m.ProgramAttachFailures, m.ExporterInitFailures,
+		m.ProgramAttachFailures, m.ExporterInitFailures, m.ExportDeliveryDropped,
 	)
 	return m
+}
+
+// ObserveExportDelivery records the outcome of one exporter ExportSpans
+// call.
+func (m *Metrics) ObserveExportDelivery(cr CRKey, spanCount int, err error) {
+	if m == nil || err == nil || spanCount <= 0 {
+		return
+	}
+	if m.ExportDeliveryDropped != nil {
+		m.ExportDeliveryDropped.WithLabelValues(cr.Namespace, cr.Name, ClassifyExporterError(err)).Add(float64(spanCount))
+	}
 }
 
 // RecordProgramAttachFailure increments program_attach_failures_total

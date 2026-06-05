@@ -76,6 +76,7 @@ func buildNodeStatusEntry(node string, rule *CRRule, counters crCounters, agentR
 	entry := podtracev1alpha1.PodTraceNodeStatus{
 		Node:          node,
 		Ready:         agentReady && rule.Err == nil && backendErr == nil,
+		MatchedPods:   rule.MatchedPods,
 		ActiveCgroups: lenToInt32(len(rule.CgroupIDs)),
 		EventsTotal:   counters.Events,
 		DroppedEvents: counters.Dropped,
@@ -120,6 +121,7 @@ func (w *StatusWriter) patchCRStatus(ctx context.Context, key CRKey, entry podtr
 	nodeAC := podtraceac.PodTraceNodeStatus().
 		WithNode(entry.Node).
 		WithReady(entry.Ready).
+		WithMatchedPods(entry.MatchedPods).
 		WithActiveCgroups(entry.ActiveCgroups).
 		WithEventsTotal(entry.EventsTotal).
 		WithDroppedEvents(entry.DroppedEvents).

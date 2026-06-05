@@ -15,14 +15,32 @@ type PidInfo struct {
 	Name       string
 	Count      int
 	Percentage float64
+	Pod        string
+}
+
+func (p PidInfo) PodSuffix() string {
+	if p.Pod == "" {
+		return ""
+	}
+	return " [pod: " + p.Pod + "]"
 }
 
 func AnalyzeProcessActivity(events []*events.Event) []PidInfo {
 	pidMap := make(map[uint32]int)
 	totalEvents := len(events)
 
+	pidPod := make(map[uint32]string)
+
 	for _, e := range events {
+		if e == nil {
+			continue
+		}
 		pidMap[e.PID]++
+		if e.K8s != nil && e.K8s.PodName != "" {
+			if _, ok := pidPod[e.PID]; !ok {
+				pidPod[e.PID] = e.K8s.PodName
+			}
+		}
 	}
 
 	type latestName struct {
@@ -64,6 +82,7 @@ func AnalyzeProcessActivity(events []*events.Event) []PidInfo {
 			Name:       name,
 			Count:      count,
 			Percentage: percentage,
+			Pod:        pidPod[pid],
 		})
 	}
 

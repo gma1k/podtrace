@@ -121,8 +121,9 @@ func Run(ctx context.Context, opts RunOptions) error {
 			cmu.Unlock()
 			return err
 		}
+		label := nodePodLabel(podRefs)
 		g.Go(func() error {
-			return runOneNode(gctx, opts, podSpec, multiNode, &wmu)
+			return runOneNode(gctx, opts, podSpec, multiNode, &wmu, label)
 		})
 		return nil
 	}
@@ -169,7 +170,31 @@ func Run(ctx context.Context, opts RunOptions) error {
 	return g.Wait()
 }
 
-func runOneNode(ctx context.Context, opts RunOptions, podSpec *corev1.Pod, multiNode bool, wmu *sync.Mutex) (retErr error) {
+func nodePodLabel(podRefs []PodRef) string {
+	seen := map[string]struct{}{}
+	var names []string
+	for _, p := range podRefs {
+		if p.Name == "" {
+			continue
+		}
+		if _, ok := seen[p.Name]; ok {
+			continue
+		}
+		seen[p.Name] = struct{}{}
+		names = append(names, p.Name)
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	label := strings.Join(names, ",")
+	const maxLen = 60
+	if len(label) > maxLen {
+		label = label[:maxLen-1] + "…"
+	}
+	return label
+}
+
+func runOneNode(ctx context.Context, opts RunOptions, podSpec *corev1.Pod, multiNode bool, wmu *sync.Mutex, nodeLabel string) (retErr error) {
 	created, err := opts.Clientset.CoreV1().Pods(podSpec.Namespace).Create(ctx, podSpec, metav1.CreateOptions{})
 	if err != nil {
 		if apierrors.IsForbidden(err) && strings.Contains(err.Error(), "violates PodSecurity") {
@@ -216,8 +241,13 @@ func runOneNode(ctx context.Context, opts RunOptions, podSpec *corev1.Pod, multi
 
 	streams := opts.Streams
 	if multiNode {
-		streams.Out = newPrefixedWriter(streams.Out, "["+podSpec.Spec.NodeSelector["kubernetes.io/hostname"]+"] ", wmu)
-		streams.ErrOut = newPrefixedWriter(streams.ErrOut, "["+podSpec.Spec.NodeSelector["kubernetes.io/hostname"]+"] ", wmu)
+		host := podSpec.Spec.NodeSelector["kubernetes.io/hostname"]
+		tag := host
+		if nodeLabel != "" {
+			tag = host + ": " + nodeLabel
+		}
+		streams.Out = newPrefixedWriter(streams.Out, "["+tag+"] ", wmu)
+		streams.ErrOut = newPrefixedWriter(streams.ErrOut, "["+tag+"] ", wmu)
 		streams.In = nil
 	}
 

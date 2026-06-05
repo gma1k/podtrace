@@ -72,6 +72,7 @@ type Tracer struct {
 	probeGroups   map[probes.ProbeGroup][]link.Link
 
 	intentionallyDisabled    map[probes.ProbeGroup]struct{}
+	detachWarned             map[probes.ProbeGroup]struct{}
 	reader                   *ringbuf.Reader
 	filter                   *filter.CgroupFilter
 	containerID              string
@@ -1034,12 +1035,57 @@ func (t *Tracer) SetEnabledCategories(categories []string) error {
 			t.probeGroupsMu.Lock()
 			_, disabled := t.intentionallyDisabled[g]
 			t.probeGroupsMu.Unlock()
-			if disabled {
-				logger.Warn("SetEnabledCategories: category needs a group that is currently detached; restart agent to re-attach",
-					zap.String("category", c), zap.String("group", string(g)))
+			if !disabled {
+				continue
+			}
+			if err := t.EnableProbeGroup(g); err != nil {
+				t.probeGroupsMu.Lock()
+				if t.detachWarned == nil {
+					t.detachWarned = map[probes.ProbeGroup]struct{}{}
+				}
+				_, warned := t.detachWarned[g]
+				if !warned {
+					t.detachWarned[g] = struct{}{}
+				}
+				t.probeGroupsMu.Unlock()
+				if !warned {
+					logger.Warn("SetEnabledCategories: category needs a detached probe group that could not be re-attached (events in this group are not captured until the agent restarts; common cause: tracefs/debugfs not mounted into the agent)",
+						zap.String("category", c), zap.String("group", string(g)), zap.Error(err))
+				}
 			}
 		}
 	}
+	return nil
+}
+
+// EnableProbeGroup re-attaches a probe group that was previously disabled
+// by SetEnabledCategories.
+func (t *Tracer) EnableProbeGroup(g probes.ProbeGroup) error {
+	t.probeGroupsMu.Lock()
+	if existing, ok := t.probeGroups[g]; ok && len(existing) > 0 {
+		t.probeGroupsMu.Unlock()
+		return nil
+	}
+	coll := t.collection
+	t.probeGroupsMu.Unlock()
+
+	if coll == nil {
+		return fmt.Errorf("no eBPF collection available to re-attach group %q", g)
+	}
+
+	newLinks, err := probes.AttachProbeGroup(coll, g)
+	if err != nil {
+		return err
+	}
+
+	t.probeGroupsMu.Lock()
+	t.probeGroups[g] = append(t.probeGroups[g], newLinks...)
+	t.links = append(t.links, newLinks...)
+	delete(t.intentionallyDisabled, g)
+	delete(t.detachWarned, g)
+	t.probeGroupsMu.Unlock()
+
+	logger.Info("Probe group re-attached", zap.String("group", string(g)), zap.Int("links", len(newLinks)))
 	return nil
 }
 

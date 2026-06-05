@@ -29,6 +29,7 @@ import (
 type PodTraceNodeStatusApplyConfiguration struct {
 	Node          *string                       `json:"node,omitempty"`
 	Ready         *bool                         `json:"ready,omitempty"`
+	MatchedPods   *int32                        `json:"matchedPods,omitempty"`
 	ActiveCgroups *int32                        `json:"activeCgroups,omitempty"`
 	EventsTotal   *int64                        `json:"eventsTotal,omitempty"`
 	DroppedEvents *int64                        `json:"droppedEvents,omitempty"`
@@ -57,6 +58,14 @@ func (b *PodTraceNodeStatusApplyConfiguration) WithNode(value string) *PodTraceN
 // If called multiple times, the Ready field is set to the value of the last call.
 func (b *PodTraceNodeStatusApplyConfiguration) WithReady(value bool) *PodTraceNodeStatusApplyConfiguration {
 	b.Ready = &value
+	return b
+}
+
+// WithMatchedPods sets the MatchedPods field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the MatchedPods field is set to the value of the last call.
+func (b *PodTraceNodeStatusApplyConfiguration) WithMatchedPods(value int32) *PodTraceNodeStatusApplyConfiguration {
+	b.MatchedPods = &value
 	return b
 }
 

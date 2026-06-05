@@ -193,8 +193,8 @@ func TestSDKEventExporter_SplunkAppliesTokenHeader(t *testing.T) {
 // the agent's OTLP-only design.
 func TestSDKEventExporter_GoldenOTLPWire(t *testing.T) {
 	cases := []struct {
-		name          string
-		build         func(CRKey, *BundlePayload) (interface {
+		name  string
+		build func(CRKey, *BundlePayload) (interface {
 			Export(context.Context, []*events.Event) error
 			Close(context.Context) error
 			Name() string
@@ -659,5 +659,51 @@ func TestSDKEventExporter_NoThresholdsNoMetricChurn(t *testing.T) {
 		if got != 0 {
 			t.Errorf("unexpected %s trip when no thresholds set: %v", kind, got)
 		}
+	}
+}
+
+// fakeSpanExporter lets us drive the deliveryObservingExporter's error path.
+type fakeSpanExporter struct{ err error }
+
+func (f *fakeSpanExporter) ExportSpans(_ context.Context, _ []sdktrace.ReadOnlySpan) error {
+	return f.err
+}
+func (f *fakeSpanExporter) Shutdown(_ context.Context) error { return nil }
+
+func TestDeliveryObservingExporter_RecordsFailures(t *testing.T) {
+	m := NewMetrics()
+	cr := CRKey{Namespace: "ns", Name: "cr"}
+
+	// Failing inner exporter: ExportSpans must propagate the error AND the
+	// dropped span count must land on export_delivery_dropped_total.
+	failing := &deliveryObservingExporter{
+		inner:   &fakeSpanExporter{err: context.DeadlineExceeded},
+		cr:      cr,
+		name:    "otlp",
+		metrics: m,
+	}
+	spans := make([]sdktrace.ReadOnlySpan, 3)
+	if err := failing.ExportSpans(context.Background(), spans); err == nil {
+		t.Fatal("expected the inner export error to propagate")
+	}
+	got := counterValue(t, m.ExportDeliveryDropped, prometheus.Labels{
+		"cr_namespace": cr.Namespace,
+		"cr_name":      cr.Name,
+		"reason":       ClassifyExporterError(context.DeadlineExceeded),
+	})
+	if got != 3 {
+		t.Fatalf("export_delivery_dropped_total = %v, want 3", got)
+	}
+
+	// Success path: no error, nothing added.
+	ok := &deliveryObservingExporter{inner: &fakeSpanExporter{err: nil}, cr: cr, name: "otlp", metrics: m}
+	if err := ok.ExportSpans(context.Background(), make([]sdktrace.ReadOnlySpan, 5)); err != nil {
+		t.Fatalf("unexpected error on success path: %v", err)
+	}
+	if v := counterValue(t, m.ExportDeliveryDropped, prometheus.Labels{
+		"cr_namespace": cr.Namespace, "cr_name": cr.Name,
+		"reason": ClassifyExporterError(context.DeadlineExceeded),
+	}); v != 3 {
+		t.Fatalf("counter changed on success path: got %v want 3", v)
 	}
 }

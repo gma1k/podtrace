@@ -35,12 +35,13 @@ var spawnControlFlags = map[string]struct{}{
 	"pods":             {},
 	"pod-selector":     {},
 	"all-in-namespace": {},
+	"app":              {},
+	"label":            {},
+	"all-namespaces":   {},
 }
 
 // maybeSpawnOnNode runs the spawn flow when appropriate. The boolean return
-// reports whether the spawn flow handled the invocation (true = caller should
-// return without falling through to the local eBPF path). When err is non-nil
-// the caller propagates it; the exit code is encoded via nodespawn.ExitError.
+// reports whether the spawn flow handled the invocation.
 func maybeSpawnOnNode(ctx context.Context, cmd *cobra.Command, resolver pkgkube.PodResolverInterface, selection pkgkube.TargetSelection) (handled bool, err error) {
 	if os.Getenv(nodespawn.EnvNodeLocalSentinel) == "1" {
 		return false, nil
