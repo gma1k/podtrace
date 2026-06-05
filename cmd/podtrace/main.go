@@ -496,7 +496,6 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	}
 
 	var enricher *kubernetes.ContextEnricher
-	var eventsCorrelator *kubernetes.EventsCorrelator
 	enrichmentEnabled := os.Getenv("PODTRACE_K8S_ENRICHMENT_ENABLED") != "false"
 	if enrichmentEnabled {
 		if clientsetProvider, ok := resolver.(kubernetes.ClientsetProvider); ok {
@@ -505,12 +504,6 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 				enricher = kubernetes.NewContextEnricher(clientset, podInfo)
 				enricher.Start(ctx)
 				defer enricher.Stop()
-				eventsCorrelator = kubernetes.NewEventsCorrelator(clientset, podInfo.PodName, podInfo.Namespace)
-				if err := eventsCorrelator.Start(ctx); err != nil {
-					logger.Warn("Failed to start Kubernetes events correlator", zap.Error(err))
-				} else {
-					defer eventsCorrelator.Stop()
-				}
 			}
 		}
 	}
@@ -625,10 +618,10 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	}
 
 	if diagnoseDuration != "" {
-		return runDiagnoseModeWithSource(ctx, filteredChan, diagnoseDuration, podInfo, enricher, eventsCorrelator, tracingManager, enableTracing, sourceIndex.Resolve, profilingHandler)
+		return runDiagnoseModeWithSource(ctx, filteredChan, diagnoseDuration, podInfo, enricher, nil, tracingManager, enableTracing, sourceIndex.Resolve, profilingHandler)
 	}
 
-	return runNormalModeWithSource(ctx, filteredChan, podInfo, enricher, eventsCorrelator, tracingManager, enableTracing, sourceIndex.Resolve, profilingHandler)
+	return runNormalModeWithSource(ctx, filteredChan, podInfo, enricher, nil, tracingManager, enableTracing, sourceIndex.Resolve, profilingHandler)
 }
 
 func runNormalMode(ctx context.Context, eventChan <-chan *events.Event, podInfo *kubernetes.PodInfo, enricher *kubernetes.ContextEnricher, eventsCorrelator *kubernetes.EventsCorrelator, tracingManager *tracing.Manager, enableTracing bool) error {
