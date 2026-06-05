@@ -125,7 +125,7 @@ func main() {
 	rootCmd.AddCommand(newScheduleCmd())
 	rootCmd.AddCommand(newWatchCmd())
 
-	rootCmd.Flags().StringVarP(&namespace, "namespace", "n", config.DefaultNamespace, "Kubernetes namespace")
+	rootCmd.Flags().StringVarP(&namespace, "namespace", "n", config.DefaultNamespace, "Kubernetes namespace (defaults to the current kubeconfig context's namespace)")
 	rootCmd.Flags().StringVar(&namespacesCSV, "namespaces", "", "Comma-separated namespaces for multi-pod tracing (e.g., default,prod)")
 	rootCmd.Flags().StringVar(&podsCSV, "pods", "", "Comma-separated pod references to trace (pod or namespace/pod)")
 	rootCmd.Flags().StringVar(&podSelector, "pod-selector", "", "Kubernetes label selector for target pods (e.g., app=api,team=payments)")
@@ -179,6 +179,12 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	if showVersion {
 		fmt.Println(config.GetVersion())
 		return nil
+	}
+
+	if !cmd.Flags().Changed("namespace") {
+		if ctxNamespace, ok := kubernetes.NamespaceFromContext(); ok {
+			namespace = ctxNamespace
+		}
 	}
 
 	if watchAppName != "" && watchLabel != "" {

@@ -48,36 +48,51 @@ func (r *PodResolver) GetRestConfig() *rest.Config {
 	return r.restConfig
 }
 
+func kubeconfigLoadingRules() *clientcmd.ClientConfigLoadingRules {
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+
+	if kubeconfig := os.Getenv("KUBECONFIG"); kubeconfig != "" {
+		loadingRules.ExplicitPath = kubeconfig
+		return loadingRules
+	}
+
+	sudoUser := os.Getenv("SUDO_USER")
+	if sudoUser != "" {
+		homePath := filepath.Join("/home", sudoUser, ".kube", "config")
+		if _, err := hostfs.Stat(homePath); err == nil {
+			loadingRules.ExplicitPath = homePath
+		}
+	}
+	if loadingRules.ExplicitPath == "" {
+		if home := os.Getenv("HOME"); home != "" && home != "/root" {
+			homePath := filepath.Join(home, ".kube", "config")
+			if _, err := hostfs.Stat(homePath); err == nil {
+				loadingRules.ExplicitPath = homePath
+			}
+		}
+	}
+
+	return loadingRules
+}
+
+func NamespaceFromContext() (string, bool) {
+	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		kubeconfigLoadingRules(), &clientcmd.ConfigOverrides{})
+	ns, _, err := clientConfig.Namespace()
+	if err != nil || ns == "" {
+		return "", false
+	}
+	return ns, true
+}
+
 func NewPodResolver() (*PodResolver, error) {
 	var config *rest.Config
 	var err error
 
 	config, err = rest.InClusterConfig()
 	if err != nil {
-		loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
-
-		if kubeconfig := os.Getenv("KUBECONFIG"); kubeconfig != "" {
-			loadingRules.ExplicitPath = kubeconfig
-		} else {
-			sudoUser := os.Getenv("SUDO_USER")
-			if sudoUser != "" {
-				homePath := filepath.Join("/home", sudoUser, ".kube", "config")
-				if _, err := hostfs.Stat(homePath); err == nil {
-					loadingRules.ExplicitPath = homePath
-				}
-			}
-			if loadingRules.ExplicitPath == "" {
-				if home := os.Getenv("HOME"); home != "" && home != "/root" {
-					homePath := filepath.Join(home, ".kube", "config")
-					if _, err := hostfs.Stat(homePath); err == nil {
-						loadingRules.ExplicitPath = homePath
-					}
-				}
-			}
-		}
-
-		configOverrides := &clientcmd.ConfigOverrides{}
-		kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
+		kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+			kubeconfigLoadingRules(), &clientcmd.ConfigOverrides{})
 
 		config, err = kubeConfig.ClientConfig()
 		if err != nil {
