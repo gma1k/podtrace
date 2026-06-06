@@ -9,6 +9,13 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.12.7](https://github.com/gma1k/podtrace/compare/v0.12.6...v0.12.7) (2026-06-06)
+
+
+### Bug Fixes
+
+* bucket timeline by event clock and clarify DNS fallback log ([#192](https://github.com/gma1k/podtrace/issues/192)) ([b96b0bb](https://github.com/gma1k/podtrace/commit/b96b0bbf66ec187451944ce1422661f77ed8b6ce))
+
 ## [0.12.6](https://github.com/gma1k/podtrace/compare/v0.12.5...v0.12.6) (2026-06-06)
 
 
