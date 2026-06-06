@@ -9,6 +9,19 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.12.6](https://github.com/gma1k/podtrace/compare/v0.12.5...v0.12.6) (2026-06-06)
+
+
+### Features
+
+* add libc-independent DNS packet capture with v4/v6 parity ([#191](https://github.com/gma1k/podtrace/issues/191)) ([0846b77](https://github.com/gma1k/podtrace/commit/0846b771392ae230c60b1aa77f69d6c347d87915))
+
+
+### Bug Fixes
+
+* quieter startup warnings and workstation-side event correlation ([#190](https://github.com/gma1k/podtrace/issues/190)) ([8c23bd8](https://github.com/gma1k/podtrace/commit/8c23bd809fbe9ab21f678e009b99d822f20f81b9))
+* timeline bucket overlap ([#186](https://github.com/gma1k/podtrace/issues/186)) and OLM workflow-scope push ([#188](https://github.com/gma1k/podtrace/issues/188)) ([50bcf50](https://github.com/gma1k/podtrace/commit/50bcf50126849a3fa3036360e4e91c7b54230287))
+
 ## [0.12.5](https://github.com/gma1k/podtrace/compare/v0.12.4...v0.12.5) (2026-06-05)
 
 
