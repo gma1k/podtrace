@@ -1,0 +1,15 @@
+apiVersion: podtrace.io/v1alpha1
+kind: PodTraceSession
+metadata:
+  name: dns-session
+spec:
+  selector:
+    matchLabels:
+      app: dns-target
+  duration: 20s
+  filters: [dns]
+  exporterRef:
+    name: dns-otlp
+  reportRef:
+    configMap:
+      name: dns-report

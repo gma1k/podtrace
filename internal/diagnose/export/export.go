@@ -58,10 +58,15 @@ func ExportJSON(d Diagnostician) ExportData {
 		},
 	}
 
+	dnsQueries := d.FilterEvents(events.EventDNSQuery)
 	dnsEvents := d.FilterEvents(events.EventDNS)
-	if len(dnsEvents) > 0 {
-		avgLatency, maxLatency, errors, p50, p95, p99, topTargets := analyzer.AnalyzeDNS(dnsEvents)
-		data.DNS = buildDNSExportData(dnsEvents, duration, avgLatency, maxLatency, errors, p50, p95, p99, topTargets)
+	if len(dnsQueries) > 0 || len(dnsEvents) > 0 {
+		avgLatency, maxLatency, errors, p50, p95, p99, topTargets := analyzer.AnalyzeDNS(dnsQueries, dnsEvents)
+		countEvents := dnsQueries
+		if len(countEvents) < len(dnsEvents) {
+			countEvents = dnsEvents
+		}
+		data.DNS = buildDNSExportData(countEvents, duration, avgLatency, maxLatency, errors, p50, p95, p99, topTargets)
 	}
 
 	tcpSendEvents := d.FilterEvents(events.EventTCPSend)
@@ -111,14 +116,14 @@ func ExportJSON(d Diagnostician) ExportData {
 
 func buildDNSExportData(dnsEvents []*events.Event, duration time.Duration, avgLatency, maxLatency float64, errors int, p50, p95, p99 float64, topTargets []analyzer.TargetCount) map[string]interface{} {
 	return map[string]interface{}{
-		"total_lookups": len(dnsEvents),
+		"total_lookups":   len(dnsEvents),
 		"rate_per_second": calculateRate(len(dnsEvents), duration),
-		"avg_latency_ms": avgLatency,
-		"max_latency_ms": maxLatency,
-		"p50_ms":         p50,
-		"p95_ms":         p95,
-		"p99_ms":         p99,
-		"errors":         errors,
+		"avg_latency_ms":  avgLatency,
+		"max_latency_ms":  maxLatency,
+		"p50_ms":          p50,
+		"p95_ms":          p95,
+		"p99_ms":          p99,
+		"errors":          errors,
 		"error_rate": func() float64 {
 			if len(dnsEvents) > 0 {
 				return float64(errors) * float64(config.Percent100) / float64(len(dnsEvents))
@@ -154,16 +159,16 @@ func buildTCPExportData(tcpSendEvents, tcpRecvEvents, allTCP []*events.Event, du
 func buildConnectionExportData(connectEvents []*events.Event, duration time.Duration, avgLatency, maxLatency float64, errors int, p50, p95, p99 float64, topTargets []analyzer.TargetCount, errorBreakdown map[int32]int) map[string]interface{} {
 	return map[string]interface{}{
 		"total_connections": len(connectEvents),
-		"rate_per_second":    calculateRate(len(connectEvents), duration),
-		"avg_latency_ms":     avgLatency,
-		"max_latency_ms":     maxLatency,
-		"p50_ms":             p50,
-		"p95_ms":             p95,
-		"p99_ms":             p99,
-		"failed":             errors,
-		"failure_rate":       float64(errors) * float64(config.Percent100) / float64(len(connectEvents)),
-		"error_breakdown":    errorBreakdown,
-		"top_targets":        topTargets,
+		"rate_per_second":   calculateRate(len(connectEvents), duration),
+		"avg_latency_ms":    avgLatency,
+		"max_latency_ms":    maxLatency,
+		"p50_ms":            p50,
+		"p95_ms":            p95,
+		"p99_ms":            p99,
+		"failed":            errors,
+		"failure_rate":      float64(errors) * float64(config.Percent100) / float64(len(connectEvents)),
+		"error_breakdown":   errorBreakdown,
+		"top_targets":       topTargets,
 	}
 }
 
@@ -224,4 +229,3 @@ func ExportCSV(d Diagnostician, w io.Writer) error {
 
 	return nil
 }
-

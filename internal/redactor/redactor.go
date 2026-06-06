@@ -1,6 +1,7 @@
 package redactor
 
 import (
+	"os"
 	"regexp"
 
 	"github.com/podtrace/podtrace/internal/events"
@@ -15,12 +16,16 @@ type Rule struct {
 
 // Redactor applies a list of Rules to event Target and Details fields in-place.
 type Redactor struct {
-	rules []Rule
+	rules          []Rule
+	redactDNSNames bool
 }
 
 // Default returns a Redactor with built-in rules for common PII patterns.
 func Default() *Redactor {
-	return &Redactor{rules: defaultRules()}
+	return &Redactor{
+		rules:          defaultRules(),
+		redactDNSNames: os.Getenv("PODTRACE_REDACT_DNS_NAMES") == "true",
+	}
 }
 
 // New creates a Redactor with the provided rules.
@@ -32,6 +37,9 @@ func New(rules []Rule) *Redactor {
 func (r *Redactor) Redact(e *events.Event) {
 	if e == nil {
 		return
+	}
+	if r.redactDNSNames && e.Type == events.EventDNS {
+		e.Target = "[redacted]"
 	}
 	for _, rule := range r.rules {
 		e.Target = rule.Pattern.ReplaceAllString(e.Target, rule.Replace)

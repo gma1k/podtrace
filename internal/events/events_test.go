@@ -132,6 +132,50 @@ func TestEvent_FormatMessage_DNS(t *testing.T) {
 	}
 }
 
+func TestEvent_FormatMessage_DNS_Rich(t *testing.T) {
+	tests := []struct {
+		name     string
+		event    *Event
+		expected string
+	}{
+		{
+			"A with resolved IP",
+			&Event{Type: EventDNS, TCPState: 1, Target: "example.com", Details: "93.184.216.34", LatencyNS: 2410000},
+			"[DNS] A example.com -> 93.184.216.34 (2.41ms)",
+		},
+		{
+			"AAAA NXDOMAIN",
+			&Event{Type: EventDNS, TCPState: 28, Target: "nope.invalid", Error: 3, LatencyNS: 1100000},
+			"[DNS] AAAA nope.invalid failed: NXDOMAIN (1.10ms)",
+		},
+		{
+			"timeout",
+			&Event{Type: EventDNS, TCPState: 1, Target: "slow.example", Details: "timeout", LatencyNS: 5000000000},
+			"[DNS] A slow.example timed out (no response after 5000ms)",
+		},
+		{
+			"DoT",
+			&Event{Type: EventDNS, Target: "10.0.0.10:853", Details: "encrypted (DoT)"},
+			"[DNS] encrypted query (DoT) to 10.0.0.10:853",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.event.FormatMessage(); got != tt.expected {
+				t.Errorf("FormatMessage() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestEvent_FormatMessage_Connect_DNSCorrelation(t *testing.T) {
+	e := &Event{Type: EventConnect, Target: "93.184.216.34:443", Details: "example.com", LatencyNS: 2000000}
+	got := e.FormatRealtimeMessage()
+	if !strings.Contains(got, "93.184.216.34:443 (example.com)") {
+		t.Errorf("connect message %q missing resolved-name correlation", got)
+	}
+}
+
 func TestEvent_FormatMessage_Connect(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -2061,5 +2105,44 @@ func TestFormatMessage_KafkaFetch_Error(t *testing.T) {
 	msg := e.FormatMessage()
 	if !strings.Contains(msg, "error") {
 		t.Errorf("expected 'error' in kafka fetch error message, got %q", msg)
+	}
+}
+
+func TestEvent_FormatMessage_DNSQuery(t *testing.T) {
+	e := &Event{Type: EventDNSQuery, TCPState: 1, Target: "example.com", DNSServerIP: 0x0a00600a}
+	got := e.FormatMessage()
+	want := "[DNS] query A example.com via 10.96.0.10"
+	if got != want {
+		t.Errorf("FormatMessage() = %q, want %q", got, want)
+	}
+}
+
+func TestEvent_FormatMessage_DNS_IPv6Server(t *testing.T) {
+	// 2606:4700:4700::1111 (Cloudflare); v6 server is preferred over v4.
+	e := &Event{
+		Type:        EventDNSQuery,
+		TCPState:    28, // AAAA
+		Target:      "example.com",
+		DNSServerIP: 0x0a00600a, // present but should be shadowed by v6
+		DNSServerIP6: [16]byte{
+			0x26, 0x06, 0x47, 0x00, 0x47, 0x00, 0, 0,
+			0, 0, 0, 0, 0, 0, 0x11, 0x11,
+		},
+	}
+	got := e.FormatMessage()
+	want := "[DNS] query AAAA example.com via 2606:4700:4700:0000:0000:0000:0000:1111"
+	if got != want {
+		t.Errorf("FormatMessage() = %q, want %q", got, want)
+	}
+}
+
+func TestEvent_DNSServerAddr_PrefersV6(t *testing.T) {
+	v4Only := &Event{DNSServerIP: 0x0a00600a}
+	if got := v4Only.DNSServerAddr(); got != "10.96.0.10" {
+		t.Errorf("v4 DNSServerAddr = %q, want 10.96.0.10", got)
+	}
+	none := &Event{}
+	if got := none.DNSServerAddr(); got != "" {
+		t.Errorf("empty DNSServerAddr = %q, want \"\"", got)
 	}
 }

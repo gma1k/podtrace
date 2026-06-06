@@ -192,6 +192,32 @@ The `Bytes` field is overloaded depending on event type:
 `Error` is the negated errno value reported by the kernel function. For
 example, `EAGAIN` (errno 11) appears as `-11`. `0` means success.
 
+### DNS event field encoding
+
+`EVENT_DNS` (response) and `EVENT_DNS_QUERY` (egress query) events produced by
+the packet-based capture (`bpf/dns.c`, `cgroup_skb`) mostly reuse existing
+fields, plus the dedicated DNS fields added in V5/V6:
+
+| Field | DNS meaning |
+|-------|-------------|
+| `Target` | Query name (QNAME) |
+| `TCPState` | Query type (QTYPE): 1=A, 28=AAAA, 5=CNAME, 33=SRV, 12=PTR, 16=TXT, … |
+| `Error` | Response code (RCODE): 0=NOERROR, 2=SERVFAIL, 3=NXDOMAIN, 5=REFUSED |
+| `LatencyNS` | Resolution latency (query→response) |
+| `Bytes` | Answer record count |
+| `Details` | First resolved address (A or AAAA); or `timeout`; or `encrypted (DoT)`/`encrypted (DoH)` |
+| `DNSServerIP` | Upstream resolver IPv4 (V5; 0 when the server is IPv6 or unknown) |
+| `DNSTransport` | 0=UDP, 1=TCP (V5) |
+| `DNSServerIP6` | Upstream resolver IPv6 (V6; all-zero when the server is IPv4). Preferred over `DNSServerIP` when set |
+
+IPv4 and IPv6 are at parity: AAAA answers are resolved and correlated, the
+upstream-server field is captured for both families, and DoT/DoH detection
+covers known IPv6 resolver prefixes.
+
+For `EVENT_CONNECT`, `Details` carries the DNS name the destination IP was
+resolved from (correlation, IPv4 and IPv6), rendered as `ip:port (name)`. See
+[dns-tracing.md](dns-tracing.md).
+
 ---
 
 ## Version History
@@ -202,6 +228,8 @@ example, `EAGAIN` (errno 11) appears as `-11`. `0` means success.
 | V2      | `CgroupID`  | `bpf_get_current_cgroup_id()` always available |
 | V3      | `Comm[16]`  | `bpf_get_current_comm()` always available |
 | V4      | `NetNsID`   | Requires `PODTRACE_VMLINUX_FROM_BTF` for BTF CO-RE |
+| V5      | `DNSServerIP`, `DNSTransport` | Packet DNS: upstream IPv4 resolver + UDP/TCP |
+| V6      | `DNSServerIP6` | Packet DNS: upstream IPv6 resolver (IPv4/IPv6 parity) |
 
 ---
 

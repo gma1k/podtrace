@@ -126,6 +126,13 @@ var (
 		},
 	)
 
+	dnsDropsCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "podtrace_dns_drops_total",
+			Help: "Total DNS records dropped.",
+		},
+	)
+
 	processCacheHitsCounter = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "podtrace_process_cache_hits_total",
@@ -386,6 +393,7 @@ func init() {
 	prometheus.MustRegister(networkBytesCounter)
 	prometheus.MustRegister(filesystemBytesCounter)
 	prometheus.MustRegister(ringBufferDropsCounter)
+	prometheus.MustRegister(dnsDropsCounter)
 	prometheus.MustRegister(processCacheHitsCounter)
 	prometheus.MustRegister(processCacheMissesCounter)
 	prometheus.MustRegister(pidCacheHitsCounter)
@@ -650,6 +658,12 @@ func ExportFilesystemBandwidthMetricWithContext(e *events.Event, operation, name
 
 func RecordRingBufferDrop() {
 	ringBufferDropsCounter.Inc()
+}
+
+func AddDNSDrops(delta uint64) {
+	if delta > 0 {
+		dnsDropsCounter.Add(float64(delta))
+	}
 }
 
 func RecordProcessCacheHit() {

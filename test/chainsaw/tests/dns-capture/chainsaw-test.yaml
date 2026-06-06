@@ -1,0 +1,40 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: dns-capture
+spec:
+  description: |
+    Verifies libc-independent DNS capture end-to-end through the operator path:
+      1. Apply ExporterConfig + a busybox (musl) Deployment doing nslookups.
+      2. Apply a PodTraceSession with filters=[dns].
+      3. Session reaches Completed with summary.totalEvents > 0 (DNS events came
+         from the cgroup_skb packet path — busybox never calls glibc getaddrinfo).
+      4. The report ConfigMap contains DNS statistics.
+  timeouts:
+    apply: 30s
+    assert: 120s
+    delete: 60s
+    cleanup: 120s
+  steps:
+    - name: setup-workload
+      try:
+        - apply:
+            file: ./resources.yaml
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: dns-chatty
+              status:
+                readyReplicas: 1
+    - name: apply-session
+      try:
+        - apply:
+            file: ./session.yaml
+        - assert:
+            file: ./assert-completed.yaml
+    - name: report-artifact
+      try:
+        - assert:
+            file: ./assert-report.yaml

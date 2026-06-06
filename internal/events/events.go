@@ -64,13 +64,17 @@ const (
 	EventGRPCMethod   // 35: gRPC method call (BTF-only h2c)
 	EventKafkaProduce // 36: Kafka produce (librdkafka)
 	EventKafkaFetch   // 37: Kafka consumer_poll result (librdkafka)
+	EventDNSQuery     // 38: DNS query seen on egress
 )
 
 type Event struct {
 	Timestamp    uint64
 	PID          uint32
 	CgroupID     uint64
-	NetNsID      uint32 // V4: network namespace inum (0 if kernel BTF unavailable)
+	NetNsID      uint32   // V4: network namespace inum (0 if kernel BTF unavailable)
+	DNSServerIP  uint32   // V5: upstream resolver IPv4 for DNS events (0 otherwise)
+	DNSTransport uint8    // V5: 0=UDP, 1=TCP for DNS events
+	DNSServerIP6 [16]byte // V6: upstream resolver IPv6 for DNS events
 	ProcessName  string
 	Type         EventType
 	LatencyNS    uint64
@@ -100,7 +104,7 @@ func (e *Event) TimestampTime() time.Time {
 
 func (e *Event) TypeString() string {
 	switch e.Type {
-	case EventDNS:
+	case EventDNS, EventDNSQuery:
 		return "DNS"
 	case EventConnect:
 		return "NET"
@@ -145,6 +149,90 @@ func (e *Event) TypeString() string {
 	}
 }
 
+// dnsQTypeName maps a DNS query type to its mnemonic (carried in TCPState for
+// EVENT_DNS).
+func dnsQTypeName(t uint32) string {
+	switch t {
+	case 1:
+		return "A"
+	case 28:
+		return "AAAA"
+	case 5:
+		return "CNAME"
+	case 33:
+		return "SRV"
+	case 12:
+		return "PTR"
+	case 16:
+		return "TXT"
+	case 15:
+		return "MX"
+	case 2:
+		return "NS"
+	case 6:
+		return "SOA"
+	case 0:
+		return "lookup"
+	default:
+		return fmt.Sprintf("TYPE%d", t)
+	}
+}
+
+// dnsServerString formats the upstream resolver IPv4.
+func dnsServerString(v uint32) string {
+	if v == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d.%d.%d.%d", v&0xff, (v>>8)&0xff, (v>>16)&0xff, (v>>24)&0xff)
+}
+
+// DNSServerAddr returns the upstream resolver address for a DNS event,
+// preferring the IPv6 server when present, else the IPv4 one.
+func (e *Event) DNSServerAddr() string {
+	return dnsServerStr(e)
+}
+
+// dnsServerStr returns the upstream resolver address for a DNS event, preferring
+// the IPv6 server when present, else the IPv4 one. Returns "" when unknown.
+func dnsServerStr(e *Event) string {
+	for _, b := range e.DNSServerIP6 {
+		if b != 0 {
+			const hex = "0123456789abcdef"
+			out := make([]byte, 0, 39)
+			for i := 0; i < 16; i += 2 {
+				if i > 0 {
+					out = append(out, ':')
+				}
+				out = append(out, hex[e.DNSServerIP6[i]>>4], hex[e.DNSServerIP6[i]&0xf],
+					hex[e.DNSServerIP6[i+1]>>4], hex[e.DNSServerIP6[i+1]&0xf])
+			}
+			return string(out)
+		}
+	}
+	return dnsServerString(e.DNSServerIP)
+}
+
+// dnsRCodeName maps a DNS response code (carried in Error for EVENT_DNS) to its
+// mnemonic.
+func dnsRCodeName(rcode int32) string {
+	switch rcode {
+	case 0:
+		return "NOERROR"
+	case 1:
+		return "FORMERR"
+	case 2:
+		return "SERVFAIL"
+	case 3:
+		return "NXDOMAIN"
+	case 4:
+		return "NOTIMP"
+	case 5:
+		return "REFUSED"
+	default:
+		return fmt.Sprintf("rcode %d", rcode)
+	}
+}
+
 // formatEventMessage is the shared implementation for FormatMessage and
 // FormatRealtimeMessage. The realtime parameter controls threshold selection
 // and a few minor wording differences.
@@ -152,32 +240,67 @@ func formatEventMessage(e *Event, realtime bool) string {
 	latencyMs := float64(e.LatencyNS) / float64(config.NSPerMS)
 	maxTargetLen := config.MaxTargetStringLength
 
-	// Choose the right TCP threshold based on mode.
 	tcpThresholdMS := config.TCPLatencySpikeThresholdMS
 	if realtime {
 		tcpThresholdMS = config.TCPRealtimeThresholdMS
 	}
 
 	switch e.Type {
-	case EventDNS:
-		if e.Error != 0 {
-			return fmt.Sprintf("[DNS] lookup %s failed: error %d", sanitizeString(truncateString(e.Target, maxTargetLen)), e.Error)
+	case EventDNSQuery:
+		name := sanitizeString(truncateString(e.Target, maxTargetLen))
+		suffix := ""
+		if s := dnsServerStr(e); s != "" {
+			suffix = " via " + s
 		}
-		return fmt.Sprintf("[DNS] lookup %s took %.2fms", sanitizeString(truncateString(e.Target, maxTargetLen)), latencyMs)
+		if e.DNSTransport == 1 {
+			suffix += " (tcp)"
+		}
+		return fmt.Sprintf("[DNS] query %s %s%s", dnsQTypeName(e.TCPState), name, suffix)
+
+	case EventDNS:
+		name := sanitizeString(truncateString(e.Target, maxTargetLen))
+		qtype := dnsQTypeName(e.TCPState)
+		if e.Details == "encrypted (DoT)" {
+			return fmt.Sprintf("[DNS] encrypted query (DoT) to %s", name)
+		}
+		if e.Details == "encrypted (DoH)" {
+			return fmt.Sprintf("[DNS] encrypted query (DoH) to %s", name)
+		}
+		suffix := ""
+		if s := dnsServerStr(e); s != "" {
+			suffix = " via " + s
+		}
+		if e.DNSTransport == 1 {
+			suffix += " (tcp)"
+		}
+		if e.Details == "timeout" {
+			return fmt.Sprintf("[DNS] %s %s timed out (no response after %.0fms)%s", qtype, name, latencyMs, suffix)
+		}
+		if e.Error != 0 {
+			return fmt.Sprintf("[DNS] %s %s failed: %s (%.2fms)%s", qtype, name, dnsRCodeName(e.Error), latencyMs, suffix)
+		}
+		if e.Details != "" {
+			return fmt.Sprintf("[DNS] %s %s -> %s (%.2fms)%s", qtype, name, sanitizeString(e.Details), latencyMs, suffix)
+		}
+		return fmt.Sprintf("[DNS] %s %s took %.2fms%s", qtype, name, latencyMs, suffix)
 
 	case EventConnect:
 		target := truncateString(e.Target, maxTargetLen)
 		if target == "" || target == "?" {
 			target = "file"
 		}
+		target = sanitizeString(target)
+		if e.Details != "" {
+			target = fmt.Sprintf("%s (%s)", target, sanitizeString(e.Details))
+		}
 		if e.Error != 0 {
-			return fmt.Sprintf("[NET] connect to %s failed: error %d", sanitizeString(target), e.Error)
+			return fmt.Sprintf("[NET] connect to %s failed: error %d", target, e.Error)
 		}
 		if realtime {
-			return fmt.Sprintf("[NET] connect to %s (%.2fms)", sanitizeString(target), latencyMs)
+			return fmt.Sprintf("[NET] connect to %s (%.2fms)", target, latencyMs)
 		}
 		if latencyMs > config.ConnectLatencyThresholdMS {
-			return fmt.Sprintf("[NET] connect to %s took %.2fms", sanitizeString(target), latencyMs)
+			return fmt.Sprintf("[NET] connect to %s took %.2fms", target, latencyMs)
 		}
 		return ""
 
