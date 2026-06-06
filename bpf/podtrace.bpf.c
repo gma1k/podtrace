@@ -7,6 +7,7 @@
 #include "protocols.h"
 
 #include "network.c"
+#include "dns.c"
 #include "filesystem.c"
 #include "cpu.c"
 #include "memory.c"

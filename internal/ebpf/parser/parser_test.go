@@ -531,3 +531,100 @@ func BenchmarkParseEvent(b *testing.B) {
 		_ = ParseEvent(eventData)
 	}
 }
+
+func TestParseEvent_V5_DNSFields(t *testing.T) {
+	// Mirror of the V5 wire layout (rawEventV5 is local to ParseEvent).
+	type rawV5 struct {
+		Timestamp    uint64
+		PID          uint32
+		Type         uint32
+		LatencyNS    uint64
+		Error        int32
+		_            uint32
+		Bytes        uint64
+		TCPState     uint32
+		_            uint32
+		StackKey     uint64
+		CgroupID     uint64
+		Comm         [16]byte
+		Target       [128]byte
+		Details      [128]byte
+		NetNsID      uint32
+		_            uint32
+		DNSServerIP  uint32
+		DNSTransport uint8
+		_            [3]uint8
+	}
+	var raw rawV5
+	raw.Type = uint32(events.EventDNS)
+	raw.TCPState = 28 // AAAA
+	raw.Error = 3     // NXDOMAIN
+	raw.DNSServerIP = 0x0a00600a
+	raw.DNSTransport = 1 // TCP
+	copy(raw.Target[:], "example.com")
+
+	var buf bytes.Buffer
+	if err := binary.Write(&buf, binary.LittleEndian, raw); err != nil {
+		t.Fatal(err)
+	}
+	e := ParseEvent(buf.Bytes())
+	if e == nil {
+		t.Fatal("ParseEvent returned nil for V5 event")
+	}
+	if e.DNSServerIP != 0x0a00600a {
+		t.Errorf("DNSServerIP = %#x, want 0x0a00600a", e.DNSServerIP)
+	}
+	if e.DNSTransport != 1 {
+		t.Errorf("DNSTransport = %d, want 1", e.DNSTransport)
+	}
+	if e.TCPState != 28 || e.Error != 3 || e.Target != "example.com" {
+		t.Errorf("unexpected decode: qtype=%d rcode=%d target=%q", e.TCPState, e.Error, e.Target)
+	}
+}
+
+func TestParseEvent_V6_DNSServerIP6(t *testing.T) {
+	type rawV6 struct {
+		Timestamp    uint64
+		PID          uint32
+		Type         uint32
+		LatencyNS    uint64
+		Error        int32
+		_            uint32
+		Bytes        uint64
+		TCPState     uint32
+		_            uint32
+		StackKey     uint64
+		CgroupID     uint64
+		Comm         [16]byte
+		Target       [128]byte
+		Details      [128]byte
+		NetNsID      uint32
+		_            uint32
+		DNSServerIP  uint32
+		DNSTransport uint8
+		_            [3]uint8
+		DNSServerIP6 [16]byte
+	}
+	var raw rawV6
+	raw.Type = uint32(events.EventDNS)
+	raw.TCPState = 28 // AAAA
+	copy(raw.Target[:], "example.com")
+	// 2606:4700:4700::1111 (Cloudflare)
+	want := [16]byte{0x26, 0x06, 0x47, 0x00, 0x47, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0x11, 0x11}
+	raw.DNSServerIP6 = want
+
+	var buf bytes.Buffer
+	if err := binary.Write(&buf, binary.LittleEndian, raw); err != nil {
+		t.Fatal(err)
+	}
+	e := ParseEvent(buf.Bytes())
+	if e == nil {
+		t.Fatal("ParseEvent returned nil for V6 event")
+	}
+	if e.DNSServerIP6 != want {
+		t.Errorf("DNSServerIP6 = %v, want %v", e.DNSServerIP6, want)
+	}
+	if got := e.DNSServerAddr(); got != "2606:4700:4700:0000:0000:0000:0000:1111" {
+		t.Errorf("DNSServerAddr = %q", got)
+	}
+}

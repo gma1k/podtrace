@@ -82,6 +82,9 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 			Value: itoa(int(n)),
 		})
 	}
+	if dpc := tc.Spec.Agent.DNSPacketCapture; dpc != nil && !*dpc {
+		env = append(env, corev1.EnvVar{Name: "PODTRACE_DNS_PACKET_CAPTURE", Value: "false"})
+	}
 
 	args := []string{
 		"agent",

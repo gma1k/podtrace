@@ -17,6 +17,7 @@ import (
 
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/diagnose/tracker"
+	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/internal/safeconv"
 )
 
@@ -179,12 +180,29 @@ func (e *OTLPExporter) exportSpan(ctx context.Context, span *tracker.Span, _ *tr
 	}
 
 	for _, event := range span.Events {
+		attrs := []attribute.KeyValue{
+			attribute.String("target", event.Target),
+			attribute.Int64("latency_ns", safeconv.Uint64ToInt64(event.LatencyNS)),
+		}
+		if event.Type == events.EventDNS {
+			attrs = append(attrs,
+				attribute.String("dns.question.name", event.Target),
+				attribute.Int("dns.question.type", int(event.TCPState)),
+				attribute.Int("dns.response.code", int(event.Error)),
+			)
+			if event.Details != "" {
+				attrs = append(attrs, attribute.String("dns.resolved", event.Details))
+			}
+			if s := event.DNSServerAddr(); s != "" {
+				attrs = append(attrs, attribute.String("dns.server", s))
+			}
+			if event.DNSTransport == 1 {
+				attrs = append(attrs, attribute.String("dns.transport", "tcp"))
+			}
+		}
 		otelSpan.AddEvent(event.TypeString(),
 			trace.WithTimestamp(event.TimestampTime()),
-			trace.WithAttributes(
-				attribute.String("target", event.Target),
-				attribute.Int64("latency_ns", safeconv.Uint64ToInt64(event.LatencyNS)),
-			),
+			trace.WithAttributes(attrs...),
 		)
 	}
 

@@ -279,6 +279,64 @@ func AttachDNSProbes(coll *ebpf.Collection, containerID string) []link.Link {
 	return AttachDNSProbesWithPID(coll, containerID, 0)
 }
 
+// AttachDNSPacketProbes attaches the cgroup_skb DNS program to each target pod
+// cgroup, capturing DNS by parsing packets rather than via libc uprobes.
+func AttachDNSPacketProbes(coll *ebpf.Collection, cgroupPaths []string) []link.Link {
+	if os.Getenv("PODTRACE_DNS_PACKET_CAPTURE") == "false" {
+		logger.Debug("Packet-based DNS capture disabled via PODTRACE_DNS_PACKET_CAPTURE=false")
+		return nil
+	}
+	egress := coll.Programs["dns_egress"]
+	ingress := coll.Programs["dns_ingress"]
+	if egress == nil && ingress == nil {
+		return nil
+	}
+	attach := []struct {
+		prog *ebpf.Program
+		typ  ebpf.AttachType
+		name string
+	}{
+		{egress, ebpf.AttachCGroupInetEgress, "egress"},
+		{ingress, ebpf.AttachCGroupInetIngress, "ingress"},
+	}
+
+	var links []link.Link
+	seen := make(map[string]struct{}, len(cgroupPaths))
+	for _, path := range cgroupPaths {
+		if path == "" {
+			continue
+		}
+		if _, dup := seen[path]; dup {
+			continue
+		}
+		seen[path] = struct{}{}
+		for _, a := range attach {
+			if a.prog == nil {
+				continue
+			}
+			l, err := link.AttachCgroup(link.CgroupOptions{
+				Path:    path,
+				Attach:  a.typ,
+				Program: a.prog,
+			})
+			if err != nil {
+				logger.Info("Packet-based DNS capture unavailable for cgroup; falling back to libc uprobe only",
+					zap.String("cgroup", path), zap.String("direction", a.name), zap.Error(err))
+				continue
+			}
+			links = append(links, l)
+		}
+	}
+	if len(links) > 0 {
+		logger.Info("Packet-based DNS capture attached",
+			zap.Int("cgroups", len(seen)), zap.Int("links", len(links)))
+	} else {
+		logger.Info("Packet-based DNS capture attached to no cgroups",
+			zap.Int("cgroup_paths_given", len(cgroupPaths)))
+	}
+	return links
+}
+
 func AttachDNSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint32) []link.Link {
 	var links []link.Link
 	libcPath := FindLibcPathWithPID(containerID, pid)

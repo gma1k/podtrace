@@ -30,6 +30,56 @@ struct {
 	__type(value, char[MAX_STRING_LEN]);
 } dns_targets SEC(".maps");
 
+struct dns_flow_key {
+	u64 cgroup_id;
+	u32 txid;
+	u32 _pad;
+};
+
+struct dns_query_state {
+	u64 ts_ns;
+	u32 pid;
+	u32 qtype;
+	u32 server_ip;
+	u8 transport;
+	u8 _pad[3];
+	char comm[COMM_LEN];
+	char name[MAX_STRING_LEN];
+	u8 server_ip6[16];
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 4096);
+	__type(key, struct dns_flow_key);
+	__type(value, struct dns_query_state);
+} dns_inflight SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 8192);
+	__type(key, u32);
+	__type(value, char[MAX_STRING_LEN]);
+} dns_resolved SEC(".maps");
+
+struct dns_v6key {
+	u8 addr[16];
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 8192);
+	__type(key, struct dns_v6key);
+	__type(value, char[MAX_STRING_LEN]);
+} dns_resolved6 SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, u32);
+	__type(value, u64);
+} dns_drops SEC(".maps");
+
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 1024);

@@ -93,3 +93,33 @@ func TestNew_CustomRule(t *testing.T) {
 		t.Errorf("expected redacted SSN: %q", e.Details)
 	}
 }
+
+func TestRedact_DNSNames_Toggle(t *testing.T) {
+	dnsEvent := func() *events.Event {
+		return &events.Event{Type: events.EventDNS, Target: "secret-internal.example.com"}
+	}
+
+	// Default (env unset): DNS names are kept.
+	t.Setenv("PODTRACE_REDACT_DNS_NAMES", "")
+	e := dnsEvent()
+	redactor.Default().Redact(e)
+	if e.Target != "secret-internal.example.com" {
+		t.Errorf("name should be kept by default, got %q", e.Target)
+	}
+
+	// Opt-in: DNS names are redacted.
+	t.Setenv("PODTRACE_REDACT_DNS_NAMES", "true")
+	e = dnsEvent()
+	redactor.Default().Redact(e)
+	if e.Target != "[redacted]" {
+		t.Errorf("name should be redacted, got %q", e.Target)
+	}
+
+	// Redaction must not touch non-DNS events.
+	t.Setenv("PODTRACE_REDACT_DNS_NAMES", "true")
+	c := &events.Event{Type: events.EventConnect, Target: "1.2.3.4:443"}
+	redactor.Default().Redact(c)
+	if c.Target != "1.2.3.4:443" {
+		t.Errorf("connect target should be untouched, got %q", c.Target)
+	}
+}

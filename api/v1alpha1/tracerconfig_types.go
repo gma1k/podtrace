@@ -44,6 +44,11 @@ type AgentSpec struct {
 	// status.nodeStatus. Default 30s.
 	// +optional
 	StatusReportInterval *metav1.Duration `json:"statusReportInterval,omitempty"`
+
+	// DNSPacketCapture enables libc-independent DNS capture by parsing packets
+	// in the kernel.
+	// +optional
+	DNSPacketCapture *bool `json:"dnsPacketCapture,omitempty"`
 }
 
 // SessionRuntimeSpec tunes the per-session Job pods the operator creates.

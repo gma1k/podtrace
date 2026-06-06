@@ -85,6 +85,53 @@ func ParseEvent(data []byte) *events.Event {
 		_         uint32 // explicit padding
 	}
 
+	type rawEventV5 struct {
+		Timestamp    uint64
+		PID          uint32
+		Type         uint32
+		LatencyNS    uint64
+		Error        int32
+		_            uint32
+		Bytes        uint64
+		TCPState     uint32
+		_            uint32
+		StackKey     uint64
+		CgroupID     uint64
+		Comm         [16]byte
+		Target       [128]byte
+		Details      [128]byte
+		NetNsID      uint32
+		_            uint32
+		DNSServerIP  uint32
+		DNSTransport uint8
+		_            [3]uint8
+	}
+
+	type rawEventV6 struct {
+		Timestamp    uint64
+		PID          uint32
+		Type         uint32
+		LatencyNS    uint64
+		Error        int32
+		_            uint32
+		Bytes        uint64
+		TCPState     uint32
+		_            uint32
+		StackKey     uint64
+		CgroupID     uint64
+		Comm         [16]byte
+		Target       [128]byte
+		Details      [128]byte
+		NetNsID      uint32
+		_            uint32
+		DNSServerIP  uint32
+		DNSTransport uint8
+		_            [3]uint8
+		DNSServerIP6 [16]byte
+	}
+
+	expectedV6 := int(unsafe.Sizeof(rawEventV6{}))
+	expectedV5 := int(unsafe.Sizeof(rawEventV5{}))
 	expectedV4 := int(unsafe.Sizeof(rawEventV4{}))
 	expectedV3 := int(unsafe.Sizeof(rawEventV3{}))
 	expectedV2 := int(unsafe.Sizeof(rawEventV2{}))
@@ -98,6 +145,56 @@ func ParseEvent(data []byte) *events.Event {
 	event.Stack = nil
 	event.CgroupID = 0
 	event.NetNsID = 0
+	event.DNSServerIP = 0
+	event.DNSTransport = 0
+	event.DNSServerIP6 = [16]byte{}
+
+	if len(data) >= expectedV6 {
+		var e rawEventV6
+		if err := binaryRead(bytes.NewReader(data[:expectedV6]), binary.LittleEndian, &e); err != nil {
+			return nil
+		}
+		event.Timestamp = e.Timestamp
+		event.PID = e.PID
+		event.Type = events.EventType(e.Type)
+		event.LatencyNS = e.LatencyNS
+		event.Error = e.Error
+		event.Bytes = e.Bytes
+		event.TCPState = e.TCPState
+		event.StackKey = e.StackKey
+		event.CgroupID = e.CgroupID
+		event.ProcessName = string(bytes.TrimRight(e.Comm[:], "\x00"))
+		event.Target = string(bytes.TrimRight(e.Target[:], "\x00"))
+		event.Details = string(bytes.TrimRight(e.Details[:], "\x00"))
+		event.NetNsID = e.NetNsID
+		event.DNSServerIP = e.DNSServerIP
+		event.DNSTransport = e.DNSTransport
+		event.DNSServerIP6 = e.DNSServerIP6
+		return event
+	}
+
+	if len(data) >= expectedV5 {
+		var e rawEventV5
+		if err := binaryRead(bytes.NewReader(data[:expectedV5]), binary.LittleEndian, &e); err != nil {
+			return nil
+		}
+		event.Timestamp = e.Timestamp
+		event.PID = e.PID
+		event.Type = events.EventType(e.Type)
+		event.LatencyNS = e.LatencyNS
+		event.Error = e.Error
+		event.Bytes = e.Bytes
+		event.TCPState = e.TCPState
+		event.StackKey = e.StackKey
+		event.CgroupID = e.CgroupID
+		event.ProcessName = string(bytes.TrimRight(e.Comm[:], "\x00"))
+		event.Target = string(bytes.TrimRight(e.Target[:], "\x00"))
+		event.Details = string(bytes.TrimRight(e.Details[:], "\x00"))
+		event.NetNsID = e.NetNsID
+		event.DNSServerIP = e.DNSServerIP
+		event.DNSTransport = e.DNSTransport
+		return event
+	}
 
 	if len(data) >= expectedV4 {
 		var e rawEventV4

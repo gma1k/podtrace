@@ -73,7 +73,7 @@ func TestAnalyzeDNS(t *testing.T) {
 		{LatencyNS: 5000000, Error: 0, Target: "example.com"},
 	}
 
-	avg, max, errors, p50, _, _, topTargets := AnalyzeDNS(events)
+	avg, max, errors, p50, _, _, topTargets := AnalyzeDNS(nil, events)
 
 	if avg != 3.0 {
 		t.Errorf("Expected avg latency 3.0ms, got %.2f", avg)
@@ -93,7 +93,7 @@ func TestAnalyzeDNS(t *testing.T) {
 }
 
 func TestAnalyzeDNS_Empty(t *testing.T) {
-	avg, max, errors, p50, p95, p99, topTargets := AnalyzeDNS([]*events.Event{})
+	avg, max, errors, p50, p95, p99, topTargets := AnalyzeDNS(nil, []*events.Event{})
 
 	if avg != 0 {
 		t.Errorf("Expected avg 0, got %.2f", avg)
@@ -197,7 +197,7 @@ func BenchmarkAnalyzeDNS(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _, _, _, _, _, _ = AnalyzeDNS(eventSlice)
+		_, _, _, _, _, _, _ = AnalyzeDNS(nil, eventSlice)
 	}
 }
 

@@ -95,19 +95,25 @@ func GenerateCgroupScopeSection(d Diagnostician) string {
 }
 
 func GenerateDNSSection(d Diagnostician, duration time.Duration) string {
-	dnsEvents := d.FilterEvents(events.EventDNS)
-	if len(dnsEvents) == 0 {
+	queries := d.FilterEvents(events.EventDNSQuery)
+	responses := d.FilterEvents(events.EventDNS)
+	if len(queries) == 0 && len(responses) == 0 {
 		return ""
 	}
 
-	avgLatency, maxLatency, errors, p50, p95, p99, topTargets := analyzer.AnalyzeDNS(dnsEvents)
+	lookupCount := len(queries)
+	if lookupCount < len(responses) {
+		lookupCount = len(responses)
+	}
+
+	avgLatency, maxLatency, errors, p50, p95, p99, topTargets := analyzer.AnalyzeDNS(queries, responses)
 	var report string
 	report += formatter.SectionHeader("DNS")
-	dnsRate := d.CalculateRate(len(dnsEvents), duration)
-	report += formatter.TotalWithRate("lookups", len(dnsEvents), dnsRate)
+	dnsRate := d.CalculateRate(lookupCount, duration)
+	report += formatter.TotalWithRate("lookups", lookupCount, dnsRate)
 	report += formatter.LatencyMetrics(avgLatency, maxLatency)
 	report += formatter.Percentiles(p50, p95, p99)
-	report += formatter.ErrorRate(errors, len(dnsEvents))
+	report += formatter.ErrorRate(errors, lookupCount)
 	report += formatter.TopTargets(topTargets, config.TopTargetsLimit, "targets", "lookups")
 	report += "\n"
 	return report

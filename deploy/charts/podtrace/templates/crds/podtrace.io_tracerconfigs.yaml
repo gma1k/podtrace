@@ -983,6 +983,11 @@ spec:
                 description: Agent configures the DaemonSet that provides realtime
                   tracing.
                 properties:
+                  dnsPacketCapture:
+                    description: |-
+                      DNSPacketCapture enables libc-independent DNS capture by parsing packets
+                      in the kernel.
+                    type: boolean
                   eventBufferSize:
                     description: EventBufferSize is the per-agent event channel capacity.
                       Default 10000.

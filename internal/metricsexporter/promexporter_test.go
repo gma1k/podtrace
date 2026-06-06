@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/podtrace/podtrace/internal/events"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func TestExportMetricsHelpers(t *testing.T) {
@@ -294,10 +295,10 @@ func TestExportResourceLimitMetric(t *testing.T) {
 
 func TestExportResourceLimitMetricWithContext(t *testing.T) {
 	event := &events.Event{
-		Type:      events.EventResourceLimit,
-		TCPState:  1,
-		Error:     90,
-		Bytes:     450000000,
+		Type:     events.EventResourceLimit,
+		TCPState: 1,
+		Error:    90,
+		Bytes:    450000000,
 	}
 
 	ExportResourceLimitMetricWithContext(event, "test-namespace")
@@ -305,13 +306,13 @@ func TestExportResourceLimitMetricWithContext(t *testing.T) {
 
 func TestExportResourceMetrics(t *testing.T) {
 	tests := []struct {
-		name              string
-		resourceType      string
-		namespace         string
-		limitBytes        uint64
-		usageBytes        uint64
+		name               string
+		resourceType       string
+		namespace          string
+		limitBytes         uint64
+		usageBytes         uint64
 		utilizationPercent float64
-		alertLevel        uint32
+		alertLevel         uint32
 	}{
 		{"CPU warning", "cpu", "default", 1000000000, 850000000, 85.0, 1},
 		{"Memory critical", "memory", "production", 500000000, 460000000, 92.0, 2},
@@ -335,10 +336,10 @@ func TestExportResourceMetrics(t *testing.T) {
 
 func TestHandleEvent_ResourceLimit(t *testing.T) {
 	event := &events.Event{
-		Type:      events.EventResourceLimit,
-		TCPState:  0,
-		Error:     85,
-		Bytes:     850000000,
+		Type:     events.EventResourceLimit,
+		TCPState: 0,
+		Error:    85,
+		Bytes:    850000000,
 	}
 
 	HandleEvent(event)
@@ -346,10 +347,10 @@ func TestHandleEvent_ResourceLimit(t *testing.T) {
 
 func TestHandleEventWithContext_ResourceLimit(t *testing.T) {
 	event := &events.Event{
-		Type:      events.EventResourceLimit,
-		TCPState:  1,
-		Error:     92,
-		Bytes:     460000000,
+		Type:     events.EventResourceLimit,
+		TCPState: 1,
+		Error:    92,
+		Bytes:    460000000,
 	}
 
 	k8sContext := map[string]interface{}{
@@ -548,5 +549,15 @@ func TestRateLimitMiddleware_Allowed(t *testing.T) {
 	// The first request should be allowed (rate limiter has capacity at startup).
 	if rr.Code != http.StatusOK && rr.Code != http.StatusTooManyRequests {
 		t.Errorf("unexpected status code: %d", rr.Code)
+	}
+}
+
+func TestAddDNSDrops(t *testing.T) {
+	before := testutil.ToFloat64(dnsDropsCounter)
+	AddDNSDrops(3)
+	AddDNSDrops(0) // no-op
+	after := testutil.ToFloat64(dnsDropsCounter)
+	if after-before != 3 {
+		t.Errorf("dnsDropsCounter delta = %v, want 3", after-before)
 	}
 }

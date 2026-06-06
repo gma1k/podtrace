@@ -44,6 +44,7 @@ enum event_type {
 	EVENT_GRPC_METHOD,      /* 35: gRPC method call via HTTP/2 HEADERS — BTF-only */
 	EVENT_KAFKA_PRODUCE,    /* 36: Kafka produce (librdkafka: rd_kafka_produce) */
 	EVENT_KAFKA_FETCH,      /* 37: Kafka consumer_poll result (librdkafka) */
+	EVENT_DNS_QUERY,        /* 38: DNS query seen on egress */
 };
 
 struct event {
@@ -62,6 +63,12 @@ struct event {
 	/* V4 additions — populated under PODTRACE_VMLINUX_FROM_BTF */
 	u32 net_ns_id;  /* network namespace inum (0 if BTF unavailable) */
 	u32 _pad2;      /* explicit padding to keep struct 8-byte aligned */
+	/* V5 additions — DNS packet capture (bpf/dns.c) */
+	u32 dns_server_ip;  /* upstream resolver IPv4 (DNS events; 0 otherwise) */
+	u8  dns_transport;  /* 0=UDP, 1=TCP (DNS events) */
+	u8  _pad3[3];       /* keep struct 8-byte aligned */
+	/* V6 additions — IPv6 DNS */
+	u8  dns_server_ip6[16]; /* upstream resolver IPv6 */
 };
 
 #endif

@@ -544,6 +544,13 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 	circuitBreaker := newCircuitBreaker(config.DefaultCircuitBreakerThreshold, config.DefaultCircuitBreakerTimeout)
 	stackMap := t.collection.Maps["stack_traces"]
 
+	t.cgroupWriteMu.Lock()
+	dnsCgroups := append([]string(nil), t.cgroupPaths...)
+	t.cgroupWriteMu.Unlock()
+	if dnsLinks := probes.AttachDNSPacketProbes(t.collection, dnsCgroups); len(dnsLinks) > 0 {
+		t.links = append(t.links, dnsLinks...)
+	}
+
 	if t.cgroupPath != "" {
 		limitsMap := t.collection.Maps["cgroup_limits"]
 		alertsMap := t.collection.Maps["cgroup_alerts"]
@@ -579,6 +586,8 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 			}
 		}
 	}()
+
+	go t.runDNSTimeoutSweeper(ctx, eventChan)
 
 	if config.ManagementPort > 0 {
 		go t.serveManagementAPI(ctx, config.ManagementPort)

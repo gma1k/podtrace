@@ -71,7 +71,11 @@ func AnalyzeConnections(events []*events.Event) (avgLatency, maxLatency float64,
 			errorBreakdown[e.Error]++
 		}
 		if e.Target != "" && e.Target != "?" && e.Target != "unknown" && e.Target != "file" {
-			targetMap[e.Target]++
+			label := e.Target
+			if e.Details != "" {
+				label = e.Target + " (" + e.Details + ")"
+			}
+			targetMap[label]++
 		}
 	}
 

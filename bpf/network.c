@@ -58,7 +58,6 @@ int kretprobe_tcp_v6_connect(struct pt_regs *ctx) {
 		u16 family;
 		if (bpf_probe_read_user(&family, sizeof(family), uaddr) == 0) {
 			if (family == AF_INET6) {
-				/* Read the full sockaddr_in6 to extract the real IPv6 address */
 				struct {
 					u16 sin6_family;
 					u16 sin6_port;
@@ -69,6 +68,14 @@ int kretprobe_tcp_v6_connect(struct pt_regs *ctx) {
 				if (bpf_probe_read_user(&addr6, sizeof(addr6), uaddr) == 0) {
 					u16 port = __builtin_bswap16(addr6.sin6_port);
 					format_ipv6_port(addr6.sin6_addr, port, e->target);
+					struct dns_v6key k6 = {};
+					__builtin_memcpy(k6.addr, addr6.sin6_addr, 16);
+					char *resolved = bpf_map_lookup_elem(&dns_resolved6, &k6);
+					if (resolved) {
+						__builtin_memcpy(e->details, resolved, MAX_STRING_LEN);
+					} else {
+						e->details[0] = '\0';
+					}
 				}
 			}
 		}
@@ -114,6 +121,12 @@ int kretprobe_tcp_connect(struct pt_regs *ctx) {
 				if (bpf_probe_read_user(&ip_be, sizeof(ip_be), &addr.sin_addr.s_addr) == 0) {
 					u32 ip = __builtin_bswap32(ip_be);
 					format_ip_port(ip, port, e->target);
+					char *resolved = bpf_map_lookup_elem(&dns_resolved, &ip_be);
+					if (resolved) {
+						__builtin_memcpy(e->details, resolved, MAX_STRING_LEN);
+					} else {
+						e->details[0] = '\0';
+					}
 				} else {
 					e->target[0] = '\0';
 				}

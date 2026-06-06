@@ -1,0 +1,37 @@
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: dns-otlp
+spec:
+  type: otlp
+  otlp:
+    endpoint: otel-collector:4318
+    protocol: http
+    insecure: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dns-chatty
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dns-target
+  template:
+    metadata:
+      labels:
+        app: dns-target
+    spec:
+      containers:
+        - name: bb
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              while true; do
+                nslookup kubernetes.default.svc.cluster.local || true
+                nslookup nope-zzz.invalid || true
+                sleep 1
+              done
