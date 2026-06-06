@@ -279,10 +279,16 @@ func AttachDNSProbes(coll *ebpf.Collection, containerID string) []link.Link {
 	return AttachDNSProbesWithPID(coll, containerID, 0)
 }
 
+// packetDNSCaptureEnabled reports whether the libc-independent, packet-based
+// DNS capture path is active.
+func packetDNSCaptureEnabled() bool {
+	return os.Getenv("PODTRACE_DNS_PACKET_CAPTURE") != "false"
+}
+
 // AttachDNSPacketProbes attaches the cgroup_skb DNS program to each target pod
 // cgroup, capturing DNS by parsing packets rather than via libc uprobes.
 func AttachDNSPacketProbes(coll *ebpf.Collection, cgroupPaths []string) []link.Link {
-	if os.Getenv("PODTRACE_DNS_PACKET_CAPTURE") == "false" {
+	if !packetDNSCaptureEnabled() {
 		logger.Debug("Packet-based DNS capture disabled via PODTRACE_DNS_PACKET_CAPTURE=false")
 		return nil
 	}
@@ -359,11 +365,15 @@ func AttachDNSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint3
 					logger.Info("DNS tracking (uretprobe) unavailable", zap.Error(err))
 				}
 			}
+		} else if packetDNSCaptureEnabled() {
+			logger.Debug("libc uprobe DNS unavailable; DNS is captured via the packet-based path instead")
 		} else {
 			logger.Info("DNS tracking disabled: libc was located but could not be opened for uprobe attachment. DNS name resolution will not be traced; other tracing is unaffected.")
 		}
+	} else if packetDNSCaptureEnabled() {
+		logger.Debug("libc uprobe DNS unavailable; DNS is captured via the packet-based path instead")
 	} else {
-		logger.Info("DNS tracking disabled: no libc found in the target container (e.g. a statically-linked binary or distroless/scratch image). DNS name resolution will not be traced; other tracing is unaffected.")
+		logger.Info("DNS tracking disabled: no libc found in the target container and packet-based DNS capture is disabled. DNS name resolution will not be traced; other tracing is unaffected.")
 	}
 	return links
 }

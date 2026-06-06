@@ -65,6 +65,35 @@ func TestAnalyzeTimeline_ContiguousNonOverlappingBuckets(t *testing.T) {
 	}
 }
 
+func TestAnalyzeTimeline_MonotonicTimestamps_Issue186(t *testing.T) {
+	startTime := time.Now()
+	duration := 320 * time.Second
+	bucketDur := duration / time.Duration(config.TimelineBuckets)
+
+	const bootNS = uint64(5 * 24 * 60 * 60 * 1_000_000_000)
+
+	var evs []*events.Event
+	for b := 0; b < config.TimelineBuckets; b++ {
+		base := bootNS + uint64(int64(b)*int64(bucketDur))
+		for k := 0; k < 3; k++ {
+			evs = append(evs, &events.Event{Timestamp: base + uint64(k)*uint64(time.Second)})
+		}
+	}
+
+	buckets := AnalyzeTimeline(evs, startTime, duration)
+	if len(buckets) != config.TimelineBuckets {
+		t.Fatalf("expected %d buckets, got %d", config.TimelineBuckets, len(buckets))
+	}
+	if buckets[0].Count == len(evs) {
+		t.Fatalf("all %d events fell into the first bucket — issue #186 regression", len(evs))
+	}
+	for i, b := range buckets {
+		if b.Count != 3 {
+			t.Errorf("bucket %d: got %d events, want 3 (events must distribute by monotonic time)", i, b.Count)
+		}
+	}
+}
+
 func TestDetectBursts(t *testing.T) {
 	start := time.Now()
 	duration := 2 * time.Second
