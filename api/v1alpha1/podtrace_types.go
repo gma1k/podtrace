@@ -8,12 +8,16 @@ import (
 // PodTrace is the continuous-observability counterpart of PodTraceSession: it
 // has no bounded duration and remains active until the resource is deleted or
 // paused.
+// +kubebuilder:validation:XValidation:rule="[has(self.selector), has(self.podRefs), has(self.appSelector)].filter(x, x).size() == 1",message="exactly one of spec.selector, spec.podRefs, or spec.appSelector must be set"
 type PodTraceSpec struct {
 	// +optional
 	Selector *metav1.LabelSelector `json:"selector,omitempty"`
 
 	// +optional
 	PodRefs []PodRef `json:"podRefs,omitempty"`
+
+	// +optional
+	AppSelector *AppSelector `json:"appSelector,omitempty"`
 
 	// +optional
 	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`

@@ -228,7 +228,7 @@ coverage: test-unit
 	$(GO) tool cover -func=coverage.out | tail -1
 
 # ------------------------------------------------------------------------------
-# Operator (Phase 0/1+) — CRD code generation, manifest generation, container
+# Operator — CRD code generation, manifest generation, container
 # image. These targets are independent of the eBPF build; they operate on the
 # Go type definitions under ./api/v1alpha1 and on ./deploy/charts.
 # ------------------------------------------------------------------------------
@@ -310,7 +310,7 @@ envtest:
 helm-lint:
 	helm lint deploy/charts/podtrace
 
-# e2e-kind runs the Phase-2 smoke script against whatever kind cluster
+# e2e-kind runs the smoke script against whatever kind cluster
 # the user's KUBECONFIG currently points at. The script is idempotent;
 # re-running it upgrades an existing release in place.
 e2e-kind:

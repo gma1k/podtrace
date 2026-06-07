@@ -38,8 +38,8 @@ func main() {
 	releaseCount := int64(0)
 	var mu sync.Mutex
 
-	phase1 := func() {
-		fmt.Println("Phase 1: Normal operations (100 inserts)")
+	stage1 := func() {
+		fmt.Println("Stage 1: Normal operations (100 inserts)")
 		for i := 0; i < 100; i++ {
 			_, err := db.Exec("INSERT INTO test (data) VALUES (?)", fmt.Sprintf("data-%d", i))
 			if err != nil {
@@ -58,12 +58,12 @@ func main() {
 
 			time.Sleep(50 * time.Millisecond)
 		}
-		fmt.Println("Phase 1 completed")
+		fmt.Println("Stage 1 completed")
 		fmt.Println("")
 	}
 
-	phase2 := func() {
-		fmt.Println("Phase 2: Concurrent queries (20 queries)")
+	stage2 := func() {
+		fmt.Println("Stage 2: Concurrent queries (20 queries)")
 		for i := 0; i < 20; i++ {
 			var count int
 			err := db.QueryRow("SELECT COUNT(*) FROM test").Scan(&count)
@@ -77,12 +77,12 @@ func main() {
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
-		fmt.Println("Phase 2 completed")
+		fmt.Println("Stage 2 completed")
 		fmt.Println("")
 	}
 
-	phase3 := func() {
-		fmt.Println("Phase 3: Pool exhaustion test (10 concurrent connections)")
+	stage3 := func() {
+		fmt.Println("Stage 3: Pool exhaustion test (10 concurrent connections)")
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
@@ -112,12 +112,12 @@ func main() {
 			}(i)
 		}
 		wg.Wait()
-		fmt.Println("Phase 3 completed")
+		fmt.Println("Stage 3 completed")
 		fmt.Println("")
 	}
 
-	phase4 := func() {
-		fmt.Println("Phase 4: Continuous operations (running indefinitely)")
+	stage4 := func() {
+		fmt.Println("Stage 4: Continuous operations (running indefinitely)")
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 
@@ -142,9 +142,9 @@ func main() {
 		}
 	}
 
-	phase1()
-	phase2()
-	phase3()
+	stage1()
+	stage2()
+	stage3()
 
 	mu.Lock()
 	totalAcq := acquireCount
@@ -159,5 +159,5 @@ func main() {
 	fmt.Println("Starting continuous operations...")
 	fmt.Println("")
 
-	phase4()
+	stage4()
 }

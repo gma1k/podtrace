@@ -10,7 +10,7 @@ spec:
 
     SCOPE: control-plane only. Without a mock OTLP receiver this test
     cannot assert the rotated credential reaches the wire. When a
-    receiver harness lands (Phase 7+), extend this test to capture
+    receiver harness lands, extend this test to capture
     request headers pre/post rotation and compare.
   timeouts:
     apply: 30s

@@ -60,5 +60,13 @@ func registerReconcilers(mgr ctrl.Manager, opts Options) error {
 		return fmt.Errorf("PodTraceScheduleReconciler: %w", err)
 	}
 
+	atr := &ApplicationTraceReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}
+	if err := atr.SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("ApplicationTraceReconciler: %w", err)
+	}
+
 	return nil
 }

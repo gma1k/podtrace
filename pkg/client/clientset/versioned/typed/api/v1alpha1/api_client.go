@@ -27,6 +27,7 @@ import (
 
 type PodtraceV1alpha1Interface interface {
 	RESTClient() rest.Interface
+	ApplicationTracesGetter
 	ExporterConfigsGetter
 	PodTracesGetter
 	PodTraceSchedulesGetter
@@ -37,6 +38,10 @@ type PodtraceV1alpha1Interface interface {
 // PodtraceV1alpha1Client is used to interact with features provided by the podtrace.io group.
 type PodtraceV1alpha1Client struct {
 	restClient rest.Interface
+}
+
+func (c *PodtraceV1alpha1Client) ApplicationTraces(namespace string) ApplicationTraceInterface {
+	return newApplicationTraces(c, namespace)
 }
 
 func (c *PodtraceV1alpha1Client) ExporterConfigs(namespace string) ExporterConfigInterface {

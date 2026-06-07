@@ -263,3 +263,39 @@ func TestInNamespaceScope_AllowlistSemantics(t *testing.T) {
 		})
 	}
 }
+
+func TestMatchPodTraceAgainstPods_AppSelectorUnionAndDedup(t *testing.T) {
+	pt := &podtracev1alpha1.PodTrace{}
+	pt.Namespace = "ns"
+	pt.Spec.AppSelector = &podtracev1alpha1.AppSelector{
+		MatchSelectors: []metav1.LabelSelector{
+			{MatchLabels: map[string]string{"tier": "web"}},
+			{MatchLabels: map[string]string{"app": "shop"}},
+		},
+	}
+	pods := []*corev1.Pod{
+		mkPod("ns", "web", map[string]string{"tier": "web"}),                 // sel1
+		mkPod("ns", "shop", map[string]string{"app": "shop"}),                // sel2
+		mkPod("ns", "both", map[string]string{"tier": "web", "app": "shop"}), // both -> appears ONCE
+		mkPod("ns", "other", map[string]string{"tier": "db"}),                // neither
+	}
+	matched, err := MatchPodTraceAgainstPods(pt, pods, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := map[string]int{}
+	for _, p := range matched {
+		got[p.Name]++
+	}
+	if len(matched) != 3 {
+		t.Fatalf("matched %d pods, want 3 (web, shop, both); got=%v", len(matched), got)
+	}
+	for _, name := range []string{"web", "shop", "both"} {
+		if got[name] != 1 {
+			t.Errorf("pod %q matched %d times, want exactly 1 (union dedup)", name, got[name])
+		}
+	}
+	if got["other"] != 0 {
+		t.Errorf("non-matching pod 'other' should not match")
+	}
+}

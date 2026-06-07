@@ -15,7 +15,7 @@ Why a Job instead of regular templates:
     "default" namespace: "" from "": no matches for kind "TracerConfig"
     in version "podtrace.io/v1alpha1"
 
-  Two-phase install via Helm's special `crds/` directory works around
+  Two-stage install via Helm's special `crds/` directory works around
   this, but `crds/` files are install-only and never update on
   `helm upgrade`. We deliberately moved CRDs into templates/crds/ to
   fix that, so the same workaround is no longer available.

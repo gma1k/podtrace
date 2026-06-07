@@ -45,8 +45,9 @@ spec:
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `selector` | LabelSelector | one of selector/podRefs | Pods labeled to trace. Empty selector is rejected. |
-| `podRefs` | `[{namespace, name}]` | one of selector/podRefs | Explicit pod list. Cross-namespace allowed. |
+| `selector` | LabelSelector | one of selector/podRefs/appSelector | Pods labeled to trace. Empty selector is rejected. |
+| `podRefs` | `[{namespace, name}]` | one of selector/podRefs/appSelector | Explicit pod list. Cross-namespace allowed. |
+| `appSelector` | `{matchSelectors: []LabelSelector}` | one of selector/podRefs/appSelector | Application of several workloads: a pod matching **any** selector is traced (union, de-duplicated). Exactly-one-of is enforced by CEL + webhook. |
 | `namespaceSelector` | LabelSelector | optional | Widens `selector` across namespaces. Field's expressions are not yet evaluated; presence alone enables cluster-wide search. |
 | `filters` | `[dns,net,fs,cpu,proc]` | optional | Empty = all categories. Agents enforce the set per-event in userspace and only the listed categories reach the configured exporter. |
 | `exporterRef.name` | string | required | Names an `ExporterConfig` in the same namespace. |
@@ -147,11 +148,12 @@ The managed-only flags (`--exporter`, `--name`, `--namespace-selector`,
 | `--sample N` | `spec.samplePercent` | 0-100; unset by default. |
 | `--print-only` | — | Print YAML, skip the exporter check and the apply. |
 
-> **Roadmap.** `podtrace watch` is phase one of richer application targeting.
-> Future phases add an additive `appSelector` matching primitive on `PodTrace`
-> (multiple selectors as one named group) and a higher-level `ApplicationTrace`
-> CR that owns child `PodTrace`s for multi-workload applications; `--app` will
-> repoint to it. The on-node merge router means these layers never conflict.
+> **Application targeting.** A `PodTrace` can target several workloads at once
+> via `spec.appSelector` (a union of label selectors — see above). For a
+> user-facing "application" object that owns and keeps its `PodTrace` in sync,
+> use the [`ApplicationTrace`](crd-applicationtrace.md) CR, or
+> `podtrace watch --application`. The on-node merge router means overlapping
+> traces never conflict.
 
 ## Common operations
 

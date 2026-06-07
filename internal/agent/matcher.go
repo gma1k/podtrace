@@ -33,7 +33,7 @@ func MatchPodTraceAgainstPods(pt *podtracev1alpha1.PodTrace, pods []*corev1.Pod,
 		return nil, nil
 	}
 
-	sel, err := buildLabelSelector(pt.Spec.Selector)
+	sels, err := buildSelectors(pt)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +48,7 @@ func MatchPodTraceAgainstPods(pt *podtracev1alpha1.PodTrace, pods []*corev1.Pod,
 			continue
 		}
 		switch {
-		case sel != nil && sel.Matches(labels.Set(p.Labels)):
+		case len(sels) > 0 && matchesAny(sels, p):
 			matched = append(matched, p)
 		case len(podRefs) > 0:
 			if _, ok := podRefs[p.Namespace+"/"+p.Name]; ok {
@@ -57,6 +57,45 @@ func MatchPodTraceAgainstPods(pt *podtracev1alpha1.PodTrace, pods []*corev1.Pod,
 		}
 	}
 	return matched, nil
+}
+
+// buildSelectors returns the live label selectors a PodTrace matches pods
+// against: the single spec.selector, OR the union in spec.appSelector
+// (matchSelectors).
+func buildSelectors(pt *podtracev1alpha1.PodTrace) ([]labels.Selector, error) {
+	var out []labels.Selector
+	if pt.Spec.AppSelector != nil {
+		for i := range pt.Spec.AppSelector.MatchSelectors {
+			s, err := buildLabelSelector(&pt.Spec.AppSelector.MatchSelectors[i])
+			if err != nil {
+				return nil, err
+			}
+			if s != nil {
+				out = append(out, s)
+			}
+		}
+		return out, nil
+	}
+	s, err := buildLabelSelector(pt.Spec.Selector)
+	if err != nil {
+		return nil, err
+	}
+	if s != nil {
+		out = append(out, s)
+	}
+	return out, nil
+}
+
+// matchesAny reports whether the pod's labels satisfy any selector in the
+// union.
+func matchesAny(sels []labels.Selector, p *corev1.Pod) bool {
+	set := labels.Set(p.Labels)
+	for _, s := range sels {
+		if s.Matches(set) {
+			return true
+		}
+	}
+	return false
 }
 
 // buildLabelSelector converts a CR LabelSelector into a live selector.

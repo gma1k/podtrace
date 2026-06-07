@@ -50,7 +50,7 @@ func TestBuildPodTrace_AppMapsToWellKnownLabel(t *testing.T) {
 
 func TestBuildPodTrace_LabelSelectorParsed(t *testing.T) {
 	opts := baseWatchOpts()
-	opts.Label = "app=api,tier=web"
+	opts.Labels = []string{"app=api,tier=web"}
 	opts.Name = "api-web"
 
 	pt, err := buildPodTrace(opts)
@@ -147,7 +147,7 @@ func TestBuildPodTrace_Errors(t *testing.T) {
 		},
 		{
 			name:    "app and label together",
-			mutate:  func(o *watchOptions) { o.AppName = "x"; o.Label = "a=b" },
+			mutate:  func(o *watchOptions) { o.AppName = "x"; o.Labels = []string{"a=b"} },
 			wantSub: "mutually exclusive",
 		},
 		{
@@ -157,7 +157,7 @@ func TestBuildPodTrace_Errors(t *testing.T) {
 		},
 		{
 			name:    "label without name",
-			mutate:  func(o *watchOptions) { o.Label = "app=api" },
+			mutate:  func(o *watchOptions) { o.Labels = []string{"app=api"} },
 			wantSub: "--name is required",
 		},
 		{
@@ -167,7 +167,7 @@ func TestBuildPodTrace_Errors(t *testing.T) {
 		},
 		{
 			name:    "invalid label selector",
-			mutate:  func(o *watchOptions) { o.Label = "=,,"; o.Name = "n" },
+			mutate:  func(o *watchOptions) { o.Labels = []string{"=,,"}; o.Name = "n" },
 			wantSub: "invalid --label",
 		},
 		{
@@ -183,7 +183,7 @@ func TestBuildPodTrace_Errors(t *testing.T) {
 		{
 			name:    "invalid derived name",
 			mutate:  func(o *watchOptions) { o.AppName = "Bad_Name!" },
-			wantSub: "invalid PodTrace name",
+			wantSub: "invalid resource name",
 		},
 	}
 	for _, tt := range tests {
@@ -208,7 +208,7 @@ func TestMarshalPodTraceYAML_SetsTypeMeta(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out, err := marshalPodTraceYAML(pt)
+	out, err := marshalManagedYAML(pt, "PodTrace")
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -218,5 +218,75 @@ func TestMarshalPodTraceYAML_SetsTypeMeta(t *testing.T) {
 	}
 	if !strings.Contains(s, "apiVersion: podtrace.io/v1alpha1") {
 		t.Fatalf("yaml missing apiVersion:\n%s", s)
+	}
+}
+
+func TestBuildApplicationTrace_FromApp(t *testing.T) {
+	opts := baseWatchOpts()
+	opts.AppName = "shop"
+	opts.Filter = "dns,net"
+
+	app, err := buildApplicationTrace(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if app.Name != "shop" || app.Namespace != "default" {
+		t.Fatalf("name/ns = %s/%s, want shop/default", app.Name, app.Namespace)
+	}
+	if len(app.Spec.Selectors) != 1 || app.Spec.Selectors[0].MatchLabels[appNameLabel] != "shop" {
+		t.Fatalf("selectors = %+v, want one app.kubernetes.io/name=shop", app.Spec.Selectors)
+	}
+	if app.Spec.ExporterRef.Name != "default" {
+		t.Fatalf("exporterRef = %q", app.Spec.ExporterRef.Name)
+	}
+	if len(app.Spec.Filters) != 2 {
+		t.Fatalf("filters = %v", app.Spec.Filters)
+	}
+}
+
+func TestBuildApplicationTrace_MultipleWorkloads(t *testing.T) {
+	opts := baseWatchOpts()
+	opts.Labels = []string{"tier=web", "tier=api"}
+	opts.Name = "shop"
+	opts.AllNamespaces = true
+
+	app, err := buildApplicationTrace(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(app.Spec.Selectors) != 2 {
+		t.Fatalf("selectors = %d, want 2 (web, api)", len(app.Spec.Selectors))
+	}
+	if app.Spec.Selectors[0].MatchLabels["tier"] != "web" || app.Spec.Selectors[1].MatchLabels["tier"] != "api" {
+		t.Fatalf("selectors = %+v", app.Spec.Selectors)
+	}
+	if app.Spec.NamespaceSelector == nil || len(app.Spec.NamespaceSelector.MatchLabels) != 0 {
+		t.Fatalf("--all-namespaces should give empty namespaceSelector, got %+v", app.Spec.NamespaceSelector)
+	}
+}
+
+func TestBuildPodTrace_MultipleLabelsRequireApplication(t *testing.T) {
+	opts := baseWatchOpts()
+	opts.Labels = []string{"a=b", "c=d"}
+	opts.Name = "n"
+	if _, err := buildPodTrace(opts); err == nil || !strings.Contains(err.Error(), "--application") {
+		t.Fatalf("expected error pointing at --application, got %v", err)
+	}
+}
+
+func TestMarshalManagedYAML_ApplicationTrace(t *testing.T) {
+	opts := baseWatchOpts()
+	opts.AppName = "shop"
+	app, err := buildApplicationTrace(opts)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	out, err := marshalManagedYAML(app, "ApplicationTrace")
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(out)
+	if !strings.Contains(s, "kind: ApplicationTrace") || !strings.Contains(s, "selectors:") {
+		t.Fatalf("yaml missing kind/selectors:\n%s", s)
 	}
 }
