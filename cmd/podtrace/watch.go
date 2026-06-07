@@ -31,7 +31,7 @@ const appNameLabel = "app.kubernetes.io/name"
 
 var (
 	watchAppName           string
-	watchLabel             string
+	watchLabels            []string
 	watchAllNamespaces     bool
 	watchNamespaceSelector string
 	watchExporter          string
@@ -39,12 +39,13 @@ var (
 	watchSample            int
 	watchKubeconfig        string
 	watchPrintOnly         bool
+	watchApplication       bool
 )
 
 // registerTargetFlags binds the application/label targeting flags.
 func registerTargetFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&watchAppName, "app", "", "Target an application by name; shorthand for --label "+appNameLabel+"=<NAME>.")
-	fs.StringVar(&watchLabel, "label", "", "Label selector for target pods (e.g. app=api,tier=web). Mutually exclusive with --app.")
+	fs.StringArrayVar(&watchLabels, "label", nil, "Label selector for target pods (e.g. app=api,tier=web). Repeatable: each --label is one workload of the application (with --application). Mutually exclusive with --app.")
 	fs.BoolVar(&watchAllNamespaces, "all-namespaces", false, "Match pods in every namespace (default: only --namespace).")
 }
 
@@ -52,11 +53,12 @@ func registerTargetFlags(fs *pflag.FlagSet) {
 // `watch` subcommand.
 func registerWatchOnlyFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&watchNamespaceSelector, "namespace-selector", "", "Only match namespaces carrying these labels (e.g. team=payments). Mutually exclusive with --all-namespaces.")
-	fs.StringVar(&watchExporter, "exporter", "default", "Name of the ExporterConfig (in the PodTrace's namespace) events are sent to.")
-	fs.StringVar(&watchName, "name", "", "Name for the created PodTrace (defaults to the --app value).")
+	fs.StringVar(&watchExporter, "exporter", "default", "Name of the ExporterConfig (in the CR's namespace) events are sent to.")
+	fs.StringVar(&watchName, "name", "", "Name for the created resource (defaults to the --app value).")
 	fs.IntVar(&watchSample, "sample", -1, "Sample percentage 0-100 (default: unset, i.e. the exporter's own default).")
 	fs.StringVar(&watchKubeconfig, "kubeconfig", os.Getenv("KUBECONFIG"), "Path to a kubeconfig file (defaults to KUBECONFIG, then ~/.kube/config).")
-	fs.BoolVar(&watchPrintOnly, "print-only", false, "Print the rendered PodTrace YAML instead of creating it.")
+	fs.BoolVar(&watchPrintOnly, "print-only", false, "Print the rendered manifest instead of creating it.")
+	fs.BoolVar(&watchApplication, "application", false, "Create an ApplicationTrace (an application of several workloads) instead of a single PodTrace. Each --app/--label becomes one workload selector.")
 }
 
 // newWatchCmd produces the `podtrace watch` subcommand. It is the canonical
@@ -104,7 +106,7 @@ exits. Events flow to the referenced ExporterConfig, not to this terminal.`,
 // from the flag vars keeps buildPodTrace a pure, unit-testable function.
 type watchOptions struct {
 	AppName           string
-	Label             string
+	Labels            []string
 	AllNamespaces     bool
 	NamespaceSelector string
 	Namespace         string
@@ -114,12 +116,19 @@ type watchOptions struct {
 	SamplePercent     int
 	Kubeconfig        string
 	PrintOnly         bool
+	Application       bool
 }
 
 func watchOptionsFromFlags() watchOptions {
+	labels := make([]string, 0, len(watchLabels))
+	for _, l := range watchLabels {
+		if l = strings.TrimSpace(l); l != "" {
+			labels = append(labels, l)
+		}
+	}
 	return watchOptions{
 		AppName:           strings.TrimSpace(watchAppName),
-		Label:             strings.TrimSpace(watchLabel),
+		Labels:            labels,
 		AllNamespaces:     watchAllNamespaces,
 		NamespaceSelector: strings.TrimSpace(watchNamespaceSelector),
 		Namespace:         namespace,
@@ -129,6 +138,7 @@ func watchOptionsFromFlags() watchOptions {
 		SamplePercent:     watchSample,
 		Kubeconfig:        watchKubeconfig,
 		PrintOnly:         watchPrintOnly,
+		Application:       watchApplication,
 	}
 }
 
@@ -136,13 +146,24 @@ func watchOptionsFromFlags() watchOptions {
 // or creates it in the cluster after verifying the referenced ExporterConfig
 // exists. Client wiring mirrors `schedule trigger` (cmd/podtrace/schedule.go).
 func runWatch(ctx context.Context, opts watchOptions) error {
-	pt, err := buildPodTrace(opts)
-	if err != nil {
-		return err
+	var obj client.Object
+	var kind, name string
+	if opts.Application {
+		app, err := buildApplicationTrace(opts)
+		if err != nil {
+			return err
+		}
+		obj, kind, name = app, "ApplicationTrace", app.Name
+	} else {
+		pt, err := buildPodTrace(opts)
+		if err != nil {
+			return err
+		}
+		obj, kind, name = pt, "PodTrace", pt.Name
 	}
 
 	if opts.PrintOnly {
-		out, err := marshalPodTraceYAML(pt)
+		out, err := marshalManagedYAML(obj, kind)
 		if err != nil {
 			return err
 		}
@@ -193,127 +214,188 @@ func runWatch(ctx context.Context, opts watchOptions) error {
 		return fmt.Errorf("check ExporterConfig %s/%s: %w", opts.Namespace, opts.Exporter, err)
 	}
 
-	if err := c.Create(ctx, pt); err != nil {
-		return fmt.Errorf("create PodTrace: %w", err)
+	if err := c.Create(ctx, obj); err != nil {
+		return fmt.Errorf("create %s: %w", kind, err)
 	}
-	if _, err := fmt.Fprintf(os.Stdout, "podtrace.io/PodTrace %q created in namespace %q\n", pt.Name, pt.Namespace); err != nil {
+	if _, err := fmt.Fprintf(os.Stdout, "podtrace.io/%s %q created in namespace %q\n", kind, name, opts.Namespace); err != nil {
 		return fmt.Errorf("write confirmation to stdout: %w", err)
 	}
-	_, _ = fmt.Fprintf(os.Stdout, "watch status with: kubectl get podtrace %s -n %s -w\n", pt.Name, pt.Namespace)
+	_, _ = fmt.Fprintf(os.Stdout, "watch status with: kubectl get %s %s -n %s -w\n", strings.ToLower(kind), name, opts.Namespace)
 	return nil
 }
 
-// buildPodTrace renders a PodTrace from opts. It is pure (no cluster access)
-// so the unit tests can exercise selector/namespace/name/filter construction
-// directly, mirroring buildManualSession in schedule.go.
-func buildPodTrace(opts watchOptions) (*podtracev1alpha1.PodTrace, error) {
-	if opts.AppName == "" && opts.Label == "" {
+// targetSelectors parses --app and repeated --label into the workload
+// selectors. --app is shorthand for one app.kubernetes.io/name selector;
+// each --label is its own selector. The two are mutually exclusive.
+func targetSelectors(opts watchOptions) ([]metav1.LabelSelector, error) {
+	if opts.AppName == "" && len(opts.Labels) == 0 {
 		return nil, errors.New("one of --app or --label is required")
 	}
-	if opts.AppName != "" && opts.Label != "" {
+	if opts.AppName != "" && len(opts.Labels) > 0 {
 		return nil, errors.New("--app and --label are mutually exclusive")
 	}
+	if opts.AppName != "" {
+		return []metav1.LabelSelector{{MatchLabels: map[string]string{appNameLabel: opts.AppName}}}, nil
+	}
+	sels := make([]metav1.LabelSelector, 0, len(opts.Labels))
+	for _, l := range opts.Labels {
+		sel, err := metav1.ParseToLabelSelector(l)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --label selector %q: %w", l, err)
+		}
+		sels = append(sels, *sel)
+	}
+	return sels, nil
+}
+
+// commonTargetValidate covers the validation shared by PodTrace and
+// ApplicationTrace builders, and returns the resolved namespaceSelector,
+// filters, and samplePercent.
+func commonTargetValidate(opts watchOptions) (nsSelector *metav1.LabelSelector, filters []podtracev1alpha1.EventFilter, sample *int32, err error) {
 	if opts.AllNamespaces && opts.NamespaceSelector != "" {
-		return nil, errors.New("--all-namespaces and --namespace-selector are mutually exclusive")
+		return nil, nil, nil, errors.New("--all-namespaces and --namespace-selector are mutually exclusive")
 	}
 	if opts.Exporter == "" {
-		return nil, errors.New("--exporter must not be empty")
+		return nil, nil, nil, errors.New("--exporter must not be empty")
 	}
 	if err := validation.ValidateNamespace(opts.Namespace); err != nil {
-		return nil, fmt.Errorf("invalid namespace: %w", err)
+		return nil, nil, nil, fmt.Errorf("invalid namespace: %w", err)
 	}
 
-	var selector *metav1.LabelSelector
-	if opts.AppName != "" {
-		selector = &metav1.LabelSelector{MatchLabels: map[string]string{appNameLabel: opts.AppName}}
-	} else {
-		sel, err := metav1.ParseToLabelSelector(opts.Label)
-		if err != nil {
-			return nil, fmt.Errorf("invalid --label selector %q: %w", opts.Label, err)
-		}
-		selector = sel
-	}
-
-	var nsSelector *metav1.LabelSelector
 	switch {
 	case opts.AllNamespaces:
 		nsSelector = &metav1.LabelSelector{}
 	case opts.NamespaceSelector != "":
-		sel, err := metav1.ParseToLabelSelector(opts.NamespaceSelector)
-		if err != nil {
-			return nil, fmt.Errorf("invalid --namespace-selector %q: %w", opts.NamespaceSelector, err)
+		sel, perr := metav1.ParseToLabelSelector(opts.NamespaceSelector)
+		if perr != nil {
+			return nil, nil, nil, fmt.Errorf("invalid --namespace-selector %q: %w", opts.NamespaceSelector, perr)
 		}
 		nsSelector = sel
 	}
 
-	name, err := deriveWatchName(opts)
-	if err != nil {
-		return nil, err
-	}
-
-	var filters []podtracev1alpha1.EventFilter
 	if opts.Filter != "" {
-		if err := validation.ValidateEventFilter(opts.Filter); err != nil {
-			return nil, err
+		if verr := validation.ValidateEventFilter(opts.Filter); verr != nil {
+			return nil, nil, nil, verr
 		}
 		for _, f := range parseCSV(strings.ToLower(opts.Filter)) {
 			filters = append(filters, podtracev1alpha1.EventFilter(f))
 		}
 	}
 
-	var samplePercent *int32
 	if opts.SamplePercent >= 0 {
 		if opts.SamplePercent > 100 {
-			return nil, fmt.Errorf("--sample must be between 0 and 100, got %d", opts.SamplePercent)
+			return nil, nil, nil, fmt.Errorf("--sample must be between 0 and 100, got %d", opts.SamplePercent)
 		}
 		v := int32(opts.SamplePercent)
-		samplePercent = &v
+		sample = &v
+	}
+	return nsSelector, filters, sample, nil
+}
+
+// buildPodTrace renders a single PodTrace from opts. It is pure (no cluster
+// access) so unit tests can exercise selector/namespace/name/filter
+// construction directly, mirroring buildManualSession in schedule.go.
+func buildPodTrace(opts watchOptions) (*podtracev1alpha1.PodTrace, error) {
+	sels, err := targetSelectors(opts)
+	if err != nil {
+		return nil, err
+	}
+	if len(sels) > 1 {
+		return nil, errors.New("multiple --label selectors target an application of several workloads; use --application (creates an ApplicationTrace)")
+	}
+	nsSelector, filters, sample, err := commonTargetValidate(opts)
+	if err != nil {
+		return nil, err
+	}
+	name, err := deriveWatchName(opts)
+	if err != nil {
+		return nil, err
 	}
 
+	selector := sels[0]
 	pt := &podtracev1alpha1.PodTrace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: opts.Namespace,
-			Labels: map[string]string{
-				"app.kubernetes.io/managed-by": "podtrace-cli",
-			},
+			Labels:    map[string]string{"app.kubernetes.io/managed-by": "podtrace-cli"},
 		},
 		Spec: podtracev1alpha1.PodTraceSpec{
-			Selector:          selector,
+			Selector:          &selector,
 			NamespaceSelector: nsSelector,
 			Filters:           filters,
 			ExporterRef:       podtracev1alpha1.LocalObjectReference{Name: opts.Exporter},
-			SamplePercent:     samplePercent,
+			SamplePercent:     sample,
 		},
 	}
 	return pt, nil
 }
 
-// deriveWatchName resolves the PodTrace object name: explicit --name wins,
+// buildApplicationTrace renders an ApplicationTrace: an application of one or
+// more workloads (the union of --app/--label selectors), materialized by the
+// operator into a single owned PodTrace using spec.appSelector.
+func buildApplicationTrace(opts watchOptions) (*podtracev1alpha1.ApplicationTrace, error) {
+	sels, err := targetSelectors(opts)
+	if err != nil {
+		return nil, err
+	}
+	nsSelector, filters, sample, err := commonTargetValidate(opts)
+	if err != nil {
+		return nil, err
+	}
+	name, err := deriveWatchName(opts)
+	if err != nil {
+		return nil, err
+	}
+
+	app := &podtracev1alpha1.ApplicationTrace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: opts.Namespace,
+			Labels:    map[string]string{"app.kubernetes.io/managed-by": "podtrace-cli"},
+		},
+		Spec: podtracev1alpha1.ApplicationTraceSpec{
+			Selectors:         sels,
+			NamespaceSelector: nsSelector,
+			Filters:           filters,
+			ExporterRef:       podtracev1alpha1.LocalObjectReference{Name: opts.Exporter},
+			SamplePercent:     sample,
+		},
+	}
+	return app, nil
+}
+
+// deriveWatchName resolves the created resource's name: explicit --name wins,
 // otherwise the --app value is used. --label alone has no natural name, so it
 // requires --name. The result must be a valid RFC-1123 DNS label name.
 func deriveWatchName(opts watchOptions) (string, error) {
 	name := opts.Name
 	if name == "" {
 		if opts.AppName == "" {
-			return "", errors.New("--name is required when targeting with --label (there is no app name to derive the PodTrace name from)")
+			return "", errors.New("--name is required when targeting with --label (there is no app name to derive the resource name from)")
 		}
 		name = opts.AppName
 	}
 	name = strings.ToLower(strings.TrimSpace(name))
 	if errs := k8svalidation.IsDNS1123Subdomain(name); len(errs) > 0 {
-		return "", fmt.Errorf("invalid PodTrace name %q: %s (override with --name)", name, strings.Join(errs, "; "))
+		return "", fmt.Errorf("invalid resource name %q: %s (override with --name)", name, strings.Join(errs, "; "))
 	}
 	if len(name) > 63 {
-		return "", fmt.Errorf("PodTrace name %q exceeds 63 characters; pass a shorter --name", name)
+		return "", fmt.Errorf("resource name %q exceeds 63 characters; pass a shorter --name", name)
 	}
 	return name, nil
 }
 
-// marshalPodTraceYAML renders a PodTrace in the same shape `kubectl get -o yaml`
-// would emit (mirrors marshalSessionYAML in schedule_yaml.go).
-func marshalPodTraceYAML(pt *podtracev1alpha1.PodTrace) ([]byte, error) {
-	pt.APIVersion = podtracev1alpha1.GroupVersion.String()
-	pt.Kind = "PodTrace"
-	return sigsyaml.Marshal(pt)
+// marshalManagedYAML renders a PodTrace or ApplicationTrace in the same shape
+// `kubectl get -o yaml` would emit (mirrors marshalSessionYAML in
+// schedule_yaml.go). It stamps the TypeMeta the in-memory object lacks.
+func marshalManagedYAML(obj client.Object, kind string) ([]byte, error) {
+	switch o := obj.(type) {
+	case *podtracev1alpha1.PodTrace:
+		o.APIVersion = podtracev1alpha1.GroupVersion.String()
+		o.Kind = kind
+	case *podtracev1alpha1.ApplicationTrace:
+		o.APIVersion = podtracev1alpha1.GroupVersion.String()
+		o.Kind = kind
+	}
+	return sigsyaml.Marshal(obj)
 }

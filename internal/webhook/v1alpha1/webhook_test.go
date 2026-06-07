@@ -73,7 +73,7 @@ func TestPodTraceValidator_Create(t *testing.T) {
 				ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
 			},
 			exporter:  "prod-otlp",
-			wantError: "one of spec.selector or spec.podRefs must be set",
+			wantError: "one of spec.selector, spec.podRefs, or spec.appSelector must be set",
 		},
 		{
 			name: "both-selector-and-podrefs",
@@ -110,7 +110,7 @@ func TestPodTraceValidator_Create(t *testing.T) {
 				ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
 			},
 			exporter:  "prod-otlp",
-			wantError: "one of spec.selector or spec.podRefs must be set",
+			wantError: "one of spec.selector, spec.podRefs, or spec.appSelector must be set",
 		},
 	}
 
@@ -220,7 +220,7 @@ func TestPodTraceSessionValidator_Create(t *testing.T) {
 	}
 }
 
-// TestPodTraceSessionValidator_ObjectStoreReportRef covers Phase 3:
+// TestPodTraceSessionValidator_ObjectStoreReportRef covers the ObjectStore reportRef validation:
 // ObjectStore is no longer blanket-rejected; URI shape is validated
 // instead.
 func TestPodTraceSessionValidator_ObjectStoreReportRef(t *testing.T) {

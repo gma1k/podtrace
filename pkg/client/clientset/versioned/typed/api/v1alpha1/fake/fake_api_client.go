@@ -27,6 +27,10 @@ type FakePodtraceV1alpha1 struct {
 	*testing.Fake
 }
 
+func (c *FakePodtraceV1alpha1) ApplicationTraces(namespace string) v1alpha1.ApplicationTraceInterface {
+	return newFakeApplicationTraces(c, namespace)
+}
+
 func (c *FakePodtraceV1alpha1) ExporterConfigs(namespace string) v1alpha1.ExporterConfigInterface {
 	return newFakeExporterConfigs(c, namespace)
 }

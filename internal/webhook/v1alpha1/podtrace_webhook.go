@@ -54,7 +54,7 @@ func (v *PodTraceCustomValidator) ValidateDelete(_ context.Context, _ *podtracev
 }
 
 func (v *PodTraceCustomValidator) validate(ctx context.Context, pt *podtracev1alpha1.PodTrace) (admission.Warnings, error) {
-	if err := validateSelectorExclusivity(pt.Spec.Selector, pt.Spec.PodRefs); err != nil {
+	if err := validatePodTraceTargets(pt.Spec.Selector, pt.Spec.PodRefs, pt.Spec.AppSelector); err != nil {
 		return nil, err
 	}
 	if err := validateNamespaceSelector(pt.Spec.NamespaceSelector); err != nil {

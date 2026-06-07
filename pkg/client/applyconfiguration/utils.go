@@ -33,6 +33,14 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 	// Group=podtrace.io, Version=v1alpha1
 	case v1alpha1.SchemeGroupVersion.WithKind("AgentSpec"):
 		return &apiv1alpha1.AgentSpecApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("ApplicationTrace"):
+		return &apiv1alpha1.ApplicationTraceApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("ApplicationTraceSpec"):
+		return &apiv1alpha1.ApplicationTraceSpecApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("ApplicationTraceStatus"):
+		return &apiv1alpha1.ApplicationTraceStatusApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("AppSelector"):
+		return &apiv1alpha1.AppSelectorApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("DataDogExporter"):
 		return &apiv1alpha1.DataDogExporterApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("ExporterConfig"):

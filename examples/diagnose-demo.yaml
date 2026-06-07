@@ -33,7 +33,7 @@ metadata:
 ---
 # ExporterConfig points at a collector Service in the "observability"
 # namespace. Bring your own collector or point this at any OTLP endpoint
-# (an unreachable one is tolerated — Phase 4's reportRef sink still
+# (an unreachable one is tolerated — the reportRef sink still
 # records the full report in a ConfigMap even if OTLP delivery fails).
 apiVersion: podtrace.io/v1alpha1
 kind: ExporterConfig
@@ -84,7 +84,7 @@ spec:
 #   * filters: [dns, net] — scoped to the two event categories the
 #     workload generates; omit to capture everything.
 #   * duration: 30s — enough to see a handful of HTTPS round-trips.
-#   * reportRef.configMap — Phase 4's CLI self-upload path lands the
+#   * reportRef.configMap — the CLI self-upload path lands the
 #     full human-readable report in this ConfigMap when the session
 #     completes. Switch to `secret: { name: … }` if the report may
 #     carry sensitive hostnames/payloads.

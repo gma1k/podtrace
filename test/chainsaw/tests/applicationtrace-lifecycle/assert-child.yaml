@@ -1,0 +1,28 @@
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: shop
+  labels:
+    podtrace.io/application: shop
+    podtrace.io/managed-by: podtrace-operator
+  ownerReferences:
+    - apiVersion: podtrace.io/v1alpha1
+      kind: ApplicationTrace
+      name: shop
+      controller: true
+spec:
+  exporterRef:
+    name: apt-otlp
+  appSelector:
+    matchSelectors:
+      - matchLabels: { app.kubernetes.io/name: shop, tier: web }
+      - matchLabels: { app.kubernetes.io/name: shop, tier: api }
+---
+# The ApplicationTrace reports Reconciled and references its child.
+apiVersion: podtrace.io/v1alpha1
+kind: ApplicationTrace
+metadata:
+  name: shop
+status:
+  podTraceRef: shop
+  (conditions[?type == 'Reconciled'].status | [0]): "True"

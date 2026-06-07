@@ -424,20 +424,24 @@ int tracepoint_tcp_retransmit_skb(void *ctx) {
 	return 0;
 }
 
+struct net_dev_xmit_args {
+	unsigned short common_type;
+	unsigned char common_flags;
+	unsigned char common_preempt_count;
+	int common_pid;
+	void *skbaddr;
+	unsigned int len;
+	int rc;
+	unsigned int name_loc;
+};
+_Static_assert(__builtin_offsetof(struct net_dev_xmit_args, len) == 16, "net_dev_xmit: len must be at offset 16");
+_Static_assert(__builtin_offsetof(struct net_dev_xmit_args, rc) == 20, "net_dev_xmit: rc must be at offset 20");
+_Static_assert(__builtin_offsetof(struct net_dev_xmit_args, name_loc) == 24, "net_dev_xmit: name __data_loc must be at offset 24");
+
 SEC("tp/net/net_dev_xmit")
 int tracepoint_net_dev_xmit(void *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	struct {
-		unsigned short common_type;
-		unsigned char common_flags;
-		unsigned char common_preempt_count;
-		int common_pid;
-		char name[16];
-		int queue_mapping;
-		unsigned int skbaddr;
-		unsigned int len;
-		int rc;
-	} args_local;
+	struct net_dev_xmit_args args_local;
 	bpf_probe_read_kernel(&args_local, sizeof(args_local), ctx);
 	if (args_local.rc == 0) {
 		return 0;
@@ -453,7 +457,8 @@ int tracepoint_net_dev_xmit(void *ctx) {
 	e->error = args_local.rc;
 	e->bytes = args_local.len;
 	e->tcp_state = 0;
-	bpf_probe_read_kernel_str(e->target, sizeof(e->target), args_local.name);
+	unsigned short name_off = (unsigned short)(args_local.name_loc & 0xffff);
+	bpf_probe_read_kernel_str(e->target, sizeof(e->target), (char *)ctx + name_off);
 	capture_user_stack(ctx, pid, 0, e);
 	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	return 0;

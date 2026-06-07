@@ -12,7 +12,7 @@ spec:
     NoopBackend today, so this test does NOT assert event continuity
     (no events flow through the agent regardless of restart). When
     the real eBPF backend is wired into the agent's event loop
-    (Phase 5+), this test should be extended to compare event counts
+    this test could be extended to compare event counts
     pre/post restart.
   timeouts:
     apply: 30s

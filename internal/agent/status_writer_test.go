@@ -79,7 +79,7 @@ func TestEmitOnce_NilHeartbeatIsSafe(t *testing.T) {
 	}
 }
 
-// TestBuildNodeStatusEntry covers the Phase 0 contract: how a CRRule
+// TestBuildNodeStatusEntry covers the contract: how a CRRule
 // — healthy, tombstoned, or running on an unready agent — gets
 // rendered onto the PodTrace.status.nodeStatus row that the status
 // writer patches. The apiserver round-trip is exercised by the

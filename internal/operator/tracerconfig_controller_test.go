@@ -43,7 +43,7 @@ func TestTracerConfigReconciler_EnvtestLifecycle(t *testing.T) {
 
 	r := &TracerConfigReconciler{Client: c, Scheme: scheme, SystemNamespace: systemNS}
 
-	// --- Phase: create ----------------------------------------------------
+	// --- create ----------------------------------------------------
 	reconcileUntil(t, 10*time.Second,
 		func() error {
 			var ds appsv1.DaemonSet
@@ -106,7 +106,7 @@ func TestTracerConfigReconciler_EnvtestLifecycle(t *testing.T) {
 		t.Errorf("bundle RoleBinding.subjects wrong: %+v", bundleRB.Subjects)
 	}
 
-	// --- Phase: delete ---------------------------------------------------
+	// --- delete ---------------------------------------------------
 	if err := c.Delete(ctx, tcObj); err != nil {
 		t.Fatalf("delete TracerConfig: %v", err)
 	}

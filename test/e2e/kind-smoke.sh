@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# kind-smoke.sh — Phase 2 end-to-end validation on a kind cluster.
+# kind-smoke.sh — end-to-end validation on a kind cluster.
 #
 # This script does not create a kind cluster (the user is expected to
 # have one already). It installs the podtrace chart with the operator
@@ -14,7 +14,7 @@
 #   4. Reports the session's phase on .status.phase.
 #
 # The script only asserts control-plane behaviour. The agent and session
-# Jobs will CrashLoopBackOff until the Phase-3 agent runtime lands —
+# Jobs will CrashLoopBackOff until the agent runtime lands —
 # that is expected, and does not affect the operator's reconciliation
 # loop.
 #
@@ -301,7 +301,7 @@ EOF
 		"[[ \$(kubectl -n ${SAMPLE_NS} get podtraces -o json | jq '[.items[] | select((.status.nodeStatus // []) | length > 0)] | length') -eq 2 ]]"
 
 	# --- step 11: print a summary for humans ----------------------------
-	log_info "phase-2+3 smoke passed — cluster state snapshot follows"
+	log_info "smoke passed — cluster state snapshot follows"
 	echo
 	kubectl get tracerconfig
 	echo

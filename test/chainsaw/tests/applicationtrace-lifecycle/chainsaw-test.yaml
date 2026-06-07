@@ -1,0 +1,33 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: applicationtrace-lifecycle
+spec:
+  description: |
+    ApplicationTrace generates and owns a single PodTrace whose
+    spec.appSelector is the union of the application's selectors.
+    Verifies: child PodTrace is created, owned (controller ref), carries the
+    appSelector union + exporter + filters; ApplicationTrace reports Reconciled
+    and references the child; deleting the ApplicationTrace cascades to the
+    child via owner reference.
+  timeouts:
+    apply: 30s
+    assert: 90s
+    delete: 60s
+    error: 90s
+  steps:
+    - name: create-application
+      try:
+        - apply:
+            file: ./resources.yaml
+        - assert:
+            file: ./assert-child.yaml
+    - name: delete-application-cascades
+      try:
+        - delete:
+            ref:
+              apiVersion: podtrace.io/v1alpha1
+              kind: ApplicationTrace
+              name: shop
+        - error:
+            file: ./error-child-present.yaml

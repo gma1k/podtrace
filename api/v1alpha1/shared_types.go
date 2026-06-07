@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // PodRef references a specific pod by namespace/name.
@@ -28,6 +29,14 @@ type SecretKeySelector struct {
 	Name string `json:"name"`
 	// +kubebuilder:validation:Required
 	Key string `json:"key"`
+}
+
+// AppSelector matches pods that satisfy ANY of its label selectors, so
+// an application composed of several workloads with distinct labels
+// can be traced as one.
+type AppSelector struct {
+	// +kubebuilder:validation:MinItems=1
+	MatchSelectors []metav1.LabelSelector `json:"matchSelectors"`
 }
 
 // EventFilter enumerates the event categories podtrace can capture.

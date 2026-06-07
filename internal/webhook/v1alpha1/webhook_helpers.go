@@ -59,6 +59,28 @@ func validateSelectorExclusivity(selector *metav1.LabelSelector, podRefs []podtr
 	return nil
 }
 
+// validatePodTraceTargets enforces "exactly one of selector, podRefs, or
+// appSelector" for PodTrace.
+func validatePodTraceTargets(selector *metav1.LabelSelector, podRefs []podtracev1alpha1.PodRef, appSelector *podtracev1alpha1.AppSelector) error {
+	n := 0
+	if selector != nil && (len(selector.MatchLabels) > 0 || len(selector.MatchExpressions) > 0) {
+		n++
+	}
+	if len(podRefs) > 0 {
+		n++
+	}
+	if appSelector != nil && len(appSelector.MatchSelectors) > 0 {
+		n++
+	}
+	switch {
+	case n == 0:
+		return fmt.Errorf("one of spec.selector, spec.podRefs, or spec.appSelector must be set")
+	case n > 1:
+		return fmt.Errorf("spec.selector, spec.podRefs, and spec.appSelector are mutually exclusive; set exactly one")
+	}
+	return nil
+}
+
 // resolveExporterRef verifies that spec.exporterRef.name refers to an
 // ExporterConfig that exists in the caller's namespace.
 func resolveExporterRef(ctx context.Context, c client.Client, namespace, name string) error {

@@ -1,7 +1,7 @@
 {{/*
 crd-labeler — one-time-per-cluster CRD ownership migration.
 
-Before Phase 1 + Phase 5 the chart shipped its CRDs in Helm's `crds/`
+Earlier the chart shipped its CRDs in Helm's `crds/`
 directory, which installs once at first `helm install` and never
 updates afterward. We have since moved the CRDs into `templates/crds/`
 with `helm.sh/hook: pre-install,pre-upgrade` so Helm propagates schema

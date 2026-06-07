@@ -1,0 +1,22 @@
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: apt-otlp
+spec:
+  type: otlp
+  otlp:
+    endpoint: otel-collector:4318
+    protocol: http
+    insecure: true
+---
+apiVersion: podtrace.io/v1alpha1
+kind: ApplicationTrace
+metadata:
+  name: shop
+spec:
+  selectors:
+    - matchLabels: { app.kubernetes.io/name: shop, tier: web }
+    - matchLabels: { app.kubernetes.io/name: shop, tier: api }
+  exporterRef:
+    name: apt-otlp
+  filters: [dns, net]

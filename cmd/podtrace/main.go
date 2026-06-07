@@ -187,17 +187,20 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if watchAppName != "" && watchLabel != "" {
+	if watchAppName != "" && len(watchLabels) > 0 {
 		return fmt.Errorf("--app and --label are mutually exclusive")
 	}
-	if watchAppName != "" || watchLabel != "" {
+	if watchAppName != "" || len(watchLabels) > 0 {
 		if podSelector != "" {
 			return fmt.Errorf("--app/--label and --pod-selector are mutually exclusive; use one")
+		}
+		if len(watchLabels) > 1 {
+			return fmt.Errorf("multiple --label selectors target an application; use 'podtrace watch --application' (a managed ApplicationTrace), not the ephemeral command")
 		}
 		if watchAppName != "" {
 			podSelector = appNameLabel + "=" + watchAppName
 		} else {
-			podSelector = watchLabel
+			podSelector = watchLabels[0]
 		}
 	}
 

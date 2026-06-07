@@ -437,7 +437,7 @@ func gaugeValue(t *testing.T, gv *prometheus.GaugeVec, labels prometheus.Labels)
 }
 
 // TestSDKEventExporter_ThresholdTripsCounter is the agent-side
-// end-to-end gate on Phase A threshold wiring: a bundle carrying an
+// end-to-end gate on threshold wiring: a bundle carrying an
 // FS-slow threshold yields a Prometheus counter increment for an FS
 // event whose latency exceeds the threshold, and no increment for one
 // that doesn't.
