@@ -88,6 +88,19 @@ metadata:
               }
             }
           }
+        },
+        {
+          "apiVersion": "podtrace.io/v1alpha1",
+          "kind": "ApplicationTrace",
+          "metadata": { "name": "trace-storefront", "namespace": "default" },
+          "spec": {
+            "selectors": [
+              { "matchLabels": { "app": "frontend" } },
+              { "matchLabels": { "app": "checkout" } }
+            ],
+            "filters": ["dns", "net", "http"],
+            "exporterRef": { "name": "prod-otlp" }
+          }
         }
       ]
 
@@ -221,6 +234,23 @@ spec:
 
   customresourcedefinitions:
     owned:
+      - name: applicationtraces.podtrace.io
+        version: v1alpha1
+        kind: ApplicationTrace
+        displayName: Application Trace
+        description: |
+          Application-level tracing intent. Targets a whole application
+          across one or more workload label selectors (optionally
+          spanning namespaces via `namespaceSelector`) and owns a single
+          synced `PodTrace` that streams events to the referenced
+          `ExporterConfig`. The user-facing entry point for tracing an
+          app rather than an individual pod set.
+        resources:
+          - kind: PodTrace
+            version: podtrace.io/v1alpha1
+          - kind: Pod
+            version: v1
+
       - name: tracerconfigs.podtrace.io
         version: v1alpha1
         kind: TracerConfig
@@ -307,13 +337,13 @@ spec:
         - serviceAccountName: podtrace-operator
           rules:
             - apiGroups: ["podtrace.io"]
-              resources: ["tracerconfigs", "podtraces", "podtracesessions", "exporterconfigs"]
-              verbs: ["get", "list", "watch", "update", "patch", "delete"]
+              resources: ["tracerconfigs", "podtraces", "podtracesessions", "exporterconfigs", "podtraceschedules", "applicationtraces"]
+              verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
             - apiGroups: ["podtrace.io"]
-              resources: ["tracerconfigs/status", "podtraces/status", "podtracesessions/status", "exporterconfigs/status"]
+              resources: ["tracerconfigs/status", "podtraces/status", "podtracesessions/status", "exporterconfigs/status", "podtraceschedules/status", "applicationtraces/status"]
               verbs: ["get", "update", "patch"]
             - apiGroups: ["podtrace.io"]
-              resources: ["tracerconfigs/finalizers", "podtraces/finalizers", "podtracesessions/finalizers"]
+              resources: ["tracerconfigs/finalizers", "podtraces/finalizers", "podtracesessions/finalizers", "podtraceschedules/finalizers", "applicationtraces/finalizers"]
               verbs: ["update"]
             - apiGroups: ["apps"]
               resources: ["daemonsets"]
@@ -323,6 +353,9 @@ spec:
               verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
             - apiGroups: [""]
               resources: ["pods"]
+              verbs: ["get", "list", "watch"]
+            - apiGroups: [""]
+              resources: ["namespaces"]
               verbs: ["get", "list", "watch"]
             - apiGroups: [""]
               resources: ["serviceaccounts", "configmaps", "secrets"]
