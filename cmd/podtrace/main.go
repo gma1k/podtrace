@@ -648,8 +648,6 @@ func runNormalModeWithSource(ctx context.Context, eventChan <-chan *events.Event
 
 	for {
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
 		case event := <-eventChan:
 			attachSourcePod(event, resolveSource)
 			var k8sCtx map[string]interface{}
@@ -733,18 +731,6 @@ func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Eve
 
 	for {
 		select {
-		case <-ctx.Done():
-			diagnostician.Finish()
-			report := diagnostician.GenerateReport()
-			if profilingHandler != nil {
-				report += profilingHandler.GenerateSection(diagnostician.GetEvents(), duration)
-			}
-			finalizeDiagnoseOutputs(ctx, report, diagnostician)
-			if exportFormat != "" {
-				return exportReport(report, exportFormat, diagnostician)
-			}
-			fmt.Println(report)
-			return ctx.Err()
 		case event := <-eventChan:
 			attachSourcePod(event, resolveSource)
 			eventBatch = append(eventBatch, event)

@@ -130,6 +130,66 @@ func TestPopulateSessionSummaries_UnfinishedJobsContributeZero(t *testing.T) {
 	}
 }
 
+func TestPopulateSessionSummaries_NodeFromSummaryAndSkipsForeignContainers(t *testing.T) {
+	scheme := newSummaryScheme(t)
+	now := metav1.Now()
+
+	job := batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pts-nolabel", Namespace: "podtrace-system",
+		},
+		Status: batchv1.JobStatus{Succeeded: 1, CompletionTime: &now},
+	}
+	raw, _ := json.Marshal(sessionSummaryJSON{TotalEvents: 77, Node: "node-from-summary"})
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pts-nolabel-xyz",
+			Namespace: "podtrace-system",
+			Labels:    map[string]string{"job-name": "pts-nolabel"},
+		},
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name: "istio-proxy",
+					State: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{Message: "ignored"},
+					},
+				},
+				{
+					Name: "podtrace",
+					State: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{Message: string(raw)},
+					},
+				},
+			},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(pod).Build()
+
+	s := &podtracev1alpha1.PodTraceSession{
+		Status: podtracev1alpha1.PodTraceSessionStatus{
+			Jobs: []podtracev1alpha1.SessionJobRef{{Node: "node-from-summary", Name: "pts-nolabel"}},
+		},
+	}
+	if err := populateSessionSummaries(context.Background(), c, s, []batchv1.Job{job}); err != nil {
+		t.Fatalf("populateSessionSummaries: %v", err)
+	}
+	if s.Status.Jobs[0].EventCount != 77 {
+		t.Errorf("EventCount=%d want 77 (node resolved from summary.Node)", s.Status.Jobs[0].EventCount)
+	}
+	if s.Status.Summary == nil || s.Status.Summary.TotalEvents != 77 {
+		t.Errorf("Summary not aggregated: %+v", s.Status.Summary)
+	}
+}
+
+func TestPopulateSessionSummaries_NilSessionIsNoop(t *testing.T) {
+	scheme := newSummaryScheme(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	if err := populateSessionSummaries(context.Background(), c, nil, nil); err != nil {
+		t.Errorf("nil session should be a no-op, got %v", err)
+	}
+}
+
 func TestPopulateSessionSummaries_MalformedMessageIsNonFatal(t *testing.T) {
 	scheme := newSummaryScheme(t)
 	now := metav1.Now()

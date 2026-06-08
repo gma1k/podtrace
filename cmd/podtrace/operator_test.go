@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"testing"
 )
 
@@ -22,10 +23,6 @@ func TestNewOperatorCmd_Metadata(t *testing.T) {
 		}
 	}
 
-	// RunE must be wired; we cannot execute it in a unit test because it
-	// starts a real manager that needs a kubeconfig. End-to-end coverage
-	// lives in envtest (internal/operator/*_test.go) and the kind-cluster
-	// smoke script under test/e2e/.
 	if cmd.RunE == nil {
 		t.Error("RunE is nil — operator subcommand is not wired")
 	}
@@ -33,9 +30,6 @@ func TestNewOperatorCmd_Metadata(t *testing.T) {
 
 func TestNewOperatorCmd_FlagsMapCleanlyToOptions(t *testing.T) {
 	cmd := newOperatorCmd()
-	// Override a couple of flags to non-default values and confirm they
-	// propagate through toOperatorOptions. Keeps the CLI↔library contract
-	// honest without booting a manager.
 	if err := cmd.Flags().Set("system-namespace", "custom-ns"); err != nil {
 		t.Fatal(err)
 	}
@@ -46,15 +40,12 @@ func TestNewOperatorCmd_FlagsMapCleanlyToOptions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The options struct is owned privately by newOperatorCmd's closure;
-	// we re-derive it via the same translation helper the RunE uses.
 	opts := &operatorOptions{}
 	opts.systemNamespace = cmd.Flag("system-namespace").Value.String()
 	opts.leaderElectNamespace = cmd.Flag("leader-elect-namespace").Value.String()
 	opts.metricsAddr = cmd.Flag("metrics-addr").Value.String()
 	opts.healthAddr = cmd.Flag("health-addr").Value.String()
 	opts.webhookCertDir = cmd.Flag("webhook-cert-dir").Value.String()
-	// bools/ints need typed getters
 	opts.leaderElect, _ = cmd.Flags().GetBool("leader-elect")
 	opts.webhookPort, _ = cmd.Flags().GetInt("webhook-port")
 
@@ -68,8 +59,48 @@ func TestNewOperatorCmd_FlagsMapCleanlyToOptions(t *testing.T) {
 	if runtimeOpts.WebhookPort != 10443 {
 		t.Errorf("WebhookPort=%d want 10443", runtimeOpts.WebhookPort)
 	}
-	// The toOperatorOptions return type is operator.Options by
-	// declaration; no further runtime assertion needed.
+}
+
+func TestToOperatorOptions_EmptyLeaderNSFallsBackToSystemNS(t *testing.T) {
+	t.Setenv("POD_NAMESPACE", "")
+	if err := os.Unsetenv("POD_NAMESPACE"); err != nil {
+		t.Fatalf("unset POD_NAMESPACE: %v", err)
+	}
+
+	opts := &operatorOptions{
+		systemNamespace:      "sys-ns",
+		leaderElectNamespace: "",
+	}
+	got := toOperatorOptions(opts)
+	if got.LeaderElectionNamespace != "sys-ns" {
+		t.Errorf("LeaderElectionNamespace=%q, want sys-ns (fallback)", got.LeaderElectionNamespace)
+	}
+}
+
+func TestToOperatorOptions_PodNamespaceEnvOverridesDefault(t *testing.T) {
+	t.Setenv("POD_NAMESPACE", "pod-actual-ns")
+
+	opts := &operatorOptions{
+		systemNamespace:      "sys-ns",
+		leaderElectNamespace: "podtrace-system",
+	}
+	got := toOperatorOptions(opts)
+	if got.LeaderElectionNamespace != "pod-actual-ns" {
+		t.Errorf("LeaderElectionNamespace=%q, want pod-actual-ns (env override)", got.LeaderElectionNamespace)
+	}
+}
+
+func TestToOperatorOptions_ExplicitLeaderNSWinsOverEnv(t *testing.T) {
+	t.Setenv("POD_NAMESPACE", "pod-actual-ns")
+
+	opts := &operatorOptions{
+		systemNamespace:      "sys-ns",
+		leaderElectNamespace: "explicit-ns",
+	}
+	got := toOperatorOptions(opts)
+	if got.LeaderElectionNamespace != "explicit-ns" {
+		t.Errorf("LeaderElectionNamespace=%q, want explicit-ns", got.LeaderElectionNamespace)
+	}
 }
 
 func TestNewOperatorCmd_LeaderElectDefault(t *testing.T) {

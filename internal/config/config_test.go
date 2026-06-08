@@ -756,6 +756,16 @@ func TestGetVersion(t *testing.T) {
 	})
 }
 
+func TestReadVCSRevision_RealImplementation(t *testing.T) {
+	originalReadVCS := readVCSRevision
+	t.Cleanup(func() { readVCSRevision = originalReadVCS })
+
+	got := originalReadVCS()
+	if got != "" && len(got) != 7 {
+		t.Errorf("readVCSRevision()=%q: a non-empty revision must be a 7-char short SHA", got)
+	}
+}
+
 func TestGetUserAgent(t *testing.T) {
 	key := "PODTRACE_VERSION"
 	originalEnv := os.Getenv(key)
