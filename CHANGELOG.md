@@ -9,6 +9,25 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.12.8](https://github.com/gma1k/podtrace/compare/v0.12.7...v0.12.8) (2026-06-08)
+
+
+### Features
+
+* add application targeting appSelector and ApplicationTrace CRD ([#197](https://github.com/gma1k/podtrace/issues/197)) ([27d15f4](https://github.com/gma1k/podtrace/commit/27d15f46debe899318546b053327a6b614b90179))
+
+
+### Tests
+
+* improve coverage; fix nondeterministic mode-loop select ([#198](https://github.com/gma1k/podtrace/issues/198)) ([06f45a7](https://github.com/gma1k/podtrace/commit/06f45a7e14d08243801c8fa5b4cda907555bc877))
+
+
+### Maintenance
+
+* **deps:** update github actions to v6.0.2 ([#194](https://github.com/gma1k/podtrace/issues/194)) ([e2c4138](https://github.com/gma1k/podtrace/commit/e2c413829a93609e60ae6ea6280345b2bc908c7d))
+* **deps:** update github actions to v7 ([#195](https://github.com/gma1k/podtrace/issues/195)) ([e4bb67c](https://github.com/gma1k/podtrace/commit/e4bb67c5a818685ca78d55c0c92a2487afcecbc8))
+* **deps:** update go modules (non-major) ([#199](https://github.com/gma1k/podtrace/issues/199)) ([f5502d7](https://github.com/gma1k/podtrace/commit/f5502d77f0d7f8e3a11d335b3908add5ab02357d))
+
 ## [0.12.7](https://github.com/gma1k/podtrace/compare/v0.12.6...v0.12.7) (2026-06-06)
 
 
