@@ -51,6 +51,50 @@ func TestApplyPayloadToConfig_SplunkCredentialSetsToken(t *testing.T) {
 	}
 }
 
+func TestApplyPayloadToConfig_NilIsNoop(t *testing.T) {
+	defer resetTracingConfig()
+	before := config.OTLPEndpoint
+	applyPayloadToConfig(nil)
+	if config.OTLPEndpoint != before {
+		t.Errorf("nil payload mutated config: OTLPEndpoint=%q", config.OTLPEndpoint)
+	}
+}
+
+func TestApplyPayloadToConfig_Jaeger(t *testing.T) {
+	defer resetTracingConfig()
+	applyPayloadToConfig(&bundle.Payload{
+		Type:     bundle.TypeJaeger,
+		Endpoint: "jaeger:4318",
+	})
+	if config.JaegerEndpoint != "jaeger:4318" {
+		t.Errorf("JaegerEndpoint=%q", config.JaegerEndpoint)
+	}
+}
+
+func TestApplyPayloadToConfig_Zipkin(t *testing.T) {
+	defer resetTracingConfig()
+	applyPayloadToConfig(&bundle.Payload{
+		Type:     bundle.TypeZipkin,
+		Endpoint: "zipkin:9411",
+	})
+	if config.ZipkinEndpoint != "zipkin:9411" {
+		t.Errorf("ZipkinEndpoint=%q", config.ZipkinEndpoint)
+	}
+}
+
+func TestApplyPayloadToConfig_ZeroSampleDoesNotOverride(t *testing.T) {
+	defer resetTracingConfig()
+	config.TracingSampleRate = 0.5
+	applyPayloadToConfig(&bundle.Payload{
+		Type:     bundle.TypeOTLP,
+		Endpoint: "otel:4318",
+		Sample:   0,
+	})
+	if config.TracingSampleRate != 0.5 {
+		t.Errorf("zero sample should not override; got %v", config.TracingSampleRate)
+	}
+}
+
 func TestApplyExporterFromFile_RoundTrip(t *testing.T) {
 	defer resetTracingConfig()
 	dir := t.TempDir()
@@ -119,6 +163,35 @@ func TestApplyExporterFromFile_CredentialFileLoaded(t *testing.T) {
 	}
 	if config.DataDogAPIKey != "dd-key" {
 		t.Errorf("DataDogAPIKey=%q want dd-key", config.DataDogAPIKey)
+	}
+}
+
+func TestApplyExporterFromFile_EnvCredentialWins(t *testing.T) {
+	defer resetTracingConfig()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bundle.yaml")
+	if err := os.WriteFile(path, []byte("type: splunk\nendpoint: splunk:8088\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PODTRACE_EXPORTER_CREDENTIAL", "env-hec-token")
+	t.Setenv("PODTRACE_EXPORTER_CREDENTIAL_FILE", filepath.Join(dir, "ignored"))
+	if err := applyExporterFromFile(path); err != nil {
+		t.Fatalf("applyExporterFromFile: %v", err)
+	}
+	if config.SplunkToken != "env-hec-token" {
+		t.Errorf("SplunkToken=%q want env-hec-token (env credential must win)", config.SplunkToken)
+	}
+}
+
+func TestApplyExporterFromFile_MalformedYAMLErrors(t *testing.T) {
+	defer resetTracingConfig()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bundle.yaml")
+	if err := os.WriteFile(path, []byte("\tnot: [valid"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyExporterFromFile(path); err == nil {
+		t.Fatal("expected error for malformed bundle YAML")
 	}
 }
 

@@ -35,6 +35,22 @@ func (r *recordingLogger) OnAttempt(backend, method, url string, status, attempt
 	})
 }
 
+func TestCounterFor_ReturnsSameCounterForSameKey(t *testing.T) {
+	p := newAzureRetryLogPolicy()
+	first := p.counterFor("PUT example.com/blob")
+	first.Add(3)
+	second := p.counterFor("PUT example.com/blob")
+	if first != second {
+		t.Fatal("counterFor returned a different counter for the same key")
+	}
+	if got := second.Load(); got != 3 {
+		t.Errorf("cached counter lost state: got %d want 3", got)
+	}
+	if other := p.counterFor("GET example.com/blob"); other == first {
+		t.Error("distinct keys must not share a counter")
+	}
+}
+
 func TestLoggingTransport_AttemptsIncrementPerSameURL(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)

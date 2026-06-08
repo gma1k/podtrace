@@ -18,15 +18,16 @@ import (
 //     result.
 func TestSessionJobName_Properties(t *testing.T) {
 	cases := []struct {
-		name    string
-		uid     types.UID
-		node    string
+		name     string
+		uid      types.UID
+		node     string
 		mustHave string
 	}{
 		{"simple", "abcdef1234567890", "ip-10-0-1-4", "pts-abcdef123456"},
 		{"dotted-fqdn", "abcdef1234567890", "node-1.prod.example.com", "pts-abcdef123456"},
 		{"uppercase", "abcdef1234567890", "Node-Upper", "pts-abcdef123456"},
 		{"short-uid", "ab12", "node-a", "pts-ab12"},
+		{"long-node-truncates", "abcdef1234567890", "very-long-node-name-that-keeps-going-and-going-and-going-forever", "pts-abcdef123456"},
 	}
 	for _, tc := range cases {
 		tc := tc

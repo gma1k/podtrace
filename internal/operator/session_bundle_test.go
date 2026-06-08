@@ -139,6 +139,12 @@ func TestEnsureSessionExporterBundle_WithCredentialCreatesSecret(t *testing.T) {
 	}
 }
 
+func TestMarshalBundleToYAML_DecodeError(t *testing.T) {
+	if _, err := marshalBundleToYAML(nil); err == nil {
+		t.Fatal("expected error when ConfigMap data is nil")
+	}
+}
+
 func TestMarshalBundleToYAML_RoundTrip(t *testing.T) {
 	cmData := map[string]string{
 		"type":          "otlp",

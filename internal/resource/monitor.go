@@ -44,11 +44,24 @@ type ResourceLimit struct {
 	ResourceType uint32
 }
 
+type bpfLimitMap interface {
+	Put(key, value interface{}) error
+	Delete(key interface{}) error
+}
+
+type limitMapValue struct {
+	LimitBytes   uint64
+	UsageBytes   uint64
+	LastUpdateNS uint64
+	ResourceType uint32
+	_            [4]byte
+}
+
 type ResourceMonitor struct {
 	cgroupPath    string
 	cgroupInode   uint64
-	limitsMap     *ebpf.Map
-	alertsMap     *ebpf.Map
+	limitsMap     bpfLimitMap
+	alertsMap     bpfLimitMap
 	eventChan     chan<- *events.Event
 	mu            sync.RWMutex
 	limits        map[uint32]*ResourceLimit
@@ -67,13 +80,17 @@ func NewResourceMonitor(cgroupPath string, limitsMap, alertsMap *ebpf.Map, event
 	rm := &ResourceMonitor{
 		cgroupPath:    cgroupPath,
 		cgroupInode:   inode,
-		limitsMap:     limitsMap,
-		alertsMap:     alertsMap,
 		eventChan:     eventChan,
 		limits:        make(map[uint32]*ResourceLimit),
 		checkInterval: config.ResourceMonitorInterval,
 		stopCh:        make(chan struct{}),
 		namespace:     namespace,
+	}
+	if limitsMap != nil {
+		rm.limitsMap = limitsMap
+	}
+	if alertsMap != nil {
+		rm.alertsMap = alertsMap
 	}
 
 	if err := rm.readLimits(); err != nil {
@@ -313,13 +330,7 @@ func (rm *ResourceMonitor) syncToBPF() error {
 
 	for resourceType, limit := range rm.limits {
 		key := rm.cgroupInode
-		value := struct {
-			LimitBytes   uint64
-			UsageBytes   uint64
-			LastUpdateNS uint64
-			ResourceType uint32
-			_            [4]byte
-		}{
+		value := limitMapValue{
 			LimitBytes:   limit.LimitBytes,
 			UsageBytes:   limit.UsageBytes,
 			LastUpdateNS: limit.LastUpdateNS,

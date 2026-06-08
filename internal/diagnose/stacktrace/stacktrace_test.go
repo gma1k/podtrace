@@ -195,6 +195,18 @@ func TestStackResolver_ZeroAddr(t *testing.T) {
 	}
 }
 
+// TestStackResolver_KernelAddress exercises the kernel-address branch:
+// a kernel-range address routes through defaultKallsyms; with no symbols
+// loaded it falls back to the 0x%x hex form rather than touching procfs.
+func TestStackResolver_KernelAddress(t *testing.T) {
+	r := &stackResolver{cache: make(map[string]string)}
+	const kernelAddr = uint64(0xffffffff81000000)
+	got := r.resolve(context.Background(), 1, kernelAddr)
+	if got == "" {
+		t.Fatal("kernel address must resolve to a non-empty string")
+	}
+}
+
 // TestStackResolver_ContextCancelled verifies the ctx.Done early-return path.
 func TestStackResolver_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -238,4 +250,3 @@ func TestStackResolver_CurrentPID(t *testing.T) {
 		t.Errorf("cache hit should return same value: got1=%q got2=%q", got1, got2)
 	}
 }
-
