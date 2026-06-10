@@ -10,7 +10,7 @@ SEC("kprobe/vfs_write")
 int kprobe_vfs_write(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_VFS_WRITE);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 	
@@ -29,7 +29,7 @@ SEC("kprobe/vfs_read")
 int kprobe_vfs_read(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_VFS_READ);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 	
@@ -48,7 +48,7 @@ SEC("kretprobe/vfs_read")
 int kretprobe_vfs_read(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_VFS_READ);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	
 	if (!start_ts) {
@@ -97,7 +97,7 @@ SEC("kretprobe/vfs_write")
 int kretprobe_vfs_write(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_VFS_WRITE);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	
 	if (!start_ts) {
@@ -146,7 +146,7 @@ SEC("kprobe/vfs_fsync")
 int kprobe_vfs_fsync(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_VFS_FSYNC);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 	
@@ -165,7 +165,7 @@ SEC("kretprobe/vfs_fsync")
 int kretprobe_vfs_fsync(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_VFS_FSYNC);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	
 	if (!start_ts) {

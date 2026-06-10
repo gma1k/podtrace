@@ -42,7 +42,7 @@ int uprobe_rd_kafka_topic_new(struct pt_regs *ctx)
 {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_KAFKA_TOPIC_NEW);
 
 	const char *topic = (const char *)PT_REGS_PARM2(ctx);
 	if (!topic)
@@ -59,7 +59,7 @@ int uretprobe_rd_kafka_topic_new(struct pt_regs *ctx)
 {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_KAFKA_TOPIC_NEW);
 
 	/* Return value = rd_kafka_topic_t* */
 	u64 topic_ptr = (u64)PT_REGS_RC(ctx);
@@ -88,7 +88,7 @@ int uprobe_rd_kafka_produce(struct pt_regs *ctx)
 {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_KAFKA_PRODUCE);
 	u64 ts  = bpf_ktime_get_ns();
 
 	u64 rkt_ptr = (u64)PT_REGS_PARM1(ctx);
@@ -114,7 +114,7 @@ int uretprobe_rd_kafka_produce(struct pt_regs *ctx)
 {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_KAFKA_PRODUCE);
 
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	if (!start_ts)
@@ -175,7 +175,7 @@ int uprobe_rd_kafka_consumer_poll(struct pt_regs *ctx)
 {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_KAFKA_POLL);
 	u64 ts  = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 	return 0;
@@ -186,7 +186,7 @@ int uretprobe_rd_kafka_consumer_poll(struct pt_regs *ctx)
 {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_KAFKA_POLL);
 
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	if (!start_ts)

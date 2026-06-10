@@ -102,7 +102,7 @@ $(VMLINUX_GEN):
 	@cp bpf/vmlinux.h "$(VMLINUX_GEN)"
 endif
 
-$(BPF_OBJ): $(VMLINUX_GEN) bpf/podtrace.bpf.c bpf/*.h bpf/network.c bpf/filesystem.c bpf/cpu.c bpf/memory.c
+$(BPF_OBJ): $(VMLINUX_GEN) bpf/podtrace.bpf.c bpf/*.h bpf/*.c
 	@mkdir -p $(dir $(BPF_OBJ))
 	$(CLANG) $(BPF_CFLAGS) -Ibpf -I. -c bpf/podtrace.bpf.c -o $(BPF_OBJ)
 

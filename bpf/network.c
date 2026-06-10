@@ -5,25 +5,54 @@
 #include "events.h"
 #include "helpers.h"
 
+/* The destination sockaddr must be captured at kprobe entry: by the time the
+ * kretprobe fires, the argument registers have been clobbered by the function
+ * body. PARM2 is the KERNEL copy of the caller's sockaddr (the syscall layer
+ * runs move_addr_to_kernel before tcp_v4/v6_connect), so it is read with
+ * bpf_probe_read_kernel. */
 SEC("kprobe/tcp_v4_connect")
 int kprobe_tcp_connect(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
-	u64 ts = bpf_ktime_get_ns();
-	
-	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
+	struct pair_key key = make_pair_key(PAIR_TCP_CONNECT_V4);
+	record_start_time(&key);
+
+	void *uaddr = (void *)PT_REGS_PARM2(ctx);
+	if (uaddr) {
+		struct sockaddr_in sa;
+		if (bpf_probe_read_kernel(&sa, sizeof(sa), uaddr) == 0 &&
+		    sa.sin_family == AF_INET) {
+			struct connect_addr ca = {};
+			ca.family = AF_INET;
+			ca.port_be = sa.sin_port;
+			ca.addr_be = sa.sin_addr.s_addr;
+			bpf_map_update_elem(&connect_addrs, &key, &ca, BPF_ANY);
+		}
+	}
 	return 0;
 }
 
 SEC("kprobe/tcp_v6_connect")
 int kprobe_tcp_v6_connect(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
-	u64 ts = bpf_ktime_get_ns();
-	
-	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
+	struct pair_key key = make_pair_key(PAIR_TCP_CONNECT_V6);
+	record_start_time(&key);
+
+	void *uaddr = (void *)PT_REGS_PARM2(ctx);
+	if (uaddr) {
+		struct {
+			u16 sin6_family;
+			u16 sin6_port;
+			u32 sin6_flowinfo;
+			u8  sin6_addr[16];
+			u32 sin6_scope_id;
+		} sa6;
+		if (bpf_probe_read_kernel(&sa6, sizeof(sa6), uaddr) == 0 &&
+		    sa6.sin6_family == AF_INET6) {
+			struct connect_addr ca = {};
+			ca.family = AF_INET6;
+			ca.port_be = sa6.sin6_port;
+			__builtin_memcpy(ca.addr6, sa6.sin6_addr, 16);
+			bpf_map_update_elem(&connect_addrs, &key, &ca, BPF_ANY);
+		}
+	}
 	return 0;
 }
 
@@ -31,7 +60,7 @@ SEC("kretprobe/tcp_v6_connect")
 int kretprobe_tcp_v6_connect(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_TCP_CONNECT_V6);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	
 	if (!start_ts) {
@@ -52,36 +81,22 @@ int kretprobe_tcp_v6_connect(struct pt_regs *ctx) {
 	e->bytes = 0;
 	e->tcp_state = 0;
 	e->target[0] = '\0';
-	
-	void *uaddr = (void *)PT_REGS_PARM2(ctx);
-	if (uaddr) {
-		u16 family;
-		if (bpf_probe_read_user(&family, sizeof(family), uaddr) == 0) {
-			if (family == AF_INET6) {
-				struct {
-					u16 sin6_family;
-					u16 sin6_port;
-					u32 sin6_flowinfo;
-					u8  sin6_addr[16];
-					u32 sin6_scope_id;
-				} addr6;
-				if (bpf_probe_read_user(&addr6, sizeof(addr6), uaddr) == 0) {
-					u16 port = __builtin_bswap16(addr6.sin6_port);
-					format_ipv6_port(addr6.sin6_addr, port, e->target);
-					struct dns_v6key k6 = {};
-					__builtin_memcpy(k6.addr, addr6.sin6_addr, 16);
-					char *resolved = bpf_map_lookup_elem(&dns_resolved6, &k6);
-					if (resolved) {
-						__builtin_memcpy(e->details, resolved, MAX_STRING_LEN);
-					} else {
-						e->details[0] = '\0';
-					}
-				}
-			}
+	e->details[0] = '\0';
+
+	struct connect_addr *ca = bpf_map_lookup_elem(&connect_addrs, &key);
+	if (ca && ca->family == AF_INET6) {
+		u16 port = __builtin_bswap16(ca->port_be);
+		format_ipv6_port(ca->addr6, port, e->target);
+		struct dns_v6key k6 = {};
+		__builtin_memcpy(k6.addr, ca->addr6, 16);
+		char *resolved = bpf_map_lookup_elem(&dns_resolved6, &k6);
+		if (resolved) {
+			__builtin_memcpy(e->details, resolved, MAX_STRING_LEN);
 		}
 	}
 	capture_user_stack(ctx, pid, tid, e);
 	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	bpf_map_delete_elem(&connect_addrs, &key);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
@@ -90,7 +105,7 @@ SEC("kretprobe/tcp_v4_connect")
 int kretprobe_tcp_connect(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_TCP_CONNECT_V4);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	
 	if (!start_ts) {
@@ -110,37 +125,23 @@ int kretprobe_tcp_connect(struct pt_regs *ctx) {
 	e->error = PT_REGS_RC(ctx);
 	e->bytes = 0;
 	e->tcp_state = 0;
-	
-	struct sockaddr_in addr;
-	void *uaddr = (void *)PT_REGS_PARM2(ctx);
-	if (uaddr) {
-		if (bpf_probe_read_user(&addr, sizeof(addr), uaddr) == 0) {
-			if (addr.sin_family == AF_INET) {
-				u16 port = __builtin_bswap16(addr.sin_port);
-				u32 ip_be;
-				if (bpf_probe_read_user(&ip_be, sizeof(ip_be), &addr.sin_addr.s_addr) == 0) {
-					u32 ip = __builtin_bswap32(ip_be);
-					format_ip_port(ip, port, e->target);
-					char *resolved = bpf_map_lookup_elem(&dns_resolved, &ip_be);
-					if (resolved) {
-						__builtin_memcpy(e->details, resolved, MAX_STRING_LEN);
-					} else {
-						e->details[0] = '\0';
-					}
-				} else {
-					e->target[0] = '\0';
-				}
-			} else {
-				e->target[0] = '\0';
-			}
-		} else {
-			e->target[0] = '\0';
+	e->target[0] = '\0';
+	e->details[0] = '\0';
+
+	struct connect_addr *ca = bpf_map_lookup_elem(&connect_addrs, &key);
+	if (ca && ca->family == AF_INET) {
+		u16 port = __builtin_bswap16(ca->port_be);
+		u32 ip = __builtin_bswap32(ca->addr_be);
+		format_ip_port(ip, port, e->target);
+		u32 ip_be = ca->addr_be;
+		char *resolved = bpf_map_lookup_elem(&dns_resolved, &ip_be);
+		if (resolved) {
+			__builtin_memcpy(e->details, resolved, MAX_STRING_LEN);
 		}
-	} else {
-		e->target[0] = '\0';
 	}
 	capture_user_stack(ctx, pid, tid, e);
 	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	bpf_map_delete_elem(&connect_addrs, &key);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
@@ -149,7 +150,7 @@ SEC("kprobe/tcp_sendmsg")
 int kprobe_tcp_sendmsg(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_TCP_SENDMSG);
 	u64 ts = bpf_ktime_get_ns();
 	
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
@@ -160,7 +161,7 @@ SEC("kretprobe/tcp_sendmsg")
 int kretprobe_tcp_sendmsg(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_TCP_SENDMSG);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 
 	if (!start_ts) {
@@ -173,13 +174,17 @@ int kretprobe_tcp_sendmsg(struct pt_regs *ctx) {
 		bytes = (u64)ret;
 	}
 
-	/* Save latency now so we can reuse it for the optional gRPC event below */
 	u64 latency_ns = calc_latency(*start_ts);
+
+	/* socket_conns and grpc_methods are cross-probe blackboards written by
+	 * other probes (http_request uprobe, grpc sendmsg kprobe) and stay keyed
+	 * by the plain thread key. */
+	u64 conn_key = get_key(pid, tid);
 
 	struct event *e = get_event_buf();
 	if (!e) {
 		bpf_map_delete_elem(&start_times, &key);
-		bpf_map_delete_elem(&grpc_methods, &key);
+		bpf_map_delete_elem(&grpc_methods, &conn_key);
 		return 0;
 	}
 	e->timestamp = bpf_ktime_get_ns();
@@ -190,10 +195,12 @@ int kretprobe_tcp_sendmsg(struct pt_regs *ctx) {
 	e->bytes = bytes;
 	e->tcp_state = 0;
 
-	char *conn_ptr = bpf_map_lookup_elem(&socket_conns, &key);
+	/* Look up without deleting: the entry belongs to the in-flight
+	 * http_request pair, which removes it when the request returns.
+	 * Deleting here starved the HTTP/Redis consumers of their URL. */
+	char *conn_ptr = bpf_map_lookup_elem(&socket_conns, &conn_key);
 	if (conn_ptr) {
 		bpf_probe_read_kernel_str(e->target, sizeof(e->target), conn_ptr);
-		bpf_map_delete_elem(&socket_conns, &key);
 	} else {
 		e->target[0] = '\0';
 	}
@@ -203,7 +210,7 @@ int kretprobe_tcp_sendmsg(struct pt_regs *ctx) {
 
 	/* If kprobe_grpc_tcp_sendmsg detected an HTTP/2 gRPC method path,
 	 * emit an additional EVENT_GRPC_METHOD event for that send. */
-	char *grpc_method_ptr = bpf_map_lookup_elem(&grpc_methods, &key);
+	char *grpc_method_ptr = bpf_map_lookup_elem(&grpc_methods, &conn_key);
 	if (grpc_method_ptr) {
 		struct event *eg = get_event_buf();
 		if (eg) {
@@ -219,7 +226,7 @@ int kretprobe_tcp_sendmsg(struct pt_regs *ctx) {
 			capture_user_stack(ctx, pid, tid, eg);
 			bpf_ringbuf_output(&events, eg, sizeof(*eg), 0);
 		}
-		bpf_map_delete_elem(&grpc_methods, &key);
+		bpf_map_delete_elem(&grpc_methods, &conn_key);
 	}
 
 	return 0;
@@ -229,7 +236,7 @@ SEC("kprobe/tcp_recvmsg")
 int kprobe_tcp_recvmsg(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_TCP_RECVMSG);
 	u64 ts = bpf_ktime_get_ns();
 	
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
@@ -240,7 +247,7 @@ SEC("kretprobe/tcp_recvmsg")
 int kretprobe_tcp_recvmsg(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_TCP_RECVMSG);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	
 	if (!start_ts) {
@@ -265,11 +272,12 @@ int kretprobe_tcp_recvmsg(struct pt_regs *ctx) {
 	e->error = ret < 0 ? ret : 0;
 	e->bytes = bytes;
 	e->tcp_state = 0;
-	
-	char *conn_ptr = bpf_map_lookup_elem(&socket_conns, &key);
+
+	/* Same blackboard semantics as the sendmsg kretprobe: read-only. */
+	u64 conn_key = get_key(pid, tid);
+	char *conn_ptr = bpf_map_lookup_elem(&socket_conns, &conn_key);
 	if (conn_ptr) {
 		bpf_probe_read_kernel_str(e->target, sizeof(e->target), conn_ptr);
-		bpf_map_delete_elem(&socket_conns, &key);
 	} else {
 		e->target[0] = '\0';
 	}
@@ -283,7 +291,7 @@ SEC("uprobe/getaddrinfo")
 int uprobe_getaddrinfo(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_GETADDRINFO);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 	
@@ -301,7 +309,7 @@ SEC("uretprobe/getaddrinfo")
 int uretprobe_getaddrinfo(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_GETADDRINFO);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	
 	if (!start_ts) {
@@ -342,27 +350,57 @@ int uretprobe_getaddrinfo(struct pt_regs *ctx) {
 	return 0;
 }
 
-SEC("tp/tcp/tcp_set_state")
-int tracepoint_tcp_set_state(void *ctx) {
+/* tcp:tcp_set_state was removed in kernel 4.16 (replaced by
+ * sock:inet_sock_set_state, commit 563e0bb0dc74), so this handler targets the
+ * replacement. Layout pinned to the upstream trace event (verified against a
+ * live kernel format file); sport/dport are stored in HOST byte order by the
+ * tracepoint (TP_STORE_ADDR_PORTS applies ntohs), the address byte arrays are
+ * in network order. */
+struct inet_sock_set_state_args {
+	unsigned short common_type;
+	unsigned char common_flags;
+	unsigned char common_preempt_count;
+	int common_pid;
+	const void *skaddr;
+	int oldstate;
+	int newstate;
+	__u16 sport;
+	__u16 dport;
+	__u16 family;
+	__u16 protocol;
+	__u8 saddr[4];
+	__u8 daddr[4];
+	__u8 saddr_v6[16];
+	__u8 daddr_v6[16];
+};
+_Static_assert(__builtin_offsetof(struct inet_sock_set_state_args, skaddr) == 8, "inet_sock_set_state: skaddr must be at offset 8");
+_Static_assert(__builtin_offsetof(struct inet_sock_set_state_args, oldstate) == 16, "inet_sock_set_state: oldstate must be at offset 16");
+_Static_assert(__builtin_offsetof(struct inet_sock_set_state_args, newstate) == 20, "inet_sock_set_state: newstate must be at offset 20");
+_Static_assert(__builtin_offsetof(struct inet_sock_set_state_args, sport) == 24, "inet_sock_set_state: sport must be at offset 24");
+_Static_assert(__builtin_offsetof(struct inet_sock_set_state_args, dport) == 26, "inet_sock_set_state: dport must be at offset 26");
+_Static_assert(__builtin_offsetof(struct inet_sock_set_state_args, family) == 28, "inet_sock_set_state: family must be at offset 28");
+_Static_assert(__builtin_offsetof(struct inet_sock_set_state_args, protocol) == 30, "inet_sock_set_state: protocol must be at offset 30");
+_Static_assert(__builtin_offsetof(struct inet_sock_set_state_args, saddr) == 32, "inet_sock_set_state: saddr must be at offset 32");
+_Static_assert(__builtin_offsetof(struct inet_sock_set_state_args, daddr) == 36, "inet_sock_set_state: daddr must be at offset 36");
+_Static_assert(__builtin_offsetof(struct inet_sock_set_state_args, saddr_v6) == 40, "inet_sock_set_state: saddr_v6 must be at offset 40");
+_Static_assert(__builtin_offsetof(struct inet_sock_set_state_args, daddr_v6) == 56, "inet_sock_set_state: daddr_v6 must be at offset 56");
+
+SEC("tp/sock/inet_sock_set_state")
+int tracepoint_inet_sock_set_state(void *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	
-	struct {
-		unsigned short common_type;
-		unsigned char common_flags;
-		unsigned char common_preempt_count;
-		int common_pid;
-		const void *skaddr;
-		int oldstate;
-		int newstate;
-		__u16 sport;
-		__u16 dport;
-		__u32 saddr;
-		__u32 daddr;
-	} args_local;
-	
-	bpf_probe_read_kernel(&args_local, sizeof(args_local), ctx);
-	
-	struct event *e = get_event_buf();
+
+	struct inet_sock_set_state_args args_local;
+	if (bpf_probe_read_kernel(&args_local, sizeof(args_local), ctx) != 0) {
+		return 0;
+	}
+	if (args_local.protocol != IPPROTO_TCP) {
+		return 0;
+	}
+
+	/* State changes often fire in softirq context where the current task is
+	 * a bystander, so skip the in-kernel cgroup prefilter and let the
+	 * userspace filter decide. */
+	struct event *e = get_event_buf_unfiltered();
 	if (!e) {
 		return 0;
 	}
@@ -374,35 +412,67 @@ int tracepoint_tcp_set_state(void *ctx) {
 	e->bytes = 0;
 	e->tcp_state = args_local.newstate;
 	e->target[0] = '\0';
-	
-	u16 dport = __builtin_bswap16(args_local.dport);
-	u32 daddr = __builtin_bswap32(args_local.daddr);
-	
-	if (daddr != 0) {
-		format_ip_port(daddr, dport, e->target);
+
+	if (args_local.family == AF_INET6) {
+		format_ipv6_port(args_local.daddr_v6, args_local.dport, e->target);
+	} else {
+		u32 daddr = ((u32)args_local.daddr[0] << 24) |
+		            ((u32)args_local.daddr[1] << 16) |
+		            ((u32)args_local.daddr[2] << 8) |
+		            (u32)args_local.daddr[3];
+		if (daddr != 0) {
+			format_ip_port(daddr, args_local.dport, e->target);
+		}
 	}
 	capture_user_stack(ctx, pid, 0, e);
 	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	return 0;
 }
 
+/* Layout pinned to the post-5.10 tcp_event_sk_skb class (skbaddr, skaddr,
+ * state, then ports/family/addresses; `family` landed in v5.10). The previous
+ * hand-written struct used a pre-5.10 layout, so sport/dport were read from
+ * inside `state` and daddr landed on family+saddr — bogus retransmit targets
+ * on any modern kernel. Same bug class as the fixed net_dev_xmit handler;
+ * same _Static_assert treatment. Ports are in HOST byte order. */
+struct tcp_retransmit_skb_args {
+	unsigned short common_type;
+	unsigned char common_flags;
+	unsigned char common_preempt_count;
+	int common_pid;
+	const void *skbaddr;
+	const void *skaddr;
+	int state;
+	__u16 sport;
+	__u16 dport;
+	__u16 family;
+	__u8 saddr[4];
+	__u8 daddr[4];
+	__u8 saddr_v6[16];
+	__u8 daddr_v6[16];
+};
+_Static_assert(__builtin_offsetof(struct tcp_retransmit_skb_args, skbaddr) == 8, "tcp_retransmit_skb: skbaddr must be at offset 8");
+_Static_assert(__builtin_offsetof(struct tcp_retransmit_skb_args, skaddr) == 16, "tcp_retransmit_skb: skaddr must be at offset 16");
+_Static_assert(__builtin_offsetof(struct tcp_retransmit_skb_args, state) == 24, "tcp_retransmit_skb: state must be at offset 24");
+_Static_assert(__builtin_offsetof(struct tcp_retransmit_skb_args, sport) == 28, "tcp_retransmit_skb: sport must be at offset 28");
+_Static_assert(__builtin_offsetof(struct tcp_retransmit_skb_args, dport) == 30, "tcp_retransmit_skb: dport must be at offset 30");
+_Static_assert(__builtin_offsetof(struct tcp_retransmit_skb_args, family) == 32, "tcp_retransmit_skb: family must be at offset 32");
+_Static_assert(__builtin_offsetof(struct tcp_retransmit_skb_args, saddr) == 34, "tcp_retransmit_skb: saddr must be at offset 34");
+_Static_assert(__builtin_offsetof(struct tcp_retransmit_skb_args, daddr) == 38, "tcp_retransmit_skb: daddr must be at offset 38");
+_Static_assert(__builtin_offsetof(struct tcp_retransmit_skb_args, saddr_v6) == 42, "tcp_retransmit_skb: saddr_v6 must be at offset 42");
+_Static_assert(__builtin_offsetof(struct tcp_retransmit_skb_args, daddr_v6) == 58, "tcp_retransmit_skb: daddr_v6 must be at offset 58");
+
 SEC("tp/tcp/tcp_retransmit_skb")
 int tracepoint_tcp_retransmit_skb(void *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	struct {
-		unsigned short common_type;
-		unsigned char common_flags;
-		unsigned char common_preempt_count;
-		int common_pid;
-		const void *skaddr;
-		const void *skbaddr;
-		__u16 sport;
-		__u16 dport;
-		__u32 saddr;
-		__u32 daddr;
-	} args_local;
-	bpf_probe_read_kernel(&args_local, sizeof(args_local), ctx);
-	struct event *e = get_event_buf();
+	struct tcp_retransmit_skb_args args_local;
+	if (bpf_probe_read_kernel(&args_local, sizeof(args_local), ctx) != 0) {
+		return 0;
+	}
+
+	/* Retransmits fire from timers/softirq where the current task is a
+	 * bystander; skip the in-kernel cgroup prefilter. */
+	struct event *e = get_event_buf_unfiltered();
 	if (!e) {
 		return 0;
 	}
@@ -414,10 +484,17 @@ int tracepoint_tcp_retransmit_skb(void *ctx) {
 	e->bytes = 0;
 	e->tcp_state = 0;
 	e->target[0] = '\0';
-	u16 dport = __builtin_bswap16(args_local.dport);
-	u32 daddr = __builtin_bswap32(args_local.daddr);
-	if (daddr != 0) {
-		format_ip_port(daddr, dport, e->target);
+
+	if (args_local.family == AF_INET6) {
+		format_ipv6_port(args_local.daddr_v6, args_local.dport, e->target);
+	} else {
+		u32 daddr = ((u32)args_local.daddr[0] << 24) |
+		            ((u32)args_local.daddr[1] << 16) |
+		            ((u32)args_local.daddr[2] << 8) |
+		            (u32)args_local.daddr[3];
+		if (daddr != 0) {
+			format_ip_port(daddr, args_local.dport, e->target);
+		}
 	}
 	capture_user_stack(ctx, pid, 0, e);
 	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
@@ -446,7 +523,8 @@ int tracepoint_net_dev_xmit(void *ctx) {
 	if (args_local.rc == 0) {
 		return 0;
 	}
-	struct event *e = get_event_buf();
+	/* Softirq context: current task is a bystander, skip the prefilter. */
+	struct event *e = get_event_buf_unfiltered();
 	if (!e) {
 		return 0;
 	}
@@ -468,7 +546,7 @@ SEC("kprobe/udp_sendmsg")
 int kprobe_udp_sendmsg(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_UDP_SENDMSG);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 	return 0;
@@ -478,7 +556,7 @@ SEC("kretprobe/udp_sendmsg")
 int kretprobe_udp_sendmsg(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_UDP_SENDMSG);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	
 	if (!start_ts) {
@@ -515,7 +593,7 @@ SEC("kprobe/udp_recvmsg")
 int kprobe_udp_recvmsg(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_UDP_RECVMSG);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 	return 0;
@@ -525,7 +603,7 @@ SEC("kretprobe/udp_recvmsg")
 int kretprobe_udp_recvmsg(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_UDP_RECVMSG);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	
 	if (!start_ts) {
@@ -562,7 +640,7 @@ SEC("uprobe/http_request")
 int uprobe_http_request(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_HTTP_REQUEST);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 	
@@ -570,7 +648,8 @@ int uprobe_http_request(struct pt_regs *ctx) {
 	if (url) {
 		char url_buf[MAX_STRING_LEN] = {};
 		bpf_probe_read_user_str(url_buf, sizeof(url_buf), url);
-		bpf_map_update_elem(&socket_conns, &key, url_buf, BPF_ANY);
+		u64 conn_key = get_key(pid, tid);
+		bpf_map_update_elem(&socket_conns, &conn_key, url_buf, BPF_ANY);
 	}
 	return 0;
 }
@@ -579,7 +658,7 @@ SEC("uretprobe/http_request")
 int uretprobe_http_request(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_HTTP_REQUEST);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	
 	if (!start_ts) {
@@ -599,10 +678,11 @@ int uretprobe_http_request(struct pt_regs *ctx) {
 	e->bytes = 0;
 	e->tcp_state = 0;
 	
-	char *url_ptr = bpf_map_lookup_elem(&socket_conns, &key);
+	u64 conn_key = get_key(pid, tid);
+	char *url_ptr = bpf_map_lookup_elem(&socket_conns, &conn_key);
 	if (url_ptr) {
 		bpf_probe_read_kernel_str(e->target, sizeof(e->target), url_ptr);
-		bpf_map_delete_elem(&socket_conns, &key);
+		bpf_map_delete_elem(&socket_conns, &conn_key);
 	} else {
 		e->target[0] = '\0';
 	}
@@ -616,7 +696,7 @@ SEC("uprobe/http_response")
 int uprobe_http_response(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_HTTP_RESPONSE);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 	return 0;
@@ -626,7 +706,7 @@ SEC("uretprobe/http_response")
 int uretprobe_http_response(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_HTTP_RESPONSE);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	
 	if (!start_ts) {
@@ -663,7 +743,7 @@ SEC("uprobe/PQexec")
 int uprobe_PQexec(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_PQEXEC);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 	char *query = (char *)PT_REGS_PARM2(ctx);
@@ -686,7 +766,7 @@ SEC("uretprobe/PQexec")
 int uretprobe_PQexec(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_PQEXEC);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	if (!start_ts) {
 		return 0;
@@ -701,8 +781,10 @@ int uretprobe_PQexec(struct pt_regs *ctx) {
 	e->pid = pid;
 	e->type = EVENT_DB_QUERY;
 	e->latency_ns = latency;
+	/* PQexec returns PGresult* — NULL on failure, a heap pointer on
+	 * success. Storing the pointer as a status inverted the meaning. */
 	long ret = PT_REGS_RC(ctx);
-	e->error = ret;
+	e->error = ret == 0 ? -1 : 0;
 	e->bytes = 0;
 	e->tcp_state = 0;
 	char *qptr = bpf_map_lookup_elem(&db_queries, &key);
@@ -722,7 +804,7 @@ SEC("uprobe/mysql_real_query")
 int uprobe_mysql_real_query(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_MYSQL_QUERY);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 	const char *query = (const char *)PT_REGS_PARM2(ctx);
@@ -745,7 +827,7 @@ SEC("uretprobe/mysql_real_query")
 int uretprobe_mysql_real_query(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_MYSQL_QUERY);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	if (!start_ts) {
 		return 0;
@@ -780,7 +862,7 @@ SEC("uprobe/SSL_connect")
 int uprobe_SSL_connect(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_SSL_CONNECT);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 	return 0;
@@ -790,7 +872,7 @@ SEC("uretprobe/SSL_connect")
 int uretprobe_SSL_connect(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_SSL_CONNECT);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	if (!start_ts) {
 		return 0;
@@ -819,7 +901,7 @@ SEC("uprobe/SSL_accept")
 int uprobe_SSL_accept(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_SSL_ACCEPT);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 	return 0;
@@ -829,7 +911,7 @@ SEC("uretprobe/SSL_accept")
 int uretprobe_SSL_accept(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_SSL_ACCEPT);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	if (!start_ts) {
 		return 0;
@@ -858,7 +940,7 @@ SEC("uprobe/SSL_do_handshake")
 int uprobe_SSL_do_handshake(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_SSL_DO_HANDSHAKE);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 	return 0;
@@ -868,7 +950,7 @@ SEC("uretprobe/SSL_do_handshake")
 int uretprobe_SSL_do_handshake(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_SSL_DO_HANDSHAKE);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	if (!start_ts) {
 		return 0;
@@ -897,7 +979,7 @@ SEC("uprobe/gnutls_handshake")
 int uprobe_gnutls_handshake(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_GNUTLS_HANDSHAKE);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 	return 0;
@@ -907,7 +989,7 @@ SEC("uretprobe/gnutls_handshake")
 int uretprobe_gnutls_handshake(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_GNUTLS_HANDSHAKE);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	if (!start_ts) {
 		return 0;
@@ -936,7 +1018,7 @@ SEC("uprobe/mbedtls_ssl_handshake")
 int uprobe_mbedtls_ssl_handshake(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_MBEDTLS_HANDSHAKE);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 	return 0;
@@ -946,7 +1028,7 @@ SEC("uretprobe/mbedtls_ssl_handshake")
 int uretprobe_mbedtls_ssl_handshake(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	struct pair_key key = make_pair_key(PAIR_MBEDTLS_HANDSHAKE);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	if (!start_ts) {
 		return 0;

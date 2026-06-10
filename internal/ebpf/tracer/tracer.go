@@ -82,8 +82,8 @@ type Tracer struct {
 	resourceMonitor          *resource.ResourceMonitor
 	cgroupPath               string
 	cgroupPaths              []string
-	useUserspaceCgroupFilter bool
-	targetCgroupID           uint64
+	useUserspaceCgroupFilter atomic.Bool
+	targetCgroupID           atomic.Uint64
 	targetCgroupIDs          atomic.Pointer[map[uint64]struct{}]
 	cgroupWriteMu            sync.Mutex
 	cpAnalyzer               *criticalpath.Analyzer
@@ -233,16 +233,16 @@ func NewTracer() (*Tracer, error) {
 	processCache := cache.NewLRUCache(config.CacheMaxSize, ttl)
 
 	t := &Tracer{
-		collection:               coll,
-		links:                    links,
-		probeGroups:              probeGroups,
-		intentionallyDisabled:    map[probes.ProbeGroup]struct{}{},
-		reader:                   rd,
-		filter:                   filter.NewCgroupFilter(),
-		processNameCache:         processCache,
-		pathCache:                cache.NewPathCache(),
-		useUserspaceCgroupFilter: true,
+		collection:            coll,
+		links:                 links,
+		probeGroups:           probeGroups,
+		intentionallyDisabled: map[probes.ProbeGroup]struct{}{},
+		reader:                rd,
+		filter:                filter.NewCgroupFilter(),
+		processNameCache:      processCache,
+		pathCache:             cache.NewPathCache(),
 	}
+	t.useUserspaceCgroupFilter.Store(true)
 	t.storeCgroupIDs(map[uint64]struct{}{})
 
 	if config.CriticalPathEnabled {
@@ -271,7 +271,7 @@ func (t *Tracer) SetCgroups(cgroupPaths []string) error {
 		t.cgroupWriteMu.Lock()
 		t.cgroupPaths = nil
 		t.cgroupPath = ""
-		t.targetCgroupID = 0
+		t.targetCgroupID.Store(0)
 		t.storeCgroupIDs(map[uint64]struct{}{})
 		t.filter.SetCgroupPaths(nil)
 		if err := t.syncTargetCgroupMap(); err != nil {
@@ -331,7 +331,7 @@ func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 	var newIDs map[uint64]struct{}
 	if replace {
 		allPaths = normalized
-		t.targetCgroupID = 0
+		t.targetCgroupID.Store(0)
 		newIDs = make(map[uint64]struct{}, len(normalized))
 	} else {
 		seen := make(map[string]struct{}, len(t.cgroupPaths)+len(normalized))
@@ -375,8 +375,8 @@ func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 		for _, cgroupPath := range newPaths {
 			if cgid, err := getCgroupIDFromPath(cgroupPath); err == nil && cgid != 0 {
 				newIDs[cgid] = struct{}{}
-				if t.targetCgroupID == 0 {
-					t.targetCgroupID = cgid
+				if t.targetCgroupID.Load() == 0 {
+					t.targetCgroupID.Store(cgid)
 				}
 			} else if err != nil {
 				logger.Debug("Could not get cgroup ID from path", zap.Error(err), zap.String("cgroup_path", cgroupPath))
@@ -400,7 +400,7 @@ func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 			logger.Debug("Set target cgroup IDs for in-kernel filtering", zap.Int("count", len(newIDs)))
 		}
 		if len(newIDs) > 0 && os.Getenv("PODTRACE_DISABLE_USERSPACE_CGROUP_FILTER") == "1" {
-			t.useUserspaceCgroupFilter = false
+			t.useUserspaceCgroupFilter.Store(false)
 		}
 	} else {
 		t.storeCgroupIDs(newIDs)
@@ -410,7 +410,7 @@ func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 		zap.Int("cgroup_count", len(t.cgroupPaths)),
 		zap.Uint32("container_pid", t.containerPID),
 		zap.Int("target_cgroup_id_count", len(newIDs)),
-		zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter),
+		zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter.Load()),
 		zap.Bool("replace", replace))
 	return nil
 }
@@ -426,18 +426,36 @@ func (t *Tracer) syncTargetCgroupMap() error {
 
 	ids := t.loadCgroupIDs()
 
-	// Clear existing keys.
-	var key uint64
-	var val uint8
-	iter := targetMap.Iterate()
-	keys := make([]uint64, 0, len(ids))
-	for iter.Next(&key, &val) {
-		keys = append(keys, key)
-	}
-	for _, k := range keys {
-		_ = targetMap.Delete(&k)
+	// When the target set empties, disable the filter before draining the
+	// map so there is no window where the flag is on and the allowlist is
+	// empty (which would drop every event in the kernel).
+	if len(ids) == 0 {
+		if err := t.setCgroupFilterEnabled(false); err != nil {
+			return err
+		}
 	}
 
+	// Diff-based sync: delete stale keys and upsert current ones. The old
+	// clear-then-repopulate approach opened a window during which the
+	// allowlist was empty on every resync.
+	var key uint64
+	var val uint8
+	stale := make([]uint64, 0)
+	iter := targetMap.Iterate()
+	for iter.Next(&key, &val) {
+		if _, want := ids[key]; !want {
+			stale = append(stale, key)
+		}
+	}
+	if err := iter.Err(); err != nil {
+		return fmt.Errorf("iterate target_cgroup_ids: %w", err)
+	}
+	for _, k := range stale {
+		staleKey := k
+		if err := targetMap.Delete(&staleKey); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+			return err
+		}
+	}
 	one := uint8(1)
 	for cgid := range ids {
 		cgidCopy := cgid
@@ -445,7 +463,32 @@ func (t *Tracer) syncTargetCgroupMap() error {
 			return err
 		}
 	}
+
+	if len(ids) > 0 {
+		return t.setCgroupFilterEnabled(true)
+	}
 	return nil
+}
+
+// setCgroupFilterEnabled flips the dedicated flag the BPF side consults
+// before applying the in-kernel cgroup prefilter. The previous design probed
+// target_cgroup_ids for key 0 to decide whether the filter was active, but
+// the Go side never writes key 0 (real cgroup IDs are never 0), so the
+// prefilter silently allowed everything.
+func (t *Tracer) setCgroupFilterEnabled(enabled bool) error {
+	if t.collection == nil || t.collection.Maps == nil {
+		return nil
+	}
+	flagMap, ok := t.collection.Maps["cgroup_filter_enabled"]
+	if !ok || flagMap == nil {
+		return nil
+	}
+	var zero uint32
+	val := uint32(0)
+	if enabled {
+		val = 1
+	}
+	return flagMap.Update(&zero, &val, ebpf.UpdateAny)
 }
 
 func readFirstPIDFromCgroupProcs(cgroupPath string) uint32 {
@@ -593,22 +636,29 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 		go t.serveManagementAPI(ctx, config.ManagementPort)
 	}
 
-	var eventsCollected int64
-	var eventsFiltered int64
-	var eventsParsed int64
-	var filteringDisabled bool
+	// Shared between the monitoring goroutine and the event-reader
+	// goroutine below, so they must be atomic.
+	var eventsCollected atomic.Int64
+	var eventsFiltered atomic.Int64
+	var eventsParsed atomic.Int64
+	var filteringDisabled atomic.Bool
 	startTime := time.Now()
-	eventCollectionTicker := time.NewTicker(5 * time.Second)
-	defer eventCollectionTicker.Stop()
 
 	logger.Info("Starting event collection",
 		zap.String("cgroup_path", t.cgroupPath),
 		zap.Uint32("container_pid", t.containerPID),
-		zap.Uint64("target_cgroup_id", t.targetCgroupID),
+		zap.Uint64("target_cgroup_id", t.targetCgroupID.Load()),
 		zap.Int("target_cgroup_id_count", len(t.loadCgroupIDs())),
-		zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter))
+		zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter.Load()))
 
 	go func() {
+		// The ticker must live inside this goroutine: it used to be created
+		// in Start() with a deferred Stop(), which fired as soon as Start()
+		// returned — the ticker never delivered a tick, leaving the
+		// filter-auto-disable fallback and the attachment diagnostics below
+		// permanently dead.
+		eventCollectionTicker := time.NewTicker(5 * time.Second)
+		defer eventCollectionTicker.Stop()
 		filterAutoDisableHintLogged := false
 		for {
 			select {
@@ -616,19 +666,19 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 				return
 			case <-eventCollectionTicker.C:
 				elapsed := time.Since(startTime)
-				if !filteringDisabled && eventsParsed > 10 && eventsCollected == 0 && elapsed > 10*time.Second {
+				if !filteringDisabled.Load() && eventsParsed.Load() > 10 && eventsCollected.Load() == 0 && elapsed > 10*time.Second {
 					if config.AllowCgroupFilterAutoDisable() {
 						logger.Warn("Events being parsed but all filtered - disabling filtering as fallback",
-							zap.Int64("events_parsed", eventsParsed),
-							zap.Int64("events_filtered", eventsFiltered),
-							zap.Int64("events_collected", eventsCollected),
-							zap.Uint64("target_cgroup_id", t.targetCgroupID),
+							zap.Int64("events_parsed", eventsParsed.Load()),
+							zap.Int64("events_filtered", eventsFiltered.Load()),
+							zap.Int64("events_collected", eventsCollected.Load()),
+							zap.Uint64("target_cgroup_id", t.targetCgroupID.Load()),
 							zap.String("cgroup_path", t.cgroupPath),
-							zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter))
-						filteringDisabled = true
+							zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter.Load()))
+						filteringDisabled.Store(true)
 						t.cgroupWriteMu.Lock()
-						t.useUserspaceCgroupFilter = false
-						t.targetCgroupID = 0
+						t.useUserspaceCgroupFilter.Store(false)
+						t.targetCgroupID.Store(0)
 						t.storeCgroupIDs(map[uint64]struct{}{})
 						if err := t.syncTargetCgroupMap(); err == nil {
 							logger.Info("Cleared kernel-side cgroup filter")
@@ -637,27 +687,27 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 					} else if !filterAutoDisableHintLogged {
 						filterAutoDisableHintLogged = true
 						logger.Warn("Events parsed but all filtered; automatic cgroup filter disable not applied. Set PODTRACE_ALLOW_CGROUP_FILTER_DISABLE=1 to allow clearing cgroup filters as a last resort",
-							zap.Int64("events_parsed", eventsParsed),
-							zap.Int64("events_filtered", eventsFiltered),
-							zap.Int64("events_collected", eventsCollected),
+							zap.Int64("events_parsed", eventsParsed.Load()),
+							zap.Int64("events_filtered", eventsFiltered.Load()),
+							zap.Int64("events_collected", eventsCollected.Load()),
 							zap.String("cgroup_path", t.cgroupPath))
 					}
-				} else if eventsParsed == 0 && elapsed > 15*time.Second {
+				} else if eventsParsed.Load() == 0 && elapsed > 15*time.Second {
 					logger.Warn("No events parsed from ring buffer after 15 seconds - check eBPF program attachment",
-						zap.Uint64("target_cgroup_id", t.targetCgroupID),
+						zap.Uint64("target_cgroup_id", t.targetCgroupID.Load()),
 						zap.String("cgroup_path", t.cgroupPath),
 						zap.Duration("elapsed", elapsed),
 						zap.Int("links_attached", len(t.links)))
 					logger.Warn("If running in a container (e.g. DaemonSet), ensure host /sys/fs/cgroup and /proc are mounted and PODTRACE_CGROUP_BASE / PODTRACE_PROC_BASE point at them; see installation doc 'Running as a DaemonSet'")
-				} else if eventsCollected == 0 && eventsParsed > 0 && elapsed > 10*time.Second {
+				} else if eventsCollected.Load() == 0 && eventsParsed.Load() > 0 && elapsed > 10*time.Second {
 					logger.Warn("Events parsed but none collected - filtering may be too strict",
-						zap.Int64("events_parsed", eventsParsed),
-						zap.Int64("events_filtered", eventsFiltered),
-						zap.Uint64("target_cgroup_id", t.targetCgroupID),
+						zap.Int64("events_parsed", eventsParsed.Load()),
+						zap.Int64("events_filtered", eventsFiltered.Load()),
+						zap.Uint64("target_cgroup_id", t.targetCgroupID.Load()),
 						zap.String("cgroup_path", t.cgroupPath),
-						zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter),
+						zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter.Load()),
 						zap.Duration("elapsed", elapsed))
-					if t.useUserspaceCgroupFilter {
+					if t.useUserspaceCgroupFilter.Load() {
 						logger.Warn("Running in a container (e.g. DaemonSet)? Set PODTRACE_CGROUP_BASE and PODTRACE_PROC_BASE to the host's cgroup and proc mount paths so the target pod's cgroup is visible and filtering can match events",
 							zap.String("cgroup_base", config.CgroupBasePath),
 							zap.String("proc_base", config.ProcBasePath))
@@ -731,7 +781,7 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 			processingStart := time.Now()
 			event := parser.ParseEvent(record.RawSample)
 			if event != nil {
-				eventsParsed++
+				eventsParsed.Add(1)
 				if stackMap != nil && event.StackKey != 0 {
 					var stack stackTraceValue
 					key := event.StackKey
@@ -790,15 +840,14 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 
 				allowed := true
 				cgroupIDs := t.loadCgroupIDs()
-				if filteringDisabled {
+				if filteringDisabled.Load() {
 					// Fallback mode: allow all events
 					allowed = true
 				} else if len(cgroupIDs) > 0 && event.CgroupID != 0 {
 					_, allowed = cgroupIDs[event.CgroupID]
 					if !allowed {
-						eventsFiltered++
 						// Log first few mismatches for debugging, then throttle
-						if eventsFiltered <= 5 || time.Now().Unix()%10 == 0 {
+						if eventsFiltered.Add(1) <= 5 || time.Now().Unix()%10 == 0 {
 							logger.Debug("Event filtered by cgroup ID mismatch",
 								zap.Uint64("event_cgroup_id", event.CgroupID),
 								zap.Int("target_cgroup_id_count", len(cgroupIDs)),
@@ -806,11 +855,10 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 								zap.String("process", event.ProcessName))
 						}
 					}
-				} else if t.useUserspaceCgroupFilter {
+				} else if t.useUserspaceCgroupFilter.Load() {
 					allowed = t.filter.IsPIDInCgroup(event.PID)
 					if !allowed {
-						eventsFiltered++
-						if eventsFiltered <= 5 || time.Now().Unix()%10 == 0 {
+						if eventsFiltered.Add(1) <= 5 || time.Now().Unix()%10 == 0 {
 							logger.Debug("Event filtered by userspace PID cgroup check",
 								zap.Uint32("pid", event.PID),
 								zap.String("process", event.ProcessName),
@@ -818,11 +866,11 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 						}
 					}
 				} else {
-					if eventsParsed <= 5 {
+					if eventsParsed.Load() <= 5 {
 						logger.Debug("No cgroup filtering active, allowing all events",
 							zap.Uint64("event_cgroup_id", event.CgroupID),
-							zap.Uint64("target_cgroup_id", t.targetCgroupID),
-							zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter))
+							zap.Uint64("target_cgroup_id", t.targetCgroupID.Load()),
+							zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter.Load()))
 					}
 				}
 
@@ -832,8 +880,7 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 						parser.PutEvent(event)
 						return
 					case eventChan <- event:
-						eventsCollected++
-						if eventsCollected <= 5 {
+						if eventsCollected.Add(1) <= 5 {
 							logger.Debug("Event collected",
 								zap.Uint64("cgroup_id", event.CgroupID),
 								zap.Uint32("pid", event.PID),

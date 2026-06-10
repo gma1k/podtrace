@@ -141,9 +141,22 @@ func TestBuildSessionJobSpec_CoreInvariants(t *testing.T) {
 	if !strings.Contains(args, "--termination-message-path /dev/termination-log") {
 		t.Errorf("missing --termination-message-path: %v", spec.Template.Spec.Containers[0].Args)
 	}
-	// Mount count sanity: bpf, btf, proc, cgroup, exporter, exporter-credential, rundir = 7.
-	if n := len(spec.Template.Spec.Containers[0].VolumeMounts); n != 7 {
-		t.Errorf("main container mounts=%d want 7", n)
+	// Mount count sanity: bpf, btf, proc, cgroup, debugfs, tracefs,
+	// exporter, exporter-credential, rundir = 9.
+	if n := len(spec.Template.Spec.Containers[0].VolumeMounts); n != 9 {
+		t.Errorf("main container mounts=%d want 9", n)
+	}
+	// Tracepoints (sched_switch, inet_sock_set_state, ...) attach via
+	// tracefs; without these mounts every tracepoint silently failed in
+	// session Jobs while the agent DaemonSet carried them.
+	mountPaths := make(map[string]bool)
+	for _, m := range spec.Template.Spec.Containers[0].VolumeMounts {
+		mountPaths[m.MountPath] = true
+	}
+	for _, required := range []string{"/sys/kernel/debug", "/sys/kernel/tracing"} {
+		if !mountPaths[required] {
+			t.Errorf("session Job is missing the %s mount required for tracepoint attach", required)
+		}
 	}
 	// Sidecar must not be present when TracerConfig.Session.SidecarUploader is false.
 	if len(spec.Template.Spec.InitContainers) != 0 {
