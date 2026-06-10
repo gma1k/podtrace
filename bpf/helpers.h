@@ -10,6 +10,18 @@ static inline u64 get_key(u32 pid, u32 tid) {
 	return ((u64)pid << 32) | tid;
 }
 
+static inline struct pair_key make_pair_key(u32 pair) {
+	struct pair_key k = {};
+	k.pid_tgid = bpf_get_current_pid_tgid();
+	k.pair = pair;
+	return k;
+}
+
+static inline void record_start_time(const struct pair_key *key) {
+	u64 ts = bpf_ktime_get_ns();
+	bpf_map_update_elem(&start_times, key, &ts, BPF_ANY);
+}
+
 static inline u64 calc_latency(u64 start) {
 	u64 now = bpf_ktime_get_ns();
 	return now > start ? now - start : 0;
@@ -95,7 +107,7 @@ static inline u64 build_stack_key(u32 pid, u32 tid, u64 timestamp) {
 	return h;
 }
 
-static inline struct event *get_event_buf(void) {
+static inline struct event *get_event_buf_unfiltered(void) {
 	u32 zero = 0;
 	struct event *e = bpf_map_lookup_elem(&event_buf, &zero);
 	if (e) {
@@ -104,24 +116,28 @@ static inline struct event *get_event_buf(void) {
 		bpf_get_current_comm(&e->comm, sizeof(e->comm));
 
 #ifdef PODTRACE_VMLINUX_FROM_BTF
-		/* Capture network namespace inum for multi-tenant correlation */
 		struct task_struct *__task = (struct task_struct *)bpf_get_current_task();
 		if (__task) {
 			e->net_ns_id = BPF_CORE_READ(__task, nsproxy, net_ns, ns.inum);
 		}
 #endif
+	}
+	return e;
+}
 
-		/* In-kernel prefilter:
-		 * - empty target_cgroup_ids map => allow all
-		 * - non-empty map => allow only keys present in map */
-		u64 probe_key = 0;
-		u8 *probe_val = bpf_map_lookup_elem(&target_cgroup_ids, &probe_key);
-		if (probe_val) {
-			u64 cgid = e->cgroup_id;
-			u8 *allowed = bpf_map_lookup_elem(&target_cgroup_ids, &cgid);
-			if (!allowed) {
-				return NULL;
-			}
+static inline struct event *get_event_buf(void) {
+	struct event *e = get_event_buf_unfiltered();
+	if (!e) {
+		return NULL;
+	}
+
+	u32 zero = 0;
+	u32 *enabled = bpf_map_lookup_elem(&cgroup_filter_enabled, &zero);
+	if (enabled && *enabled) {
+		u64 cgid = e->cgroup_id;
+		u8 *allowed = bpf_map_lookup_elem(&target_cgroup_ids, &cgid);
+		if (!allowed) {
+			return NULL;
 		}
 	}
 	return e;

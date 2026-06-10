@@ -132,9 +132,12 @@ struct __sk_buff {
 
 #define AF_INET 2
 #define AF_INET6 10
+#define IPPROTO_TCP 6
 #define EAGAIN 11
 #define HEX_ADDR_LEN 16
 #define COMM_LEN 16
+
+#define PAGE_FAULT_SAMPLE_RATE 64
 
 #ifndef BPF_MAP_TYPE_RINGBUF
 #define BPF_MAP_TYPE_RINGBUF 27

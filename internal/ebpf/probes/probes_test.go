@@ -436,13 +436,13 @@ func TestAttachProbes_AllProbeTypes(t *testing.T) {
 func TestAttachProbes_WithTracepoints(t *testing.T) {
 	coll := &ebpf.Collection{
 		Programs: map[string]*ebpf.Program{
-			"tracepoint_sched_switch":       {},
-			"tracepoint_tcp_set_state":      {},
-			"tracepoint_tcp_retransmit_skb": {},
-			"tracepoint_net_dev_xmit":       {},
-			"tracepoint_page_fault_user":    {},
-			"tracepoint_oom_kill_process":   {},
-			"tracepoint_sched_process_fork": {},
+			"tracepoint_sched_switch":        {},
+			"tracepoint_inet_sock_set_state": {},
+			"tracepoint_tcp_retransmit_skb":  {},
+			"tracepoint_net_dev_xmit":        {},
+			"tracepoint_page_fault_user":     {},
+			"tracepoint_oom_mark_victim":     {},
+			"tracepoint_sched_process_fork":  {},
 		},
 	}
 
@@ -478,7 +478,7 @@ func TestAttachProbes_TracepointPermissionDenied(t *testing.T) {
 func TestAttachProbes_TracepointNotFound(t *testing.T) {
 	coll := &ebpf.Collection{
 		Programs: map[string]*ebpf.Program{
-			"tracepoint_tcp_set_state": {},
+			"tracepoint_inet_sock_set_state": {},
 		},
 	}
 
@@ -1558,11 +1558,11 @@ func TestAttachPoolProbes_WithPrograms(t *testing.T) {
 			"uprobe_sqlite3_step":          {},
 			"uretprobe_sqlite3_step":       {},
 			"uprobe_PQconnectStart":        {},
-			"uretprobe_PQfinish":            {},
-			"uprobe_PQexec_pool":            {},
-			"uprobe_mysql_real_connect":     {},
-			"uretprobe_mysql_close":         {},
-			"uprobe_mysql_real_query_pool":  {},
+			"uretprobe_PQfinish":           {},
+			"uprobe_PQexec_pool":           {},
+			"uprobe_mysql_real_connect":    {},
+			"uretprobe_mysql_close":        {},
+			"uprobe_mysql_real_query_pool": {},
 		},
 	}
 
@@ -2033,7 +2033,7 @@ func TestFindLibcInContainer_AllPaths(t *testing.T) {
 func TestProbeAttachError_Unwrap(t *testing.T) {
 	originalErr := fmt.Errorf("original error")
 	err := NewProbeAttachError("test_probe", originalErr)
-	
+
 	unwrapped := err.Unwrap()
 	if unwrapped != originalErr {
 		t.Errorf("Unwrap() = %v, want %v", unwrapped, originalErr)

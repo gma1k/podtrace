@@ -12,82 +12,84 @@ const (
 	GroupMemory     ProbeGroup = "memory"
 	GroupCPU        ProbeGroup = "cpu"
 	GroupPool       ProbeGroup = "pool"
-	GroupCache      ProbeGroup = "cache"      // Redis, Memcached
-	GroupMessaging  ProbeGroup = "messaging"  // Kafka
-	GroupFastCGI    ProbeGroup = "fastcgi"    // PHP-FPM / FastCGI unix socket probes
+	GroupCache      ProbeGroup = "cache"     // Redis, Memcached
+	GroupMessaging  ProbeGroup = "messaging" // Kafka
+	GroupFastCGI    ProbeGroup = "fastcgi"   // PHP-FPM / FastCGI unix socket probes
 )
 
 // probeGroupMap maps each BPF program name to its ProbeGroup.
 // Programs absent from this map are treated as GroupNetwork by default.
 var probeGroupMap = map[string]ProbeGroup{
 	// Network
-	"kprobe_tcp_connect":          GroupNetwork,
-	"kretprobe_tcp_connect":       GroupNetwork,
-	"kprobe_tcp_v6_connect":       GroupNetwork,
-	"kretprobe_tcp_v6_connect":    GroupNetwork,
-	"kprobe_tcp_sendmsg":          GroupNetwork,
-	"kretprobe_tcp_sendmsg":       GroupNetwork,
-	"kprobe_tcp_recvmsg":          GroupNetwork,
-	"kretprobe_tcp_recvmsg":       GroupNetwork,
-	"kprobe_udp_sendmsg":          GroupNetwork,
-	"kretprobe_udp_sendmsg":       GroupNetwork,
-	"kprobe_udp_recvmsg":          GroupNetwork,
-	"kretprobe_udp_recvmsg":       GroupNetwork,
-	"tracepoint_tcp_set_state":    GroupNetwork,
-	"tracepoint_tcp_retransmit_skb": GroupNetwork,
-	"tracepoint_net_dev_xmit":    GroupNetwork,
+	"kprobe_tcp_connect":             GroupNetwork,
+	"kretprobe_tcp_connect":          GroupNetwork,
+	"kprobe_tcp_v6_connect":          GroupNetwork,
+	"kretprobe_tcp_v6_connect":       GroupNetwork,
+	"kprobe_tcp_sendmsg":             GroupNetwork,
+	"kretprobe_tcp_sendmsg":          GroupNetwork,
+	"kprobe_tcp_recvmsg":             GroupNetwork,
+	"kretprobe_tcp_recvmsg":          GroupNetwork,
+	"kprobe_udp_sendmsg":             GroupNetwork,
+	"kretprobe_udp_sendmsg":          GroupNetwork,
+	"kprobe_udp_recvmsg":             GroupNetwork,
+	"kretprobe_udp_recvmsg":          GroupNetwork,
+	"tracepoint_inet_sock_set_state": GroupNetwork,
+	"tracepoint_tcp_retransmit_skb":  GroupNetwork,
+	"tracepoint_net_dev_xmit":        GroupNetwork,
 
 	// FileSystem
-	"kprobe_vfs_write":          GroupFileSystem,
-	"kretprobe_vfs_write":       GroupFileSystem,
-	"kprobe_vfs_read":           GroupFileSystem,
-	"kretprobe_vfs_read":        GroupFileSystem,
-	"kprobe_vfs_fsync":          GroupFileSystem,
-	"kretprobe_vfs_fsync":       GroupFileSystem,
-	"kprobe_do_sys_openat2":     GroupFileSystem,
-	"kretprobe_do_sys_openat2":  GroupFileSystem,
-	"kprobe_vfs_unlink":         GroupFileSystem,
-	"kretprobe_vfs_unlink":      GroupFileSystem,
-	"kprobe_vfs_rename":         GroupFileSystem,
-	"kretprobe_vfs_rename":      GroupFileSystem,
+	"kprobe_vfs_write":         GroupFileSystem,
+	"kretprobe_vfs_write":      GroupFileSystem,
+	"kprobe_vfs_read":          GroupFileSystem,
+	"kretprobe_vfs_read":       GroupFileSystem,
+	"kprobe_vfs_fsync":         GroupFileSystem,
+	"kretprobe_vfs_fsync":      GroupFileSystem,
+	"kprobe_do_sys_openat2":    GroupFileSystem,
+	"kretprobe_do_sys_openat2": GroupFileSystem,
+	"kprobe_vfs_unlink":        GroupFileSystem,
+	"kretprobe_vfs_unlink":     GroupFileSystem,
+	"kprobe_vfs_rename":        GroupFileSystem,
+	"kretprobe_vfs_rename":     GroupFileSystem,
+	"kprobe_close_fd":          GroupFileSystem,
 
 	// CPU
-	"tracepoint_sched_switch":       GroupCPU,
-	"kprobe_do_futex":               GroupCPU,
-	"kretprobe_do_futex":            GroupCPU,
+	"tracepoint_sched_switch": GroupCPU,
+	"kprobe_do_futex":         GroupCPU,
+	"kretprobe_do_futex":      GroupCPU,
 
 	// Memory
-	"tracepoint_page_fault_user":  GroupMemory,
-	"tracepoint_oom_kill_process": GroupMemory,
+	"tracepoint_page_fault_user": GroupMemory,
+	"tracepoint_oom_mark_victim": GroupMemory,
 
 	// Process (grouped under CPU for simplicity)
 	"tracepoint_sched_process_fork": GroupCPU,
+	"tracepoint_sched_process_exec": GroupCPU,
 
 	// TLS (uprobes attached separately via SetContainerID)
-	"uprobe_getaddrinfo":              GroupTLS,
-	"uretprobe_getaddrinfo":           GroupTLS,
-	"uprobe_pthread_mutex_lock":       GroupTLS,
-	"uretprobe_pthread_mutex_lock":    GroupTLS,
+	"uprobe_getaddrinfo":           GroupTLS,
+	"uretprobe_getaddrinfo":        GroupTLS,
+	"uprobe_pthread_mutex_lock":    GroupTLS,
+	"uretprobe_pthread_mutex_lock": GroupTLS,
 
 	// Database
-	"uprobe_PQexec":   GroupDatabase,
+	"uprobe_PQexec":    GroupDatabase,
 	"uretprobe_PQexec": GroupDatabase,
 
 	// Pool
-	"uprobe_pool_acquire":  GroupPool,
+	"uprobe_pool_acquire":    GroupPool,
 	"uretprobe_pool_acquire": GroupPool,
 
 	// Cache (Redis / Memcached)
-	"uprobe_redisCommand":         GroupCache,
-	"uretprobe_redisCommand":      GroupCache,
-	"uprobe_redisCommandArgv":     GroupCache,
-	"uretprobe_redisCommandArgv":  GroupCache,
-	"uprobe_memcached_get":        GroupCache,
-	"uretprobe_memcached_get":     GroupCache,
-	"uprobe_memcached_set":        GroupCache,
-	"uretprobe_memcached_set":     GroupCache,
-	"uprobe_memcached_delete":     GroupCache,
-	"uretprobe_memcached_delete":  GroupCache,
+	"uprobe_redisCommand":        GroupCache,
+	"uretprobe_redisCommand":     GroupCache,
+	"uprobe_redisCommandArgv":    GroupCache,
+	"uretprobe_redisCommandArgv": GroupCache,
+	"uprobe_memcached_get":       GroupCache,
+	"uretprobe_memcached_get":    GroupCache,
+	"uprobe_memcached_set":       GroupCache,
+	"uretprobe_memcached_set":    GroupCache,
+	"uprobe_memcached_delete":    GroupCache,
+	"uretprobe_memcached_delete": GroupCache,
 
 	// Messaging (Kafka)
 	"uprobe_rd_kafka_topic_new":        GroupMessaging,

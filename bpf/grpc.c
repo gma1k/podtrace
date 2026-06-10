@@ -63,28 +63,21 @@ int kprobe_grpc_tcp_sendmsg(struct pt_regs *ctx)
 	if (dport != GRPC_DEFAULT_PORT)
 		return 0;
 
-	/* Read first GRPC_INSPECT_LEN bytes from send buffer */
+	/* Read first GRPC_INSPECT_LEN bytes from the send buffer via the shared
+	 * iov_iter resolver, which handles both ITER_IOVEC and ITER_UBUF (the
+	 * plain send()/write() shape on kernels >= 6.0). */
 	struct msghdr *msg = (struct msghdr *)PT_REGS_PARM2(ctx);
-	if (!msg)
-		return 0;
-
-	const struct iovec *iov = BPF_CORE_READ(msg, msg_iter.__iov);
-	if (!iov)
-		return 0;
-
-	struct iovec iov_entry;
-	if (bpf_probe_read_kernel(&iov_entry, sizeof(iov_entry), iov) != 0)
-		return 0;
-
-	if (!iov_entry.iov_base || iov_entry.iov_len < HTTP2_FRAME_HDR)
+	u64 avail = 0;
+	void *base = msghdr_user_base(msg, &avail);
+	if (!base || avail < HTTP2_FRAME_HDR)
 		return 0;
 
 	u8 buf[GRPC_INSPECT_LEN] = {};
-	u32 read_len = (u32)iov_entry.iov_len;
+	u32 read_len = (u32)avail;
 	if (read_len > GRPC_INSPECT_LEN)
 		read_len = GRPC_INSPECT_LEN;
 	/* Do not use (read_len & (N-1)) unless N is a power of two; GRPC_INSPECT_LEN is 50. */
-	if (bpf_probe_read_user(buf, read_len, iov_entry.iov_base) != 0)
+	if (bpf_probe_read_user(buf, read_len, base) != 0)
 		return 0;
 
 	/* Check HTTP/2 frame type (byte 3 in the 9-byte frame header) */
@@ -96,10 +89,9 @@ int kprobe_grpc_tcp_sendmsg(struct pt_regs *ctx)
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_key(pid, tid);
 
-	/* Check for the HTTP/2 client connection preface (initial SETTINGS frame).
-	 * The preface starts with "PRI * HTTP/2.0" — skip it (not a gRPC call). */
-	if (buf[0] == 'P' && buf[1] == 'R' && buf[2] == 'I')
-		return 0;
+	/* (No preface check needed: the "PRI * HTTP/2.0" preface has ' ' at
+	 * byte 3, which the HTTP2_HEADERS frame-type check above already
+	 * rejects.) */
 
 	/* Scan for '/' in the HPACK payload */
 	u32 path_start = 0;
