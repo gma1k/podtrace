@@ -82,6 +82,8 @@ var (
 	ShutdownTimeout           = getDurationEnvOrDefault("PODTRACE_SHUTDOWN_TIMEOUT", DefaultShutdownTimeout)
 	EventBatchSize            = getIntEnvOrDefault("PODTRACE_EVENT_BATCH_SIZE", DefaultEventBatchSize)
 	ResourceMonitorInterval   = getDurationEnvOrDefault("PODTRACE_RESOURCE_MONITOR_INTERVAL", DefaultResourceMonitorInterval)
+	MetricsLabelLimit         = getIntEnvOrDefault("PODTRACE_METRICS_LABEL_LIMIT", 200)
+	MetricsPodLabelLimit      = getIntEnvOrDefault("PODTRACE_METRICS_POD_LABEL_LIMIT", 500)
 	ProcessCacheEvictionRatio = getFloatEnvOrDefault("PODTRACE_PROCESS_CACHE_EVICTION_RATIO", DefaultProcessCacheEvictionRatio)
 	PIDCacheEvictionRatio     = getFloatEnvOrDefault("PODTRACE_PID_CACHE_EVICTION_RATIO", DefaultPIDCacheEvictionRatio)
 	CacheEvictionThreshold    = getFloatEnvOrDefault("PODTRACE_CACHE_EVICTION_THRESHOLD", DefaultCacheEvictionThreshold)

@@ -84,10 +84,17 @@ func (g *gcsSink) Upload(ctx context.Context, keyHint, contentType string, body 
 	if key == "" {
 		return "", fmt.Errorf("gcs: resolved object key is empty (URI must include a key or prefix)")
 	}
-	w := g.client.Bucket(g.dest.bucket).Object(key).NewWriter(ctx)
+	// Aborting a GCS upload requires cancelling the writer's context:
+	// Close() FINALIZES the object with whatever bytes were buffered, so
+	// closing after a mid-stream copy failure committed a silently
+	// truncated report (which a prefix-keyed retry would not overwrite).
+	writeCtx, cancelWrite := context.WithCancel(ctx)
+	defer cancelWrite()
+	w := g.client.Bucket(g.dest.bucket).Object(key).NewWriter(writeCtx)
 	w.ContentType = contentType
 	if _, err := io.Copy(w, body); err != nil {
-		_ = w.Close()
+		cancelWrite()
+		_ = w.Close() // releases resources; the object is NOT committed
 		return "", fmt.Errorf("gcs: stream to %s/%s: %w", g.dest.bucket, key, err)
 	}
 	if err := w.Close(); err != nil {

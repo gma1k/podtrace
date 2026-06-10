@@ -21,6 +21,7 @@ import (
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/internal/logger"
 	"github.com/podtrace/podtrace/internal/metricsexporter"
+	"github.com/podtrace/podtrace/internal/safeconv"
 	"github.com/podtrace/podtrace/internal/sysfs"
 )
 
@@ -57,6 +58,13 @@ type limitMapValue struct {
 	_            [4]byte
 }
 
+// resourceSample is one (cumulative usage, wall clock) observation, kept so
+// CPU and IO utilization can be computed as RATES between ticks.
+type resourceSample struct {
+	usage  uint64
+	wallNS uint64
+}
+
 type ResourceMonitor struct {
 	cgroupPath    string
 	cgroupInode   uint64
@@ -69,6 +77,10 @@ type ResourceMonitor struct {
 	stopCh        chan struct{}
 	wg            sync.WaitGroup
 	namespace     string
+
+	cpuQuotaMicros  uint64
+	cpuPeriodMicros uint64
+	previousSamples map[uint32]resourceSample
 }
 
 func NewResourceMonitor(cgroupPath string, limitsMap, alertsMap *ebpf.Map, eventChan chan<- *events.Event, namespace string) (*ResourceMonitor, error) {
@@ -78,13 +90,14 @@ func NewResourceMonitor(cgroupPath string, limitsMap, alertsMap *ebpf.Map, event
 	}
 
 	rm := &ResourceMonitor{
-		cgroupPath:    cgroupPath,
-		cgroupInode:   inode,
-		eventChan:     eventChan,
-		limits:        make(map[uint32]*ResourceLimit),
-		checkInterval: config.ResourceMonitorInterval,
-		stopCh:        make(chan struct{}),
-		namespace:     namespace,
+		cgroupPath:      cgroupPath,
+		cgroupInode:     inode,
+		eventChan:       eventChan,
+		limits:          make(map[uint32]*ResourceLimit),
+		previousSamples: make(map[uint32]resourceSample),
+		checkInterval:   config.ResourceMonitorInterval,
+		stopCh:          make(chan struct{}),
+		namespace:       namespace,
 	}
 	if limitsMap != nil {
 		rm.limitsMap = limitsMap
@@ -157,11 +170,12 @@ func (rm *ResourceMonitor) readLimitsV2() error {
 	cpuMax, err := readCgroupFile(cpuMaxPath)
 	if err == nil {
 		quota, period, unlimited := parseCPUMax(cpuMax)
-		if !unlimited && quota > 0 {
+		if !unlimited && quota > 0 && period > 0 {
+			rm.cpuQuotaMicros = quota
+			rm.cpuPeriodMicros = period
 			rm.limits[ResourceCPU] = &ResourceLimit{
 				LimitBytes:   quota,
 				ResourceType: ResourceCPU,
-				LastUpdateNS: period,
 			}
 			logger.Debug("CPU limit read", zap.Uint64("quota", quota), zap.Uint64("period", period))
 		} else {
@@ -211,10 +225,11 @@ func (rm *ResourceMonitor) readLimitsV1() error {
 		quota, _ := strconv.ParseUint(strings.TrimSpace(cpuQuota), 10, 64)
 		period, _ := strconv.ParseUint(strings.TrimSpace(cpuPeriod), 10, 64)
 		if quota > 0 && period > 0 {
+			rm.cpuQuotaMicros = quota
+			rm.cpuPeriodMicros = period
 			rm.limits[ResourceCPU] = &ResourceLimit{
 				LimitBytes:   quota,
 				ResourceType: ResourceCPU,
-				LastUpdateNS: uint64(time.Now().UnixNano()),
 			}
 		}
 	}
@@ -248,6 +263,11 @@ func (rm *ResourceMonitor) readLimitsV1() error {
 
 func (rm *ResourceMonitor) updateResourceUsage() error {
 	rm.mu.Lock()
+	for _, resourceType := range []uint32{ResourceCPU, ResourceIO} {
+		if limit, ok := rm.limits[resourceType]; ok && limit.LastUpdateNS != 0 {
+			rm.previousSamples[resourceType] = resourceSample{usage: limit.UsageBytes, wallNS: limit.LastUpdateNS}
+		}
+	}
 	defer rm.mu.Unlock()
 
 	isV2, err := isCgroupV2(rm.cgroupPath)
@@ -352,6 +372,61 @@ func isBenignMapDeleteError(err error) bool {
 	return errors.Is(err, ebpf.ErrKeyNotExist)
 }
 
+// utilizationPercent returns the 0-100 utilization for one resource.
+//
+// Memory compares current bytes against the byte limit directly. CPU and IO
+// usage counters are CUMULATIVE (cpu.stat usage_usec, io.stat rbytes+wbytes),
+// while their limits are RATES (quota per period, bytes per second) — the
+// previous code divided one by the other, so after ~0.1 CPU-seconds of total
+// runtime "utilization" saturated at 100% and fired AlertEmergency every tick
+// forever. Both are now computed as the consumption rate between the last two
+// samples relative to the allowed rate; the first tick (no previous sample)
+// and counter resets (container restart) report no data.
+func (rm *ResourceMonitor) utilizationPercent(resourceType uint32, limit *ResourceLimit) (uint64, bool) {
+	clamp := func(v float64) (uint64, bool) {
+		if v < 0 {
+			return 0, false
+		}
+		if v > 100 {
+			return 100, true
+		}
+		return uint64(v), true
+	}
+
+	switch resourceType {
+	case ResourceMemory:
+		return clamp(float64(limit.UsageBytes) * 100 / float64(limit.LimitBytes))
+
+	case ResourceCPU:
+		if rm.cpuQuotaMicros == 0 || rm.cpuPeriodMicros == 0 {
+			return 0, false
+		}
+		previous, ok := rm.previousSamples[ResourceCPU]
+		if !ok || limit.LastUpdateNS <= previous.wallNS || limit.UsageBytes < previous.usage {
+			return 0, false
+		}
+		usedMicros := float64(limit.UsageBytes - previous.usage)
+		wallMicros := float64(limit.LastUpdateNS-previous.wallNS) / 1000
+		if wallMicros <= 0 {
+			return 0, false
+		}
+		allowedCPUs := float64(rm.cpuQuotaMicros) / float64(rm.cpuPeriodMicros)
+		return clamp(usedMicros / wallMicros / allowedCPUs * 100)
+
+	case ResourceIO:
+		previous, ok := rm.previousSamples[ResourceIO]
+		if !ok || limit.LastUpdateNS <= previous.wallNS || limit.UsageBytes < previous.usage {
+			return 0, false
+		}
+		bytesPerSecond := float64(limit.UsageBytes-previous.usage) /
+			(float64(limit.LastUpdateNS-previous.wallNS) / 1e9)
+		return clamp(bytesPerSecond / float64(limit.LimitBytes) * 100)
+
+	default:
+		return clamp(float64(limit.UsageBytes) * 100 / float64(limit.LimitBytes))
+	}
+}
+
 func (rm *ResourceMonitor) checkAlerts() {
 	rm.mu.RLock()
 	defer rm.mu.RUnlock()
@@ -371,11 +446,11 @@ func (rm *ResourceMonitor) checkAlerts() {
 			continue
 		}
 
-		utilization := (limit.UsageBytes * 100) / limit.LimitBytes
-		if utilization > 100 {
-			utilization = 100
+		utilization, ok := rm.utilizationPercent(resourceType, limit)
+		if !ok {
+			continue
 		}
-		utilizationUint32 := uint32(utilization)
+		utilizationUint32 := safeconv.Uint64ToUint32(utilization)
 
 		var alertLevel uint32
 		if utilizationUint32 >= 95 {
@@ -454,7 +529,7 @@ func (rm *ResourceMonitor) checkAlerts() {
 					PID:         0,
 					ProcessName: "cgroup",
 					LatencyNS:   limit.LimitBytes,
-					Error:       int32(utilizationUint32),
+					Error:       safeconv.Uint64ToInt32(utilization),
 					Bytes:       limit.UsageBytes,
 					TCPState:    resourceType,
 					Target:      rm.cgroupPath,

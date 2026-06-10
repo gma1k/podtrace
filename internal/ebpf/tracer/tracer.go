@@ -66,10 +66,11 @@ type ProfilingControllerSetter interface {
 }
 
 type Tracer struct {
-	collection    *ebpf.Collection
-	links         []link.Link
-	probeGroupsMu sync.Mutex
-	probeGroups   map[probes.ProbeGroup][]link.Link
+	collection     *ebpf.Collection
+	links          []link.Link
+	probeGroupsMu  sync.Mutex
+	probeGroups    map[probes.ProbeGroup][]link.Link
+	dnsPacketLinks map[string][]link.Link
 
 	intentionallyDisabled    map[probes.ProbeGroup]struct{}
 	detachWarned             map[probes.ProbeGroup]struct{}
@@ -89,6 +90,125 @@ type Tracer struct {
 	cpAnalyzer               *criticalpath.Analyzer
 	piiRedactor              *redactor.Redactor
 	profilingCtrl            ProfilingController
+}
+
+// registerGroupLinks records freshly attached links under their probe group
+// (so Disable/EnableProbeGroup can manage them) and in the flat registry
+// Stop() closes.
+func (t *Tracer) registerGroupLinks(g probes.ProbeGroup, ls []link.Link) {
+	if len(ls) == 0 {
+		return
+	}
+	t.probeGroupsMu.Lock()
+	defer t.probeGroupsMu.Unlock()
+	t.probeGroups[g] = append(t.probeGroups[g], ls...)
+	t.links = append(t.links, ls...)
+}
+
+func (t *Tracer) addLinks(ls []link.Link) {
+	if len(ls) == 0 {
+		return
+	}
+	t.probeGroupsMu.Lock()
+	defer t.probeGroupsMu.Unlock()
+	t.links = append(t.links, ls...)
+}
+
+func (t *Tracer) linkCount() int {
+	t.probeGroupsMu.Lock()
+	defer t.probeGroupsMu.Unlock()
+	return len(t.links)
+}
+
+// attachGroupUprobes re-attaches the container-scoped probes belonging to a
+// group, using the most recent SetContainerIDs target.
+func (t *Tracer) attachGroupUprobes(g probes.ProbeGroup) []link.Link {
+	coll := t.collection
+	if coll == nil {
+		return nil
+	}
+	id, pid := t.containerID, t.containerPID
+	switch g {
+	case probes.GroupTLS:
+		if id == "" {
+			return nil
+		}
+		var ls []link.Link
+		ls = append(ls, probes.AttachDNSProbesWithPID(coll, id, pid)...)
+		ls = append(ls, probes.AttachSyncProbesWithPID(coll, id, pid)...)
+		ls = append(ls, probes.AttachTLSProbesWithPID(coll, id, pid)...)
+		return ls
+	case probes.GroupDatabase:
+		if id == "" {
+			return nil
+		}
+		return probes.AttachDBProbesWithPID(coll, id, pid)
+	case probes.GroupPool:
+		if id == "" {
+			return nil
+		}
+		return probes.AttachPoolProbesWithPID(coll, id, pid)
+	case probes.GroupCache:
+		if id == "" {
+			return nil
+		}
+		var ls []link.Link
+		ls = append(ls, probes.AttachRedisProbesWithPID(coll, id, pid)...)
+		ls = append(ls, probes.AttachMemcachedProbesWithPID(coll, id, pid)...)
+		return ls
+	case probes.GroupMessaging:
+		if id == "" {
+			return nil
+		}
+		return probes.AttachKafkaProbesWithPID(coll, id, pid)
+	case probes.GroupFastCGI:
+		return probes.AttachFastCGIProbes(coll)
+	case probes.GroupNetwork:
+		return probes.AttachGRPCProbes(coll)
+	}
+	return nil
+}
+
+// syncDNSPacketProbes reconciles the per-cgroup dns_egress/dns_ingress
+// attachments with the current target set.
+func (t *Tracer) syncDNSPacketProbes(paths []string) {
+	if t.collection == nil {
+		return
+	}
+	want := make(map[string]struct{}, len(paths))
+	for _, p := range paths {
+		if p != "" {
+			want[p] = struct{}{}
+		}
+	}
+
+	t.probeGroupsMu.Lock()
+	if t.dnsPacketLinks == nil {
+		t.dnsPacketLinks = map[string][]link.Link{}
+	}
+	for p, ls := range t.dnsPacketLinks {
+		if _, ok := want[p]; ok {
+			continue
+		}
+		for _, l := range ls {
+			_ = l.Close()
+		}
+		delete(t.dnsPacketLinks, p)
+	}
+	var missing []string
+	for p := range want {
+		if _, ok := t.dnsPacketLinks[p]; !ok {
+			missing = append(missing, p)
+		}
+	}
+	t.probeGroupsMu.Unlock()
+
+	for _, p := range missing {
+		ls := probes.AttachDNSPacketProbes(t.collection, []string{p})
+		t.probeGroupsMu.Lock()
+		t.dnsPacketLinks[p] = ls
+		t.probeGroupsMu.Unlock()
+	}
 }
 
 // SetProfilingController wires an optional profiling controller into the
@@ -278,6 +398,7 @@ func (t *Tracer) SetCgroups(cgroupPaths []string) error {
 			logger.Warn("Failed to clear target_cgroup_ids map", zap.Error(err))
 		}
 		t.cgroupWriteMu.Unlock()
+		t.syncDNSPacketProbes(nil)
 		logger.Debug("Detached all cgroups")
 		return nil
 	}
@@ -406,6 +527,11 @@ func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 		t.storeCgroupIDs(newIDs)
 		logger.Debug("Cgroup v2 not detected, using userspace filtering only", zap.String("cgroup_base", config.CgroupBasePath))
 	}
+	// attachCgroups holds cgroupWriteMu for its whole body (deferred
+	// unlock), so read the final path set directly.
+	currentPaths := append([]string(nil), t.cgroupPaths...)
+	t.syncDNSPacketProbes(currentPaths)
+
 	logger.Debug("Attached to cgroups",
 		zap.Int("cgroup_count", len(t.cgroupPaths)),
 		zap.Uint32("container_pid", t.containerPID),
@@ -553,31 +679,18 @@ func (t *Tracer) SetContainerIDs(containerIDs []string) error {
 	}
 
 	t.containerID = primary
-	dnsLinks := probes.AttachDNSProbesWithPID(t.collection, primary, t.containerPID)
-	if len(dnsLinks) > 0 {
-		t.links = append(t.links, dnsLinks...)
-	}
-	syncLinks := probes.AttachSyncProbesWithPID(t.collection, primary, t.containerPID)
-	if len(syncLinks) > 0 {
-		t.links = append(t.links, syncLinks...)
-	}
-	dbLinks := probes.AttachDBProbesWithPID(t.collection, primary, t.containerPID)
-	if len(dbLinks) > 0 {
-		t.links = append(t.links, dbLinks...)
-	}
-	poolLinks := probes.AttachPoolProbesWithPID(t.collection, primary, t.containerPID)
-	if len(poolLinks) > 0 {
-		t.links = append(t.links, poolLinks...)
-	}
-	tlsLinks := probes.AttachTLSProbesWithPID(t.collection, primary, t.containerPID)
-	if len(tlsLinks) > 0 {
-		t.links = append(t.links, tlsLinks...)
-	}
-	t.links = append(t.links, probes.AttachRedisProbesWithPID(t.collection, primary, t.containerPID)...)
-	t.links = append(t.links, probes.AttachMemcachedProbesWithPID(t.collection, primary, t.containerPID)...)
-	t.links = append(t.links, probes.AttachKafkaProbesWithPID(t.collection, primary, t.containerPID)...)
-	t.links = append(t.links, probes.AttachFastCGIProbes(t.collection)...)
-	t.links = append(t.links, probes.AttachGRPCProbes(t.collection)...)
+	// Each batch is registered under its probe group so the category gate
+	// and the management endpoints can detach and re-attach it.
+	t.registerGroupLinks(probes.GroupTLS, probes.AttachDNSProbesWithPID(t.collection, primary, t.containerPID))
+	t.registerGroupLinks(probes.GroupTLS, probes.AttachSyncProbesWithPID(t.collection, primary, t.containerPID))
+	t.registerGroupLinks(probes.GroupDatabase, probes.AttachDBProbesWithPID(t.collection, primary, t.containerPID))
+	t.registerGroupLinks(probes.GroupPool, probes.AttachPoolProbesWithPID(t.collection, primary, t.containerPID))
+	t.registerGroupLinks(probes.GroupTLS, probes.AttachTLSProbesWithPID(t.collection, primary, t.containerPID))
+	t.registerGroupLinks(probes.GroupCache, probes.AttachRedisProbesWithPID(t.collection, primary, t.containerPID))
+	t.registerGroupLinks(probes.GroupCache, probes.AttachMemcachedProbesWithPID(t.collection, primary, t.containerPID))
+	t.registerGroupLinks(probes.GroupMessaging, probes.AttachKafkaProbesWithPID(t.collection, primary, t.containerPID))
+	t.registerGroupLinks(probes.GroupFastCGI, probes.AttachFastCGIProbes(t.collection))
+	t.registerGroupLinks(probes.GroupNetwork, probes.AttachGRPCProbes(t.collection))
 	return nil
 }
 
@@ -590,9 +703,7 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 	t.cgroupWriteMu.Lock()
 	dnsCgroups := append([]string(nil), t.cgroupPaths...)
 	t.cgroupWriteMu.Unlock()
-	if dnsLinks := probes.AttachDNSPacketProbes(t.collection, dnsCgroups); len(dnsLinks) > 0 {
-		t.links = append(t.links, dnsLinks...)
-	}
+	t.syncDNSPacketProbes(dnsCgroups)
 
 	if t.cgroupPath != "" {
 		limitsMap := t.collection.Maps["cgroup_limits"]
@@ -697,7 +808,7 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 						zap.Uint64("target_cgroup_id", t.targetCgroupID.Load()),
 						zap.String("cgroup_path", t.cgroupPath),
 						zap.Duration("elapsed", elapsed),
-						zap.Int("links_attached", len(t.links)))
+						zap.Int("links_attached", t.linkCount()))
 					logger.Warn("If running in a container (e.g. DaemonSet), ensure host /sys/fs/cgroup and /proc are mounted and PODTRACE_CGROUP_BASE / PODTRACE_PROC_BASE point at them; see installation doc 'Running as a DaemonSet'")
 				} else if eventsCollected.Load() == 0 && eventsParsed.Load() > 0 && elapsed > 10*time.Second {
 					logger.Warn("Events parsed but none collected - filtering may be too strict",
@@ -907,7 +1018,16 @@ func (t *Tracer) Stop() error {
 		_ = t.reader.Close()
 	}
 
-	for _, l := range t.links {
+	t.probeGroupsMu.Lock()
+	closing := t.links
+	t.links = nil
+	t.probeGroups = map[probes.ProbeGroup][]link.Link{}
+	for _, ls := range t.dnsPacketLinks {
+		closing = append(closing, ls...)
+	}
+	t.dnsPacketLinks = nil
+	t.probeGroupsMu.Unlock()
+	for _, l := range closing {
 		_ = l.Close()
 	}
 
@@ -1133,6 +1253,10 @@ func (t *Tracer) EnableProbeGroup(g probes.ProbeGroup) error {
 	if err != nil {
 		return err
 	}
+	// Groups with container-scoped uprobes (TLS, cache, FastCGI, ...) have
+	// nothing in the kprobe/tracepoint tables AttachProbeGroup walks; they
+	// are re-attached from the most recent SetContainerIDs target.
+	newLinks = append(newLinks, t.attachGroupUprobes(g)...)
 
 	t.probeGroupsMu.Lock()
 	t.probeGroups[g] = append(t.probeGroups[g], newLinks...)
@@ -1183,7 +1307,7 @@ var groupCategoryNeeds = map[probes.ProbeGroup][]string{
 	probes.GroupCPU:        {"cpu", "proc"},
 	probes.GroupMemory:     {"proc"},
 	probes.GroupFastCGI:    {"net"},
-	probes.GroupTLS:        {"dns", "cpu"},
+	probes.GroupTLS:        {"dns", "cpu", "net"},
 }
 
 // DisableProbeGroup closes all links associated with the given group.
@@ -1194,9 +1318,21 @@ func (t *Tracer) DisableProbeGroup(g probes.ProbeGroup) error {
 	if !ok || len(ls) == 0 {
 		return nil
 	}
+	closed := make(map[link.Link]struct{}, len(ls))
 	for _, l := range ls {
 		_ = l.Close()
+		closed[l] = struct{}{}
 	}
+	// Drop the closed links from the flat registry too: leaving them in
+	// meant Stop() double-closed them and repeated disable/enable cycles
+	// grew t.links with dead handles indefinitely.
+	kept := t.links[:0]
+	for _, l := range t.links {
+		if _, isClosed := closed[l]; !isClosed {
+			kept = append(kept, l)
+		}
+	}
+	t.links = kept
 	delete(t.probeGroups, g)
 	logger.Info("Probe group disabled", zap.String("group", string(g)))
 	return nil
