@@ -180,7 +180,13 @@ func (p *PodProfiler) FetchCPUProfile(ctx context.Context, duration time.Duratio
 	if err != nil {
 		return &ProfileResult{Type: ProfileCPU, Available: false, Error: err.Error()}
 	}
-	resp, err := p.httpClient.Do(req)
+	// p.httpClient carries a 5s global timeout for discovery and the quick
+	// profile endpoints, but /debug/pprof/profile?seconds=N blocks for the
+	// FULL N seconds before responding — the shared client timed out every
+	// CPU profile longer than ~5s (the default is 30s). Use a dedicated
+	// client bounded only by fetchCtx.
+	cpuClient := &http.Client{Transport: p.httpClient.Transport}
+	resp, err := cpuClient.Do(req)
 	if err != nil {
 		return &ProfileResult{Type: ProfileCPU, Available: false, Error: err.Error()}
 	}

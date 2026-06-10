@@ -7,6 +7,7 @@ import (
 	"net/http"
 	pprofhttp "net/http/pprof"
 	"runtime/debug"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -428,18 +429,19 @@ func init() {
 
 // RecordProfilingGoroutines records goroutine counts from the last pprof fetch.
 func RecordProfilingGoroutines(podIP string, total, blocked int) {
+	podIP = podIPCardinality.bound(podIP)
 	profilingGoroutinesGauge.WithLabelValues(podIP, "total").Set(float64(total))
 	profilingGoroutinesGauge.WithLabelValues(podIP, "blocked").Set(float64(blocked))
 }
 
 // RecordProfilingAutoTrigger increments the auto-trigger counter.
 func RecordProfilingAutoTrigger(podIP string) {
-	profilingAutoTriggersTotal.WithLabelValues(podIP).Inc()
+	profilingAutoTriggersTotal.WithLabelValues(podIPCardinality.bound(podIP)).Inc()
 }
 
 // RecordProfilingFetchError increments the fetch error counter.
 func RecordProfilingFetchError(podIP, profileType string) {
-	profilingFetchErrorsTotal.WithLabelValues(podIP, profileType).Inc()
+	profilingFetchErrorsTotal.WithLabelValues(podIPCardinality.bound(podIP), profileType).Inc()
 }
 
 func HandleEvents(ch <-chan *events.Event) {
@@ -462,13 +464,59 @@ func HandleEvent(e *events.Event) {
 	HandleEventWithContext(e, nil)
 }
 
+// labelCardinalityLimiter caps the number of distinct values a
+// traffic-derived label can mint. Labels like command/method/topic come
+// straight off the traced wire (arbitrary URL paths, Redis command words,
+// Kafka topics) and target_pod/pod_ip churn with the cluster — and Prometheus
+// keeps one series (x 20 histogram buckets) per distinct value forever, since
+// nothing here ever calls DeleteLabelValues. Without a cap a long-lived agent
+// is a textbook exporter memory explosion. Values beyond the cap collapse
+// into "other"; bounded staleness in exchange for bounded memory.
+type labelCardinalityLimiter struct {
+	mu    sync.Mutex
+	seen  map[string]struct{}
+	limit int
+}
+
+func newLabelCardinalityLimiter(limit int) *labelCardinalityLimiter {
+	return &labelCardinalityLimiter{seen: make(map[string]struct{}), limit: limit}
+}
+
+func (l *labelCardinalityLimiter) bound(value string) string {
+	if value == "" {
+		return value
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if _, ok := l.seen[value]; ok {
+		return value
+	}
+	if len(l.seen) >= l.limit {
+		return "other"
+	}
+	l.seen[value] = struct{}{}
+	return value
+}
+
+var (
+	// Wire-derived labels: one limiter per label so a noisy gRPC service
+	// cannot evict Redis commands and vice versa.
+	commandCardinality = newLabelCardinalityLimiter(config.MetricsLabelLimit)
+	methodCardinality  = newLabelCardinalityLimiter(config.MetricsLabelLimit)
+	topicCardinality   = newLabelCardinalityLimiter(config.MetricsLabelLimit)
+	// Pod-churn labels.
+	podCardinality     = newLabelCardinalityLimiter(config.MetricsPodLabelLimit)
+	serviceCardinality = newLabelCardinalityLimiter(config.MetricsPodLabelLimit)
+	podIPCardinality   = newLabelCardinalityLimiter(config.MetricsPodLabelLimit)
+)
+
 func HandleEventWithContext(e *events.Event, k8sContext map[string]interface{}) {
 	if e == nil {
 		return
 	}
 	namespace := getLabel(k8sContext, "namespace", "")
-	targetPod := getLabel(k8sContext, "target_pod", "")
-	targetService := getLabel(k8sContext, "target_service", "")
+	targetPod := podCardinality.bound(getLabel(k8sContext, "target_pod", ""))
+	targetService := serviceCardinality.bound(getLabel(k8sContext, "target_service", ""))
 
 	switch e.Type {
 	case events.EventConnect:
@@ -522,7 +570,7 @@ func HandleEventWithContext(e *events.Event, k8sContext map[string]interface{}) 
 
 	case events.EventRedisCmd:
 		latSec := float64(e.LatencyNS) / 1e9
-		cmd := e.Details
+		cmd := commandCardinality.bound(e.Details)
 		if cmd == "" {
 			cmd = "unknown"
 		}
@@ -530,7 +578,7 @@ func HandleEventWithContext(e *events.Event, k8sContext map[string]interface{}) 
 
 	case events.EventMemcachedCmd:
 		latSec := float64(e.LatencyNS) / 1e9
-		op := e.Details
+		op := commandCardinality.bound(e.Details)
 		if op == "" {
 			op = "unknown"
 		}
@@ -538,7 +586,7 @@ func HandleEventWithContext(e *events.Event, k8sContext map[string]interface{}) 
 
 	case events.EventFastCGIResp:
 		latSec := float64(e.LatencyNS) / 1e9
-		method := e.Details
+		method := methodCardinality.bound(e.Details)
 		if method == "" {
 			method = "unknown"
 		}
@@ -546,7 +594,7 @@ func HandleEventWithContext(e *events.Event, k8sContext map[string]interface{}) 
 
 	case events.EventGRPCMethod:
 		latSec := float64(e.LatencyNS) / 1e9
-		method := e.Target
+		method := methodCardinality.bound(e.Target)
 		if method == "" {
 			method = "unknown"
 		}
@@ -554,7 +602,7 @@ func HandleEventWithContext(e *events.Event, k8sContext map[string]interface{}) 
 
 	case events.EventKafkaProduce:
 		latSec := float64(e.LatencyNS) / 1e9
-		topic := e.Details
+		topic := topicCardinality.bound(e.Details)
 		if topic == "" {
 			topic = "unknown"
 		}
@@ -565,7 +613,7 @@ func HandleEventWithContext(e *events.Event, k8sContext map[string]interface{}) 
 
 	case events.EventKafkaFetch:
 		latSec := float64(e.LatencyNS) / 1e9
-		topic := e.Details
+		topic := topicCardinality.bound(e.Details)
 		if topic == "" {
 			topic = "unknown"
 		}

@@ -18,6 +18,7 @@ type CgroupFilter struct {
 	cgroupPaths map[string]struct{}
 	pidCache    map[uint32]bool
 	pidCacheMu  sync.RWMutex
+	pathsMu     sync.RWMutex
 }
 
 func NewCgroupFilter() *CgroupFilter {
@@ -28,17 +29,20 @@ func NewCgroupFilter() *CgroupFilter {
 }
 
 func (f *CgroupFilter) SetCgroupPath(path string) {
+	f.pathsMu.Lock()
 	f.cgroupPath = path
 	f.cgroupPaths = make(map[string]struct{})
 	if path != "" {
 		f.cgroupPaths[path] = struct{}{}
 	}
+	f.pathsMu.Unlock()
 	f.pidCacheMu.Lock()
 	f.pidCache = make(map[uint32]bool)
 	f.pidCacheMu.Unlock()
 }
 
 func (f *CgroupFilter) SetCgroupPaths(paths []string) {
+	f.pathsMu.Lock()
 	f.cgroupPath = ""
 	f.cgroupPaths = make(map[string]struct{}, len(paths))
 	for _, path := range paths {
@@ -47,13 +51,34 @@ func (f *CgroupFilter) SetCgroupPaths(paths []string) {
 		}
 		f.cgroupPaths[path] = struct{}{}
 	}
+	f.pathsMu.Unlock()
 	f.pidCacheMu.Lock()
 	f.pidCache = make(map[uint32]bool)
 	f.pidCacheMu.Unlock()
 }
 
+// snapshotTargets copies the configured target paths under pathsMu. The
+// agent calls SetCgroupPaths on every reconcile while IsPIDInCgroup runs on
+// the event hot path; only pidCache used to be locked, so the map swap raced
+// the iteration below.
+func (f *CgroupFilter) snapshotTargets() []string {
+	f.pathsMu.RLock()
+	defer f.pathsMu.RUnlock()
+	targets := make([]string, 0, len(f.cgroupPaths)+1)
+	if f.cgroupPath != "" {
+		targets = append(targets, f.cgroupPath)
+	}
+	for p := range f.cgroupPaths {
+		if p != "" {
+			targets = append(targets, p)
+		}
+	}
+	return targets
+}
+
 func (f *CgroupFilter) IsPIDInCgroup(pid uint32) bool {
-	if f.cgroupPath == "" && len(f.cgroupPaths) == 0 {
+	configuredTargets := f.snapshotTargets()
+	if len(configuredTargets) == 0 {
 		return true
 	}
 
@@ -118,18 +143,9 @@ func (f *CgroupFilter) IsPIDInCgroup(pid uint32) bool {
 	}
 
 	normalizedPID := NormalizeCgroupPath(pidCgroupPath)
-	targets := make([]string, 0, len(f.cgroupPaths)+1)
-	if f.cgroupPath != "" {
-		targets = append(targets, f.cgroupPath)
-	}
-	for p := range f.cgroupPaths {
-		if p != "" {
-			targets = append(targets, p)
-		}
-	}
 
 	result := false
-	for _, target := range targets {
+	for _, target := range configuredTargets {
 		normalizedTarget := NormalizeCgroupPath(target)
 		// If the configured target normalizes to empty (e.g. "/" or the cgroup base),
 		// treat it as invalid to avoid accidentally matching everything.
