@@ -58,6 +58,13 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 		{Name: "btf", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/kernel/btf"}}},
 		{Name: "proc", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/proc"}}},
 		{Name: "cgroup", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/fs/cgroup"}}},
+		// debugfs/tracefs are required to attach tracepoints (sched_switch,
+		// inet_sock_set_state, ...). Without them every tracepoint silently
+		// failed to attach in session Jobs, so cpu-filtered sessions
+		// collected nothing; the agent DaemonSet has carried these mounts
+		// all along.
+		{Name: "debugfs", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/kernel/debug"}}},
+		{Name: "tracefs", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/kernel/tracing"}}},
 		// Exporter bundle: the CLI reads bundle.yaml to resolve the
 		// exporter endpoint/credentials the session should push to.
 		{
@@ -95,6 +102,8 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 		{Name: "btf", MountPath: "/sys/kernel/btf", ReadOnly: true},
 		{Name: "proc", MountPath: "/host/proc", ReadOnly: true},
 		{Name: "cgroup", MountPath: "/sys/fs/cgroup", ReadOnly: false},
+		{Name: "debugfs", MountPath: "/sys/kernel/debug", ReadOnly: true},
+		{Name: "tracefs", MountPath: "/sys/kernel/tracing", ReadOnly: true},
 		{Name: "exporter", MountPath: "/etc/podtrace/exporter", ReadOnly: true},
 		{Name: "exporter-credential", MountPath: "/etc/podtrace/exporter-credential", ReadOnly: true},
 		{Name: "rundir", MountPath: "/var/run/podtrace"},

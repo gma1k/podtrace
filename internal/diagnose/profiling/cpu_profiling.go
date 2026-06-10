@@ -25,20 +25,10 @@ func GenerateCPUUsageReport(allEvents []*events.Event, duration time.Duration) s
 	durationSec := duration.Seconds()
 	totalCPUPercent := 0.0
 
-	cpuTimeFromSched := make(map[uint32]uint64)
-	for _, e := range allEvents {
-		if e == nil || e.Type != events.EventSchedSwitch {
-			continue
-		}
-		cpuTimeFromSched[e.PID] += e.LatencyNS
-	}
-
 	pidCPUTimes := make(map[uint32]cpuTimeInfo)
 	for _, info := range pidActivity {
 		var totalNS uint64
-		if ns, ok := cpuTimeFromSched[info.Pid]; ok && ns > 0 {
-			totalNS = ns
-		} else if proc := getProcessCPUTime(info.Pid); proc.totalNS > 0 {
+		if proc := getProcessCPUTime(info.Pid); proc.totalNS > 0 {
 			totalNS = proc.totalNS
 		}
 		if totalNS > 0 {

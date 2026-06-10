@@ -31,45 +31,8 @@
 
 #ifdef PODTRACE_VMLINUX_FROM_BTF
 
-static __always_inline void *msghdr_user_base(struct msghdr *msg, u64 *avail)
-{
-	if (!msg)
-		return NULL;
-	u8 it = BPF_CORE_READ(msg, msg_iter.iter_type);
-	if (it == ITER_UBUF) {
-		void *ubuf = (void *)BPF_CORE_READ(msg, msg_iter.ubuf);
-		size_t count = BPF_CORE_READ(msg, msg_iter.count);
-		size_t off = BPF_CORE_READ(msg, msg_iter.iov_offset);
-		if (avail)
-			*avail = count;
-		if (!ubuf)
-			return NULL;
-		return (u8 *)ubuf + off;
-	}
-	if (it == ITER_IOVEC) {
-		const struct iovec *iov = BPF_CORE_READ(msg, msg_iter.__iov);
-		if (!iov)
-			return NULL;
-		struct iovec iov_entry;
-		if (bpf_probe_read_kernel(&iov_entry, sizeof(iov_entry), iov) != 0)
-			return NULL;
-		if (avail)
-			*avail = iov_entry.iov_len;
-		return iov_entry.iov_base;
-	}
-	return NULL;
-}
-
-static __always_inline int read_msghdr_data(struct msghdr *msg, void *buf, u32 buf_size)
-{
-	if (!buf || buf_size == 0)
-		return -1;
-	u64 avail = 0;
-	void *base = msghdr_user_base(msg, &avail);
-	if (!base || avail < buf_size)
-		return -1;
-	return bpf_probe_read_user(buf, buf_size, base);
-}
+/* msghdr_user_base / read_msghdr_data now live in protocols.h, shared with
+ * the gRPC inspector. */
 
 /* -----------------------------------------------------------------------
  * kprobe/unix_stream_recvmsg — save msghdr* for kretprobe use
@@ -152,9 +115,6 @@ int kretprobe_unix_stream_recvmsg(struct pt_regs *ctx)
 		bpf_map_delete_elem(&fastcgi_pending, &key);
 		if (p.expected_body_bytes != 0 && (u32)rc_bytes == p.expected_body_bytes) {
 			request_id = (u16)p.request_id;
-			/* Cap to FCGI_PARAMS_SCAN_LEN; trailing padding bytes
-			 * (the size mismatch we account for here) live past
-			 * the NV pairs and don't enter the scan window. */
 			content_len = p.expected_body_bytes > FCGI_PARAMS_SCAN_LEN
 				? FCGI_PARAMS_SCAN_LEN
 				: (u16)p.expected_body_bytes;
@@ -205,7 +165,6 @@ emit_params: ;
 	struct event *e = get_event_buf();
 	if (!e) return 0;
 
-	/* Read PARAMS body — scan for REQUEST_URI */
 	u8 params[FCGI_PARAMS_SCAN_LEN] = {};
 	u32 scan_len = content_len < FCGI_PARAMS_SCAN_LEN ? content_len : FCGI_PARAMS_SCAN_LEN;
 
@@ -230,20 +189,23 @@ emit_params: ;
 			    params[i+4] == 'E' && params[i+5] == 'S' && params[i+6] == 'T' &&
 			    params[i+7] == '_' && params[i+8] == 'U' && params[i+9] == 'R' &&
 			    params[i+10] == 'I') {
-				u32 j;
-				for (j = i + 11; j < i + 16 && j + 1 < FCGI_PARAMS_SCAN_LEN; j++) {
-					if (params[j] == '/') {
-						/* Copy URI into event buffer.
-						 * Max is min(remaining bytes, MAX_STRING_LEN-1). */
-						u32 copy = FCGI_PARAMS_SCAN_LEN - j;
-						if (copy >= MAX_STRING_LEN)
-							copy = MAX_STRING_LEN - 1;
-						bpf_probe_read_kernel(e->target, copy & (MAX_STRING_LEN - 1),
-						                     &params[j]);
-						e->target[MAX_STRING_LEN - 1] = '\0';
-						found_uri = 1;
-						break;
+				/* Indices are masked to keep every params[] offset provably
+				 * in-bounds for the verifier (the guards already bound them
+				 * logically; 128 is a power of two so the mask is free). */
+				u32 vstart = (i + 11) & (FCGI_PARAMS_SCAN_LEN - 1);
+				if (params[vstart] == '/') {
+					u32 copy = FCGI_PARAMS_SCAN_LEN - vstart;
+					if (i >= 2) {
+						u8 vlen = params[(i - 1) & (FCGI_PARAMS_SCAN_LEN - 1)];
+						if ((vlen & FCGI_NV_LEN_4BYTE) == 0 && vlen > 0 && vlen < copy)
+							copy = vlen;
 					}
+					if (copy >= MAX_STRING_LEN)
+						copy = MAX_STRING_LEN - 1;
+					bpf_probe_read_kernel(e->target, copy & (MAX_STRING_LEN - 1),
+					                     &params[vstart]);
+					e->target[copy & (MAX_STRING_LEN - 1)] = '\0';
+					found_uri = 1;
 				}
 			}
 		}
@@ -255,28 +217,28 @@ emit_params: ;
 			    params[i+7] == '_' && params[i+8] == 'M' && params[i+9] == 'E' &&
 			    params[i+10] == 'T' && params[i+11] == 'H' && params[i+12] == 'O' &&
 			    params[i+13] == 'D') {
-				/* Value follows: typical methods are GET/POST/PUT 3-6 chars */
-				u32 j;
-				for (j = i + 14; j < FCGI_PARAMS_SCAN_LEN && j < i + 20; j++) {
-					/* Skip non-alpha (NV length bytes) to find the method text */
-					if ((params[j] >= 'A' && params[j] <= 'Z') ||
-					    (params[j] >= 'a' && params[j] <= 'z')) {
-						u32 copy = 15;
-						if (j + copy > FCGI_PARAMS_SCAN_LEN)
-							copy = FCGI_PARAMS_SCAN_LEN - j;
-						bpf_probe_read_kernel(e->details, copy & 0xF,
-						                     &params[j]);
-						e->details[15] = '\0';
-						found_method = 1;
-						break;
+				u32 vstart = (i + 14) & (FCGI_PARAMS_SCAN_LEN - 1);
+				u8 c0 = params[vstart];
+				if ((c0 >= 'A' && c0 <= 'Z') || (c0 >= 'a' && c0 <= 'z')) {
+					u32 copy = 15;
+					if (i >= 2) {
+						u8 vlen = params[(i - 1) & (FCGI_PARAMS_SCAN_LEN - 1)];
+						if ((vlen & FCGI_NV_LEN_4BYTE) == 0 && vlen > 0 && vlen < copy)
+							copy = vlen;
 					}
+					if (vstart + copy > FCGI_PARAMS_SCAN_LEN)
+						copy = FCGI_PARAMS_SCAN_LEN - vstart;
+					bpf_probe_read_kernel(e->details, copy & 0xF,
+					                     &params[vstart]);
+					e->details[copy & 0xF] = '\0';
+					found_method = 1;
 				}
 			}
 		}
 	}
 
 	if (!found_uri && !found_method)
-		return 0;  /* Not a PARAMS record we can decode */
+		return 0;
 
 	if (!found_uri) e->target[0] = '\0';
 	if (!found_method) e->details[0] = '\0';

@@ -50,6 +50,7 @@ var optionalProbes = map[string]string{
 	"kprobe_do_sys_openat2":    "do_sys_openat2",
 	"kretprobe_do_sys_openat2": "do_sys_openat2",
 	"kprobe_vfs_unlink":        "vfs_unlink",
+	"kprobe_close_fd":          "close_fd",
 	"kretprobe_vfs_unlink":     "vfs_unlink",
 	"kprobe_vfs_rename":        "vfs_rename",
 	"kretprobe_vfs_rename":     "vfs_rename",
@@ -185,12 +186,13 @@ type tracepointSpec struct {
 // (hot re-attach) so the two paths can never drift.
 var tracepointProbes = []tracepointSpec{
 	{"tracepoint_sched_switch", "sched", "sched_switch", "CPU/scheduling tracking unavailable"},
-	{"tracepoint_tcp_set_state", "tcp", "tcp_set_state", ""},
+	{"tracepoint_inet_sock_set_state", "sock", "inet_sock_set_state", "TCP state-change tracking unavailable"},
 	{"tracepoint_tcp_retransmit_skb", "tcp", "tcp_retransmit_skb", "TCP retransmission tracking unavailable"},
 	{"tracepoint_net_dev_xmit", "net", "net_dev_xmit", "Network device error tracking unavailable"},
 	{"tracepoint_page_fault_user", "exceptions", "page_fault_user", "Page fault tracking unavailable"},
-	{"tracepoint_oom_kill_process", "oom", "oom_kill_process", ""},
+	{"tracepoint_oom_mark_victim", "oom", "mark_victim", "OOM kill tracking unavailable"},
 	{"tracepoint_sched_process_fork", "sched", "sched_process_fork", "Process fork tracking unavailable"},
+	{"tracepoint_sched_process_exec", "sched", "sched_process_exec", "Process exec tracking unavailable"},
 }
 
 // attachTracepointSpec attaches one tracepoint, returning (link, true) on
