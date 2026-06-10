@@ -89,10 +89,30 @@ if [[ ! -d "${BUNDLE_DIR}/manifests" ]] || [[ ! -d "${BUNDLE_DIR}/metadata" ]]; 
 	exit 1
 fi
 
+upstream_commits_missing_from_fork() {
+	gh api \
+		"repos/${FORK_OWNER}/${FORK_REPO}/compare/main...${UPSTREAM%%/*}:main" \
+		--jq .ahead_by
+}
+
 log_info "syncing fork ${FORK_OWNER}/${FORK_REPO}:main with ${UPSTREAM}:main"
 if ! gh api --method POST "repos/${FORK_OWNER}/${FORK_REPO}/merge-upstream" \
-	-f branch=main >/dev/null 2>&1; then
-	log_info "fork sync skipped (already up to date or not fast-forwardable)"
+	-f branch=main; then
+	log_info "fast-forward sync failed — force-resetting fork main to upstream main"
+	gh repo sync "${FORK_OWNER}/${FORK_REPO}" --source "${UPSTREAM}" --branch main --force
+fi
+
+upstream_ahead="$(upstream_commits_missing_from_fork)"
+if [[ "${upstream_ahead}" != "0" ]]; then
+	log_info "fork main still ${upstream_ahead} commit(s) behind after sync — force-resetting"
+	gh repo sync "${FORK_OWNER}/${FORK_REPO}" --source "${UPSTREAM}" --branch main --force
+	upstream_ahead="$(upstream_commits_missing_from_fork)"
+fi
+if [[ "${upstream_ahead}" != "0" ]]; then
+	log_err "fork main is still ${upstream_ahead} commit(s) behind ${UPSTREAM}:main"
+	log_err "after a forced sync; refusing to open a PR that would fail the"
+	log_err "community-operators rebase check. Investigate the fork manually."
+	exit 1
 fi
 
 log_info "cloning fork ${FORK_OWNER}/${FORK_REPO}"
