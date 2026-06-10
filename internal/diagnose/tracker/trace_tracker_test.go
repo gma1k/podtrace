@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/podtrace/podtrace/internal/clock"
 	"github.com/podtrace/podtrace/internal/events"
 )
 
@@ -120,11 +121,34 @@ func TestTraceTracker_GetAllTraces(t *testing.T) {
 func TestTraceTracker_CleanupOldTraces(t *testing.T) {
 	tt := NewTraceTracker()
 
-	oldTime := time.Now().Add(-15 * time.Minute)
+	oldTime := time.Now().Add(-2 * time.Second)
 	event := &events.Event{
 		TraceID:   "old-trace",
 		SpanID:    "span1",
-		Timestamp: uint64(oldTime.UnixNano()),
+		Timestamp: clock.WallToBPFTimestamp(oldTime),
+		Type:      events.EventHTTPReq,
+	}
+
+	tt.ProcessEvent(event, nil)
+
+	tt.CleanupOldTraces(1 * time.Second)
+
+	if tt.GetTraceCount() != 0 {
+		t.Error("Old traces should be cleaned up")
+	}
+}
+
+// TestTraceTracker_CleanupKeepsFreshTraces is a regression test for the
+// monotonic-vs-epoch timestamp bug: TimestampTime() used to interpret
+// bpf_ktime_get_ns() values as epoch nanoseconds, anchoring every trace in
+// 1970 so CleanupOldTraces deleted all traces on every pass.
+func TestTraceTracker_CleanupKeepsFreshTraces(t *testing.T) {
+	tt := NewTraceTracker()
+
+	event := &events.Event{
+		TraceID:   "fresh-trace",
+		SpanID:    "span1",
+		Timestamp: clock.WallToBPFTimestamp(time.Now()),
 		Type:      events.EventHTTPReq,
 	}
 
@@ -132,8 +156,8 @@ func TestTraceTracker_CleanupOldTraces(t *testing.T) {
 
 	tt.CleanupOldTraces(10 * time.Minute)
 
-	if tt.GetTraceCount() != 0 {
-		t.Error("Old traces should be cleaned up")
+	if tt.GetTraceCount() != 1 {
+		t.Fatalf("fresh trace was cleaned up: got %d traces, want 1", tt.GetTraceCount())
 	}
 }
 
@@ -202,7 +226,7 @@ func TestTraceTracker_ProcessEvent_EarlierTimestamp(t *testing.T) {
 		TraceID:   "t1",
 		SpanID:    "s1",
 		Type:      events.EventHTTPReq,
-		Timestamp: uint64(baseTime.UnixNano()),
+		Timestamp: clock.WallToBPFTimestamp(baseTime),
 	}
 	tt.ProcessEvent(ev1, nil)
 
@@ -211,7 +235,7 @@ func TestTraceTracker_ProcessEvent_EarlierTimestamp(t *testing.T) {
 		TraceID:   "t1",
 		SpanID:    "s2",
 		Type:      events.EventHTTPResp,
-		Timestamp: uint64(baseTime.Add(-100 * time.Millisecond).UnixNano()),
+		Timestamp: clock.WallToBPFTimestamp(baseTime.Add(-100 * time.Millisecond)),
 	}
 	tt.ProcessEvent(ev2, nil)
 
@@ -233,7 +257,7 @@ func TestTraceTracker_ProcessEvent_LaterTimestamp(t *testing.T) {
 		TraceID:   "t2",
 		SpanID:    "s1",
 		Type:      events.EventHTTPReq,
-		Timestamp: uint64(baseTime.UnixNano()),
+		Timestamp: clock.WallToBPFTimestamp(baseTime),
 	}
 	tt.ProcessEvent(ev1, nil)
 
@@ -242,7 +266,7 @@ func TestTraceTracker_ProcessEvent_LaterTimestamp(t *testing.T) {
 		TraceID:   "t2",
 		SpanID:    "s2",
 		Type:      events.EventHTTPResp,
-		Timestamp: uint64(baseTime.Add(200 * time.Millisecond).UnixNano()),
+		Timestamp: clock.WallToBPFTimestamp(baseTime.Add(200 * time.Millisecond)),
 	}
 	tt.ProcessEvent(ev2, nil)
 

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/podtrace/podtrace/internal/clock"
 	"github.com/podtrace/podtrace/internal/config"
 )
 
@@ -17,11 +18,15 @@ func TestEvent_Latency(t *testing.T) {
 }
 
 func TestEvent_TimestampTime(t *testing.T) {
-	ts := uint64(1609459200000000000)
+	// Timestamp is a bpf_ktime_get_ns() value (nanoseconds since boot), so
+	// TimestampTime must anchor it to the wall clock via the process-wide
+	// monotonic-to-wall offset rather than interpret it as epoch nanoseconds.
+	ts := uint64(1_000_000_000) // 1s after boot
 	e := &Event{Timestamp: ts}
 	result := e.TimestampTime()
-	if result.UnixNano() != int64(ts) {
-		t.Errorf("Expected timestamp %d, got %d", ts, result.UnixNano())
+	expected := clock.BPFTimestampToWall(ts)
+	if !result.Equal(expected) {
+		t.Errorf("Expected timestamp %v, got %v", expected, result)
 	}
 }
 

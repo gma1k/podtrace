@@ -10,45 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/podtrace/podtrace/internal/clock"
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/events"
 )
-
-// ─── clock.go ────────────────────────────────────────────────────────────────
-
-func TestGetClockOffset_NonZero(t *testing.T) {
-	offset := GetClockOffset()
-	// The offset between wall clock and CLOCK_MONOTONIC should be non-zero on
-	// any real system (wall time started long after boot).
-	if offset == 0 {
-		t.Log("clock offset is 0 — acceptable if system clock is exactly at epoch, but unusual")
-	}
-}
-
-func TestGetClockOffset_Idempotent(t *testing.T) {
-	a := GetClockOffset()
-	b := GetClockOffset()
-	if a != b {
-		t.Errorf("GetClockOffset() not idempotent: %d != %d", a, b)
-	}
-}
-
-func TestBPFTimestampToWall_ReasonableTime(t *testing.T) {
-	// A BPF timestamp of 0 should produce a wall time close to the clock offset
-	// (i.e. near the boot time expressed as wall time).
-	wall := BPFTimestampToWall(0)
-	if wall.IsZero() {
-		t.Error("BPFTimestampToWall(0) returned zero time")
-	}
-}
-
-func TestBPFTimestampToWall_RelativeOrdering(t *testing.T) {
-	t1 := BPFTimestampToWall(1_000_000_000)
-	t2 := BPFTimestampToWall(2_000_000_000)
-	if !t2.After(t1) {
-		t.Errorf("expected t2 > t1, got t1=%v t2=%v", t1, t2)
-	}
-}
 
 // ─── profiler.go ─────────────────────────────────────────────────────────────
 
@@ -995,10 +960,10 @@ func mustParseAddr(t *testing.T, addr string) (string, int) {
 	return host, port
 }
 
-// GetClockOffset_ns returns the clock offset as uint64 nanoseconds for use in
+// GetClockOffset_ns returns the clock offset as a duration for use in
 // computing BPF-like timestamps in tests.
 func GetClockOffset_ns() time.Duration {
-	return time.Duration(GetClockOffset())
+	return time.Duration(clock.MonotonicToWallOffset())
 }
 
 // Ensure atomic.Bool is used (keeps the import).

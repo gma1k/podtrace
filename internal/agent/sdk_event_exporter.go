@@ -16,7 +16,6 @@ import (
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/internal/logger"
-	"github.com/podtrace/podtrace/internal/profiling"
 	"github.com/podtrace/podtrace/internal/safeconv"
 	bundlepkg "github.com/podtrace/podtrace/pkg/exporter/bundle"
 	"github.com/podtrace/podtrace/pkg/tracer"
@@ -152,7 +151,7 @@ func (e *sdkEventExporter) Export(ctx context.Context, batch []*events.Event) er
 		if ev.Timestamp == 0 {
 			startedAt = time.Now()
 		} else {
-			startedAt = profiling.BPFTimestampToWall(ev.Timestamp)
+			startedAt = ev.TimestampTime()
 		}
 		endedAt := startedAt.Add(time.Duration(safeUint64ToInt64(ev.LatencyNS)))
 		if endedAt.Before(startedAt) {
