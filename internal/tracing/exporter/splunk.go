@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -46,17 +48,18 @@ func (e *SplunkExporter) ExportTraces(traces []*tracker.Trace) error {
 		return nil
 	}
 
+	var errs []error
 	for _, t := range traces {
 		if !e.shouldSample(t) {
 			continue
 		}
 
 		if err := e.exportTrace(t); err != nil {
-			continue
+			errs = append(errs, fmt.Errorf("trace %s: %w", t.TraceID, err))
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 func (e *SplunkExporter) shouldSample(_ *tracker.Trace) bool {
@@ -107,14 +110,17 @@ func (e *SplunkExporter) exportTrace(t *tracker.Trace) error {
 		events = append(events, event)
 	}
 
+	var errs []error
 	for _, event := range events {
 		payload, err := json.Marshal(event)
 		if err != nil {
+			errs = append(errs, fmt.Errorf("marshal event: %w", err))
 			continue
 		}
 
 		req, err := http.NewRequestWithContext(context.Background(), "POST", e.endpoint, bytes.NewReader(payload))
 		if err != nil {
+			errs = append(errs, fmt.Errorf("create request: %w", err))
 			continue
 		}
 
@@ -125,12 +131,18 @@ func (e *SplunkExporter) exportTrace(t *tracker.Trace) error {
 
 		resp, err := e.client.Do(req)
 		if err != nil {
+			errs = append(errs, fmt.Errorf("send request: %w", err))
 			continue
 		}
 		_ = resp.Body.Close()
+		// HEC failures (401 bad token, 400 malformed event) used to be
+		// indistinguishable from success.
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+			errs = append(errs, fmt.Errorf("unexpected status code: %d", resp.StatusCode))
+		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 func (e *SplunkExporter) Shutdown(ctx context.Context) error {

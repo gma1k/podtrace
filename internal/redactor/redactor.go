@@ -38,8 +38,15 @@ func (r *Redactor) Redact(e *events.Event) {
 	if e == nil {
 		return
 	}
-	if r.redactDNSNames && e.Type == events.EventDNS {
-		e.Target = "[redacted]"
+	if r.redactDNSNames {
+		switch e.Type {
+		case events.EventDNS, events.EventDNSQuery:
+			e.Target = "[redacted]"
+		case events.EventConnect:
+			if e.Details != "" {
+				e.Details = "[redacted]"
+			}
+		}
 	}
 	for _, rule := range r.rules {
 		e.Target = rule.Pattern.ReplaceAllString(e.Target, rule.Replace)

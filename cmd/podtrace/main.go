@@ -512,7 +512,34 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	}
 
 	eventChan := make(chan *events.Event, config.EventChannelBufferSize)
+
+	// Every consumer below must see EVERY event, so the source channel is
+	// teed: a channel delivers each value to exactly one receiver, and the
+	// previous shared-channel wiring partitioned events randomly between
+	// the report loop, metrics, tracing, and profiling.
+	tracingActive := tracingManager != nil && enableTracing
+	profilingActive := (enableProfiling || config.ProfilingEnabled) &&
+		podInfo != nil && podInfo.PodIP != ""
+	auxiliaryConsumers := 0
+	for _, active := range []bool{enableMetrics, tracingActive, profilingActive} {
+		if active {
+			auxiliaryConsumers++
+		}
+	}
+	reportChan := eventChan
+	var auxiliaryChans []chan *events.Event
+	if auxiliaryConsumers > 0 {
+		reportChan, auxiliaryChans = teeEvents(ctx, eventChan, auxiliaryConsumers)
+	}
+	nextAuxiliary := 0
+	takeAuxiliary := func() chan *events.Event {
+		c := auxiliaryChans[nextAuxiliary]
+		nextAuxiliary++
+		return c
+	}
+
 	if enableMetrics {
+		metricsChan := takeAuxiliary()
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -525,7 +552,7 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 				select {
 				case <-ctx.Done():
 					return
-				case event, ok := <-eventChan:
+				case event, ok := <-metricsChan:
 					if !ok {
 						return
 					}
@@ -545,7 +572,8 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		}()
 	}
 
-	if tracingManager != nil && enableTracing {
+	if tracingActive {
+		tracingChan := takeAuxiliary()
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -558,7 +586,7 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 				select {
 				case <-ctx.Done():
 					return
-				case event, ok := <-eventChan:
+				case event, ok := <-tracingChan:
 					if !ok {
 						return
 					}
@@ -579,9 +607,9 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	if enableProfiling || config.ProfilingEnabled {
 		config.ProfilingEnabled = true // ensures MetricsEnablePprof() returns true
 		ports := parsePprofPorts(config.ProfilingPprofPorts)
-		if podInfo != nil && podInfo.PodIP != "" {
+		if profilingActive {
 			profilingHandler = profiling.NewHandler(podInfo.PodIP, ports)
-			go profilingHandler.Run(ctx, eventChan)
+			go profilingHandler.Run(ctx, takeAuxiliary())
 		} else {
 			logger.Warn("Profiling requested but pod IP is not available; skipping pprof discovery")
 		}
@@ -593,7 +621,7 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	enrichedChan := eventChan
+	enrichedChan := reportChan
 
 	filteredChan := enrichedChan
 	if eventFilter != "" {

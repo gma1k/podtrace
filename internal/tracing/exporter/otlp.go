@@ -2,6 +2,7 @@ package exporter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -115,6 +116,7 @@ func (e *OTLPExporter) ExportTraces(traces []*tracker.Trace) error {
 	}
 
 	ctx := context.Background()
+	var errs []error
 	for _, t := range traces {
 		if !e.shouldSample(t) {
 			continue
@@ -122,12 +124,15 @@ func (e *OTLPExporter) ExportTraces(traces []*tracker.Trace) error {
 
 		for _, span := range t.Spans {
 			if err := e.exportSpan(ctx, span, t); err != nil {
-				continue
+				// Keep exporting, but surface the failure: returning nil
+				// here made the manager's exporter-failure alerting
+				// unreachable dead code.
+				errs = append(errs, fmt.Errorf("trace %s span %s: %w", t.TraceID, span.SpanID, err))
 			}
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 func (e *OTLPExporter) shouldSample(_ *tracker.Trace) bool {

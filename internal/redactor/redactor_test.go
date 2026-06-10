@@ -123,3 +123,27 @@ func TestRedact_DNSNames_Toggle(t *testing.T) {
 		t.Errorf("connect target should be untouched, got %q", c.Target)
 	}
 }
+
+// TestRedact_DNSNameBypasses is a regression test for the redaction
+// bypasses: EventDNSQuery (which also carries a query name in Target) and
+// the DNS-correlated hostname in EventConnect.Details were exempt from
+// PODTRACE_REDACT_DNS_NAMES.
+func TestRedact_DNSNameBypasses(t *testing.T) {
+	t.Setenv("PODTRACE_REDACT_DNS_NAMES", "true")
+	r := redactor.Default()
+
+	query := &events.Event{Type: events.EventDNSQuery, Target: "secret-host.internal"}
+	r.Redact(query)
+	if query.Target != "[redacted]" {
+		t.Errorf("EventDNSQuery target = %q, want [redacted]", query.Target)
+	}
+
+	connect := &events.Event{Type: events.EventConnect, Target: "10.0.0.8:00443", Details: "secret-host.internal"}
+	r.Redact(connect)
+	if connect.Details != "[redacted]" {
+		t.Errorf("EventConnect details = %q, want [redacted]", connect.Details)
+	}
+	if connect.Target != "10.0.0.8:00443" {
+		t.Errorf("EventConnect target must keep the ip:port, got %q", connect.Target)
+	}
+}

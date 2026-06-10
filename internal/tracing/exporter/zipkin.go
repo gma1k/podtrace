@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -21,15 +22,15 @@ type ZipkinExporter struct {
 
 // Zipkin v2 span format.
 type zipkinSpan struct {
-	TraceID       string            `json:"traceId"`
-	ID            string            `json:"id"`
-	ParentID      string            `json:"parentId,omitempty"`
-	Name          string            `json:"name"`
-	Timestamp     int64             `json:"timestamp"`
-	Duration      int64             `json:"duration"`
-	Kind          string            `json:"kind,omitempty"`
-	LocalEndpoint zipkinEndpoint    `json:"localEndpoint"`
-	Tags          map[string]string `json:"tags,omitempty"`
+	TraceID       string             `json:"traceId"`
+	ID            string             `json:"id"`
+	ParentID      string             `json:"parentId,omitempty"`
+	Name          string             `json:"name"`
+	Timestamp     int64              `json:"timestamp"`
+	Duration      int64              `json:"duration"`
+	Kind          string             `json:"kind,omitempty"`
+	LocalEndpoint zipkinEndpoint     `json:"localEndpoint"`
+	Tags          map[string]string  `json:"tags,omitempty"`
 	Annotations   []zipkinAnnotation `json:"annotations,omitempty"`
 }
 
@@ -60,17 +61,18 @@ func (e *ZipkinExporter) ExportTraces(traces []*tracker.Trace) error {
 		return nil
 	}
 
+	var errs []error
 	for _, t := range traces {
 		if !e.shouldSample(t) {
 			continue
 		}
 
 		if err := e.exportTrace(t); err != nil {
-			continue
+			errs = append(errs, fmt.Errorf("trace %s: %w", t.TraceID, err))
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 func (e *ZipkinExporter) shouldSample(_ *tracker.Trace) bool {

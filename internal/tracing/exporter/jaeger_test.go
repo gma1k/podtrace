@@ -121,7 +121,7 @@ func TestJaegerExporter_ExportTraces_WithSampledTrace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewJaegerExporter() error = %v", err)
 	}
-	
+
 	trace := &tracker.Trace{
 		TraceID: "test123",
 		Spans: []*tracker.Span{
@@ -135,7 +135,7 @@ func TestJaegerExporter_ExportTraces_WithSampledTrace(t *testing.T) {
 			},
 		},
 	}
-	
+
 	err = exporter.ExportTraces([]*tracker.Trace{trace})
 	if err != nil {
 		t.Logf("ExportTraces() error (expected for test without server): %v", err)
@@ -147,7 +147,7 @@ func TestJaegerExporter_ExportTraces_WithNotSampledTrace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewJaegerExporter() error = %v", err)
 	}
-	
+
 	trace := &tracker.Trace{
 		TraceID: "test123",
 		Spans: []*tracker.Span{
@@ -161,7 +161,7 @@ func TestJaegerExporter_ExportTraces_WithNotSampledTrace(t *testing.T) {
 			},
 		},
 	}
-	
+
 	err = exporter.ExportTraces([]*tracker.Trace{trace})
 	if err != nil {
 		t.Errorf("ExportTraces() error = %v", err)
@@ -173,23 +173,23 @@ func TestJaegerExporter_exportTrace_WithErrorSpan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewJaegerExporter() error = %v", err)
 	}
-	
+
 	trace := &tracker.Trace{
 		TraceID: "test123",
 		Spans: []*tracker.Span{
 			{
-				TraceID:   "test123",
-				SpanID:    "span123",
-				Operation: "test-op",
-				Service:   "test-service",
-				StartTime: time.Now(),
-				Duration:  100 * time.Millisecond,
-				Error:     true,
+				TraceID:    "test123",
+				SpanID:     "span123",
+				Operation:  "test-op",
+				Service:    "test-service",
+				StartTime:  time.Now(),
+				Duration:   100 * time.Millisecond,
+				Error:      true,
 				Attributes: map[string]string{"key": "value"},
 			},
 		},
 	}
-	
+
 	err = exporter.exportTrace(trace)
 	if err != nil {
 		t.Logf("exportTrace() error (expected for test without server): %v", err)
@@ -201,7 +201,7 @@ func TestJaegerExporter_exportTrace_WithEmptyServiceName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewJaegerExporter() error = %v", err)
 	}
-	
+
 	trace := &tracker.Trace{
 		TraceID: "test123",
 		Spans: []*tracker.Span{
@@ -215,7 +215,7 @@ func TestJaegerExporter_exportTrace_WithEmptyServiceName(t *testing.T) {
 			},
 		},
 	}
-	
+
 	err = exporter.exportTrace(trace)
 	if err != nil {
 		t.Logf("exportTrace() error (expected for test without server): %v", err)
@@ -227,7 +227,7 @@ func TestJaegerExporter_exportTrace_WithEventError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewJaegerExporter() error = %v", err)
 	}
-	
+
 	trace := &tracker.Trace{
 		TraceID: "test123",
 		Spans: []*tracker.Span{
@@ -250,7 +250,7 @@ func TestJaegerExporter_exportTrace_WithEventError(t *testing.T) {
 			},
 		},
 	}
-	
+
 	err = exporter.exportTrace(trace)
 	if err != nil {
 		t.Logf("exportTrace() error (expected for test without server): %v", err)
@@ -262,7 +262,7 @@ func TestJaegerExporter_exportTrace_WithParentSpanID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewJaegerExporter() error = %v", err)
 	}
-	
+
 	trace := &tracker.Trace{
 		TraceID: "test123",
 		Spans: []*tracker.Span{
@@ -277,7 +277,7 @@ func TestJaegerExporter_exportTrace_WithParentSpanID(t *testing.T) {
 			},
 		},
 	}
-	
+
 	err = exporter.exportTrace(trace)
 	if err != nil {
 		t.Logf("exportTrace() error (expected for test without server): %v", err)

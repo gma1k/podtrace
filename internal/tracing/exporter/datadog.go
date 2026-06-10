@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -23,17 +24,17 @@ type DataDogExporter struct {
 
 // DataDog v0.4 trace format: outer array = list of traces, inner array = spans of one trace.
 type datadogSpan struct {
-	TraceID  uint64            `json:"trace_id"`
-	SpanID   uint64            `json:"span_id"`
-	ParentID uint64            `json:"parent_id"`
-	Name     string            `json:"name"`
-	Resource string            `json:"resource"`
-	Service  string            `json:"service"`
-	Type     string            `json:"type"`
-	Start    int64             `json:"start"`
-	Duration int64             `json:"duration"`
-	Error    int32             `json:"error"`
-	Meta     map[string]string `json:"meta"`
+	TraceID  uint64             `json:"trace_id"`
+	SpanID   uint64             `json:"span_id"`
+	ParentID uint64             `json:"parent_id"`
+	Name     string             `json:"name"`
+	Resource string             `json:"resource"`
+	Service  string             `json:"service"`
+	Type     string             `json:"type"`
+	Start    int64              `json:"start"`
+	Duration int64              `json:"duration"`
+	Error    int32              `json:"error"`
+	Meta     map[string]string  `json:"meta"`
 	Metrics  map[string]float64 `json:"metrics"`
 }
 
@@ -56,17 +57,18 @@ func (e *DataDogExporter) ExportTraces(traces []*tracker.Trace) error {
 		return nil
 	}
 
+	var errs []error
 	for _, t := range traces {
 		if !e.shouldSample(t) {
 			continue
 		}
 
 		if err := e.exportTrace(t); err != nil {
-			continue
+			errs = append(errs, fmt.Errorf("trace %s: %w", t.TraceID, err))
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 func (e *DataDogExporter) shouldSample(_ *tracker.Trace) bool {

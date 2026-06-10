@@ -90,8 +90,19 @@ func runReportUploader(ctx context.Context, opts reportUploaderOptions) error {
 		}
 	}
 
-	return uploadIfPresent(ctx, opts)
+	// With --max-wait 0 the wait above ends BECAUSE ctx was cancelled —
+	// SIGTERM is the designed trigger ("wait until SIGTERM, then upload
+	// what exists"). Running the upload on that cancelled context made it
+	// fail instantly on the exact path it exists for, so detach it and
+	// apply a bounded grace period instead.
+	uploadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), uploadGracePeriod)
+	defer cancel()
+	return uploadIfPresent(uploadCtx, opts)
 }
+
+// uploadGracePeriod bounds the post-shutdown upload so a hung sink cannot
+// keep the sidecar alive past the pod's termination grace period.
+const uploadGracePeriod = 30 * time.Second
 
 func waitForFile(ctx context.Context, path string, interval time.Duration) error {
 	ticker := time.NewTicker(interval)

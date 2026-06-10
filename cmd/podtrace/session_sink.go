@@ -25,12 +25,22 @@ func finalizeDiagnoseOutputs(ctx context.Context, report string, d *diagnose.Dia
 	if summaryFile == "" && terminationMessagePath == "" && reportTo == "" {
 		return
 	}
+	// On the interrupt path ctx is already cancelled (Ctrl+C, Job deletion,
+	// node drain), and every sink write derives a timeout from it — so the
+	// report was silently lost on exactly the early-termination cases the
+	// sinks exist for. Detach and bound with a grace period instead.
+	finalizeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeGracePeriod)
+	defer cancel()
 	node := os.Getenv("NODE_NAME")
 	summary := computeSessionSummary(d, node)
-	if err := emitSessionArtifacts(ctx, summary, report); err != nil {
+	if err := emitSessionArtifacts(finalizeCtx, summary, report); err != nil {
 		logger.Warn("emit session artifacts", zap.Error(err))
 	}
 }
+
+// finalizeGracePeriod bounds report/summary delivery after shutdown began so
+// a hung sink cannot exceed the pod's termination grace period.
+const finalizeGracePeriod = 30 * time.Second
 
 // SessionSummary is the compact, machine-readable summary the CLI emits
 // at the end of --diagnose. Matches the CRD's SessionSummary type
