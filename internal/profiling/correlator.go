@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/podtrace/podtrace/internal/clock"
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/events"
 )
@@ -113,7 +114,7 @@ func Correlate(
 		if e.LatencyNS >= triggerNS && isSlowEventType(e.Type) {
 			result.SlowEvents = append(result.SlowEvents, e)
 			// Build a ±50ms window around the slow event for SchedSwitch correlation.
-			eventWall := BPFTimestampToWall(e.Timestamp)
+			eventWall := clock.BPFTimestampToWall(e.Timestamp)
 			slowWindows = append(slowWindows, window{
 				start: eventWall.Add(-50 * time.Millisecond),
 				end:   eventWall.Add(time.Duration(safeInt64(e.LatencyNS)) + 50*time.Millisecond),
@@ -147,7 +148,7 @@ func Correlate(
 
 		// Check if this SchedSwitch falls inside any slow-event window.
 		if len(slowWindows) > 0 && len(e.Stack) > 0 {
-			eventWall := BPFTimestampToWall(e.Timestamp)
+			eventWall := clock.BPFTimestampToWall(e.Timestamp)
 			inWindow := false
 			for _, w := range slowWindows {
 				if !eventWall.Before(w.start) && !eventWall.After(w.end) {
@@ -197,8 +198,8 @@ func Correlate(
 	}
 
 	if len(allEvents) > 0 {
-		result.StartTime = BPFTimestampToWall(allEvents[0].Timestamp)
-		result.EndTime = BPFTimestampToWall(allEvents[len(allEvents)-1].Timestamp)
+		result.StartTime = clock.BPFTimestampToWall(allEvents[0].Timestamp)
+		result.EndTime = clock.BPFTimestampToWall(allEvents[len(allEvents)-1].Timestamp)
 	}
 
 	return result

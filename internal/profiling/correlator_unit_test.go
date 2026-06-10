@@ -3,7 +3,6 @@ package profiling
 import (
 	"math"
 	"testing"
-	"time"
 )
 
 func TestSafeInt64(t *testing.T) {
@@ -70,32 +69,5 @@ func TestFormatBytes(t *testing.T) {
 				t.Errorf("formatBytes(%d) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
-	}
-}
-
-// TestBPFTimestampToWall verifies conversion using the package clock offset.
-// GetClockOffset() caches a value via sync.Once on first use; this test asserts
-// the conversion is consistent with that cached offset (covering both the
-// normal path and the MaxInt64 clamp branch) without mutating production state.
-func TestBPFTimestampToWall(t *testing.T) {
-	offset := GetClockOffset()
-
-	const bpfNS = uint64(1_000_000_000) // 1s since boot
-	got := BPFTimestampToWall(bpfNS)
-	want := time.Unix(0, int64(bpfNS)+offset)
-	if !got.Equal(want) {
-		t.Errorf("BPFTimestampToWall(%d) = %v, want %v", bpfNS, got, want)
-	}
-
-	gotZero := BPFTimestampToWall(0)
-	wantZero := time.Unix(0, offset)
-	if !gotZero.Equal(wantZero) {
-		t.Errorf("BPFTimestampToWall(0) = %v, want %v", gotZero, wantZero)
-	}
-
-	gotBig := BPFTimestampToWall(math.MaxUint64)
-	wantBig := time.Unix(0, int64(math.MaxInt64)+offset)
-	if !gotBig.Equal(wantBig) {
-		t.Errorf("BPFTimestampToWall(MaxUint64) = %v, want %v", gotBig, wantBig)
 	}
 }

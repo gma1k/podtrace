@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/podtrace/podtrace/internal/clock"
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/safeconv"
 )
@@ -98,8 +99,13 @@ func (e *Event) Latency() time.Duration {
 	return time.Duration(safeconv.Uint64ToInt64(e.LatencyNS)) * time.Nanosecond
 }
 
+// TimestampTime returns the event's timestamp as wall-clock time. Timestamp
+// holds a raw bpf_ktime_get_ns() value (nanoseconds since boot,
+// CLOCK_MONOTONIC), so it must be anchored to the wall clock before being
+// formatted or compared against time.Now(). Deltas between two events can use
+// Timestamp directly; absolute times must go through this method.
 func (e *Event) TimestampTime() time.Time {
-	return time.Unix(0, safeconv.Uint64ToInt64(e.Timestamp))
+	return clock.BPFTimestampToWall(e.Timestamp)
 }
 
 func (e *Event) TypeString() string {
