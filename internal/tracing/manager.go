@@ -3,6 +3,7 @@ package tracing
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,6 +32,7 @@ type Manager struct {
 	exportInterval  time.Duration
 	cleanupInterval time.Duration
 	stopCh          chan struct{}
+	stopOnce        sync.Once
 	wg              sync.WaitGroup
 }
 
@@ -147,7 +149,7 @@ func (m *Manager) exportLoop(ctx context.Context) {
 		case <-m.stopCh:
 			return
 		case <-ticker.C:
-			m.exportTraces()
+			m.exportTraces(false)
 		}
 	}
 }
@@ -170,145 +172,91 @@ func (m *Manager) cleanupLoop(ctx context.Context) {
 	}
 }
 
-func (m *Manager) exportTraces() {
-	traces := m.traceTracker.GetAllTraces()
+// exporterTarget pairs one configured exporter with the metadata its
+// failure alert needs.
+type exporterTarget struct {
+	name            string
+	endpoint        string
+	export          func([]*tracker.Trace) error
+	recommendations []string
+	suppressAlert   bool
+}
+
+func (m *Manager) exporterTargets() []exporterTarget {
+	var out []exporterTarget
+	if m.otlpExporter != nil {
+		out = append(out, exporterTarget{
+			name: "otlp", endpoint: config.OTLPEndpoint, export: m.otlpExporter.ExportTraces,
+			recommendations: []string{"Check OTLP endpoint connectivity", "Verify endpoint configuration", "Check network connectivity"},
+		})
+	}
+	if m.jaegerExporter != nil {
+		out = append(out, exporterTarget{
+			name: "jaeger", endpoint: config.JaegerEndpoint, export: m.jaegerExporter.ExportTraces,
+			recommendations: []string{"Check Jaeger endpoint connectivity", "Verify endpoint configuration", "Check network connectivity"},
+		})
+	}
+	if m.splunkExporter != nil {
+		out = append(out, exporterTarget{
+			name: "splunk", endpoint: config.SplunkEndpoint, export: m.splunkExporter.ExportTraces,
+			recommendations: []string{"Check Splunk endpoint connectivity", "Verify Splunk token", "Check network connectivity"},
+			// Avoid an alert feedback loop when alerts themselves are
+			// delivered through Splunk.
+			suppressAlert: config.AlertSplunkEnabled,
+		})
+	}
+	if m.datadogExporter != nil {
+		out = append(out, exporterTarget{
+			name: "datadog", endpoint: config.DataDogEndpoint, export: m.datadogExporter.ExportTraces,
+			recommendations: []string{"Check DataDog agent endpoint connectivity", "Verify DD-API-KEY if using direct ingest", "Check network connectivity"},
+		})
+	}
+	if m.zipkinExporter != nil {
+		out = append(out, exporterTarget{
+			name: "zipkin", endpoint: config.ZipkinEndpoint, export: m.zipkinExporter.ExportTraces,
+			recommendations: []string{"Check Zipkin endpoint connectivity", "Verify endpoint configuration", "Check network connectivity"},
+		})
+	}
+	return out
+}
+
+// exportTraces hands each span to every exporter exactly once: the tracker
+// snapshot advances a per-trace watermark, so a tick no longer re-sends every
+// accumulated trace (which duplicated spans in all backends on every 5s
+// interval). force (shutdown) flushes spans of traces that are still
+// settling.
+func (m *Manager) exportTraces(force bool) {
+	traces := m.traceTracker.SnapshotForExport(m.exportInterval, force)
 	if len(traces) == 0 {
 		return
 	}
 
-	if m.otlpExporter != nil {
-		if err := m.otlpExporter.ExportTraces(traces); err != nil {
-			logger.Warn("Failed to export traces to OTLP", zap.Error(err))
-			manager := alerting.GetGlobalManager()
-			if manager != nil {
-				alert := &alerting.Alert{
-					Severity:  alerting.SeverityWarning,
-					Title:     "OTLP Exporter Failure",
-					Message:   fmt.Sprintf("Failed to export traces to OTLP: %v", err),
-					Timestamp: time.Now(),
-					Source:    "exporter",
-					Context: map[string]interface{}{
-						"exporter": "otlp",
-						"endpoint": config.OTLPEndpoint,
-						"error":    err.Error(),
-					},
-					Recommendations: []string{
-						"Check OTLP endpoint connectivity",
-						"Verify endpoint configuration",
-						"Check network connectivity",
-					},
-				}
-				manager.SendAlert(alert)
-			}
+	for _, target := range m.exporterTargets() {
+		err := target.export(traces)
+		if err == nil {
+			continue
 		}
-	}
-
-	if m.jaegerExporter != nil {
-		if err := m.jaegerExporter.ExportTraces(traces); err != nil {
-			logger.Warn("Failed to export traces to Jaeger", zap.Error(err))
-			manager := alerting.GetGlobalManager()
-			if manager != nil {
-				alert := &alerting.Alert{
-					Severity:  alerting.SeverityWarning,
-					Title:     "Jaeger Exporter Failure",
-					Message:   fmt.Sprintf("Failed to export traces to Jaeger: %v", err),
-					Timestamp: time.Now(),
-					Source:    "exporter",
-					Context: map[string]interface{}{
-						"exporter": "jaeger",
-						"endpoint": config.JaegerEndpoint,
-						"error":    err.Error(),
-					},
-					Recommendations: []string{
-						"Check Jaeger endpoint connectivity",
-						"Verify endpoint configuration",
-						"Check network connectivity",
-					},
-				}
-				manager.SendAlert(alert)
-			}
+		logger.Warn("Failed to export traces", zap.String("exporter", target.name), zap.Error(err))
+		if target.suppressAlert {
+			continue
 		}
-	}
-
-	if m.splunkExporter != nil {
-		if err := m.splunkExporter.ExportTraces(traces); err != nil {
-			logger.Warn("Failed to export traces to Splunk", zap.Error(err))
-			manager := alerting.GetGlobalManager()
-			if manager != nil && !config.AlertSplunkEnabled {
-				alert := &alerting.Alert{
-					Severity:  alerting.SeverityWarning,
-					Title:     "Splunk Exporter Failure",
-					Message:   fmt.Sprintf("Failed to export traces to Splunk: %v", err),
-					Timestamp: time.Now(),
-					Source:    "exporter",
-					Context: map[string]interface{}{
-						"exporter": "splunk",
-						"endpoint": config.SplunkEndpoint,
-						"error":    err.Error(),
-					},
-					Recommendations: []string{
-						"Check Splunk endpoint connectivity",
-						"Verify Splunk token",
-						"Check network connectivity",
-					},
-				}
-				manager.SendAlert(alert)
-			}
+		manager := alerting.GetGlobalManager()
+		if manager == nil {
+			continue
 		}
-	}
-
-	if m.datadogExporter != nil {
-		if err := m.datadogExporter.ExportTraces(traces); err != nil {
-			logger.Warn("Failed to export traces to DataDog", zap.Error(err))
-			manager := alerting.GetGlobalManager()
-			if manager != nil {
-				alert := &alerting.Alert{
-					Severity:  alerting.SeverityWarning,
-					Title:     "DataDog Exporter Failure",
-					Message:   fmt.Sprintf("Failed to export traces to DataDog: %v", err),
-					Timestamp: time.Now(),
-					Source:    "exporter",
-					Context: map[string]interface{}{
-						"exporter": "datadog",
-						"endpoint": config.DataDogEndpoint,
-						"error":    err.Error(),
-					},
-					Recommendations: []string{
-						"Check DataDog agent endpoint connectivity",
-						"Verify DD-API-KEY if using direct ingest",
-						"Check network connectivity",
-					},
-				}
-				manager.SendAlert(alert)
-			}
-		}
-	}
-
-	if m.zipkinExporter != nil {
-		if err := m.zipkinExporter.ExportTraces(traces); err != nil {
-			logger.Warn("Failed to export traces to Zipkin", zap.Error(err))
-			manager := alerting.GetGlobalManager()
-			if manager != nil {
-				alert := &alerting.Alert{
-					Severity:  alerting.SeverityWarning,
-					Title:     "Zipkin Exporter Failure",
-					Message:   fmt.Sprintf("Failed to export traces to Zipkin: %v", err),
-					Timestamp: time.Now(),
-					Source:    "exporter",
-					Context: map[string]interface{}{
-						"exporter": "zipkin",
-						"endpoint": config.ZipkinEndpoint,
-						"error":    err.Error(),
-					},
-					Recommendations: []string{
-						"Check Zipkin endpoint connectivity",
-						"Verify endpoint configuration",
-						"Check network connectivity",
-					},
-				}
-				manager.SendAlert(alert)
-			}
-		}
+		manager.SendAlert(&alerting.Alert{
+			Severity:  alerting.SeverityWarning,
+			Title:     fmt.Sprintf("%s Exporter Failure", strings.ToUpper(target.name[:1])+target.name[1:]),
+			Message:   fmt.Sprintf("Failed to export traces to %s: %v", target.name, err),
+			Timestamp: time.Now(),
+			Source:    "exporter",
+			Context: map[string]interface{}{
+				"exporter": target.name,
+				"endpoint": target.endpoint,
+				"error":    err.Error(),
+			},
+			Recommendations: target.recommendations,
+		})
 	}
 }
 
@@ -317,7 +265,9 @@ func (m *Manager) GetRequestFlowGraph() *graph.RequestFlowGraph {
 		return nil
 	}
 
-	traces := m.traceTracker.GetAllTraces()
+	// Deep-copied snapshot: the graph builder sorts spans in place, which
+	// raced ProcessEvent on the live objects.
+	traces := m.traceTracker.SnapshotAll()
 	return m.graphBuilder.BuildFromTraces(traces)
 }
 
@@ -333,10 +283,11 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 		return nil
 	}
 
-	close(m.stopCh)
+	m.stopOnce.Do(func() { close(m.stopCh) })
 	m.wg.Wait()
 
-	m.exportTraces()
+	// Final flush: force-export spans of traces that are still settling.
+	m.exportTraces(true)
 
 	if m.otlpExporter != nil {
 		if err := m.otlpExporter.Shutdown(ctx); err != nil {

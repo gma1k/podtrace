@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -64,17 +65,21 @@ func (e *JaegerExporter) ExportTraces(traces []*tracker.Trace) error {
 		return nil
 	}
 
+	var errs []error
 	for _, t := range traces {
 		if !e.shouldSample(t) {
 			continue
 		}
 
 		if err := e.exportTrace(t); err != nil {
-			continue
+			// Keep exporting the remaining traces, but surface the failure:
+			// returning nil here made the manager's exporter-failure
+			// alerting unreachable dead code.
+			errs = append(errs, fmt.Errorf("trace %s: %w", t.TraceID, err))
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 func (e *JaegerExporter) shouldSample(_ *tracker.Trace) bool {

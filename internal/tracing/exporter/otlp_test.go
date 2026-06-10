@@ -119,7 +119,7 @@ func TestOTLPExporter_ExportTraces_WithSampledTrace(t *testing.T) {
 		t.Skipf("Skipping test: failed to create exporter: %v", err)
 	}
 	defer func() { _ = exporter.Shutdown(context.Background()) }()
-	
+
 	trace := &tracker.Trace{
 		TraceID: "test123",
 		Spans: []*tracker.Span{
@@ -133,7 +133,7 @@ func TestOTLPExporter_ExportTraces_WithSampledTrace(t *testing.T) {
 			},
 		},
 	}
-	
+
 	err = exporter.ExportTraces([]*tracker.Trace{trace})
 	if err != nil {
 		t.Logf("ExportTraces() error (expected for test without server): %v", err)
@@ -146,7 +146,7 @@ func TestOTLPExporter_ExportTraces_WithNotSampledTrace(t *testing.T) {
 		t.Skipf("Skipping test: failed to create exporter: %v", err)
 	}
 	defer func() { _ = exporter.Shutdown(context.Background()) }()
-	
+
 	trace := &tracker.Trace{
 		TraceID: "test123",
 		Spans: []*tracker.Span{
@@ -160,7 +160,7 @@ func TestOTLPExporter_ExportTraces_WithNotSampledTrace(t *testing.T) {
 			},
 		},
 	}
-	
+
 	err = exporter.ExportTraces([]*tracker.Trace{trace})
 	if err != nil {
 		t.Errorf("ExportTraces() error = %v", err)
@@ -173,11 +173,11 @@ func TestOTLPExporter_exportSpan(t *testing.T) {
 		t.Skipf("Skipping test: failed to create exporter: %v", err)
 	}
 	defer func() { _ = exporter.Shutdown(context.Background()) }()
-	
+
 	trace := &tracker.Trace{
 		TraceID: "test123",
 	}
-	
+
 	span := &tracker.Span{
 		TraceID:      "12345678901234567890123456789012",
 		SpanID:       "1234567890123456",
@@ -197,7 +197,7 @@ func TestOTLPExporter_exportSpan(t *testing.T) {
 			},
 		},
 	}
-	
+
 	err = exporter.exportSpan(context.Background(), span, trace)
 	if err != nil {
 		t.Logf("exportSpan() error (expected for test without server): %v", err)
@@ -210,11 +210,11 @@ func TestOTLPExporter_exportSpan_InvalidTraceID(t *testing.T) {
 		t.Skipf("Skipping test: failed to create exporter: %v", err)
 	}
 	defer func() { _ = exporter.Shutdown(context.Background()) }()
-	
+
 	trace := &tracker.Trace{
 		TraceID: "test123",
 	}
-	
+
 	span := &tracker.Span{
 		TraceID:   "invalid",
 		SpanID:    "1234567890123456",
@@ -222,7 +222,7 @@ func TestOTLPExporter_exportSpan_InvalidTraceID(t *testing.T) {
 		StartTime: time.Now(),
 		Duration:  100 * time.Millisecond,
 	}
-	
+
 	err = exporter.exportSpan(context.Background(), span, trace)
 	if err == nil {
 		t.Error("exportSpan() should return error for invalid trace ID")
@@ -235,11 +235,11 @@ func TestOTLPExporter_exportSpan_InvalidSpanID(t *testing.T) {
 		t.Skipf("Skipping test: failed to create exporter: %v", err)
 	}
 	defer func() { _ = exporter.Shutdown(context.Background()) }()
-	
+
 	trace := &tracker.Trace{
 		TraceID: "test123",
 	}
-	
+
 	span := &tracker.Span{
 		TraceID:   "12345678901234567890123456789012",
 		SpanID:    "invalid",
@@ -247,7 +247,7 @@ func TestOTLPExporter_exportSpan_InvalidSpanID(t *testing.T) {
 		StartTime: time.Now(),
 		Duration:  100 * time.Millisecond,
 	}
-	
+
 	err = exporter.exportSpan(context.Background(), span, trace)
 	if err == nil {
 		t.Error("exportSpan() should return error for invalid span ID")
@@ -260,11 +260,11 @@ func TestOTLPExporter_exportSpan_NoParentSpanID(t *testing.T) {
 		t.Skipf("Skipping test: failed to create exporter: %v", err)
 	}
 	defer func() { _ = exporter.Shutdown(context.Background()) }()
-	
+
 	trace := &tracker.Trace{
 		TraceID: "test123",
 	}
-	
+
 	span := &tracker.Span{
 		TraceID:      "12345678901234567890123456789012",
 		SpanID:       "1234567890123456",
@@ -275,7 +275,7 @@ func TestOTLPExporter_exportSpan_NoParentSpanID(t *testing.T) {
 		Duration:     100 * time.Millisecond,
 		Attributes:   map[string]string{"key": "value"},
 	}
-	
+
 	err = exporter.exportSpan(context.Background(), span, trace)
 	if err != nil {
 		t.Logf("exportSpan() error (expected for test without server): %v", err)
@@ -288,7 +288,7 @@ func TestOTLPExporter_ExportTraces_WithErrorInExportSpan(t *testing.T) {
 		t.Skipf("Skipping test: failed to create exporter: %v", err)
 	}
 	defer func() { _ = exporter.Shutdown(context.Background()) }()
-	
+
 	trace := &tracker.Trace{
 		TraceID: "test123",
 		Spans: []*tracker.Span{
@@ -302,7 +302,7 @@ func TestOTLPExporter_ExportTraces_WithErrorInExportSpan(t *testing.T) {
 			},
 		},
 	}
-	
+
 	err = exporter.ExportTraces([]*tracker.Trace{trace})
 	if err != nil {
 		t.Logf("ExportTraces() error (expected for invalid trace ID): %v", err)

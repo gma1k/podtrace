@@ -129,6 +129,9 @@ func (t *Tracer) sweepDNSTimeouts(ctx context.Context, eventChan chan<- *events.
 			Details:     "timeout",
 			ProcessName: string(bytes.TrimRight(val.Comm[:], "\x00")),
 		}
+		if t.piiRedactor != nil {
+			t.piiRedactor.Redact(ev)
+		}
 		select {
 		case <-ctx.Done():
 			return
