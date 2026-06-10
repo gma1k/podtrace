@@ -9,6 +9,24 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.12.9](https://github.com/gma1k/podtrace/compare/v0.12.8...v0.12.9) (2026-06-10)
+
+
+### Features
+
+* revive dead eBPF probes and correct event data semantics ([#204](https://github.com/gma1k/podtrace/issues/204)) ([d625421](https://github.com/gma1k/podtrace/commit/d625421c5a834b2d15d19f32ae44f34d8645403f))
+
+
+### Bug Fixes
+
+* add ApplicationTrace to OLM CSV and sync operator RBAC ([#200](https://github.com/gma1k/podtrace/issues/200)) ([3386d3a](https://github.com/gma1k/podtrace/commit/3386d3a7e5f8fe1a5c435cf8dcacb9cd2b183260))
+* anchor BPF event timestamps to wall clock ([#202](https://github.com/gma1k/podtrace/issues/202)) ([fdec2a4](https://github.com/gma1k/podtrace/commit/fdec2a4296468540f126e3c47d3bce567490f952))
+
+
+### Maintenance
+
+* **deps:** update go modules (non-major) ([#203](https://github.com/gma1k/podtrace/issues/203)) ([2e2fe21](https://github.com/gma1k/podtrace/commit/2e2fe214b1b6a6b51016039989f89465bc82410a))
+
 ## [0.12.8](https://github.com/gma1k/podtrace/compare/v0.12.7...v0.12.8) (2026-06-08)
 
 
