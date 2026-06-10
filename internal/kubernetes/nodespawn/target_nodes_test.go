@@ -186,7 +186,7 @@ func TestPickRunningContainer_PrefersRunning(t *testing.T) {
 			Terminated: &corev1.ContainerStateTerminated{ExitCode: 0},
 		}},
 	}}}
-	cs := pickRunningContainer(p)
+	cs := pickRunningContainer(p, "")
 	if cs == nil || cs.Name != "b" {
 		t.Fatalf("expected to pick the Running container, got %+v", cs)
 	}
@@ -202,7 +202,7 @@ func TestPickRunningContainer_RejectsAllNonRunning(t *testing.T) {
 			p := &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{
 				{Name: "x", ContainerID: "containerd://xxx", State: st},
 			}}}
-			if cs := pickRunningContainer(p); cs != nil {
+			if cs := pickRunningContainer(p, ""); cs != nil {
 				t.Errorf("must not pick a %s container, got %+v", name, cs)
 			}
 		})
@@ -217,7 +217,7 @@ func TestPickRunningContainer_RejectsRunningWithEmptyID(t *testing.T) {
 			Running: &corev1.ContainerStateRunning{},
 		}},
 	}}}
-	if cs := pickRunningContainer(p); cs != nil {
+	if cs := pickRunningContainer(p, ""); cs != nil {
 		t.Errorf("Running container with empty ID must be rejected, got %+v", cs)
 	}
 }

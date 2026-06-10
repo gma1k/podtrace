@@ -25,6 +25,12 @@ import (
 // resolved credential material in the companion Secret.
 const CredentialKey = "credential"
 
+// SecretHeaderKeyPrefix prefixes bundle-Secret keys that carry one
+// Secret-backed header each (OTLP headersFromSecret): "header.<name>" maps
+// to header <name>. Kept in the Secret — never the ConfigMap — because the
+// values are credential material.
+const SecretHeaderKeyPrefix = "header."
+
 const CurrentVersion = "v2"
 
 type Type string
@@ -101,6 +107,11 @@ type Payload struct {
 	PolicyGeneration int64 `yaml:"policyGeneration,omitempty"`
 
 	Credential []byte `yaml:"-"`
+
+	// SecretHeaders carries the OTLP headersFromSecret entries, loaded from
+	// the bundle Secret's SecretHeaderKeyPrefix keys. Never serialized:
+	// the values are credential material.
+	SecretHeaders map[string]string `yaml:"-"`
 
 	ResourceVer string `yaml:"-"`
 }

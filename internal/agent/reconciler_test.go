@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,14 +30,33 @@ type fakeExporter struct {
 	closed  int
 }
 
-func (e *fakeExporter) Name() string                                          { return e.name }
-func (e *fakeExporter) Export(_ context.Context, batch []*events.Event) error { e.exports++; return nil }
+func (e *fakeExporter) Name() string { return e.name }
+func (e *fakeExporter) Export(_ context.Context, batch []*events.Event) error {
+	e.exports++
+	return nil
+}
 func (e *fakeExporter) Close(_ context.Context) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.closed++
 	return nil
 }
+
+// waitForCloses polls until the exporter's Close count reaches want.
+// Displaced exporters are closed asynchronously after Router.Publish (so a
+// hung collector cannot stall the reconcile loop), hence the wait.
+func waitForCloses(t *testing.T, e *fakeExporter, want int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if e.Closes() == want {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Errorf("exporter %s Close count = %d, want %d", e.name, e.Closes(), want)
+}
+
 func (e *fakeExporter) Closes() int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -313,9 +333,7 @@ func TestReconcile_BundleRotationRebuildsExporter(t *testing.T) {
 	if calls != 2 {
 		t.Errorf("ExporterBuilder calls = %d, want 2 (rotation should rebuild)", calls)
 	}
-	if old.Closes() != 1 {
-		t.Errorf("old exporter Close count = %d, want 1", old.Closes())
-	}
+	waitForCloses(t, old, 1)
 	if new1.Closes() != 0 {
 		t.Errorf("new exporter Close count = %d, want 0", new1.Closes())
 	}
@@ -398,9 +416,7 @@ func TestReconcile_NoMatchedPodsReleasesExporter(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if exp.Closes() != 1 {
-		t.Errorf("stale exporter Close count = %d, want 1", exp.Closes())
-	}
+	waitForCloses(t, exp, 1)
 	if _, ok := r.exporterCache[CRKey{Namespace: ns, Name: "pt"}]; ok {
 		t.Error("exporter cache should be empty after release")
 	}
@@ -687,9 +703,7 @@ func TestReconcile_ReapsExportersForDeletedCRs(t *testing.T) {
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{}); err != nil {
 		t.Fatal(err)
 	}
-	if stale.Closes() != 1 {
-		t.Errorf("stale exporter Close count = %d, want 1", stale.Closes())
-	}
+	waitForCloses(t, stale, 1)
 }
 
 func TestReconcile_TargetsChannelKeepLatest(t *testing.T) {
@@ -815,17 +829,21 @@ func TestObtainAndReleaseExporter(t *testing.T) {
 	if calls != 2 {
 		t.Errorf("calls = %d, want 2", calls)
 	}
-	if exp1.(*fakeExporter).Closes() != 1 {
-		t.Errorf("old exporter Close count = %d, want 1", exp1.(*fakeExporter).Closes())
+	// Displaced exporters accumulate in pendingClose and are only closed by
+	// the post-Publish drain — never inline, where in-flight Export calls
+	// could still route into them.
+	if exp1.(*fakeExporter).Closes() != 0 {
+		t.Errorf("old exporter closed before drain, count = %d", exp1.(*fakeExporter).Closes())
 	}
+	r.closeDisplacedExporters()
+	waitForCloses(t, exp1.(*fakeExporter), 1)
 
 	r.releaseExporter(key)
 	if _, ok := r.exporterCache[key]; ok {
 		t.Error("releaseExporter did not remove the entry")
 	}
-	if exp3.(*fakeExporter).Closes() != 1 {
-		t.Errorf("released exporter Close count = %d, want 1", exp3.(*fakeExporter).Closes())
-	}
+	r.closeDisplacedExporters()
+	waitForCloses(t, exp3.(*fakeExporter), 1)
 	r.releaseExporter(key)
 }
 
@@ -856,12 +874,11 @@ func TestReapStaleExporters(t *testing.T) {
 	}
 	active := map[CRKey]struct{}{{Namespace: "ns", Name: "a"}: {}}
 	r.reapStaleExporters(active)
+	r.closeDisplacedExporters()
 	if a.Closes() != 0 {
 		t.Errorf("active exporter must not be closed, got %d", a.Closes())
 	}
-	if b.Closes() != 1 {
-		t.Errorf("stale exporter close count = %d, want 1", b.Closes())
-	}
+	waitForCloses(t, b, 1)
 	if _, ok := r.exporterCache[CRKey{Namespace: "ns", Name: "b"}]; ok {
 		t.Error("stale entry not removed")
 	}

@@ -53,8 +53,10 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	if !pt.DeletionTimestamp.IsZero() {
-		if err := cleanupPodTraceChildren(ctx, r.Client, &pt, r.SystemNamespace); err != nil {
-			return ctrl.Result{}, err
+		for _, ns := range candidateSystemNamespaces(r.effectiveSystemNamespace(ctx), r.SystemNamespace) {
+			if err := cleanupPodTraceChildren(ctx, r.Client, &pt, ns); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 		if removeFinalizer(&pt) {
 			if err := r.Update(ctx, &pt); err != nil {
@@ -207,10 +209,15 @@ func (r *PodTraceReconciler) exporterConfigToPodTraces(ctx context.Context, obj 
 }
 
 func (r *PodTraceReconciler) syncExporterBundle(ctx context.Context, pt *podtracev1alpha1.PodTrace, ec *podtracev1alpha1.ExporterConfig, targetNamespaces []string) error {
-	systemNS := r.SystemNamespace
+	// The bundle must live where agents read it. Agents are launched with
+	// --system-namespace set to the TracerConfig's systemNamespace override
+	// (tracerconfig_daemonset.go), so writing to the operator default here
+	// made continuous tracing silently export nothing whenever the override
+	// was set: agents looked in a namespace the operator never wrote.
+	systemNS := r.effectiveSystemNamespace(ctx)
 	name := ExporterBundleName(pt.UID)
 
-	payload, credSecretRef, err := renderBundlePayload(policyFromPodTrace(pt), ec, targetNamespaces)
+	payload, credSecretRef, headersFrom, err := renderBundlePayload(policyFromPodTrace(pt), ec, targetNamespaces)
 	if err != nil {
 		return err
 	}
@@ -239,8 +246,8 @@ func (r *PodTraceReconciler) syncExporterBundle(ctx context.Context, pt *podtrac
 		return fmt.Errorf("bundle ConfigMap: %w", err)
 	}
 
-	if credSecretRef != nil {
-		credData, err := r.loadCredentialSecret(ctx, ec.Namespace, *credSecretRef)
+	if credSecretRef != nil || headersFrom != nil {
+		credData, err := buildBundleSecretData(ctx, r.Client, ec.Namespace, credSecretRef, headersFrom)
 		if err != nil {
 			return fmt.Errorf("load credential Secret: %w", err)
 		}
@@ -270,6 +277,19 @@ func (r *PodTraceReconciler) syncExporterBundle(ctx context.Context, pt *podtrac
 		}
 	}
 	return nil
+}
+
+// effectiveSystemNamespace returns the namespace agents read bundles from:
+// the default TracerConfig's spec.systemNamespace override when set,
+// otherwise the operator default. Bundles must be written (and cleaned up)
+// there, mirroring the --system-namespace the rendered DaemonSet passes to
+// agents.
+func (r *PodTraceReconciler) effectiveSystemNamespace(ctx context.Context) string {
+	var tc podtracev1alpha1.TracerConfig
+	if err := r.Get(ctx, types.NamespacedName{Name: "default"}, &tc); err == nil && tc.Spec.SystemNamespace != "" {
+		return tc.Spec.SystemNamespace
+	}
+	return r.SystemNamespace
 }
 
 // loadCredentialSecret reads a SecretKeySelector from the ExporterConfig's

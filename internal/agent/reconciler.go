@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -52,7 +53,13 @@ type AgentReconciler struct {
 
 	exporterCacheMu sync.Mutex
 	exporterCache   map[CRKey]cachedExporter
+	// pendingClose accumulates exporters displaced during a reconcile.
+	pendingClose []tracer.Exporter
 }
+
+// exporterCloseTimeout bounds the asynchronous flush+shutdown of displaced
+// exporters so an unreachable collector cannot pin goroutines forever.
+const exporterCloseTimeout = 15 * time.Second
 
 type cachedExporter struct {
 	bundleRV string
@@ -212,6 +219,13 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	r.Router.Publish(rules)
 
+	// Publish holds the router's write lock, and Export holds the read lock
+	// for its whole duration — so once Publish returns, no in-flight Export
+	// references a displaced exporter and they can be flushed and closed.
+	// Done asynchronously: Close blocks on ForceFlush/Shutdown against the
+	// collector, and this reconciler is single-threaded.
+	r.closeDisplacedExporters()
+
 	if r.CategoryGate != nil {
 		categories := unionCategoriesFromRules(rules)
 		if err := r.CategoryGate(categories); err != nil {
@@ -282,7 +296,7 @@ func (r *AgentReconciler) obtainExporter(key CRKey, bundle *BundlePayload) (trac
 			return entry.exporter, nil
 		}
 		if entry.exporter != nil {
-			_ = entry.exporter.Close(context.Background())
+			r.pendingClose = append(r.pendingClose, entry.exporter)
 		}
 	}
 	exporter, err := r.ExporterBuilder(bundle, key)
@@ -299,12 +313,31 @@ func (r *AgentReconciler) obtainExporter(key CRKey, bundle *BundlePayload) (trac
 // releaseExporter closes and removes the cached exporter for key.
 func (r *AgentReconciler) releaseExporter(key CRKey) {
 	r.exporterCacheMu.Lock()
+	defer r.exporterCacheMu.Unlock()
 	entry, ok := r.exporterCache[key]
 	delete(r.exporterCache, key)
-	r.exporterCacheMu.Unlock()
 	if ok && entry.exporter != nil {
-		_ = entry.exporter.Close(context.Background())
+		r.pendingClose = append(r.pendingClose, entry.exporter)
 	}
+}
+
+// closeDisplacedExporters drains the pendingClose accumulator and closes
+// each exporter on a background goroutine with a bounded context.
+func (r *AgentReconciler) closeDisplacedExporters() {
+	r.exporterCacheMu.Lock()
+	displaced := r.pendingClose
+	r.pendingClose = nil
+	r.exporterCacheMu.Unlock()
+	if len(displaced) == 0 {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), exporterCloseTimeout)
+		defer cancel()
+		for _, e := range displaced {
+			_ = e.Close(ctx)
+		}
+	}()
 }
 
 // reapStaleExporters closes exporters whose CR keys did not appear in

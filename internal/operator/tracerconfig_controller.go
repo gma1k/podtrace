@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -103,19 +104,24 @@ func (r *TracerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 // so controller-runtime requeues the TracerConfig whenever an owned
 // resource's status changes.
 func (r *TracerConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// The generation/label predicate must apply to the TracerConfig watch
+	// ONLY. A builder-level WithEventFilter also filtered every Owns()
+	// watch — and DaemonSet status updates do not bump metadata.generation
+	// (RBAC objects have no generation semantics at all), so readyAgents/
+	// desiredAgents and the Ready condition went permanently stale and
+	// manual drift in owned RBAC was never repaired.
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("tracerconfig").
-		For(&podtracev1alpha1.TracerConfig{}).
+		For(&podtracev1alpha1.TracerConfig{}, builder.WithPredicates(predicate.Or(
+			predicate.GenerationChangedPredicate{},
+			predicate.LabelChangedPredicate{},
+		))).
 		Owns(&appsv1.DaemonSet{}).
 		Owns(&corev1.ServiceAccount{}).
 		Owns(&rbacv1.ClusterRole{}).
 		Owns(&rbacv1.ClusterRoleBinding{}).
 		Owns(&rbacv1.Role{}).
 		Owns(&rbacv1.RoleBinding{}).
-		WithEventFilter(predicate.Or(
-			predicate.GenerationChangedPredicate{},
-			predicate.LabelChangedPredicate{},
-		)).
 		WithOptions(defaultControllerOptions()).
 		Complete(r)
 }

@@ -46,6 +46,14 @@ func LoadBundle(ctx context.Context, c client.Client, systemNamespace string, po
 	var sec corev1.Secret
 	if err := c.Get(ctx, types.NamespacedName{Name: name, Namespace: systemNamespace}, &sec); err == nil {
 		payload.Credential = sec.Data[bundle.CredentialKey]
+		for k, v := range sec.Data {
+			if rest, ok := strings.CutPrefix(k, bundle.SecretHeaderKeyPrefix); ok && rest != "" {
+				if payload.SecretHeaders == nil {
+					payload.SecretHeaders = map[string]string{}
+				}
+				payload.SecretHeaders[rest] = string(v)
+			}
+		}
 	} else if !apierrors.IsNotFound(err) {
 		return nil, fmt.Errorf("get bundle Secret: %w", err)
 	}

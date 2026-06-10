@@ -58,6 +58,17 @@ func cleanupPodTraceChildren(ctx context.Context, c client.Client, pt *podtracev
 	return nil
 }
 
+// candidateSystemNamespaces returns the deduplicated set of namespaces a
+// CR's children may live in: the currently effective system namespace plus
+// the operator default (they differ when TracerConfig.spec.systemNamespace
+// is set, and the effective one may have changed between create and delete).
+func candidateSystemNamespaces(effective, fallback string) []string {
+	if effective == "" || effective == fallback {
+		return []string{fallback}
+	}
+	return []string{effective, fallback}
+}
+
 // cleanupPodTraceSessionChildren deletes all resources this PodTraceSession
 // owns across namespaces:
 //

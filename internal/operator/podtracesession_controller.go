@@ -59,8 +59,11 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Deletion path: clean up cross-namespace Jobs, then release the finalizer.
 	if !session.DeletionTimestamp.IsZero() {
-		if err := cleanupPodTraceSessionChildren(ctx, r.Client, &session, r.SystemNamespace); err != nil {
-			return ctrl.Result{}, err
+		sessionNS := systemNamespaceForSession(r.resolveTracerConfig(ctx), r.SystemNamespace)
+		for _, ns := range candidateSystemNamespaces(sessionNS, r.SystemNamespace) {
+			if err := cleanupPodTraceSessionChildren(ctx, r.Client, &session, ns); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 		forgetReportObservations(session.Namespace, session.Name)
 		if removeFinalizer(&session) {

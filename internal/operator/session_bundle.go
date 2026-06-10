@@ -47,7 +47,7 @@ func SessionBundleName(sessionUID types.UID) string {
 func ensureSessionExporterBundle(ctx context.Context, c client.Client, s *podtracev1alpha1.PodTraceSession, ec *podtracev1alpha1.ExporterConfig, systemNS string) error {
 	name := SessionBundleName(s.UID)
 
-	payload, credSecretRef, err := renderBundlePayload(policyFromSession(s), ec, nil)
+	payload, credSecretRef, headersFrom, err := renderBundlePayload(policyFromSession(s), ec, nil)
 	if err != nil {
 		return fmt.Errorf("render session bundle payload: %w", err)
 	}
@@ -82,8 +82,8 @@ func ensureSessionExporterBundle(ctx context.Context, c client.Client, s *podtra
 		return fmt.Errorf("session bundle ConfigMap: %w", err)
 	}
 
-	if credSecretRef != nil {
-		credData, err := loadCredentialSecret(ctx, c, ec.Namespace, *credSecretRef)
+	if credSecretRef != nil || headersFrom != nil {
+		credData, err := buildBundleSecretData(ctx, c, ec.Namespace, credSecretRef, headersFrom)
 		if err != nil {
 			return fmt.Errorf("load session credential Secret: %w", err)
 		}
