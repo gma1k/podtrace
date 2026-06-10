@@ -42,9 +42,12 @@ func newOTLPSpanExporter(b *BundlePayload) (*otlptrace.Exporter, error) {
 	if b.Insecure {
 		opts = append(opts, otlptracehttp.WithInsecure())
 	}
-	if len(b.Headers) > 0 || b.HeaderName != "" {
+	if len(b.Headers) > 0 || len(b.SecretHeaders) > 0 || b.HeaderName != "" {
 		headers := map[string]string{}
 		for k, v := range b.Headers {
+			headers[k] = v
+		}
+		for k, v := range b.SecretHeaders {
 			headers[k] = v
 		}
 		if b.HeaderName != "" && len(b.Credential) > 0 {

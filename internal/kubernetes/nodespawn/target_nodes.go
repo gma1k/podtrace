@@ -55,6 +55,7 @@ func ResolveTargetNodes(ctx context.Context, clientset kubernetes.Interface, sel
 	tolByNode := map[string][]corev1.Toleration{}
 	tolSeen := map[string]map[string]struct{}{}
 	unscheduled := []PodRef{}
+	missingContainer := []PodRef{}
 
 	add := func(pod *corev1.Pod) {
 		ref := PodRef{Namespace: pod.Namespace, Name: pod.Name}
@@ -62,7 +63,12 @@ func ResolveTargetNodes(ctx context.Context, clientset kubernetes.Interface, sel
 			unscheduled = append(unscheduled, ref)
 			return
 		}
-		if cs := pickRunningContainer(pod); cs != nil {
+		cs := pickRunningContainer(pod, sel.ContainerName)
+		if sel.ContainerName != "" && cs == nil {
+			missingContainer = append(missingContainer, ref)
+			return
+		}
+		if cs != nil {
 			ref.ContainerName = cs.Name
 			if idx := indexAfterScheme(cs.ContainerID); idx >= 0 {
 				ref.ContainerID = cs.ContainerID[idx:]
@@ -110,6 +116,10 @@ func ResolveTargetNodes(ctx context.Context, clientset kubernetes.Interface, sel
 		}
 	}
 
+	if len(missingContainer) > 0 && len(byNode) == 0 {
+		return NodeTargets{}, fmt.Errorf("nodespawn: no matched pod has a running container named %q: %s",
+			sel.ContainerName, joinRefs(missingContainer))
+	}
 	if len(unscheduled) > 0 && len(byNode) == 0 {
 		return NodeTargets{}, fmt.Errorf("nodespawn: %d target pod(s) are not yet scheduled to a node: %s",
 			len(unscheduled), joinRefs(unscheduled))
@@ -132,17 +142,21 @@ func ResolveTargetNodes(ctx context.Context, clientset kubernetes.Interface, sel
 	return out, nil
 }
 
-// pickRunningContainer returns the first container in the pod whose State is
-// Running.
-func pickRunningContainer(pod *corev1.Pod) *corev1.ContainerStatus {
+// pickRunningContainer returns the running container matching name, or the
+// first running container when name is empty.
+func pickRunningContainer(pod *corev1.Pod, name string) *corev1.ContainerStatus {
 	if pod == nil {
 		return nil
 	}
 	for i := range pod.Status.ContainerStatuses {
 		cs := &pod.Status.ContainerStatuses[i]
-		if cs.State.Running != nil && cs.ContainerID != "" {
-			return cs
+		if cs.State.Running == nil || cs.ContainerID == "" {
+			continue
 		}
+		if name != "" && cs.Name != name {
+			continue
+		}
+		return cs
 	}
 	return nil
 }

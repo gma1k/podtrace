@@ -114,9 +114,9 @@ func (r *Router) Name() string { return "cr-router" }
 
 func (r *Router) Export(ctx context.Context, batch []*events.Event) error {
 	r.mu.RLock()
+	defer r.mu.RUnlock()
 	rules := r.rules
 	enricher := r.enricher
-	r.mu.RUnlock()
 
 	if len(rules) == 0 || len(batch) == 0 {
 		return nil

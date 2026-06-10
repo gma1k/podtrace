@@ -1,10 +1,15 @@
 package operator
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
 	"github.com/podtrace/podtrace/pkg/exporter/bundle"
@@ -46,7 +51,7 @@ import (
 // (filters, thresholds, generation) are written. Production callers
 // (continuous PodTrace + bounded PodTraceSession) always pass a
 // populated bundlePolicyInputs.
-func renderBundlePayload(policy *bundlePolicyInputs, ec *podtracev1alpha1.ExporterConfig, targetNamespaces []string) (map[string]string, *podtracev1alpha1.SecretKeySelector, error) {
+func renderBundlePayload(policy *bundlePolicyInputs, ec *podtracev1alpha1.ExporterConfig, targetNamespaces []string) (map[string]string, *podtracev1alpha1.SecretKeySelector, *podtracev1alpha1.LocalObjectReference, error) {
 	data := map[string]string{
 		"version": bundle.CurrentVersion,
 		"type":    string(ec.Spec.Type),
@@ -65,7 +70,7 @@ func renderBundlePayload(policy *bundlePolicyInputs, ec *podtracev1alpha1.Export
 	switch ec.Spec.Type {
 	case podtracev1alpha1.ExporterTypeOTLP:
 		if ec.Spec.OTLP == nil {
-			return nil, nil, fmt.Errorf("spec.otlp is required when type=otlp")
+			return nil, nil, nil, fmt.Errorf("spec.otlp is required when type=otlp")
 		}
 		data["endpoint"] = ec.Spec.OTLP.Endpoint
 		if ec.Spec.OTLP.Protocol != "" {
@@ -74,42 +79,55 @@ func renderBundlePayload(policy *bundlePolicyInputs, ec *podtracev1alpha1.Export
 			data["protocol"] = string(podtracev1alpha1.OTLPProtocolHTTP)
 		}
 		data["insecure"] = boolString(ec.Spec.OTLP.Insecure)
+		// The loop must visit every header: an early return on the first
+		// ValueFrom header used to drop all literal headers declared after
+		// it (and silently ignore further ValueFrom headers) while the
+		// readiness evaluator still reported the configuration healthy.
+		var credRef *podtracev1alpha1.SecretKeySelector
 		for _, h := range ec.Spec.OTLP.Headers {
 			if h.ValueFrom != nil {
-				sk := h.ValueFrom.DeepCopy()
+				if credRef != nil {
+					return nil, nil, nil, fmt.Errorf(
+						"at most one headers[].valueFrom is supported (the bundle carries a single credential); move additional secret-backed headers into headersFromSecret")
+				}
 				data["header_secret_name"] = h.Name
-				return data, sk, nil
+				credRef = h.ValueFrom.DeepCopy()
+				continue
 			}
 			data["headers."+h.Name] = h.Value
 		}
-		return data, nil, nil
+		var headersFrom *podtracev1alpha1.LocalObjectReference
+		if ec.Spec.OTLP.HeadersFromSecret != nil && ec.Spec.OTLP.HeadersFromSecret.Name != "" {
+			headersFrom = ec.Spec.OTLP.HeadersFromSecret.DeepCopy()
+		}
+		return data, credRef, headersFrom, nil
 
 	case podtracev1alpha1.ExporterTypeJaeger:
 		if ec.Spec.Jaeger == nil {
-			return nil, nil, fmt.Errorf("spec.jaeger is required when type=jaeger")
+			return nil, nil, nil, fmt.Errorf("spec.jaeger is required when type=jaeger")
 		}
 		data["endpoint"] = ec.Spec.Jaeger.Endpoint
-		return data, nil, nil
+		return data, nil, nil, nil
 
 	case podtracev1alpha1.ExporterTypeZipkin:
 		if ec.Spec.Zipkin == nil {
-			return nil, nil, fmt.Errorf("spec.zipkin is required when type=zipkin")
+			return nil, nil, nil, fmt.Errorf("spec.zipkin is required when type=zipkin")
 		}
 		data["endpoint"] = ec.Spec.Zipkin.Endpoint
-		return data, nil, nil
+		return data, nil, nil, nil
 
 	case podtracev1alpha1.ExporterTypeSplunk:
 		if ec.Spec.Splunk == nil {
-			return nil, nil, fmt.Errorf("spec.splunk is required when type=splunk")
+			return nil, nil, nil, fmt.Errorf("spec.splunk is required when type=splunk")
 		}
 		data["endpoint"] = ec.Spec.Splunk.Endpoint
 		data["header_secret_name"] = "X-SF-TOKEN"
 		ref := ec.Spec.Splunk.TokenSecretRef
-		return data, &ref, nil
+		return data, &ref, nil, nil
 
 	case podtracev1alpha1.ExporterTypeDataDog:
 		if ec.Spec.DataDog == nil {
-			return nil, nil, fmt.Errorf("spec.datadog is required when type=datadog")
+			return nil, nil, nil, fmt.Errorf("spec.datadog is required when type=datadog")
 		}
 		site := ec.Spec.DataDog.Site
 		if site == "" {
@@ -123,11 +141,45 @@ func renderBundlePayload(policy *bundlePolicyInputs, ec *podtracev1alpha1.Export
 		}
 		data["header_secret_name"] = "DD-API-KEY"
 		ref := ec.Spec.DataDog.APIKeySecretRef
-		return data, &ref, nil
+		return data, &ref, nil, nil
 
 	default:
-		return nil, nil, fmt.Errorf("unsupported exporter type %q", ec.Spec.Type)
+		return nil, nil, nil, fmt.Errorf("unsupported exporter type %q", ec.Spec.Type)
 	}
+}
+
+// buildBundleSecretData materializes the bundle Secret contents: the single
+// credential (bundle.CredentialKey) when credRef is set, plus one
+// "header.<name>" entry per key of the headersFromSecret Secret. The latter
+// used to be checked for existence by the readiness evaluator but never
+// rendered anywhere, so OTLP auth supplied exclusively via headersFromSecret
+// reported Ready=True while agents exported with no headers at all.
+func buildBundleSecretData(ctx context.Context, c client.Client, ecNamespace string, credRef *podtracev1alpha1.SecretKeySelector, headersFrom *podtracev1alpha1.LocalObjectReference) (map[string][]byte, error) {
+	out := map[string][]byte{}
+	if credRef != nil {
+		var src corev1.Secret
+		if err := c.Get(ctx, types.NamespacedName{Namespace: ecNamespace, Name: credRef.Name}, &src); err != nil {
+			return nil, fmt.Errorf("get credential Secret %s/%s: %w", ecNamespace, credRef.Name, err)
+		}
+		val, ok := src.Data[credRef.Key]
+		if !ok {
+			return nil, fmt.Errorf("secret %s/%s has no key %q", ecNamespace, credRef.Name, credRef.Key)
+		}
+		out[bundle.CredentialKey] = val
+	}
+	if headersFrom != nil {
+		var src corev1.Secret
+		if err := c.Get(ctx, types.NamespacedName{Namespace: ecNamespace, Name: headersFrom.Name}, &src); err != nil {
+			return nil, fmt.Errorf("get headersFromSecret Secret %s/%s: %w", ecNamespace, headersFrom.Name, err)
+		}
+		for k, v := range src.Data {
+			out[bundle.SecretHeaderKeyPrefix+k] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
 }
 
 // bundlePolicyInputs is the operator-side view of the policy a CR

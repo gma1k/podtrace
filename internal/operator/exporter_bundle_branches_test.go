@@ -18,7 +18,7 @@ func TestRenderBundlePayload_MissingVariantErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := renderBundlePayload(nil, ec("missing-"+tc.name, podtracev1alpha1.ExporterConfigSpec{
+			_, _, _, err := renderBundlePayload(nil, ec("missing-"+tc.name, podtracev1alpha1.ExporterConfigSpec{
 				Type: tc.typ,
 			}), nil)
 			if err == nil {
@@ -29,7 +29,7 @@ func TestRenderBundlePayload_MissingVariantErrors(t *testing.T) {
 }
 
 func TestRenderBundlePayload_DataDogExplicitEndpoint(t *testing.T) {
-	data, secret, err := renderBundlePayload(nil, ec("dd-ep", podtracev1alpha1.ExporterConfigSpec{
+	data, secret, _, err := renderBundlePayload(nil, ec("dd-ep", podtracev1alpha1.ExporterConfigSpec{
 		Type: podtracev1alpha1.ExporterTypeDataDog,
 		DataDog: &podtracev1alpha1.DataDogExporter{
 			Site:            "datadoghq.eu",
@@ -52,7 +52,7 @@ func TestRenderBundlePayload_DataDogExplicitEndpoint(t *testing.T) {
 }
 
 func TestRenderBundlePayload_TargetNamespacesSorted(t *testing.T) {
-	data, _, err := renderBundlePayload(nil, ec("ns", podtracev1alpha1.ExporterConfigSpec{
+	data, _, _, err := renderBundlePayload(nil, ec("ns", podtracev1alpha1.ExporterConfigSpec{
 		Type:   podtracev1alpha1.ExporterTypeJaeger,
 		Jaeger: &podtracev1alpha1.JaegerExporter{Endpoint: "j:14268"},
 	}), []string{"team-c", "team-a", "team-b"})

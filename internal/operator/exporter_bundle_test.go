@@ -18,7 +18,7 @@ func ec(name string, spec podtracev1alpha1.ExporterConfigSpec) *podtracev1alpha1
 }
 
 func TestRenderBundlePayload_OTLP_LiteralHeaders(t *testing.T) {
-	data, secret, err := renderBundlePayload(nil, ec("otlp-lit", podtracev1alpha1.ExporterConfigSpec{
+	data, secret, _, err := renderBundlePayload(nil, ec("otlp-lit", podtracev1alpha1.ExporterConfigSpec{
 		Type: podtracev1alpha1.ExporterTypeOTLP,
 		OTLP: &podtracev1alpha1.OTLPExporter{
 			Endpoint: "otel:4318",
@@ -51,7 +51,7 @@ func TestRenderBundlePayload_OTLP_LiteralHeaders(t *testing.T) {
 }
 
 func TestRenderBundlePayload_OTLP_SecretBackedHeader(t *testing.T) {
-	data, secret, err := renderBundlePayload(nil, ec("otlp-sec", podtracev1alpha1.ExporterConfigSpec{
+	data, secret, _, err := renderBundlePayload(nil, ec("otlp-sec", podtracev1alpha1.ExporterConfigSpec{
 		Type: podtracev1alpha1.ExporterTypeOTLP,
 		OTLP: &podtracev1alpha1.OTLPExporter{
 			Endpoint: "otel:4318",
@@ -77,7 +77,7 @@ func TestRenderBundlePayload_OTLP_SecretBackedHeader(t *testing.T) {
 }
 
 func TestRenderBundlePayload_Jaeger_NoCredentials(t *testing.T) {
-	data, secret, err := renderBundlePayload(nil, ec("j", podtracev1alpha1.ExporterConfigSpec{
+	data, secret, _, err := renderBundlePayload(nil, ec("j", podtracev1alpha1.ExporterConfigSpec{
 		Type:   podtracev1alpha1.ExporterTypeJaeger,
 		Jaeger: &podtracev1alpha1.JaegerExporter{Endpoint: "http://jaeger:14268"},
 	}), nil)
@@ -93,7 +93,7 @@ func TestRenderBundlePayload_Jaeger_NoCredentials(t *testing.T) {
 }
 
 func TestRenderBundlePayload_Zipkin(t *testing.T) {
-	data, secret, err := renderBundlePayload(nil, ec("z", podtracev1alpha1.ExporterConfigSpec{
+	data, secret, _, err := renderBundlePayload(nil, ec("z", podtracev1alpha1.ExporterConfigSpec{
 		Type:   podtracev1alpha1.ExporterTypeZipkin,
 		Zipkin: &podtracev1alpha1.ZipkinExporter{Endpoint: "http://zipkin:9411/api/v2/spans"},
 	}), nil)
@@ -103,7 +103,7 @@ func TestRenderBundlePayload_Zipkin(t *testing.T) {
 }
 
 func TestRenderBundlePayload_Splunk_RequiresTokenSecret(t *testing.T) {
-	data, secret, err := renderBundlePayload(nil, ec("s", podtracev1alpha1.ExporterConfigSpec{
+	data, secret, _, err := renderBundlePayload(nil, ec("s", podtracev1alpha1.ExporterConfigSpec{
 		Type: podtracev1alpha1.ExporterTypeSplunk,
 		Splunk: &podtracev1alpha1.SplunkExporter{
 			Endpoint:       "https://splunk:8088",
@@ -122,7 +122,7 @@ func TestRenderBundlePayload_Splunk_RequiresTokenSecret(t *testing.T) {
 }
 
 func TestRenderBundlePayload_DataDog_DefaultSite(t *testing.T) {
-	data, secret, err := renderBundlePayload(nil, ec("d", podtracev1alpha1.ExporterConfigSpec{
+	data, secret, _, err := renderBundlePayload(nil, ec("d", podtracev1alpha1.ExporterConfigSpec{
 		Type: podtracev1alpha1.ExporterTypeDataDog,
 		DataDog: &podtracev1alpha1.DataDogExporter{
 			APIKeySecretRef: podtracev1alpha1.SecretKeySelector{Name: "dd", Key: "api"},
@@ -140,7 +140,7 @@ func TestRenderBundlePayload_DataDog_DefaultSite(t *testing.T) {
 }
 
 func TestRenderBundlePayload_ErrorOnMissingVariant(t *testing.T) {
-	_, _, err := renderBundlePayload(nil, ec("broken", podtracev1alpha1.ExporterConfigSpec{
+	_, _, _, err := renderBundlePayload(nil, ec("broken", podtracev1alpha1.ExporterConfigSpec{
 		Type: podtracev1alpha1.ExporterTypeOTLP,
 		// no OTLP block populated
 	}), nil)
@@ -150,7 +150,7 @@ func TestRenderBundlePayload_ErrorOnMissingVariant(t *testing.T) {
 }
 
 func TestRenderBundlePayload_UnknownType(t *testing.T) {
-	_, _, err := renderBundlePayload(nil, ec("xxx", podtracev1alpha1.ExporterConfigSpec{
+	_, _, _, err := renderBundlePayload(nil, ec("xxx", podtracev1alpha1.ExporterConfigSpec{
 		Type: podtracev1alpha1.ExporterType("made-up"),
 	}), nil)
 	if err == nil {
@@ -160,7 +160,7 @@ func TestRenderBundlePayload_UnknownType(t *testing.T) {
 
 func TestRenderBundlePayload_SamplePercent(t *testing.T) {
 	pct := int32(25)
-	data, _, err := renderBundlePayload(nil, ec("s", podtracev1alpha1.ExporterConfigSpec{
+	data, _, _, err := renderBundlePayload(nil, ec("s", podtracev1alpha1.ExporterConfigSpec{
 		Type:          podtracev1alpha1.ExporterTypeJaeger,
 		Jaeger:        &podtracev1alpha1.JaegerExporter{Endpoint: "j:14268"},
 		SamplePercent: &pct,
@@ -207,7 +207,7 @@ func TestRenderBundlePayload_FullPolicyPropagation(t *testing.T) {
 		SamplePercent: &ecPct,
 	})
 
-	data, _, err := renderBundlePayload(policyFromPodTrace(pt), ecObj, nil)
+	data, _, _, err := renderBundlePayload(policyFromPodTrace(pt), ecObj, nil)
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestRenderBundlePayload_NoPolicyOmitsKeys(t *testing.T) {
 		Type:   podtracev1alpha1.ExporterTypeJaeger,
 		Jaeger: &podtracev1alpha1.JaegerExporter{Endpoint: "j:14268"},
 	})
-	data, _, err := renderBundlePayload(policyFromPodTrace(pt), ecObj, nil)
+	data, _, _, err := renderBundlePayload(policyFromPodTrace(pt), ecObj, nil)
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
@@ -368,7 +368,7 @@ func TestRenderBundlePayload_AlwaysStampsVersion(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			data, _, err := renderBundlePayload(nil, ec("v-"+tc.name, tc.spec), nil)
+			data, _, _, err := renderBundlePayload(nil, ec("v-"+tc.name, tc.spec), nil)
 			if err != nil {
 				t.Fatalf("render: %v", err)
 			}
