@@ -48,7 +48,7 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2  # v5.0.0
         with:
-          version: v3.16.0
+          version: v4.2.0
 
       - name: Install chainsaw
         run: |
@@ -132,7 +132,7 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2  # v5.0.0
         with:
-          version: v3.16.0
+          version: v4.2.0
 
       - name: Install BPF toolchain
         uses: ./.github/actions/setup-bpf-toolchain
