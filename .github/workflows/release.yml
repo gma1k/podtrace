@@ -162,28 +162,37 @@ jobs:
         with:
           version: ${{ env.HELM_VERSION }}
 
-      - name: Render quickstart manifest
+      - name: Render quickstart manifests
         run: |
           set -euo pipefail
           mkdir -p dist
-          # Operator + CRDs from the chart, namespace-creating defaults.
+          cat > dist/quickstart.yaml <<'NSEOF'
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: podtrace-system
+            labels:
+              app.kubernetes.io/managed-by: podtrace-quickstart
+          NSEOF
+          echo "---" >> dist/quickstart.yaml
           helm template podtrace ${{ env.CHART_PATH }} \
             --namespace podtrace-system \
             --include-crds \
             --set namespace.create=true \
             --set operator.enabled=true \
-            > dist/operator.yaml
-          # Append the demo workload + sample CRs.
-          {
-            echo "---"
-            cat deploy/quickstart-sample.yaml
-          } > dist/sample.yaml
-          cat dist/operator.yaml dist/sample.yaml > dist/quickstart.yaml
-          echo "Rendered $(wc -l < dist/quickstart.yaml) lines"
+            >> dist/quickstart.yaml
+          # The demo workload + sample CRs ship as a SEPARATE manifest:
+          # applying CRs in the same kubectl invocation that installs their
+          # CRDs fails with the discovery-cache "ensure CRDs are installed
+          # first" error, so the documented flow is two applies.
+          cp deploy/quickstart-sample.yaml dist/quickstart-demo.yaml
+          echo "Rendered $(wc -l < dist/quickstart.yaml) + $(wc -l < dist/quickstart-demo.yaml) lines"
 
       - name: Compute checksum
         run: |
-          cd dist && sha256sum quickstart.yaml > quickstart.yaml.sha256
+          cd dist
+          sha256sum quickstart.yaml > quickstart.yaml.sha256
+          sha256sum quickstart-demo.yaml > quickstart-demo.yaml.sha256
 
       - name: Attach to GitHub Release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda  # v3.0.0
@@ -191,6 +200,8 @@ jobs:
           files: |
             dist/quickstart.yaml
             dist/quickstart.yaml.sha256
+            dist/quickstart-demo.yaml
+            dist/quickstart-demo.yaml.sha256
           fail_on_unmatched_files: true
 
   cli:

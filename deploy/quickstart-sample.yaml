@@ -1,10 +1,12 @@
 # Quickstart demo workload + diagnose session.
 #
-# Concatenated to the chart-rendered operator manifest by release.yml to
-# produce dist/quickstart.yaml on each tagged release. End users can
-# then apply the combined file in a single command:
+# Published as quickstart-demo.yaml on each tagged release, applied as the
+# SECOND step after quickstart.yaml (operator + CRDs). It is a separate file
+# because kubectl cannot apply custom resources in the same invocation that
+# installs their CRDs (client discovery-cache limitation):
 #
 #   kubectl apply -f https://github.com/gma1k/podtrace/releases/latest/download/quickstart.yaml
+#   kubectl apply -f https://github.com/gma1k/podtrace/releases/latest/download/quickstart-demo.yaml
 #
 # After the operator becomes Ready, the PodTraceSession runs for 30s
 # against the nginx Deployment and writes a human-readable report to

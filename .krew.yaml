@@ -22,8 +22,10 @@ spec:
     at /sys/kernel/btf/vmlinux.
 
     The agent and per-session Jobs run as privileged in-cluster
-    containers with CAP_BPF + CAP_PERFMON + hostPID. The kubectl plugin
-    itself does not need elevated permissions on your workstation.
+    containers with hostPID (capabilities include CAP_BPF,
+    CAP_SYS_ADMIN, CAP_PERFMON, CAP_SYS_RESOURCE, CAP_NET_ADMIN). The
+    kubectl plugin itself does not need elevated permissions on your
+    workstation.
 
     Supported platforms: linux/amd64, linux/arm64, darwin/amd64,
     darwin/arm64. Compatibility matrix:
