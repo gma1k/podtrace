@@ -15,14 +15,15 @@ import (
 // Labels stamped on every spawned pod. Used by the reaper to find pods left
 // behind by a crashed CLI.
 const (
-	LabelManagedBy = "app.kubernetes.io/managed-by"
-	LabelComponent = "app.kubernetes.io/component"
-	LabelNode      = "podtrace.io/node"
-	LabelOwnerHost = "podtrace.io/owner-host"
-	LabelOwnerPID  = "podtrace.io/owner-pid"
-	LabelCreatedAt = "podtrace.io/created-at"
-	ManagedByValue = "podtrace-cli"
-	ComponentValue = "cli-spawn"
+	LabelManagedBy   = "app.kubernetes.io/managed-by"
+	LabelComponent   = "app.kubernetes.io/component"
+	LabelNode        = "podtrace.io/node"
+	LabelOwnerHost   = "podtrace.io/owner-host"
+	LabelOwnerPID    = "podtrace.io/owner-pid"
+	LabelOwnerBootID = "podtrace.io/owner-boot-id"
+	LabelCreatedAt   = "podtrace.io/created-at"
+	ManagedByValue   = "podtrace-cli"
+	ComponentValue   = "cli-spawn"
 
 	EnvNodeLocalSentinel = "PODTRACE_NODE_LOCAL"
 
@@ -112,14 +113,14 @@ func BuildPodSpec(opts PodSpecOptions) (*corev1.Pod, error) {
 	}
 
 	container := corev1.Container{
-		Name:            "podtrace",
-		Image:           opts.Image,
-		ImagePullPolicy: opts.ImagePullPolicy,
-		Args:            append([]string(nil), opts.Args...),
-		Env:             env,
-		Stdin:           true,
-		StdinOnce:       true,
-		TTY:             false,
+		Name:                     "podtrace",
+		Image:                    opts.Image,
+		ImagePullPolicy:          opts.ImagePullPolicy,
+		Args:                     append([]string(nil), opts.Args...),
+		Env:                      env,
+		Stdin:                    true,
+		StdinOnce:                true,
+		TTY:                      false,
 		TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
 		SecurityContext: &corev1.SecurityContext{
 			Privileged: &priv,
@@ -142,6 +143,9 @@ func BuildPodSpec(opts PodSpecOptions) (*corev1.Pod, error) {
 	}
 	if opts.OwnerPID > 0 {
 		labels[LabelOwnerPID] = fmt.Sprintf("%d", opts.OwnerPID)
+	}
+	if bootID := MachineBootID(); bootID != "" {
+		labels[LabelOwnerBootID] = sanitizeLabelValue(bootID)
 	}
 
 	spec := corev1.PodSpec{

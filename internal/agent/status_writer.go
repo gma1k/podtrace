@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -26,6 +27,8 @@ type StatusWriter struct {
 	Heartbeat func()
 
 	BackendErr error
+
+	reportedKeys map[CRKey]struct{}
 }
 
 func (w *StatusWriter) Run(ctx context.Context) error {
@@ -63,12 +66,24 @@ func (w *StatusWriter) emitOnce(ctx context.Context) error {
 	}
 
 	var firstErr error
+	current := make(map[CRKey]struct{}, len(rules))
 	for _, rule := range rules {
 		entry := buildNodeStatusEntry(w.NodeName, &rule, stats[rule.Key], agentReady, w.BackendErr, time.Now())
 		if err := w.patchCRStatus(ctx, rule.Key, entry); err != nil && firstErr == nil {
 			firstErr = err
 		}
+		current[rule.Key] = struct{}{}
 	}
+
+	for key := range w.reportedKeys {
+		if _, stillActive := current[key]; stillActive {
+			continue
+		}
+		if err := w.retractCRStatus(ctx, key); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	w.reportedKeys = current
 	return firstErr
 }
 
@@ -139,6 +154,21 @@ func (w *StatusWriter) patchCRStatus(ctx context.Context, key CRKey, entry podtr
 		client.FieldOwner("podtrace-agent-"+w.NodeName),
 		client.ForceOwnership,
 	)
+}
+
+// retractCRStatus applies an empty status under this agent's field owner,
+// removing the nodeStatus row it previously owned on the CR.
+func (w *StatusWriter) retractCRStatus(ctx context.Context, key CRKey) error {
+	applyConfig := podtraceac.PodTrace(key.Name, key.Namespace).
+		WithStatus(podtraceac.PodTraceStatus())
+	err := w.Client.Status().Apply(ctx, applyConfig,
+		client.FieldOwner("podtrace-agent-"+w.NodeName),
+		client.ForceOwnership,
+	)
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
 }
 
 func ComputeNodeReport(nodeName string, router *Router, ready bool) NodeReport {

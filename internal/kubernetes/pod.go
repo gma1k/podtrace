@@ -118,28 +118,13 @@ func (r *PodResolver) ResolvePod(ctx context.Context, podName, namespace, contai
 		return nil, NewNoContainersError()
 	}
 
-	var containerStatus *corev1.ContainerStatus
-	var containerSpec *corev1.Container
-
-	if containerName != "" {
-		for i, status := range pod.Status.ContainerStatuses {
-			if status.Name == containerName {
-				containerStatus = &pod.Status.ContainerStatuses[i]
-				for j, spec := range pod.Spec.Containers {
-					if spec.Name == containerName {
-						containerSpec = &pod.Spec.Containers[j]
-						break
-					}
-				}
-				break
-			}
+	containerStatus, containerSpec := pickContainer(pod, containerName)
+	if containerStatus == nil {
+		name := containerName
+		if name == "" && len(pod.Spec.Containers) > 0 {
+			name = pod.Spec.Containers[0].Name
 		}
-		if containerStatus == nil {
-			return nil, NewContainerNotFoundError(containerName)
-		}
-	} else {
-		containerStatus = &pod.Status.ContainerStatuses[0]
-		containerSpec = &pod.Spec.Containers[0]
+		return nil, NewContainerNotFoundError(name)
 	}
 
 	containerID := containerStatus.ContainerID
@@ -397,6 +382,29 @@ func resolveCgroupPathCRI(ctx context.Context, containerID string) (string, erro
 	return "", errors.New("podtrace: CRI cgroup path not found on filesystem")
 }
 
+// pickContainer selects the container to trace: the named one, or the
+// pod's first spec container when no name is given.
+func pickContainer(pod *corev1.Pod, containerName string) (*corev1.ContainerStatus, *corev1.Container) {
+	name := containerName
+	if name == "" && len(pod.Spec.Containers) > 0 {
+		name = pod.Spec.Containers[0].Name
+	}
+
+	var spec *corev1.Container
+	for j := range pod.Spec.Containers {
+		if pod.Spec.Containers[j].Name == name {
+			spec = &pod.Spec.Containers[j]
+			break
+		}
+	}
+	for i := range pod.Status.ContainerStatuses {
+		if pod.Status.ContainerStatuses[i].Name == name {
+			return &pod.Status.ContainerStatuses[i], spec
+		}
+	}
+	return nil, spec
+}
+
 type PodInfo struct {
 	PodName       string
 	Namespace     string
@@ -493,6 +501,13 @@ func findCgroupPathV1(containerID string) (string, error) {
 			filepath.Join(root, "kubepods.slice"),
 			filepath.Join(root, "system.slice"),
 			filepath.Join(root, "user.slice"),
+			filepath.Join(root, "kubepods"),
+		)
+	}
+	for _, controllerRoot := range cgroupV1ControllerRoots() {
+		paths = append(paths,
+			filepath.Join(controllerRoot, "kubepods"),
+			filepath.Join(controllerRoot, "kubepods.slice"),
 		)
 	}
 
@@ -527,6 +542,39 @@ func findCgroupPathV1(containerID string) (string, error) {
 	}
 
 	return "", NewCgroupNotFoundError(containerID)
+}
+
+// cgroupV1ControllerRoots lists the first-level controller hierarchies
+// mounted under the cgroup base.
+func cgroupV1ControllerRoots() []string {
+	if v2, _ := isCgroupV2(config.CgroupBasePath); v2 {
+		return nil
+	}
+	entries, err := os.ReadDir(config.CgroupBasePath)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		out = append(out, filepath.Join(config.CgroupBasePath, e.Name()))
+	}
+	return out
+}
+
+// cgroupV1Controllers parses the controller field of a /proc/<pid>/cgroup
+// v1 line ("cpu,cpuacct", "name=systemd") into mount directory names.
+func cgroupV1Controllers(field string) []string {
+	var out []string
+	for _, c := range strings.Split(field, ",") {
+		c = strings.TrimSpace(strings.TrimPrefix(c, "name="))
+		if c != "" {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func findCgroupPathFromProc(containerID string) (string, error) {
@@ -589,15 +637,25 @@ func findCgroupPathFromProc(containerID string) (string, error) {
 					}
 				}
 			} else {
-				parts := strings.Split(line, ":")
-				if len(parts) >= 3 {
+				parts := strings.SplitN(line, ":", 3)
+				if len(parts) == 3 {
 					cgroupPath := parts[2]
 					if cgroupPath != "" && cgroupPath != "/" {
-						for _, root := range cgroupRootCandidates() {
-							fullPath := filepath.Join(root, strings.TrimPrefix(cgroupPath, "/"))
+						trimmed := strings.TrimPrefix(cgroupPath, "/")
+						for _, ctrl := range cgroupV1Controllers(parts[1]) {
+							fullPath := filepath.Join(config.CgroupBasePath, ctrl, trimmed)
 							if statCgroupDir(fullPath) {
 								foundPath = fullPath
 								break
+							}
+						}
+						if foundPath == "" {
+							for _, root := range cgroupRootCandidates() {
+								fullPath := filepath.Join(root, trimmed)
+								if statCgroupDir(fullPath) {
+									foundPath = fullPath
+									break
+								}
 							}
 						}
 					}

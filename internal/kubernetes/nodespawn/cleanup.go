@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"syscall"
+	"time"
 
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -14,6 +16,16 @@ import (
 
 	"github.com/podtrace/podtrace/internal/logger"
 )
+
+// MachineBootID returns this machine's kernel boot ID, or "" when it
+// cannot be read (non-Linux workstations). Overridable for tests.
+var MachineBootID = func() string {
+	data, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
 
 // DeletePod best-effort deletes the spawn pod; NotFound is swallowed so retries
 // and parallel reapers don't error out.
@@ -50,40 +62,77 @@ func reapStaleWithLiveness(
 		return 0, fmt.Errorf("nodespawn: list stale pods: %w", err)
 	}
 
+	localBootID := MachineBootID()
 	reaped := 0
 	for i := range list.Items {
 		p := &list.Items[i]
 
-		pidStr := p.Labels[LabelOwnerPID]
-		if pidStr == "" {
-			logger.Debug("Spawn pod has no owner-pid label; not reaping (anomaly — surface but don't touch)",
-				zap.String("namespace", p.Namespace),
-				zap.String("name", p.Name))
-			continue
-		}
-		pid, perr := strconv.Atoi(pidStr)
-		if perr != nil || pid <= 0 {
-			logger.Debug("Spawn pod has malformed owner-pid label; not reaping",
-				zap.String("namespace", p.Namespace),
-				zap.String("name", p.Name),
-				zap.String("owner-pid", pidStr))
-			continue
-		}
-		if alive(pid) {
-			// owning CLI is still running — leave its pod alone.
-			continue
+		expired := podOlderThan(p.Labels[LabelCreatedAt], reapAgeBound(p.Spec.ActiveDeadlineSeconds))
+
+		if !expired && localBootID != "" {
+			if podBootID := p.Labels[LabelOwnerBootID]; podBootID != "" && podBootID != sanitizeLabelValue(localBootID) {
+				continue
+			}
 		}
 
-		// dead owner → orphan → reap
+		if !expired {
+			pidStr := p.Labels[LabelOwnerPID]
+			if pidStr == "" {
+				logger.Debug("Spawn pod has no owner-pid label; not reaping (anomaly — surface but don't touch)",
+					zap.String("namespace", p.Namespace),
+					zap.String("name", p.Name))
+				continue
+			}
+			pid, perr := strconv.Atoi(pidStr)
+			if perr != nil || pid <= 0 {
+				logger.Debug("Spawn pod has malformed owner-pid label; not reaping",
+					zap.String("namespace", p.Namespace),
+					zap.String("name", p.Name),
+					zap.String("owner-pid", pidStr))
+				continue
+			}
+			if alive(pid) {
+				continue
+			}
+		}
+
 		if derr := DeletePod(ctx, clientset, p.Namespace, p.Name); derr == nil {
 			reaped++
 			logger.Debug("Reaped orphan spawn pod",
 				zap.String("namespace", p.Namespace),
 				zap.String("name", p.Name),
-				zap.Int("owner_pid", pid))
+				zap.Bool("expired", expired))
 		}
 	}
 	return reaped, nil
+}
+
+// reapAgeBound returns the age past which a spawn pod is reaped
+// unconditionally: ReaperMaxAge, or for traces spawned with a longer
+// explicit deadline, that deadline plus a grace period.
+func reapAgeBound(activeDeadlineSeconds *int64) time.Duration {
+	bound := ReaperMaxAge
+	if activeDeadlineSeconds != nil && *activeDeadlineSeconds > 0 {
+		withGrace := time.Duration(*activeDeadlineSeconds)*time.Second + 10*time.Minute
+		if withGrace > bound {
+			bound = withGrace
+		}
+	}
+	return bound
+}
+
+// podOlderThan parses the created-at label (unix seconds) and reports
+// whether the pod is older than maxAge. Missing or malformed labels
+// report false — age-based reaping requires positive evidence.
+func podOlderThan(createdAt string, maxAge time.Duration) bool {
+	if createdAt == "" {
+		return false
+	}
+	sec, err := strconv.ParseInt(createdAt, 10, 64)
+	if err != nil || sec <= 0 {
+		return false
+	}
+	return time.Since(time.Unix(sec, 0)) > maxAge
 }
 
 func processAlive(pid int) bool {

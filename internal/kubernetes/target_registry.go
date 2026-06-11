@@ -73,6 +73,10 @@ type TargetRegistry struct {
 
 	mu      sync.RWMutex
 	targets map[types.UID]*PodInfo
+
+	pendingMu sync.Mutex
+	pending   map[types.UID]*corev1.Pod
+	pendingCh chan struct{}
 }
 
 func NewTargetRegistry(clientset kubernetes.Interface, selection TargetSelection) *TargetRegistry {
@@ -83,6 +87,8 @@ func NewTargetRegistry(clientset kubernetes.Interface, selection TargetSelection
 		updates:     make(chan []*PodInfo, 8),
 		targets:     make(map[types.UID]*PodInfo),
 		podNameRefs: selection.PodRefSet(),
+		pending:     make(map[types.UID]*corev1.Pod),
+		pendingCh:   make(chan struct{}, 1),
 	}
 }
 
@@ -114,10 +120,10 @@ func (tr *TargetRegistry) Start(ctx context.Context) error {
 	podInf := factory.Core().V1().Pods().Informer()
 	_, _ = podInf.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			tr.handlePodUpsert(obj)
+			tr.enqueueUpsert(obj)
 		},
 		UpdateFunc: func(_, newObj interface{}) {
-			tr.handlePodUpsert(newObj)
+			tr.enqueueUpsert(newObj)
 		},
 		DeleteFunc: func(obj interface{}) {
 			tr.handlePodDelete(obj)
@@ -131,9 +137,57 @@ func (tr *TargetRegistry) Start(ctx context.Context) error {
 		return fmt.Errorf("timed out waiting for pod target registry cache sync")
 	}
 
-	tr.rebuildFromStore()
+	tr.rebuildFromStore(ctx)
 	tr.emitSnapshot()
+	go tr.resolveWorker(ctx)
 	return nil
+}
+
+// enqueueUpsert records the pod for the resolution worker. It runs on the
+// informer's delivery goroutine, so it must not block or perform I/O.
+func (tr *TargetRegistry) enqueueUpsert(obj interface{}) {
+	pod, ok := obj.(*corev1.Pod)
+	if !ok || pod == nil {
+		return
+	}
+	tr.pendingMu.Lock()
+	tr.pending[pod.UID] = pod
+	tr.pendingMu.Unlock()
+	select {
+	case tr.pendingCh <- struct{}{}:
+	default:
+	}
+}
+
+// resolveWorker drains pending pods and resolves them off the informer
+// goroutine. Cgroup resolution can take seconds per pod (CRI socket,
+// filesystem walks); doing it inline in the event handler stalled every
+// other informer callback.
+func (tr *TargetRegistry) resolveWorker(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tr.pendingCh:
+		}
+		for {
+			tr.pendingMu.Lock()
+			var pod *corev1.Pod
+			var uid types.UID
+			for u, p := range tr.pending {
+				uid, pod = u, p
+				break
+			}
+			if pod != nil {
+				delete(tr.pending, uid)
+			}
+			tr.pendingMu.Unlock()
+			if pod == nil {
+				break
+			}
+			tr.handlePodUpsert(ctx, pod)
+		}
+	}
 }
 
 func (tr *TargetRegistry) Updates() <-chan []*PodInfo { return tr.updates }
@@ -144,21 +198,19 @@ func (tr *TargetRegistry) Snapshot() []*PodInfo {
 	return clonePodInfos(tr.targets)
 }
 
-func (tr *TargetRegistry) rebuildFromStore() {
+func (tr *TargetRegistry) rebuildFromStore(ctx context.Context) {
 	if tr.podInf == nil {
 		return
 	}
 	items := tr.podInf.GetStore().List()
 	for _, obj := range items {
-		tr.handlePodUpsert(obj)
+		if pod, ok := obj.(*corev1.Pod); ok && pod != nil {
+			tr.handlePodUpsert(ctx, pod)
+		}
 	}
 }
 
-func (tr *TargetRegistry) handlePodUpsert(obj interface{}) {
-	pod, ok := obj.(*corev1.Pod)
-	if !ok || pod == nil {
-		return
-	}
+func (tr *TargetRegistry) handlePodUpsert(ctx context.Context, pod *corev1.Pod) {
 	if !tr.matchesSelection(pod) {
 		tr.mu.Lock()
 		delete(tr.targets, pod.UID)
@@ -167,8 +219,27 @@ func (tr *TargetRegistry) handlePodUpsert(obj interface{}) {
 		return
 	}
 
-	info, err := resolvePodInfoFromObject(context.Background(), pod, tr.selection.ContainerName)
+	info, err := resolvePodInfoFromObject(ctx, pod, tr.selection.ContainerName)
 	if err != nil {
+		logger.Debug("Target pod resolution failed",
+			zap.String("namespace", pod.Namespace),
+			zap.String("pod", pod.Name),
+			zap.Error(err))
+		tr.mu.Lock()
+		stale := tr.targets[pod.UID]
+		dropped := false
+		if stale != nil && !podHasContainerID(pod, stale.ContainerID) {
+			delete(tr.targets, pod.UID)
+			dropped = true
+		}
+		tr.mu.Unlock()
+		if dropped {
+			logger.Debug("Dropped stale target after container restart",
+				zap.String("namespace", pod.Namespace),
+				zap.String("pod", pod.Name),
+				zap.String("stale_container_id", stale.ContainerID))
+			tr.emitSnapshot()
+		}
 		return
 	}
 
@@ -183,6 +254,24 @@ func (tr *TargetRegistry) handlePodUpsert(obj interface{}) {
 	tr.targets[pod.UID] = info
 	tr.mu.Unlock()
 	tr.emitSnapshot()
+}
+
+// podHasContainerID reports whether any of the pod's current container
+// statuses carries the given (runtime-prefix-stripped) container ID.
+func podHasContainerID(pod *corev1.Pod, shortID string) bool {
+	if shortID == "" {
+		return false
+	}
+	for _, cs := range pod.Status.ContainerStatuses {
+		id := cs.ContainerID
+		if i := strings.Index(id, "://"); i >= 0 {
+			id = id[i+3:]
+		}
+		if id == shortID {
+			return true
+		}
+	}
+	return false
 }
 
 func (tr *TargetRegistry) handlePodDelete(obj interface{}) {
@@ -256,27 +345,9 @@ func resolvePodInfoFromObject(ctx context.Context, pod *corev1.Pod, containerNam
 		return nil, fmt.Errorf("pod %s/%s has no container statuses", pod.Namespace, pod.Name)
 	}
 
-	var containerStatus *corev1.ContainerStatus
-	var containerSpec *corev1.Container
-	if containerName != "" {
-		for i, status := range pod.Status.ContainerStatuses {
-			if status.Name == containerName {
-				containerStatus = &pod.Status.ContainerStatuses[i]
-				for j, spec := range pod.Spec.Containers {
-					if spec.Name == containerName {
-						containerSpec = &pod.Spec.Containers[j]
-						break
-					}
-				}
-				break
-			}
-		}
-		if containerStatus == nil {
-			return nil, fmt.Errorf("container %s not found in pod %s/%s", containerName, pod.Namespace, pod.Name)
-		}
-	} else {
-		containerStatus = &pod.Status.ContainerStatuses[0]
-		containerSpec = &pod.Spec.Containers[0]
+	containerStatus, containerSpec := pickContainer(pod, containerName)
+	if containerStatus == nil {
+		return nil, fmt.Errorf("container %q has no status yet in pod %s/%s", containerName, pod.Namespace, pod.Name)
 	}
 
 	containerID := containerStatus.ContainerID

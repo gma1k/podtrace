@@ -139,9 +139,10 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			}
 			logger.Error(err, "load bundle", "cr", key)
 			rules = append(rules, CRRule{
-				Key:     key,
-				Filters: filtersToSet(pt.Spec.Filters),
-				Err:     fmt.Errorf("load bundle: %w", err),
+				Key:        key,
+				Filters:    filtersToSet(pt.Spec.Filters),
+				Categories: filterCategories(pt.Spec.Filters),
+				Err:        fmt.Errorf("load bundle: %w", err),
 			})
 			activeKeys[key] = struct{}{}
 			continue
@@ -151,8 +152,9 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		if err != nil {
 			logger.Error(err, "match pods", "cr", key)
 			rules = append(rules, CRRule{
-				Key: key,
-				Err: fmt.Errorf("match pods: %w", err),
+				Key:        key,
+				Categories: filterCategories(pt.Spec.Filters),
+				Err:        fmt.Errorf("match pods: %w", err),
 			})
 			activeKeys[key] = struct{}{}
 			continue
@@ -170,6 +172,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			rules = append(rules, CRRule{
 				Key:         key,
 				Filters:     filtersToSet(pt.Spec.Filters),
+				Categories:  filterCategories(pt.Spec.Filters),
 				Policy:      policy,
 				MatchedPods: lenToInt32(len(matched)),
 				Err:         fmt.Errorf("resolve cgroup IDs: %w", err),
@@ -186,6 +189,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 				Key:            key,
 				CgroupIDs:      cgroupIDs,
 				Filters:        filtersToSet(pt.Spec.Filters),
+				Categories:     filterCategories(pt.Spec.Filters),
 				Policy:         policy,
 				BundleRevision: bundle.ResourceVer,
 				MatchedPods:    lenToInt32(len(matched)),
@@ -199,6 +203,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			Key:            key,
 			CgroupIDs:      cgroupIDs,
 			Filters:        filtersToSet(pt.Spec.Filters),
+			Categories:     filterCategories(pt.Spec.Filters),
 			Policy:         policy,
 			Exporter:       exporter,
 			BundleRevision: bundle.ResourceVer,
@@ -669,13 +674,13 @@ func unionCategoriesFromRules(rules []CRRule) []string {
 		if r.Err != nil {
 			continue
 		}
-		if len(r.Policy.Filters) == 0 {
+		if len(r.Categories) == 0 {
 			for _, c := range knownFilterCategories() {
 				seen[c] = struct{}{}
 			}
 			break
 		}
-		for _, c := range r.Policy.Filters {
+		for _, c := range r.Categories {
 			seen[c] = struct{}{}
 		}
 	}
@@ -684,6 +689,19 @@ func unionCategoriesFromRules(rules []CRRule) []string {
 		out = append(out, c)
 	}
 	sort.Strings(out)
+	return out
+}
+
+// filterCategories renders the CR's spec.filters as plain category
+// strings, preserving order.
+func filterCategories(in []podtracev1alpha1.EventFilter) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, f := range in {
+		out = append(out, string(f))
+	}
 	return out
 }
 
@@ -716,7 +734,7 @@ func filtersToSet(in []podtracev1alpha1.EventFilter) map[events.EventType]struct
 func filterToEventTypes(f podtracev1alpha1.EventFilter) []events.EventType {
 	switch f {
 	case podtracev1alpha1.FilterDNS:
-		return []events.EventType{events.EventDNS}
+		return []events.EventType{events.EventDNS, events.EventDNSQuery}
 	case podtracev1alpha1.FilterNet:
 		return []events.EventType{
 			events.EventConnect, events.EventTCPSend, events.EventTCPRecv,
@@ -728,6 +746,7 @@ func filterToEventTypes(f podtracev1alpha1.EventFilter) []events.EventType {
 		return []events.EventType{
 			events.EventOpen, events.EventClose, events.EventRead,
 			events.EventWrite, events.EventFsync,
+			events.EventUnlink, events.EventRename,
 		}
 	case podtracev1alpha1.FilterCPU:
 		return []events.EventType{events.EventSchedSwitch, events.EventLockContention}
@@ -751,8 +770,10 @@ func copyMap(in map[string]string) map[string]string {
 }
 
 // podChangePredicates filters Pod watches down to events that actually
-// affect matching: label changes (selector matching), state changes
-// (Running-ness), and deletions.
+// affect matching or cgroup attribution: label changes (selector
+// matching), phase changes (Running-ness), PodIP assignment (event
+// enrichment), container restarts (each restart creates a new cgroup
+// inode that must be re-resolved), and deletions.
 func podChangePredicates() predicate.Predicate {
 	return predicate.Funcs{
 		CreateFunc:  func(e event.CreateEvent) bool { return true },
@@ -770,9 +791,34 @@ func podChangePredicates() predicate.Predicate {
 			if !labelsEqual(oldP.Labels, newP.Labels) {
 				return true
 			}
+			if oldP.Status.PodIP != newP.Status.PodIP {
+				return true
+			}
+			if !containerIdentitiesEqual(oldP, newP) {
+				return true
+			}
 			return false
 		},
 	}
+}
+
+// containerIdentitiesEqual reports whether every container in the pod
+// kept its container ID and restart count across the update.
+func containerIdentitiesEqual(oldP, newP *corev1.Pod) bool {
+	digest := func(p *corev1.Pod) map[string]string {
+		out := make(map[string]string,
+			len(p.Status.ContainerStatuses)+len(p.Status.InitContainerStatuses)+len(p.Status.EphemeralContainerStatuses))
+		add := func(statuses []corev1.ContainerStatus) {
+			for _, cs := range statuses {
+				out[cs.Name] = fmt.Sprintf("%s/%d", cs.ContainerID, cs.RestartCount)
+			}
+		}
+		add(p.Status.ContainerStatuses)
+		add(p.Status.InitContainerStatuses)
+		add(p.Status.EphemeralContainerStatuses)
+		return out
+	}
+	return labelsEqual(digest(oldP), digest(newP))
 }
 
 func labelsEqual(a, b map[string]string) bool {

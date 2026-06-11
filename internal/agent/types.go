@@ -25,14 +25,14 @@ type CRKey struct {
 func (k CRKey) String() string { return k.Namespace + "/" + k.Name }
 
 type CRRule struct {
-	Key       CRKey
-	CgroupIDs map[uint64]struct{} // kernel cgroup inode numbers the tracer will see on events
-	Filters   map[events.EventType]struct{}
-	Exporter  tracer.Exporter
+	Key        CRKey
+	CgroupIDs  map[uint64]struct{}
+	Filters    map[events.EventType]struct{}
+	Categories []string
+	Exporter   tracer.Exporter
 
 	BundleRevision string
 
-	// Policy is the resolved effective policy as read from the bundle.
 	Policy PolicySnapshot
 
 	MatchedPods int32
@@ -65,13 +65,13 @@ type PolicyThresholds struct {
 // NodeReport aggregates the counters the status writer reports on one
 // tick.
 type NodeReport struct {
-	Node           string
-	Ready          bool
-	ActiveCgroups  int32
-	EventsTotal    int64
-	DroppedEvents  int64
-	LastHeartbeat  time.Time
-	Message        string
+	Node          string
+	Ready         bool
+	ActiveCgroups int32
+	EventsTotal   int64
+	DroppedEvents int64
+	LastHeartbeat time.Time
+	Message       string
 }
 
 // perCRStats tracks per-CR event counts for status reporting. Keyed by

@@ -212,10 +212,15 @@ func parseTarget(target string) (string, int) {
 		idx := strings.Index(target, "]")
 		if idx > 0 {
 			ip := target[1:idx]
-			portStr := target[idx+2:]
-			var port int
-			_, _ = fmt.Sscanf(portStr, "%d", &port)
-			return ip, port
+			// "[::1]:8080" carries a port after the bracket; a bare
+			// "[::1]" does not, indexing past the bracket without this
+			// check panicked on every portless bracketed address.
+			if idx+1 < len(target) && target[idx+1] == ':' {
+				var port int
+				_, _ = fmt.Sscanf(target[idx+2:], "%d", &port)
+				return ip, port
+			}
+			return ip, 0
 		}
 	}
 

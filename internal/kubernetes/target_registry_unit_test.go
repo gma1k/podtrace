@@ -174,7 +174,7 @@ func TestHandlePodUpsert_InsertsMatchingPod(t *testing.T) {
 	tr := NewTargetRegistry(fake.NewSimpleClientset(), TargetSelection{Namespaces: []string{"prod"}})
 	pod := runningPod("uid-ins", "prod", "api-0", "app", cid)
 
-	tr.handlePodUpsert(pod)
+	tr.handlePodUpsert(context.Background(), pod)
 
 	tr.mu.RLock()
 	got, ok := tr.targets[pod.UID]
@@ -201,7 +201,7 @@ func TestHandlePodUpsert_RespectsMaxTargets(t *testing.T) {
 	tr.targets[types.UID("existing")] = &PodInfo{PodName: "existing"}
 
 	pod := runningPod("uid-overflow", "ns", "newpod", "app", cid)
-	tr.handlePodUpsert(pod)
+	tr.handlePodUpsert(context.Background(), pod)
 
 	tr.mu.RLock()
 	_, inserted := tr.targets[pod.UID]
@@ -225,7 +225,7 @@ func TestHandlePodUpsert_UpdatesExistingAtMaxTargets(t *testing.T) {
 	pod := runningPod("uid-upd", "ns", "p", "app", cid)
 	tr.targets[pod.UID] = &PodInfo{PodName: "stale"}
 
-	tr.handlePodUpsert(pod)
+	tr.handlePodUpsert(context.Background(), pod)
 
 	tr.mu.RLock()
 	got := tr.targets[pod.UID]
@@ -253,7 +253,7 @@ func TestRebuildFromStore_PopulatesFromInformerStore(t *testing.T) {
 		t.Fatalf("store add non-matching: %v", err)
 	}
 
-	tr.rebuildFromStore()
+	tr.rebuildFromStore(context.Background())
 
 	tr.mu.RLock()
 	_, hasMatch := tr.targets[matching.UID]
@@ -274,7 +274,7 @@ func TestRebuildFromStore_PopulatesFromInformerStore(t *testing.T) {
 
 func TestRebuildFromStore_NoInformerIsNoop(t *testing.T) {
 	tr := NewTargetRegistry(fake.NewSimpleClientset(), TargetSelection{})
-	tr.rebuildFromStore()
+	tr.rebuildFromStore(context.Background())
 	if len(tr.targets) != 0 {
 		t.Fatalf("expected no targets, got %d", len(tr.targets))
 	}

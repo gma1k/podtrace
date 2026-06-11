@@ -118,7 +118,7 @@ func containerStartFailureReason(p *corev1.Pod) string {
 var stuckPodEventReason = func(ctx context.Context, clientset kubernetes.Interface, p *corev1.Pod) string {
 	fatal := map[string]struct{}{
 		"FailedMount":            {},
-		"FailedAttachVolume":    {},
+		"FailedAttachVolume":     {},
 		"FailedCreatePodSandBox": {},
 		"FailedMapVolume":        {},
 	}
@@ -225,25 +225,37 @@ func streamLogs(ctx context.Context, clientset kubernetes.Interface, pod *corev1
 // exit code.
 func WaitForExitCode(ctx context.Context, clientset kubernetes.Interface, namespace, name string) int32 {
 	const pollEvery = 500 * time.Millisecond
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
+	const maxConsecutiveErrors = 10
+	consecutiveErrors := 0
+	for {
 		select {
 		case <-ctx.Done():
 			return -1
 		default:
 		}
 		p, err := clientset.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
-		if err != nil {
+		switch {
+		case apierrors.IsNotFound(err):
 			return -1
-		}
-		for _, cs := range p.Status.ContainerStatuses {
-			if t := cs.State.Terminated; t != nil {
-				return t.ExitCode
+		case err != nil:
+			consecutiveErrors++
+			if consecutiveErrors >= maxConsecutiveErrors {
+				return -1
+			}
+		default:
+			consecutiveErrors = 0
+			for _, cs := range p.Status.ContainerStatuses {
+				if t := cs.State.Terminated; t != nil {
+					return t.ExitCode
+				}
 			}
 		}
-		time.Sleep(pollEvery)
+		select {
+		case <-ctx.Done():
+			return -1
+		case <-time.After(pollEvery):
+		}
 	}
-	return -1
 }
 
 // IsNotFound is exported so cleanup callers can swallow "already-gone" errors.
