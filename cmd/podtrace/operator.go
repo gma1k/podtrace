@@ -1,7 +1,10 @@
 package main
 
 import (
+	"github.com/podtrace/podtrace/internal/config"
 	"os"
+	"regexp"
+	"strings"
 
 	"github.com/spf13/cobra"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -91,5 +94,24 @@ func toOperatorOptions(c *operatorOptions) operator.Options {
 		LeaderElectionNamespace: leaderNS,
 		WebhookPort:             c.webhookPort,
 		WebhookCertDir:          c.webhookCertDir,
+		BootstrapFallbackImage:  bootstrapFallbackImage(),
 	}
+}
+
+// releaseVersionPattern matches clean release versions (v0.12.9 / 0.12.9) —
+// dev builds (git describe suffixes, "dev", -dirty) must not produce a
+// fallback image, since that tag does not exist in the registry and the
+// bootstrap TracerConfig would render an unpullable agent DaemonSet.
+var releaseVersionPattern = regexp.MustCompile(`^v?\d+\.\d+\.\d+$`)
+
+// bootstrapFallbackImage derives the agent image for the TracerConfig
+// bootstrap from the operator binary's own build identity. It is the second
+// line of defense behind the PODTRACE_BOOTSTRAP_IMAGE env var: distributions
+// that forget the env (the OLM CSV did, leaving installs with no agent
+// DaemonSet) still bootstrap correctly when running a release build.
+func bootstrapFallbackImage() string {
+	if config.Image == "" || !releaseVersionPattern.MatchString(config.Version) {
+		return ""
+	}
+	return config.Image + ":" + strings.TrimPrefix(config.Version, "v")
 }

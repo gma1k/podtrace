@@ -13,17 +13,18 @@ Four install paths, ordered by friction:
 
 ### Quickstart manifest (one-shot demo)
 
-A pre-rendered manifest including the operator + CRDs + a sample nginx workload + a `PodTraceSession` is attached to every GitHub Release. Apply it with one command:
+Two pre-rendered manifests are attached to every GitHub Release: `quickstart.yaml` (namespace + CRDs + operator) and `quickstart-demo.yaml` (a sample nginx workload + a `PodTraceSession`). They are separate files because kubectl cannot apply custom resources in the same invocation that installs their CRDs. Apply them in order:
 
 ```bash
 kubectl apply -f https://github.com/gma1k/podtrace/releases/latest/download/quickstart.yaml
+kubectl apply -f https://github.com/gma1k/podtrace/releases/latest/download/quickstart-demo.yaml
 ```
 
 What it deploys, in order:
 
 | Resource | Namespace | Purpose |
 |---|---|---|
-| 4 CRDs (`podtrace.io`) | cluster | Operator's API surface |
+| 6 CRDs (`podtrace.io`) | cluster | Operator's API surface |
 | `podtrace-system` Namespace + RBAC + Deployment | `podtrace-system` | Operator runtime |
 | `default` `TracerConfig` | cluster | Governs the agent DaemonSet |
 | `podtrace-demo` Namespace + nginx Deployment | `podtrace-demo` | Sample workload |
@@ -126,13 +127,15 @@ cosign download attestation ghcr.io/gma1k/podtrace:0.11.0 \
   --predicate-type https://spdx.dev/Document | jq .
 ```
 
-The quickstart manifest ships with a `quickstart.yaml.sha256` for integrity verification:
+Both quickstart manifests ship with `.sha256` companions for integrity verification:
 
 ```bash
 cd $(mktemp -d)
 curl -fsSLO https://github.com/gma1k/podtrace/releases/latest/download/quickstart.yaml
 curl -fsSLO https://github.com/gma1k/podtrace/releases/latest/download/quickstart.yaml.sha256
-sha256sum -c quickstart.yaml.sha256
+curl -fsSLO https://github.com/gma1k/podtrace/releases/latest/download/quickstart-demo.yaml
+curl -fsSLO https://github.com/gma1k/podtrace/releases/latest/download/quickstart-demo.yaml.sha256
+sha256sum -c quickstart.yaml.sha256 quickstart-demo.yaml.sha256
 ```
 
 ### Install the CLI

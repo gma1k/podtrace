@@ -51,23 +51,36 @@ render_quickstart() {
 	local root="$1"
 	local out="$2"
 
+	local image_flags=()
+	if [[ -n "${PODTRACE_IMAGE_REPO:-}" ]]; then
+		image_flags+=(--set "image.repository=${PODTRACE_IMAGE_REPO}")
+	fi
+	if [[ -n "${PODTRACE_IMAGE_TAG:-}" ]]; then
+		image_flags+=(--set "image.tag=${PODTRACE_IMAGE_TAG}")
+	fi
+
+	cat >"${out}" <<'NSEOF'
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: podtrace-system
+  labels:
+    app.kubernetes.io/managed-by: podtrace-quickstart
+NSEOF
+	echo "---" >>"${out}"
 	helm template podtrace "${root}/deploy/charts/podtrace" \
 		--namespace "${SYSTEM_NS}" \
 		--include-crds \
 		--set namespace.create=true \
 		--set operator.enabled=true \
-		>"${out}.operator"
+		"${image_flags[@]}" \
+		>>"${out}"
 
-	{
-		cat "${out}.operator"
-		echo "---"
-		cat "${root}/deploy/quickstart-sample.yaml"
-	} >"${out}"
-	rm -f "${out}.operator"
+	cp "${root}/deploy/quickstart-sample.yaml" "${out}.demo"
 
 	local lines
 	lines=$(wc -l <"${out}")
-	log_info "rendered quickstart at ${out} (${lines} lines)"
+	log_info "rendered quickstart at ${out} (${lines} lines) + demo manifest"
 }
 
 cleanup() {
@@ -75,8 +88,10 @@ cleanup() {
 
 	kubectl delete ns "${DEMO_NS}" "${SYSTEM_NS}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
 	kubectl delete crd \
+		applicationtraces.podtrace.io \
 		exporterconfigs.podtrace.io \
 		podtraces.podtrace.io \
+		podtraceschedules.podtrace.io \
 		podtracesessions.podtrace.io \
 		tracerconfigs.podtrace.io \
 		--ignore-not-found --wait=false >/dev/null 2>&1 || true
@@ -168,19 +183,27 @@ main() {
 	local root
 	root="$(repo_root)"
 	RENDERED="$(mktemp -t quickstart.XXXXXX.yaml)"
-	trap 'rm -f "${RENDERED:-}"' EXIT
+	trap 'rm -f "${RENDERED:-}" "${RENDERED:-}.demo"' EXIT
 
-	log_info "rendering quickstart.yaml from chart + sample"
+	log_info "rendering quickstart manifests from chart + sample"
 	render_quickstart "${root}" "${RENDERED}"
 
-	log_info "applying quickstart"
+	# Two applies, exactly as documented: infra first (must succeed in ONE
+	# invocation on a fresh cluster — this is the regression the script
+	# guards), demo CRs second.
+	log_info "applying quickstart (operator + CRDs)"
 	kubectl apply -f "${RENDERED}" >/dev/null
 
 	wait_for "operator Deployment Ready" 120 \
 		"kubectl -n ${SYSTEM_NS} rollout status deploy/podtrace-operator --timeout=60s"
 
-	wait_for "demo PodTraceSession reaches phase=Completed" 180 \
-		"[[ \$(kubectl -n ${DEMO_NS} get podtracesession ${SESSION_NAME} -o jsonpath='{.status.phase}' 2>/dev/null) == 'Completed' ]]"
+	log_info "applying quickstart demo (workload + sample CRs)"
+	kubectl apply -f "${RENDERED}.demo" >/dev/null
+
+	# The CRD's field is .status.state — the script previously polled the
+	# nonexistent .status.phase and could never pass.
+	wait_for "demo PodTraceSession reaches state=Completed" 180 \
+		"[[ \$(kubectl -n ${DEMO_NS} get podtracesession ${SESSION_NAME} -o jsonpath='{.status.state}' 2>/dev/null) == 'Completed' ]]"
 
 	assert_summary_populated
 

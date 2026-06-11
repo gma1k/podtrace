@@ -114,9 +114,11 @@ spec:
     Memcached, Kafka, FastCGI/PHP-FPM) — without requiring application
     code changes or sidecars.
 
-    ## Four usage modes
+    ## Five usage modes
 
-    Podtrace ships one operator that supports four workflows:
+    Podtrace ships one operator with six CRDs supporting five
+    workflows. The sixth CRD, `ExporterConfig`, defines the export
+    destination that the other CRs reference via `exporterRef`.
 
     - **`PodTrace` CR** — continuous, realtime tracing of pods matching
       a label selector. Events stream through a per-node agent
@@ -135,6 +137,12 @@ spec:
       `ConcurrencyPolicy` (Allow / Forbid / Replace), with
       history-limit retention and owner-reference cascade deletion.
 
+    - **`ApplicationTrace` CR** — continuous tracing for a whole
+      application: multiple label selectors (optionally across
+      namespaces selected by a `namespaceSelector`) roll up into one
+      managed `PodTrace`, so a frontend + checkout + worker trio is
+      traced and reported as a single unit.
+
     - **`TracerConfig` CR** — cluster-wide tracer configuration that
       governs the agent DaemonSet (event buffer sizes, default filters,
       probe groups, alert thresholds, sample rates).
@@ -142,13 +150,15 @@ spec:
     ## Architecture
 
     On install the operator runs unprivileged in the
-    `podtrace-system` namespace and watches the five CRD kinds
+    `podtrace-system` namespace and watches the six CRD kinds
     cluster-wide. When a `TracerConfig` is created, the operator rolls
-    out a `podtrace-agent` DaemonSet across the cluster with the
-    minimum capabilities eBPF requires: `CAP_BPF`, `CAP_PERFMON`, and
-    `hostPID`. Per-session Jobs use a separate, narrower
-    ServiceAccount with namespaced RBAC scoped to the session's
-    target.
+    out a `podtrace-agent` DaemonSet across the cluster. The agent
+    container runs **privileged** with `hostPID` (capabilities include
+    `CAP_BPF`, `CAP_SYS_ADMIN`, `CAP_PERFMON`, `CAP_SYS_RESOURCE`, and
+    `CAP_NET_ADMIN`) — required for attaching eBPF kprobes/uprobes and
+    walking host cgroup and proc trees. Per-session Jobs use a
+    separate, narrower ServiceAccount with namespaced RBAC scoped to
+    the session's target.
 
     ## Stability
 
@@ -416,6 +426,8 @@ spec:
                         valueFrom:
                           fieldRef:
                             fieldPath: metadata.namespace
+                      - name: PODTRACE_BOOTSTRAP_IMAGE
+                        value: ghcr.io/gma1k/podtrace:__VERSION__
                     ports:
                       - name: metrics
                         containerPort: 8080
