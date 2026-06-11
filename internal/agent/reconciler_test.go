@@ -98,8 +98,10 @@ func TestFiltersToSet_DedupesAcrossCategories(t *testing.T) {
 	}
 	got := filtersToSet(in)
 	want := []events.EventType{
-		events.EventDNS, events.EventOpen, events.EventClose,
+		events.EventDNS, events.EventDNSQuery,
+		events.EventOpen, events.EventClose,
 		events.EventRead, events.EventWrite, events.EventFsync,
+		events.EventUnlink, events.EventRename,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d entries, want %d (%v)", len(got), len(want), got)
@@ -981,8 +983,8 @@ func TestPolicySnapshotFromBundle_FullRoundTrip(t *testing.T) {
 
 func TestUnionCategoriesFromRules_NoFilterWidensToAll(t *testing.T) {
 	rules := []CRRule{
-		{Key: CRKey{Namespace: "ns", Name: "a"}, Policy: PolicySnapshot{Filters: []string{"dns"}}},
-		{Key: CRKey{Namespace: "ns", Name: "b"}, Policy: PolicySnapshot{}},
+		{Key: CRKey{Namespace: "ns", Name: "a"}, Categories: []string{"dns"}},
+		{Key: CRKey{Namespace: "ns", Name: "b"}},
 	}
 	got := unionCategoriesFromRules(rules)
 	want := []string{"cpu", "dns", "fs", "net", "proc"}
@@ -993,9 +995,9 @@ func TestUnionCategoriesFromRules_NoFilterWidensToAll(t *testing.T) {
 
 func TestUnionCategoriesFromRules_SortedDeduped(t *testing.T) {
 	rules := []CRRule{
-		{Key: CRKey{Namespace: "ns", Name: "a"}, Policy: PolicySnapshot{Filters: []string{"net", "fs"}}},
-		{Key: CRKey{Namespace: "ns", Name: "b"}, Policy: PolicySnapshot{Filters: []string{"fs", "dns"}}},
-		{Key: CRKey{Namespace: "ns", Name: "c"}, Policy: PolicySnapshot{Filters: []string{"net"}}},
+		{Key: CRKey{Namespace: "ns", Name: "a"}, Categories: []string{"net", "fs"}},
+		{Key: CRKey{Namespace: "ns", Name: "b"}, Categories: []string{"fs", "dns"}},
+		{Key: CRKey{Namespace: "ns", Name: "c"}, Categories: []string{"net"}},
 	}
 	got := unionCategoriesFromRules(rules)
 	want := []string{"dns", "fs", "net"}
@@ -1006,11 +1008,11 @@ func TestUnionCategoriesFromRules_SortedDeduped(t *testing.T) {
 
 func TestUnionCategoriesFromRules_SkipsErroredRules(t *testing.T) {
 	rules := []CRRule{
-		{Key: CRKey{Namespace: "ns", Name: "ok"}, Policy: PolicySnapshot{Filters: []string{"dns"}}},
+		{Key: CRKey{Namespace: "ns", Name: "ok"}, Categories: []string{"dns"}},
 		{
-			Key:    CRKey{Namespace: "ns", Name: "bad"},
-			Policy: PolicySnapshot{Filters: []string{"net", "fs"}},
-			Err:    errors.New("bundle load failed"),
+			Key:        CRKey{Namespace: "ns", Name: "bad"},
+			Categories: []string{"net", "fs"},
+			Err:        errors.New("bundle load failed"),
 		},
 	}
 	got := unionCategoriesFromRules(rules)

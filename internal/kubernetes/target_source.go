@@ -43,6 +43,7 @@ type ChannelTargetSource struct {
 	mu      sync.RWMutex
 	latest  []*PodInfo
 	started bool
+	closed  bool
 }
 
 // NewChannelTargetSource constructs an idle source. Publish is a no-op
@@ -78,32 +79,52 @@ func (s *ChannelTargetSource) Snapshot() []*PodInfo {
 }
 
 // Publish replaces the current snapshot and emits it. Safe for concurrent
-// use. If no consumer is reading, the oldest pending snapshot is dropped
-// to make room for the newest (latest-wins semantics).
+// use, including concurrently with Close: a Publish that loses the race is
+// a no-op rather than a send on a closed channel.
 func (s *ChannelTargetSource) Publish(snapshot []*PodInfo) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
 	// Take a defensive copy so the producer can reuse its own slice.
 	cp := make([]*PodInfo, len(snapshot))
 	copy(cp, snapshot)
 	s.latest = cp
-	started := s.started
-	s.mu.Unlock()
-
-	if !started {
+	if !s.started {
 		return
 	}
-	s.emit(cp)
+	s.emitLocked(cp)
 }
 
-// Close releases the internal channel. Publish calls after Close panic.
+// Close releases the internal channel. Idempotent, and safe to call
+// concurrently with Publish; later Publish calls become no-ops.
 func (s *ChannelTargetSource) Close() {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	s.closed = true
 	s.started = false
-	s.mu.Unlock()
 	close(s.updates)
 }
 
 func (s *ChannelTargetSource) emit(snap []*PodInfo) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	s.emitLocked(snap)
+}
+
+// emitLocked performs the non-blocking latest-wins send. Callers must
+// hold s.mu, which serializes sends against Close — every send path
+// checks s.closed under the same lock, so a send on a closed channel
+// cannot happen. The send itself never blocks, so holding the lock here
+// is cheap.
+func (s *ChannelTargetSource) emitLocked(snap []*PodInfo) {
 	select {
 	case s.updates <- snap:
 	default:

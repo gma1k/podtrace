@@ -42,15 +42,15 @@ func TestTargetSelection_PodRefSet(t *testing.T) {
 			"plain",
 			"  ",
 			"ns1/qual",
-			"ns1/qual",  // dedup within ns
+			"ns1/qual", // dedup within ns
 			"ns2/other",
 		},
 	}
 	got := sel.PodRefSet()
 	want := map[string]map[string]struct{}{
-		"def":  {"plain": {}},
-		"ns1":  {"qual": {}},
-		"ns2":  {"other": {}},
+		"def": {"plain": {}},
+		"ns1": {"qual": {}},
+		"ns2": {"other": {}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v want %#v", got, want)
@@ -297,7 +297,7 @@ func TestTargetRegistry_HandlePodUpsert_NonMatchingDeletes(t *testing.T) {
 	tr.targets[uid] = &PodInfo{PodName: "stale"}
 
 	// Upsert with a pod outside the watched namespace must remove it.
-	tr.handlePodUpsert(&corev1.Pod{
+	tr.handlePodUpsert(context.Background(), &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{UID: uid, Name: "stale", Namespace: "dev"},
 	})
 	if _, ok := tr.targets[uid]; ok {
@@ -305,12 +305,12 @@ func TestTargetRegistry_HandlePodUpsert_NonMatchingDeletes(t *testing.T) {
 	}
 }
 
-func TestTargetRegistry_HandlePodUpsert_IgnoresNonPod(t *testing.T) {
+func TestTargetRegistry_EnqueueUpsert_IgnoresNonPod(t *testing.T) {
 	tr := NewTargetRegistry(fake.NewSimpleClientset(), TargetSelection{})
-	tr.handlePodUpsert("not a pod") // must be a no-op
-	tr.handlePodUpsert(nil)         // nil pod
-	if len(tr.targets) != 0 {
-		t.Fatal("upsert of non-pod must not insert anything")
+	tr.enqueueUpsert("not a pod") // must be a no-op
+	tr.enqueueUpsert(nil)         // nil pod
+	if len(tr.pending) != 0 || len(tr.targets) != 0 {
+		t.Fatal("upsert of non-pod must not enqueue or insert anything")
 	}
 }
 
@@ -322,7 +322,7 @@ func TestTargetRegistry_HandlePodUpsert_ResolveErrorIsSwallowed(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{UID: "no-status", Name: "p", Namespace: "ns"},
 		// Status.ContainerStatuses intentionally empty.
 	}
-	tr.handlePodUpsert(pod)
+	tr.handlePodUpsert(context.Background(), pod)
 	if _, ok := tr.targets[pod.UID]; ok {
 		t.Fatal("pod with no container statuses must not be inserted")
 	}

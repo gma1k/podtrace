@@ -15,6 +15,9 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/podtrace/podtrace/internal/logger"
+	"go.uber.org/zap"
 )
 
 const (
@@ -139,8 +142,10 @@ func (ic *InformerCache) Start(ctx context.Context) {
 	syncCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
-	synced := cache.WaitForCacheSync(syncCtx.Done(), podInf.HasSynced, esInf.HasSynced)
-	_ = synced
+	if !cache.WaitForCacheSync(syncCtx.Done(), podInf.HasSynced, esInf.HasSynced) {
+		logger.Warn("Kubernetes informer cache did not sync within timeout; enrichment lookups may be incomplete until sync finishes",
+			zap.Int("timeout_seconds", timeoutSec))
+	}
 }
 
 func (ic *InformerCache) Stop() {
