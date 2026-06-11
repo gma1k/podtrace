@@ -20,7 +20,7 @@ const BootstrapImageEnv = "PODTRACE_BOOTSTRAP_IMAGE"
 type BootstrapDefaultTracerConfig struct {
 	Client          client.Client
 	SystemNamespace string
-	FallbackImage string
+	FallbackImage   string
 }
 
 func (b *BootstrapDefaultTracerConfig) NeedLeaderElection() bool { return true }

@@ -33,7 +33,7 @@ func TestResolveNamespaceSelector(t *testing.T) {
 		wantErr    bool
 	}{
 		{
-			name:    "NilSelectorReturnsNil",
+			name:     "NilSelectorReturnsNil",
 			selector: nil,
 			wantNil:  true,
 		},

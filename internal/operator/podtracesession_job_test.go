@@ -20,8 +20,8 @@ func newSession(mod func(*podtracev1alpha1.PodTraceSession)) *podtracev1alpha1.P
 			UID:       "u-sess",
 		},
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
-			Duration: metav1.Duration{Duration: 5 * time.Minute},
-			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
+			Duration:    metav1.Duration{Duration: 5 * time.Minute},
+			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
 			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
 		},
 	}
@@ -233,7 +233,7 @@ func TestComputeSessionPhase_Transitions(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			if got := computeSessionState(tc.jobs); got != tc.want {
+			if got := computeSessionState(tc.jobs, len(tc.jobs)); got != tc.want {
 				t.Errorf("got %q want %q", got, tc.want)
 			}
 		})

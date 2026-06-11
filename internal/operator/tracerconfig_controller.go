@@ -57,6 +57,20 @@ func (r *TracerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, fmt.Errorf("get TracerConfig: %w", err)
 	}
 
+	// The agent DaemonSet has a single fixed name, so exactly one
+	// TracerConfig can drive it. A second TC used to fight the first over
+	// owner references and the immutable selector, failing its reconcile
+	// forever; it now reports the conflict and stands down.
+	if tc.Name != DefaultTracerConfigName {
+		r.setCondition(&tc, ConditionDegraded, metav1.ConditionTrue, "NotDefaultTracerConfig",
+			fmt.Sprintf("only the %q TracerConfig manages the agent DaemonSet; this resource is inert", DefaultTracerConfigName))
+		r.setCondition(&tc, ConditionReady, metav1.ConditionFalse, "NotDefaultTracerConfig", "inert non-default TracerConfig")
+		if err := r.Status().Update(ctx, &tc); err != nil && !apierrors.IsConflict(err) {
+			return ctrl.Result{}, fmt.Errorf("update status: %w", err)
+		}
+		return ctrl.Result{}, nil
+	}
+
 	systemNS := r.systemNamespaceFor(&tc)
 
 	if err := r.ensureAgentRBAC(ctx, &tc, systemNS); err != nil {
@@ -78,6 +92,10 @@ func (r *TracerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		r.setCondition(&tc, ConditionDegraded, metav1.ConditionTrue, "DaemonSetError", err.Error())
 		_ = r.Status().Update(ctx, &tc)
 		return ctrl.Result{}, err
+	}
+
+	if err := r.cleanupStaleAgentNamespaces(ctx, systemNS); err != nil {
+		logger.Error(err, "cleanup stale agent namespaces")
 	}
 
 	tc.Status.DesiredAgents = ds.Status.DesiredNumberScheduled
@@ -219,6 +237,75 @@ func (r *TracerConfigReconciler) ensureAgentRBAC(ctx context.Context, tc *podtra
 	return nil
 }
 
+// cleanupStaleAgentNamespaces deletes agent DaemonSets (and their namespaced
+// RBAC companions) left behind in OTHER namespaces after a
+// spec.systemNamespace change. Their ownerReference points at the still-live
+// TracerConfig, so garbage collection never reaps them — without this, a
+// namespace move left two privileged agent fleets running concurrently.
+func (r *TracerConfigReconciler) cleanupStaleAgentNamespaces(ctx context.Context, currentNS string) error {
+	agentLabels := client.MatchingLabels{
+		LabelManagedBy: ManagedByValue,
+		LabelComponent: ComponentAgent,
+	}
+
+	var dsList appsv1.DaemonSetList
+	if err := r.List(ctx, &dsList, agentLabels); err != nil {
+		return fmt.Errorf("list agent DaemonSets: %w", err)
+	}
+	for i := range dsList.Items {
+		ds := &dsList.Items[i]
+		if ds.Namespace == currentNS {
+			continue
+		}
+		if err := r.Delete(ctx, ds); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete stale agent DaemonSet %s/%s: %w", ds.Namespace, ds.Name, err)
+		}
+	}
+
+	var saList corev1.ServiceAccountList
+	if err := r.List(ctx, &saList, agentLabels); err != nil {
+		return fmt.Errorf("list agent ServiceAccounts: %w", err)
+	}
+	for i := range saList.Items {
+		sa := &saList.Items[i]
+		if sa.Namespace == currentNS {
+			continue
+		}
+		if err := r.Delete(ctx, sa); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete stale agent ServiceAccount %s/%s: %w", sa.Namespace, sa.Name, err)
+		}
+	}
+
+	var roleList rbacv1.RoleList
+	if err := r.List(ctx, &roleList, agentLabels); err != nil {
+		return fmt.Errorf("list agent Roles: %w", err)
+	}
+	for i := range roleList.Items {
+		role := &roleList.Items[i]
+		if role.Namespace == currentNS {
+			continue
+		}
+		if err := r.Delete(ctx, role); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete stale agent Role %s/%s: %w", role.Namespace, role.Name, err)
+		}
+	}
+
+	var rbList rbacv1.RoleBindingList
+	if err := r.List(ctx, &rbList, agentLabels); err != nil {
+		return fmt.Errorf("list agent RoleBindings: %w", err)
+	}
+	for i := range rbList.Items {
+		rb := &rbList.Items[i]
+		if rb.Namespace == currentNS {
+			continue
+		}
+		if err := r.Delete(ctx, rb); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete stale agent RoleBinding %s/%s: %w", rb.Namespace, rb.Name, err)
+		}
+	}
+	return nil
+}
+
 // ensureAgentDaemonSet creates / updates the DaemonSet, returning its
 // current status so Reconcile can roll it up.
 func (r *TracerConfigReconciler) ensureAgentDaemonSet(ctx context.Context, tc *podtracev1alpha1.TracerConfig, systemNS string) (*appsv1.DaemonSet, error) {
@@ -281,4 +368,3 @@ func (r *TracerConfigReconciler) setCondition(tc *podtracev1alpha1.TracerConfig,
 		ObservedGeneration: tc.Generation,
 	})
 }
-

@@ -85,8 +85,19 @@ func TestApplicationTraceReconciler_GeneratesOwnedPodTrace(t *testing.T) {
 func TestApplicationTraceReconciler_AggregatesChildStatus(t *testing.T) {
 	scheme := newOperatorScheme(t)
 	app := mkApp()
+	controllerTrue := true
 	child := &podtracev1alpha1.PodTrace{
-		ObjectMeta: metav1.ObjectMeta{Name: "shop", Namespace: "demo"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "shop",
+			Namespace: "demo",
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: podtracev1alpha1.GroupVersion.String(),
+				Kind:       "ApplicationTrace",
+				Name:       app.Name,
+				UID:        app.UID,
+				Controller: &controllerTrue,
+			}},
+		},
 		Status: podtracev1alpha1.PodTraceStatus{
 			MatchedPods:      4,
 			TargetNamespaces: []string{"demo", "demo-b"},

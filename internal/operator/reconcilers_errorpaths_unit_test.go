@@ -42,17 +42,25 @@ func errConflict(resource, name string) error {
 // ─── PodTraceScheduleReconciler ──────────────────────────────────────
 
 // patchStatus conflict: Status().Update returns Conflict -> patchStatus
-// swallows it and returns nil, so the whole Reconcile returns no error.
-func TestErrPath_Schedule_PatchStatusConflictSwallowed(t *testing.T) {
+// retries it with a fresh read instead of silently dropping the computed
+// status (the old swallow-and-forget behavior lost status.lastScheduleTime,
+// and under ReplaceConcurrent the re-derived tick first deleted the session
+// it had just created).
+func TestErrPath_Schedule_PatchStatusConflictRetried(t *testing.T) {
 	sch := scheduleForErrPaths()
 	s := newOperatorScheme(t)
+	conflicts := 0
 	c := fake.NewClientBuilder().
 		WithScheme(s).
 		WithStatusSubresource(&podtracev1alpha1.PodTraceSchedule{}).
 		WithObjects(sch).
 		WithInterceptorFuncs(interceptor.Funcs{
-			SubResourceUpdate: func(_ context.Context, _ client.Client, _ string, _ client.Object, _ ...client.SubResourceUpdateOption) error {
-				return errConflict("podtraceschedules", sch.Name)
+			SubResourceUpdate: func(ctx context.Context, cl client.Client, sub string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+				if conflicts == 0 {
+					conflicts++
+					return errConflict("podtraceschedules", sch.Name)
+				}
+				return cl.SubResource(sub).Update(ctx, obj, opts...)
 			},
 		}).
 		Build()
@@ -62,7 +70,17 @@ func TestErrPath_Schedule_PatchStatusConflictSwallowed(t *testing.T) {
 		NamespacedName: types.NamespacedName{Name: sch.Name, Namespace: sch.Namespace},
 	})
 	if err != nil {
-		t.Fatalf("conflict on status update must be swallowed, got err=%v", err)
+		t.Fatalf("transient conflict must be retried away, got err=%v", err)
+	}
+	if conflicts != 1 {
+		t.Fatalf("interceptor conflicts = %d, want 1", conflicts)
+	}
+	var got podtracev1alpha1.PodTraceSchedule
+	if err := c.Get(context.Background(), types.NamespacedName{Name: sch.Name, Namespace: sch.Namespace}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Status.Conditions) == 0 {
+		t.Error("computed status must be persisted after the retry, got no conditions")
 	}
 }
 
@@ -497,18 +515,24 @@ func TestErrPath_ExporterConfig_StatusPatchError(t *testing.T) {
 
 // ─── ApplicationTraceReconciler ──────────────────────────────────────
 
-// patchStatus conflict (the 40%-covered helper): Status().Update returns
-// Conflict -> patchStatus swallows -> Reconcile returns no error.
-func TestErrPath_ApplicationTrace_PatchStatusConflictSwallowed(t *testing.T) {
+// patchStatus conflict: a transient Conflict is retried with a fresh read
+// and the computed status is persisted — the old behavior swallowed the
+// conflict and silently dropped the entire computed status.
+func TestErrPath_ApplicationTrace_PatchStatusConflictRetried(t *testing.T) {
 	s := newOperatorScheme(t)
 	app := mkApp()
+	conflicts := 0
 	c := fake.NewClientBuilder().
 		WithScheme(s).
 		WithStatusSubresource(&podtracev1alpha1.ApplicationTrace{}, &podtracev1alpha1.PodTrace{}).
 		WithObjects(app).
 		WithInterceptorFuncs(interceptor.Funcs{
-			SubResourceUpdate: func(_ context.Context, _ client.Client, _ string, _ client.Object, _ ...client.SubResourceUpdateOption) error {
-				return errConflict("applicationtraces", app.Name)
+			SubResourceUpdate: func(ctx context.Context, cl client.Client, sub string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+				if _, isApp := obj.(*podtracev1alpha1.ApplicationTrace); isApp && conflicts == 0 {
+					conflicts++
+					return errConflict("applicationtraces", app.Name)
+				}
+				return cl.SubResource(sub).Update(ctx, obj, opts...)
 			},
 		}).
 		Build()
@@ -517,7 +541,17 @@ func TestErrPath_ApplicationTrace_PatchStatusConflictSwallowed(t *testing.T) {
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: app.Name, Namespace: app.Namespace},
 	}); err != nil {
-		t.Fatalf("conflict on status update must be swallowed, got err=%v", err)
+		t.Fatalf("transient conflict must be retried away, got err=%v", err)
+	}
+	if conflicts != 1 {
+		t.Fatalf("interceptor conflicts = %d, want 1", conflicts)
+	}
+	var got podtracev1alpha1.ApplicationTrace
+	if err := c.Get(context.Background(), types.NamespacedName{Name: app.Name, Namespace: app.Namespace}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Status.Conditions) == 0 {
+		t.Error("computed status must be persisted after the retry, got no conditions")
 	}
 }
 

@@ -293,8 +293,8 @@ func TestPodTraceSessionReconciler_RejectsBadObjectStoreURI(t *testing.T) {
 
 	session := &podtracev1alpha1.PodTraceSession{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "bad",
-			Namespace: "default",
+			Name:       "bad",
+			Namespace:  "default",
 			Finalizers: []string{"podtrace.io/cleanup"},
 		},
 		Spec: podtracev1alpha1.PodTraceSessionSpec{

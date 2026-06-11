@@ -58,7 +58,7 @@ func TestPodTraceScheduleReconcile_CreatesSession(t *testing.T) {
 			Namespace:         "default",
 			UID:               "sch-uid-1",
 			Generation:        7,
-			CreationTimestamp: metav1.NewTime(fixedScheduleNow.Add(-24 * time.Hour)),
+			CreationTimestamp: metav1.NewTime(fixedScheduleNow.Add(-6 * time.Minute)),
 		},
 		Spec: podtracev1alpha1.PodTraceScheduleSpec{
 			Schedule: "*/5 * * * *",

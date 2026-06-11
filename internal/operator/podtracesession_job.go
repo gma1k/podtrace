@@ -239,7 +239,7 @@ func buildSessionSidecar(enabled bool, reportTo, image string, pullPolicy corev1
 			"--summary-file", "/var/run/podtrace/summary.json",
 			"--report-to", reportTo,
 		},
-		Env: env,
+		Env:                      env,
 		TerminationMessagePath:   "/dev/termination-log",
 		TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
 		VolumeMounts:             mounts,
@@ -311,12 +311,15 @@ func buildDiagnoseArgs(s *podtracev1alpha1.PodTraceSession) []string {
 	return args
 }
 
+// labelSelectorToFlag serializes the FULL selector, matchLabels and
+// matchExpressions, into the string form the in-Job CLI passes to the API
+// server.
 func labelSelectorToFlag(s *metav1.LabelSelector) string {
-	parts := make([]string, 0, len(s.MatchLabels))
-	for k, v := range s.MatchLabels {
-		parts = append(parts, k+"="+v)
+	sel, err := metav1.LabelSelectorAsSelector(s)
+	if err != nil {
+		return ""
 	}
-	return strings.Join(parts, ",")
+	return sel.String()
 }
 
 func tolerationsFrom(tc *podtracev1alpha1.TracerConfig) []corev1.Toleration {
@@ -371,8 +374,23 @@ func jobBackoffLimit(j *batchv1.Job) int32 {
 //   - Any failed past limit → Failed
 //   - Any running           → Running
 //   - Otherwise             → Pending
-func computeSessionState(jobs []batchv1.Job) podtracev1alpha1.SessionState {
+//
+// computeSessionState rolls Job conditions up into a session state.
+// expectedJobs is the number of target nodes this reconcile fanned out to:
+// the Job List comes from the informer cache, which may not yet contain a
+// Job created moments ago — without the guard a freshly grown target set
+// could read as "all (visible) Jobs succeeded" and terminate the session
+// early, orphaning the invisible Job's results.
+func computeSessionState(jobs []batchv1.Job, expectedJobs int) podtracev1alpha1.SessionState {
 	if len(jobs) == 0 {
+		return podtracev1alpha1.SessionStatePending
+	}
+	if len(jobs) < expectedJobs {
+		for i := range jobs {
+			if jobs[i].Status.Active > 0 {
+				return podtracev1alpha1.SessionStateRunning
+			}
+		}
 		return podtracev1alpha1.SessionStatePending
 	}
 	allSucceeded := true

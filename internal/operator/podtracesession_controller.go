@@ -59,7 +59,11 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Deletion path: clean up cross-namespace Jobs, then release the finalizer.
 	if !session.DeletionTimestamp.IsZero() {
-		sessionNS := systemNamespaceForSession(r.resolveTracerConfig(ctx), r.SystemNamespace)
+		tc, err := r.resolveTracerConfig(ctx)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		sessionNS := systemNamespaceForSession(tc, r.SystemNamespace)
 		for _, ns := range candidateSystemNamespaces(sessionNS, r.SystemNamespace) {
 			if err := cleanupPodTraceSessionChildren(ctx, r.Client, &session, ns); err != nil {
 				return ctrl.Result{}, err
@@ -93,21 +97,22 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	if session.Spec.ReportRef != nil && session.Spec.ReportRef.ObjectStore != nil {
 		if err := podtracev1alpha1.ValidateObjectStoreReference(session.Spec.ReportRef.ObjectStore); err != nil {
-			session.Status.State = podtracev1alpha1.SessionStateFailed
-			r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "ObjectStoreURIInvalid", err.Error())
-			_ = r.Status().Update(ctx, &session)
+			r.failSessionTerminally(ctx, &session, "ObjectStoreURIInvalid", err.Error())
 			return ctrl.Result{}, nil
 		}
 	}
 
 	targetNodes, targetNamespaces, err := r.resolveTargetNodes(ctx, &session)
 	if err != nil {
-		reason := "ResolveTargets"
 		if strings.Contains(err.Error(), "invalid NamespaceSelector") {
-			reason = "NamespaceSelectorInvalid"
-			session.Status.State = podtracev1alpha1.SessionStateFailed
+			// Terminal: an invalid selector cannot be fixed by retrying, and
+			// returning the error here put a permanently-failed object on
+			// the infinite-backoff treadmill. A spec edit re-triggers
+			// reconciliation.
+			r.failSessionTerminally(ctx, &session, "NamespaceSelectorInvalid", err.Error())
+			return ctrl.Result{}, nil
 		}
-		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, reason, err.Error())
+		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "ResolveTargets", err.Error())
 		_ = r.Status().Update(ctx, &session)
 		return ctrl.Result{}, err
 	}
@@ -119,7 +124,10 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, r.Status().Update(ctx, &session)
 	}
 
-	tc := r.resolveTracerConfig(ctx)
+	tc, err := r.resolveTracerConfig(ctx)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 	systemNS := systemNamespaceForSession(tc, r.SystemNamespace)
 
 	var ec podtracev1alpha1.ExporterConfig
@@ -181,7 +189,7 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// Refresh status from Job conditions. summarizeSessionJobs also decides
 	// whether the session has reached a terminal state.
 	session.Status.Jobs = makeSessionJobRefs(jobs)
-	session.Status.State = computeSessionState(jobs)
+	session.Status.State = computeSessionState(jobs, len(targetNodes))
 	session.Status.ObservedGeneration = session.Generation
 
 	if err := populateSessionSummaries(ctx, r.Client, &session, jobs); err != nil {
@@ -227,8 +235,46 @@ func (r *PodTraceSessionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&corev1.Namespace{},
 			handler.EnqueueRequestsFromMapFunc(r.namespaceToPodTraceSessions),
 		).
+		// Session bundle/object-store Secrets are copies of the referenced
+		// credential data; rotations must re-trigger the non-terminal
+		// sessions that snapshot them.
+		Watches(
+			&corev1.Secret{},
+			handler.EnqueueRequestsFromMapFunc(r.secretToPodTraceSessions),
+		).
 		WithOptions(defaultControllerOptions()).
 		Complete(r)
+}
+
+// secretToPodTraceSessions maps a Secret event to the non-terminal
+// PodTraceSessions whose ExporterConfig references that Secret.
+func (r *PodTraceSessionReconciler) secretToPodTraceSessions(ctx context.Context, obj client.Object) []reconcile.Request {
+	ecs := exporterConfigsReferencingSecret(ctx, r.Client, obj)
+	if len(ecs) == 0 {
+		return nil
+	}
+	referenced := make(map[string]struct{}, len(ecs))
+	for i := range ecs {
+		referenced[ecs[i].Name] = struct{}{}
+	}
+	var list podtracev1alpha1.PodTraceSessionList
+	if err := r.List(ctx, &list, client.InNamespace(obj.GetNamespace())); err != nil {
+		return nil
+	}
+	var reqs []reconcile.Request
+	for i := range list.Items {
+		s := &list.Items[i]
+		if s.Status.State == podtracev1alpha1.SessionStateCompleted ||
+			s.Status.State == podtracev1alpha1.SessionStateFailed {
+			continue
+		}
+		if _, ok := referenced[s.Spec.ExporterRef.Name]; ok {
+			reqs = append(reqs, reconcile.Request{
+				NamespacedName: client.ObjectKey{Namespace: s.Namespace, Name: s.Name},
+			})
+		}
+	}
+	return reqs
 }
 
 // namespaceToPodTraceSessions returns the set of PodTraceSessions
@@ -354,14 +400,33 @@ func isPodEligible(p *corev1.Pod) bool {
 	}
 }
 
-// resolveTracerConfig returns the "default" TracerConfig when present,
-// otherwise nil.
-func (r *PodTraceSessionReconciler) resolveTracerConfig(ctx context.Context) *podtracev1alpha1.TracerConfig {
-	var tc podtracev1alpha1.TracerConfig
-	if err := r.Get(ctx, types.NamespacedName{Name: "default"}, &tc); err != nil {
-		return nil
+// failSessionTerminally marks a session Failed with a CompletionTime stamp.
+// Failed-by-validation sessions used to be left without a CompletionTime, so
+// reconcileTerminalSession never TTL-garbage-collected them.
+func (r *PodTraceSessionReconciler) failSessionTerminally(ctx context.Context, s *podtracev1alpha1.PodTraceSession, reason, message string) {
+	s.Status.State = podtracev1alpha1.SessionStateFailed
+	if s.Status.CompletionTime == nil {
+		now := metav1.Now()
+		s.Status.CompletionTime = &now
 	}
-	return &tc
+	r.setCondition(s, ConditionDegraded, metav1.ConditionTrue, reason, message)
+	_ = r.Status().Update(ctx, s)
+}
+
+// resolveTracerConfig returns the "default" TracerConfig when present, nil
+// when it does not exist, and an error for any other Get failure — a
+// transient API error used to be indistinguishable from "no TracerConfig",
+// silently falling back to the default system namespace and an empty session
+// image.
+func (r *PodTraceSessionReconciler) resolveTracerConfig(ctx context.Context) (*podtracev1alpha1.TracerConfig, error) {
+	var tc podtracev1alpha1.TracerConfig
+	if err := r.Get(ctx, types.NamespacedName{Name: DefaultTracerConfigName}, &tc); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get TracerConfig %q: %w", DefaultTracerConfigName, err)
+	}
+	return &tc, nil
 }
 
 // nodesAtCapacity returns the subset of the candidate node list whose

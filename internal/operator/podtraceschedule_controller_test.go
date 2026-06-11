@@ -43,7 +43,7 @@ func makeSchedule(t *testing.T, c client.Client, ns, name string, mutators ...fu
 	return sch
 }
 
-func newScheduleReconciler(t *testing.T, c client.Client, now time.Time) *PodTraceScheduleReconciler {
+func newEnvtestScheduleReconciler(t *testing.T, c client.Client, now time.Time) *PodTraceScheduleReconciler {
 	t.Helper()
 	scheme, _, _ := setupSharedEnvtest(t)
 	return &PodTraceScheduleReconciler{
@@ -61,7 +61,7 @@ func TestPodTraceScheduleReconciler_RunCreatesSession(t *testing.T) {
 
 	sch := makeSchedule(t, c, ns, "sch-run")
 	now := time.Now().Add(2 * time.Minute)
-	r := newScheduleReconciler(t, c, now)
+	r := newEnvtestScheduleReconciler(t, c, now)
 
 	reconcileUntil(t, 10*time.Second,
 		func() error {
@@ -105,7 +105,7 @@ func TestPodTraceScheduleReconciler_SuspendNoRun(t *testing.T) {
 	sch := makeSchedule(t, c, ns, "sch-suspend", func(s *podtracev1alpha1.PodTraceSchedule) {
 		s.Spec.Suspend = &suspended
 	})
-	r := newScheduleReconciler(t, c, time.Now())
+	r := newEnvtestScheduleReconciler(t, c, time.Now())
 
 	_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: sch.Name, Namespace: ns}})
 	if err != nil {
@@ -140,7 +140,7 @@ func TestPodTraceScheduleReconciler_InvalidScheduleSetsDegraded(t *testing.T) {
 	sch := makeSchedule(t, c, ns, "sch-bad", func(s *podtracev1alpha1.PodTraceSchedule) {
 		s.Spec.Schedule = "this is not cron"
 	})
-	r := newScheduleReconciler(t, c, time.Now())
+	r := newEnvtestScheduleReconciler(t, c, time.Now())
 
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: sch.Name, Namespace: ns}}); err != nil {
 		t.Fatalf("reconcile: %v", err)
@@ -164,7 +164,7 @@ func TestPodTraceScheduleReconciler_ForbidConcurrentBlocks(t *testing.T) {
 	sch := makeSchedule(t, c, ns, "sch-forbid", func(s *podtracev1alpha1.PodTraceSchedule) {
 		s.Spec.ConcurrencyPolicy = podtracev1alpha1.ForbidConcurrent
 	})
-	r := newScheduleReconciler(t, c, time.Now().Add(2*time.Minute))
+	r := newEnvtestScheduleReconciler(t, c, time.Now().Add(2*time.Minute))
 
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: sch.Name, Namespace: ns}}); err != nil {
 		t.Fatalf("first reconcile: %v", err)
@@ -198,7 +198,7 @@ func TestPodTraceScheduleReconciler_HistoryLimitsGC(t *testing.T) {
 	sch := makeSchedule(t, c, ns, "sch-gc", func(s *podtracev1alpha1.PodTraceSchedule) {
 		s.Spec.SuccessfulSessionsHistoryLimit = &limit
 	})
-	r := newScheduleReconciler(t, c, time.Now())
+	r := newEnvtestScheduleReconciler(t, c, time.Now())
 
 	t1 := metav1.NewTime(time.Now().Add(-2 * time.Minute))
 	t2 := metav1.NewTime(time.Now().Add(-1 * time.Minute))
@@ -290,7 +290,7 @@ func TestPodTraceScheduleReconciler_MaxActiveSessionsCap(t *testing.T) {
 		}
 	}
 
-	r := newScheduleReconciler(t, c, time.Now().Add(2*time.Minute))
+	r := newEnvtestScheduleReconciler(t, c, time.Now().Add(2*time.Minute))
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: sch.Name, Namespace: ns}}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestPodTraceScheduleReconciler_HistoryLimitsGCOnSkippedRun(t *testing.T) {
 		s.Spec.SuccessfulSessionsHistoryLimit = &limit
 		s.Spec.Suspend = &suspended
 	})
-	r := newScheduleReconciler(t, c, time.Now())
+	r := newEnvtestScheduleReconciler(t, c, time.Now())
 
 	t1 := metav1.NewTime(time.Now().Add(-2 * time.Minute))
 	t2 := metav1.NewTime(time.Now().Add(-1 * time.Minute))
