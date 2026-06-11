@@ -9,6 +9,28 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.12.10](https://github.com/gma1k/podtrace/compare/v0.12.9...v0.12.10) (2026-06-11)
+
+
+### Features
+
+* add auto rebase for olm auto release script ([#205](https://github.com/gma1k/podtrace/issues/205)) ([e61de99](https://github.com/gma1k/podtrace/commit/e61de992b61fcdd04f41d2c6b730aeec3d8f2b02))
+
+
+### Bug Fixes
+
+* export spans once, surface exporter errors, tee event pipeline ([#208](https://github.com/gma1k/podtrace/issues/208)) ([1247be8](https://github.com/gma1k/podtrace/commit/1247be80b90312b4496b4c8a6a62c55d9126ae8e))
+* rate-based utilization, metric caps, probe lifecycle, GCS abort ([#209](https://github.com/gma1k/podtrace/issues/209)) ([2df8803](https://github.com/gma1k/podtrace/commit/2df8803e03c3c599e52fd0ce48473ce183b5f7b7))
+* wire OLM bootstrap image and split quickstart manifests ([#211](https://github.com/gma1k/podtrace/issues/211)) ([4ed4ece](https://github.com/gma1k/podtrace/commit/4ed4eceeb80cc0fba667292f5b2480b789490e7f))
+* wire systemNamespace override, OTLP headers, exporter close order ([#207](https://github.com/gma1k/podtrace/issues/207)) ([e559c5b](https://github.com/gma1k/podtrace/commit/e559c5ba2f4d109244abe05266dc3ad7d2fd25b6))
+
+
+### Maintenance
+
+* **deps:** update github actions to v3.21.0 ([#212](https://github.com/gma1k/podtrace/issues/212)) ([01cbf31](https://github.com/gma1k/podtrace/commit/01cbf318dc87b3efebd77dd77a1433c1d21aeef0))
+* **deps:** update github actions to v4 ([#214](https://github.com/gma1k/podtrace/issues/214)) ([85ee02b](https://github.com/gma1k/podtrace/commit/85ee02b9d3aa56e7edde18734d3ac92209955943))
+* **deps:** update go modules (non-major) ([#210](https://github.com/gma1k/podtrace/issues/210)) ([6ebf36c](https://github.com/gma1k/podtrace/commit/6ebf36c0ac3420ad2f9ef06dffc163d08f2c87f0))
+
 ## [0.12.9](https://github.com/gma1k/podtrace/compare/v0.12.8...v0.12.9) (2026-06-10)
 
 
