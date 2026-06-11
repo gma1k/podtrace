@@ -95,7 +95,7 @@ func TestPodTraceReconciler_EnvtestBundleSync_SecretCredentials(t *testing.T) {
 		Spec: podtracev1alpha1.ExporterConfigSpec{
 			Type: podtracev1alpha1.ExporterTypeDataDog,
 			DataDog: &podtracev1alpha1.DataDogExporter{
-				Site: "datadoghq.eu",
+				Site:            "datadoghq.eu",
 				APIKeySecretRef: podtracev1alpha1.SecretKeySelector{Name: "dd-key", Key: "api"},
 			},
 		},

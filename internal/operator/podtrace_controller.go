@@ -163,8 +163,26 @@ func (r *PodTraceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&corev1.Namespace{},
 			handler.EnqueueRequestsFromMapFunc(r.namespaceToPodTraces),
 		).
+		// Bundle Secrets are copies of the referenced credential data, so a
+		// rotation must re-trigger the PodTraces that snapshot it; the
+		// ExporterConfig watch alone does not fire (the EC itself is
+		// unchanged and its readiness status stays equal).
+		Watches(
+			&corev1.Secret{},
+			handler.EnqueueRequestsFromMapFunc(r.secretToPodTraces),
+		).
 		WithOptions(defaultControllerOptions()).
 		Complete(r)
+}
+
+// secretToPodTraces maps a Secret event to the PodTraces whose
+// ExporterConfig references that Secret.
+func (r *PodTraceReconciler) secretToPodTraces(ctx context.Context, obj client.Object) []reconcile.Request {
+	var reqs []reconcile.Request
+	for _, ec := range exporterConfigsReferencingSecret(ctx, r.Client, obj) {
+		reqs = append(reqs, r.exporterConfigToPodTraces(ctx, &ec)...)
+	}
+	return reqs
 }
 
 // namespaceToPodTraces returns the set of PodTraces that should

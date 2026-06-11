@@ -3,6 +3,8 @@ package operator
 import (
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -80,7 +82,24 @@ func (r *ApplicationTraceReconciler) ensureChildPodTrace(ctx context.Context, ap
 			Namespace: app.Namespace,
 		},
 	}
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, pt, func() error {
+	// Refuse to adopt a pre-existing PodTrace this controller did not
+	// create: CreateOrUpdate would silently overwrite a user-authored spec
+	// and add an ownerReference that garbage-collects the user's resource
+	// when the ApplicationTrace is deleted.
+	var existing podtracev1alpha1.PodTrace
+	err := r.Get(ctx, types.NamespacedName{Namespace: app.Namespace, Name: app.Name}, &existing)
+	switch {
+	case err == nil:
+		owner := metav1.GetControllerOf(&existing)
+		if owner == nil || owner.Kind != "ApplicationTrace" || owner.UID != app.UID {
+			return nil, fmt.Errorf(
+				"PodTrace %s/%s already exists and is not managed by this ApplicationTrace; rename the ApplicationTrace or delete the existing PodTrace",
+				app.Namespace, app.Name)
+		}
+	case !apierrors.IsNotFound(err):
+		return nil, fmt.Errorf("get PodTrace %s/%s: %w", app.Namespace, app.Name, err)
+	}
+	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, pt, func() error {
 		pt.Labels = mergeLabels(pt.Labels, map[string]string{
 			LabelManagedBy:   ManagedByValue,
 			LabelApplication: app.Name,
@@ -136,9 +155,23 @@ func (r *ApplicationTraceReconciler) setCondition(app *podtracev1alpha1.Applicat
 	})
 }
 
+// patchStatus writes the computed status, retrying on optimistic-concurrency
+// conflicts by re-reading the latest object and re-applying the computed
+// status. Conflicts used to be swallowed with no requeue, silently dropping
+// the entire computed status until some unrelated event arrived.
 func (r *ApplicationTraceReconciler) patchStatus(ctx context.Context, app *podtracev1alpha1.ApplicationTrace) error {
-	if err := r.Status().Update(ctx, app); err != nil {
-		if apierrors.IsConflict(err) {
+	desired := app.Status.DeepCopy()
+	key := types.NamespacedName{Namespace: app.Namespace, Name: app.Name}
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var latest podtracev1alpha1.ApplicationTrace
+		if err := r.Get(ctx, key, &latest); err != nil {
+			return err
+		}
+		latest.Status = *desired.DeepCopy()
+		return r.Status().Update(ctx, &latest)
+	})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
 			return nil
 		}
 		return fmt.Errorf("update status: %w", err)

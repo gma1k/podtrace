@@ -25,14 +25,24 @@ func TestTracerConfigReconciler_EnvtestLifecycle(t *testing.T) {
 	defer cancel()
 
 	tcObj := &podtracev1alpha1.TracerConfig{
-		ObjectMeta: metav1.ObjectMeta{Name: "lifecycle"},
+		ObjectMeta: metav1.ObjectMeta{Name: DefaultTracerConfigName},
 		Spec: podtracev1alpha1.TracerConfigSpec{
 			Image:           "ghcr.io/gma1k/podtrace:test",
 			SystemNamespace: systemNS,
 		},
 	}
 	if err := c.Create(ctx, tcObj); err != nil {
-		t.Fatalf("create TracerConfig: %v", err)
+		if !apierrors.IsAlreadyExists(err) {
+			t.Fatalf("create TracerConfig: %v", err)
+		}
+		if err := c.Get(ctx, types.NamespacedName{Name: DefaultTracerConfigName}, tcObj); err != nil {
+			t.Fatalf("get existing default TracerConfig: %v", err)
+		}
+		tcObj.Spec.Image = "ghcr.io/gma1k/podtrace:test"
+		tcObj.Spec.SystemNamespace = systemNS
+		if err := c.Update(ctx, tcObj); err != nil {
+			t.Fatalf("update default TracerConfig: %v", err)
+		}
 	}
 	t.Cleanup(func() {
 		// Best-effort cleanup for cluster-scoped resources envtest does
@@ -50,7 +60,7 @@ func TestTracerConfigReconciler_EnvtestLifecycle(t *testing.T) {
 			return c.Get(ctx, types.NamespacedName{Name: AgentDaemonSetName(), Namespace: systemNS}, &ds)
 		},
 		func() error {
-			_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: "lifecycle"}})
+			_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: tcObj.Name}})
 			return err
 		},
 	)

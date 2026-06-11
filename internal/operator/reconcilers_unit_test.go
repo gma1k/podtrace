@@ -761,7 +761,11 @@ func TestResolveTracerConfig_NotFoundReturnsNil(t *testing.T) {
 	scheme := newOperatorScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 	r := &PodTraceSessionReconciler{Client: c, Scheme: scheme}
-	if got := r.resolveTracerConfig(context.Background()); got != nil {
+	got, err := r.resolveTracerConfig(context.Background())
+	if err != nil {
+		t.Fatalf("NotFound must not surface as an error, got %v", err)
+	}
+	if got != nil {
 		t.Errorf("expected nil when default TracerConfig missing, got %+v", got)
 	}
 }
@@ -774,7 +778,10 @@ func TestResolveTracerConfig_FoundReturnsObject(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tc).Build()
 	r := &PodTraceSessionReconciler{Client: c, Scheme: scheme}
-	got := r.resolveTracerConfig(context.Background())
+	got, err := r.resolveTracerConfig(context.Background())
+	if err != nil {
+		t.Fatalf("resolveTracerConfig: %v", err)
+	}
 	if got == nil {
 		t.Fatal("expected non-nil")
 	}

@@ -236,7 +236,7 @@ func TestFin_ScheduleReconcile_NamespaceTerminating(t *testing.T) {
 			Name:              "due",
 			Namespace:         "default",
 			UID:               "due-uid",
-			CreationTimestamp: metav1.NewTime(fixedScheduleNow.Add(-24 * time.Hour)),
+			CreationTimestamp: metav1.NewTime(fixedScheduleNow.Add(-6 * time.Minute)),
 		},
 		Spec: podtracev1alpha1.PodTraceScheduleSpec{
 			Schedule: "*/5 * * * *",

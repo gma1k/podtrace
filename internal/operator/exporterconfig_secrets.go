@@ -1,8 +1,34 @@
 package operator
 
 import (
+	"context"
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+// exporterConfigsReferencingSecret returns the ExporterConfigs in the
+// Secret's namespace whose spec references it (credential keys or
+// headersFromSecret). Used by the PodTrace/Session Secret watches: bundle
+// Secrets are COPIES of the referenced data, so a credential rotation must
+// re-trigger the CRs that snapshot it — previously rotated credentials
+// propagated only on the ~10h cache resync.
+func exporterConfigsReferencingSecret(ctx context.Context, c client.Client, secret client.Object) []podtracev1alpha1.ExporterConfig {
+	var ecs podtracev1alpha1.ExporterConfigList
+	if err := c.List(ctx, &ecs, client.InNamespace(secret.GetNamespace())); err != nil {
+		return nil
+	}
+	var out []podtracev1alpha1.ExporterConfig
+	for i := range ecs.Items {
+		ec := &ecs.Items[i]
+		for _, ref := range collectSecretRefs(ec.Spec) {
+			if ref.Name == secret.GetName() {
+				out = append(out, *ec)
+				break
+			}
+		}
+	}
+	return out
+}
 
 // secretRef is one (Secret-name, required-key) pair an ExporterConfig
 // depends on.

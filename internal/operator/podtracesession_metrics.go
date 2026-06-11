@@ -34,7 +34,7 @@ var (
 		Buckets: []float64{0.5, 1, 2, 5, 10, 20, 30, 60, 120, 300, 600},
 	}, []string{"backend", "result"})
 
-	observed   = struct {
+	observed = struct {
 		sync.Mutex
 		seen map[reportObservationKey]struct{}
 	}{seen: map[reportObservationKey]struct{}{}}

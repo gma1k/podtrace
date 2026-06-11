@@ -3,6 +3,8 @@ package operator
 import (
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"sort"
 	"strings"
 	"time"
@@ -125,6 +127,33 @@ func (r *PodTraceScheduleReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			}
 			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
+	}
+
+	// Bounded catch-up, mirroring CronJob's >100-missed-runs guard: without
+	// startingDeadlineSeconds, every missed tick used to replay serially —
+	// a schedule suspended for a month at "* * * * *" would fire tens of
+	// thousands of stale sessions. Past the bound, the backlog is skipped
+	// and the schedule resumes from now.
+	missed := 0
+	for t := nextRun; !t.After(now); t = cronSched.Next(t) {
+		missed++
+		if missed > maxMissedRuns {
+			break
+		}
+	}
+	if missed > maxMissedRuns {
+		t := metav1.NewTime(now)
+		sch.Status.LastScheduleTime = &t
+		if err := r.applyHistoryLimits(ctx, &sch, succeeded, failed); err != nil {
+			return ctrl.Result{}, err
+		}
+		r.refreshStatus(&sch, active, mostRecentSuccess(succeeded))
+		r.setCondition(&sch, ConditionReconciled, metav1.ConditionTrue, "TooManyMissedRuns",
+			fmt.Sprintf("more than %d missed runs since %s; backlog skipped, resuming from now", maxMissedRuns, base.Format(time.RFC3339)))
+		if err := r.patchStatus(ctx, &sch); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: requeueAfter(cronSched.Next(now), now)}, nil
 	}
 
 	// MaxActiveSessions safety valve: independent of ConcurrencyPolicy.
@@ -432,15 +461,34 @@ func (r *PodTraceScheduleReconciler) setCondition(sch *podtracev1alpha1.PodTrace
 	})
 }
 
+// patchStatus writes the computed status, retrying on optimistic-concurrency
+// conflicts by re-reading the latest object and re-applying the computed
+// status. Conflicts used to be swallowed with no requeue — for a schedule
+// that silently dropped status.lastScheduleTime, and under ReplaceConcurrent
+// the re-derived tick first deleted the session it had just created.
 func (r *PodTraceScheduleReconciler) patchStatus(ctx context.Context, sch *podtracev1alpha1.PodTraceSchedule) error {
-	if err := r.Status().Update(ctx, sch); err != nil {
-		if apierrors.IsConflict(err) {
+	desired := sch.Status.DeepCopy()
+	key := types.NamespacedName{Namespace: sch.Namespace, Name: sch.Name}
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var latest podtracev1alpha1.PodTraceSchedule
+		if err := r.Get(ctx, key, &latest); err != nil {
+			return err
+		}
+		latest.Status = *desired.DeepCopy()
+		return r.Status().Update(ctx, &latest)
+	})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
 			return nil
 		}
 		return fmt.Errorf("update status: %w", err)
 	}
 	return nil
 }
+
+// maxMissedRuns bounds catch-up replay after a long suspension or operator
+// outage, mirroring CronJob's "too many missed start times" guard.
+const maxMissedRuns = 100
 
 // requeueAfter clamps the gap between now and nextRun into the
 // [floor, ceiling] window.
