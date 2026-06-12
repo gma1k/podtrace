@@ -76,8 +76,21 @@ func kubeconfigLoadingRules() *clientcmd.ClientConfigLoadingRules {
 }
 
 func NamespaceFromContext() (string, bool) {
+	return NamespaceFromKubeconfig("")
+}
+
+// NamespaceFromKubeconfig resolves the current context's namespace from an
+// explicit kubeconfig path, falling back to the default loading rules when
+// the path is empty. Callers that build their client from a --kubeconfig
+// flag must resolve the namespace from the SAME file, or the namespace and
+// the cluster can come from two different kubeconfigs.
+func NamespaceFromKubeconfig(path string) (string, bool) {
+	rules := kubeconfigLoadingRules()
+	if path != "" {
+		rules = &clientcmd.ClientConfigLoadingRules{ExplicitPath: path}
+	}
 	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		kubeconfigLoadingRules(), &clientcmd.ConfigOverrides{})
+		rules, &clientcmd.ConfigOverrides{})
 	ns, _, err := clientConfig.Namespace()
 	if err != nil || ns == "" {
 		return "", false

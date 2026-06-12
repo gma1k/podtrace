@@ -354,7 +354,8 @@ func synthBundleForHash(p *podtracev1alpha1.PolicyStatus) *bundle.Payload {
 	}
 	b := &bundle.Payload{}
 	if p.EffectiveSampleRate != nil {
-		b.Sample = float64(*p.EffectiveSampleRate) / 100.0
+		sample := float64(*p.EffectiveSampleRate) / 100.0
+		b.Sample = &sample
 	}
 	if len(p.Filters) > 0 {
 		filters := make([]bundle.FilterCategory, len(p.Filters))

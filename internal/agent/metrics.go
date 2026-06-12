@@ -266,8 +266,8 @@ func (m *Metrics) ObserveEffectiveSampleRate(cr CRKey, b *BundlePayload) {
 		return
 	}
 	rate := 1.0
-	if b != nil && b.Sample > 0 {
-		rate = b.Sample
+	if b != nil && b.Sample != nil {
+		rate = *b.Sample
 	}
 	m.EffectiveSampleRate.WithLabelValues(cr.Namespace, cr.Name).Set(rate)
 	if m.PolicyGeneration != nil && b != nil {

@@ -27,13 +27,13 @@ func TestLoadBundle_OTLPLiteral(t *testing.T) {
 			ResourceVersion: "42",
 		},
 		Data: map[string]string{
-			"type":              "otlp",
-			"endpoint":          "otel:4318",
-			"protocol":          "http",
-			"insecure":          "false",
-			"headers.X-Env":     "prod",
-			"headers.X-Tenant":  "team-a",
-			"sample_percent":    "50",
+			"type":             "otlp",
+			"endpoint":         "otel:4318",
+			"protocol":         "http",
+			"insecure":         "false",
+			"headers.X-Env":    "prod",
+			"headers.X-Tenant": "team-a",
+			"sample_percent":   "50",
 		},
 	}
 
@@ -48,7 +48,7 @@ func TestLoadBundle_OTLPLiteral(t *testing.T) {
 	if payload.Type != bundle.TypeOTLP || payload.Endpoint != "otel:4318" {
 		t.Errorf("payload wrong: %+v", payload)
 	}
-	if payload.Sample != 0.5 {
+	if payload.Sample == nil || *payload.Sample != 0.5 {
 		t.Errorf("sample=%v want 0.5", payload.Sample)
 	}
 	if payload.Headers["X-Env"] != "prod" || payload.Headers["X-Tenant"] != "team-a" {
@@ -233,8 +233,8 @@ func TestBuildExporter_NilPayload(t *testing.T) {
 
 func TestClassifyExporterError(t *testing.T) {
 	cases := []struct {
-		err    error
-		want   string
+		err  error
+		want string
 	}{
 		{nil, ""},
 		{errSentinel("nil bundle payload"), ExporterErrNilPayload},

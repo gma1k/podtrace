@@ -24,20 +24,25 @@ import (
 // make sense on the workstation. --metrics is also stripped (with a warning)
 // because the in-pod port can't be reached from the user's machine.
 var spawnControlFlags = map[string]struct{}{
-	"local":            {},
-	"image":            {},
-	"spawn-namespace":  {},
-	"service-account":  {},
-	"dynamic-spawn":    {},
-	"keep-spawn-pod":   {},
-	"namespace":        {},
-	"namespaces":       {},
-	"pods":             {},
-	"pod-selector":     {},
-	"all-in-namespace": {},
-	"app":              {},
-	"label":            {},
-	"all-namespaces":   {},
+	// The Splunk HEC token must never ride in the child argv: Pod argv is
+	// persisted in the cluster object and visible in `ps` on the node. It
+	// travels as the PODTRACE_SPLUNK_TOKEN env var instead (read by
+	// config in the spawn pod).
+	"tracing-splunk-token": {},
+	"local":                {},
+	"image":                {},
+	"spawn-namespace":      {},
+	"service-account":      {},
+	"dynamic-spawn":        {},
+	"keep-spawn-pod":       {},
+	"namespace":            {},
+	"namespaces":           {},
+	"pods":                 {},
+	"pod-selector":         {},
+	"all-in-namespace":     {},
+	"app":                  {},
+	"label":                {},
+	"all-namespaces":       {},
 }
 
 // maybeSpawnOnNode runs the spawn flow when appropriate. The boolean return
@@ -140,6 +145,7 @@ func maybeSpawnOnNode(ctx context.Context, cmd *cobra.Command, resolver pkgkube.
 		Image:                 image,
 		SpawnNamespace:        ns,
 		BuildChildArgs:        build,
+		ExtraEnv:              splunkTokenEnv(),
 		OwnerHost:             host,
 		OwnerPID:              os.Getpid(),
 		Streams:               streams,
@@ -156,6 +162,17 @@ func maybeSpawnOnNode(ctx context.Context, cmd *cobra.Command, resolver pkgkube.
 		return true, err
 	}
 	return true, nil
+}
+
+// splunkTokenEnv carries --tracing-splunk-token into the spawn pod as an
+// environment variable. It is stripped from the child argv (see
+// spawnControlFlags): Pod argv is persisted in the cluster object and
+// visible in ps on the node.
+func splunkTokenEnv() []corev1.EnvVar {
+	if tracingSplunkToken == "" {
+		return nil
+	}
+	return []corev1.EnvVar{{Name: "PODTRACE_SPLUNK_TOKEN", Value: tracingSplunkToken}}
 }
 
 // clusterHandles pulls the kube clientset and rest.Config from the resolver.

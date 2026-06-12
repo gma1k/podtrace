@@ -948,7 +948,7 @@ func TestPolicySnapshotFromBundle_FullRoundTrip(t *testing.T) {
 	b := &BundlePayload{
 		Type:             "otlp",
 		Endpoint:         "x:4318",
-		Sample:           0.5,
+		Sample:           samplePtr(0.5),
 		PolicyGeneration: 9,
 		Filters: []bundlepkg.FilterCategory{
 			bundlepkg.FilterDNS,
@@ -1054,3 +1054,5 @@ func TestPolicySnapshotFromBundle_NilSafe(t *testing.T) {
 		t.Errorf("nil bundle should yield zero snapshot, got %+v", snap)
 	}
 }
+
+func samplePtr(v float64) *float64 { return &v }

@@ -49,7 +49,7 @@ func TestNewOperatorCmd_FlagsMapCleanlyToOptions(t *testing.T) {
 	opts.leaderElect, _ = cmd.Flags().GetBool("leader-elect")
 	opts.webhookPort, _ = cmd.Flags().GetInt("webhook-port")
 
-	runtimeOpts := toOperatorOptions(opts)
+	runtimeOpts := toOperatorOptions(opts, cmd.Flags().Changed("leader-elect-namespace"))
 	if runtimeOpts.SystemNamespace != "custom-ns" {
 		t.Errorf("SystemNamespace=%q want custom-ns", runtimeOpts.SystemNamespace)
 	}
@@ -71,7 +71,7 @@ func TestToOperatorOptions_EmptyLeaderNSFallsBackToSystemNS(t *testing.T) {
 		systemNamespace:      "sys-ns",
 		leaderElectNamespace: "",
 	}
-	got := toOperatorOptions(opts)
+	got := toOperatorOptions(opts, false)
 	if got.LeaderElectionNamespace != "sys-ns" {
 		t.Errorf("LeaderElectionNamespace=%q, want sys-ns (fallback)", got.LeaderElectionNamespace)
 	}
@@ -84,7 +84,7 @@ func TestToOperatorOptions_PodNamespaceEnvOverridesDefault(t *testing.T) {
 		systemNamespace:      "sys-ns",
 		leaderElectNamespace: "podtrace-system",
 	}
-	got := toOperatorOptions(opts)
+	got := toOperatorOptions(opts, false)
 	if got.LeaderElectionNamespace != "pod-actual-ns" {
 		t.Errorf("LeaderElectionNamespace=%q, want pod-actual-ns (env override)", got.LeaderElectionNamespace)
 	}
@@ -97,9 +97,26 @@ func TestToOperatorOptions_ExplicitLeaderNSWinsOverEnv(t *testing.T) {
 		systemNamespace:      "sys-ns",
 		leaderElectNamespace: "explicit-ns",
 	}
-	got := toOperatorOptions(opts)
+	got := toOperatorOptions(opts, true)
 	if got.LeaderElectionNamespace != "explicit-ns" {
 		t.Errorf("LeaderElectionNamespace=%q, want explicit-ns", got.LeaderElectionNamespace)
+	}
+}
+
+// TestToOperatorOptions_ExplicitDefaultValueWinsOverEnv: explicitness is
+// cobra's Changed, not a comparison against the default literal — a user
+// explicitly passing --leader-elect-namespace=podtrace-system was silently
+// overridden by POD_NAMESPACE.
+func TestToOperatorOptions_ExplicitDefaultValueWinsOverEnv(t *testing.T) {
+	t.Setenv("POD_NAMESPACE", "pod-actual-ns")
+
+	opts := &operatorOptions{
+		systemNamespace:      "sys-ns",
+		leaderElectNamespace: "podtrace-system",
+	}
+	got := toOperatorOptions(opts, true)
+	if got.LeaderElectionNamespace != "podtrace-system" {
+		t.Errorf("LeaderElectionNamespace=%q, want the explicitly passed default", got.LeaderElectionNamespace)
 	}
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -29,6 +30,7 @@ import (
 	tracerpkg "github.com/podtrace/podtrace/internal/ebpf/tracer"
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/internal/kubernetes"
+	"github.com/podtrace/podtrace/internal/kubernetes/nodespawn"
 	"github.com/podtrace/podtrace/internal/logger"
 	"github.com/podtrace/podtrace/internal/metricsexporter"
 	"github.com/podtrace/podtrace/internal/profiling"
@@ -169,10 +171,21 @@ func main() {
 		}
 	}
 
-	if err := rootCmd.Execute(); err != nil {
-		exitFunc(1)
+	err := rootCmd.Execute()
+	// Sync BEFORE exiting: a deferred Sync after exitFunc never ran
+	// (os.Exit skips defers), so the logs explaining a failure were the
+	// ones most likely to be lost.
+	logger.Sync()
+	if err != nil {
+		code := 1
+		var exitErr *nodespawn.ExitError
+		if errors.As(err, &exitErr) && exitErr.Code != 0 {
+			// Propagate the spawned pod's real exit code; collapsing
+			// everything to 1 broke scripting around the CLI.
+			code = exitErr.Code
+		}
+		exitFunc(code)
 	}
-	defer logger.Sync()
 }
 
 func runPodtrace(cmd *cobra.Command, args []string) error {
@@ -331,11 +344,30 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	sigChan := make(chan os.Signal, 1)
+	sigChan := make(chan os.Signal, 2)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	// handlerDone disarms the handler when the run returns, so a signal
+	// arriving after completion cannot force-exit the process.
+	handlerDone := make(chan struct{})
+	defer close(handlerDone)
+	defer signal.Stop(sigChan)
 	go func() {
-		<-sigChan
-		cancel()
+		select {
+		case <-sigChan:
+			cancel()
+		case <-handlerDone:
+			return
+		}
+		// A second interrupt must still work: if graceful shutdown hangs
+		// (stuck upload, wedged exporter), the user can force an exit
+		// instead of being permanently ignored.
+		select {
+		case <-sigChan:
+			_, _ = fmt.Fprintln(os.Stderr, "second interrupt — exiting immediately")
+			logger.Sync()
+			exitFunc(130)
+		case <-handlerDone:
+		}
 	}()
 
 	resolver, err := resolverFactory()
@@ -756,6 +788,37 @@ func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Eve
 	batchTicker := time.NewTicker(config.BatchProcessingInterval)
 	defer batchTicker.Stop()
 	eventBatch := make([]*events.Event, 0, config.EventBatchSize)
+	// flushBatch feeds every pending event to the diagnostician (and the
+	// tracing manager). The terminal paths MUST flush too: finishing the
+	// run with a partially-filled batch systematically undercounted the
+	// tail of every diagnose run.
+	flushBatch := func() {
+		if len(eventBatch) == 0 {
+			return
+		}
+		for _, e := range eventBatch {
+			var k8sCtx map[string]interface{}
+			if enricher != nil {
+				enriched := enricher.EnrichEvent(ctx, e)
+				if enriched != nil && enriched.KubernetesContext != nil {
+					k8sCtx = buildK8sContextMap(enriched, resolveSourcePod(resolveSource, e))
+					diagnostician.AddEventWithContext(e, k8sCtx)
+				} else {
+					diagnostician.AddEvent(e)
+				}
+			} else {
+				diagnostician.AddEvent(e)
+			}
+			if tracingManager != nil && enableTracing {
+				var k8sCtxInterface interface{}
+				if k8sCtx != nil {
+					k8sCtxInterface = k8sCtx
+				}
+				tracingManager.ProcessEvent(e, k8sCtxInterface)
+			}
+		}
+		eventBatch = eventBatch[:0]
+	}
 
 	for {
 		select {
@@ -763,55 +826,12 @@ func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Eve
 			attachSourcePod(event, resolveSource)
 			eventBatch = append(eventBatch, event)
 			if len(eventBatch) >= config.EventBatchSize {
-				for _, e := range eventBatch {
-					var k8sCtx map[string]interface{}
-					if enricher != nil {
-						enriched := enricher.EnrichEvent(ctx, e)
-						if enriched != nil && enriched.KubernetesContext != nil {
-							k8sCtx = buildK8sContextMap(enriched, resolveSourcePod(resolveSource, e))
-							diagnostician.AddEventWithContext(e, k8sCtx)
-						} else {
-							diagnostician.AddEvent(e)
-						}
-					} else {
-						diagnostician.AddEvent(e)
-					}
-					if tracingManager != nil && enableTracing {
-						var k8sCtxInterface interface{}
-						if k8sCtx != nil {
-							k8sCtxInterface = k8sCtx
-						}
-						tracingManager.ProcessEvent(e, k8sCtxInterface)
-					}
-				}
-				eventBatch = eventBatch[:0]
+				flushBatch()
 			}
 		case <-batchTicker.C:
-			if len(eventBatch) > 0 {
-				for _, e := range eventBatch {
-					var k8sCtx map[string]interface{}
-					if enricher != nil {
-						enriched := enricher.EnrichEvent(ctx, e)
-						if enriched != nil && enriched.KubernetesContext != nil {
-							k8sCtx = buildK8sContextMap(enriched, resolveSourcePod(resolveSource, e))
-							diagnostician.AddEventWithContext(e, k8sCtx)
-						} else {
-							diagnostician.AddEvent(e)
-						}
-					} else {
-						diagnostician.AddEvent(e)
-					}
-					if tracingManager != nil && enableTracing {
-						var k8sCtxInterface interface{}
-						if k8sCtx != nil {
-							k8sCtxInterface = k8sCtx
-						}
-						tracingManager.ProcessEvent(e, k8sCtxInterface)
-					}
-				}
-				eventBatch = eventBatch[:0]
-			}
+			flushBatch()
 		case <-timeout:
+			flushBatch()
 			diagnostician.Finish()
 			report := diagnostician.GenerateReport()
 			if profilingHandler != nil {
@@ -824,6 +844,7 @@ func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Eve
 			fmt.Println(report)
 			return nil
 		case <-ctx.Done():
+			flushBatch()
 			diagnostician.Finish()
 			report := diagnostician.GenerateReport()
 			if profilingHandler != nil {
