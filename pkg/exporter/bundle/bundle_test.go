@@ -23,7 +23,7 @@ func TestFromConfigMapData_OTLPLiteralHeaders(t *testing.T) {
 	if p.Type != TypeOTLP || p.Endpoint != "otel:4318" {
 		t.Errorf("payload wrong: %+v", p)
 	}
-	if p.Sample != 0.5 {
+	if p.Sample == nil || *p.Sample != 0.5 {
 		t.Errorf("sample=%v want 0.5", p.Sample)
 	}
 	if p.Headers["X-Env"] != "prod" || p.Headers["X-Tenant"] != "team-a" {
@@ -102,7 +102,7 @@ func TestConfigMapRoundTrip(t *testing.T) {
 		Endpoint: "otel:4318",
 		Protocol: "grpc",
 		Insecure: true,
-		Sample:   0.25,
+		Sample:   samplePtr(0.25),
 		Headers: map[string]string{
 			"X-Env":    "prod",
 			"X-Tenant": "team-a",
@@ -119,7 +119,7 @@ func TestConfigMapRoundTrip(t *testing.T) {
 	if parsed.Type != original.Type || parsed.Protocol != original.Protocol {
 		t.Errorf("type/protocol round-trip: %+v vs %+v", original, parsed)
 	}
-	if parsed.Sample != original.Sample {
+	if !reflect.DeepEqual(original.Sample, parsed.Sample) {
 		t.Errorf("sample round-trip: %v vs %v", original.Sample, parsed.Sample)
 	}
 }
@@ -162,7 +162,7 @@ func TestYAMLRoundTrip(t *testing.T) {
 		Endpoint: "otel:4318",
 		Protocol: "http",
 		Insecure: true,
-		Sample:   0.5,
+		Sample:   samplePtr(0.5),
 		Headers:  map[string]string{"X-Env": "prod"},
 	}
 	raw, err := ToYAML(original)
@@ -176,7 +176,7 @@ func TestYAMLRoundTrip(t *testing.T) {
 	if !reflect.DeepEqual(original.Headers, parsed.Headers) {
 		t.Errorf("headers round-trip: %+v vs %+v", original, parsed)
 	}
-	if parsed.Type != original.Type || parsed.Sample != original.Sample {
+	if parsed.Type != original.Type || !reflect.DeepEqual(original.Sample, parsed.Sample) {
 		t.Errorf("round-trip mismatch: %+v vs %+v", original, parsed)
 	}
 }
@@ -280,17 +280,17 @@ func TestVersion_WritersAlwaysStampCurrent(t *testing.T) {
 // not set"
 func TestTargetNamespaces_ConfigMapTriState(t *testing.T) {
 	cases := []struct {
-		name      string
-		input     *Payload
-		wantKey   bool
-		wantValue string
-		wantField []string
+		name       string
+		input      *Payload
+		wantKey    bool
+		wantValue  string
+		wantField  []string
 		fieldIsNil bool
 	}{
 		{
-			name:      "NilFieldOmitsKey",
-			input:     &Payload{Type: TypeOTLP, Endpoint: "x:4318", TargetNamespaces: nil},
-			wantKey:   false,
+			name:       "NilFieldOmitsKey",
+			input:      &Payload{Type: TypeOTLP, Endpoint: "x:4318", TargetNamespaces: nil},
+			wantKey:    false,
 			fieldIsNil: true,
 		},
 		{
@@ -463,13 +463,13 @@ func TestPolicyHash_StableAcrossEquivalentPolicies(t *testing.T) {
 	five := int32(5)
 	a := &Payload{
 		Type: TypeOTLP, Endpoint: "a:4318",
-		Sample:     0.5,
+		Sample:     samplePtr(0.5),
 		Filters:    []FilterCategory{FilterDNS, FilterNet},
 		Thresholds: &Thresholds{FSSlowMs: &five},
 	}
 	b := &Payload{
 		Type: TypeJaeger, Endpoint: "b:14268",
-		Sample:     0.5,
+		Sample:     samplePtr(0.5),
 		Filters:    []FilterCategory{FilterNet, FilterDNS}, // unsorted
 		Thresholds: &Thresholds{FSSlowMs: &five},
 	}
@@ -485,15 +485,15 @@ func TestPolicyHash_ChangesWhenAnyPolicyFieldChanges(t *testing.T) {
 	ten := int32(10)
 	base := &Payload{
 		Type: TypeOTLP, Endpoint: "x:4318",
-		Sample:     0.5,
+		Sample:     samplePtr(0.5),
 		Filters:    []FilterCategory{FilterDNS},
 		Thresholds: &Thresholds{FSSlowMs: &five},
 	}
 	mutations := map[string]func(*Payload){
-		"sample_changed":     func(p *Payload) { p.Sample = 0.25 },
-		"filter_added":       func(p *Payload) { p.Filters = append(p.Filters, FilterNet) },
-		"threshold_changed":  func(p *Payload) { p.Thresholds.FSSlowMs = &ten },
-		"threshold_removed":  func(p *Payload) { p.Thresholds = nil },
+		"sample_changed":    func(p *Payload) { p.Sample = samplePtr(0.25) },
+		"filter_added":      func(p *Payload) { p.Filters = append(p.Filters, FilterNet) },
+		"threshold_changed": func(p *Payload) { p.Thresholds.FSSlowMs = &ten },
+		"threshold_removed": func(p *Payload) { p.Thresholds = nil },
 	}
 	baseHash := PolicyHash(base)
 	for name, mutate := range mutations {
@@ -521,3 +521,5 @@ func TestPolicyGeneration_RoundTrip(t *testing.T) {
 		t.Errorf("policy_generation round-trip = %d, want 42", parsed.PolicyGeneration)
 	}
 }
+
+func samplePtr(v float64) *float64 { return &v }

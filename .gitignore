@@ -3,8 +3,8 @@ bin/
 *.o
 *.so
 
-# OLM bundle build
-bundle/
+# OLM bundle
+/bundle/
 
 # Go
 *.exe

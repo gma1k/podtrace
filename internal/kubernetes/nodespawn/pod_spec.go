@@ -32,6 +32,11 @@ const (
 
 // PodSpecOptions configures BuildPodSpec.
 type PodSpecOptions struct {
+	// ExtraEnv carries values that must not appear in the container argv
+	// (e.g. the Splunk HEC token): argv is persisted in the Pod object
+	// and visible in ps on the node.
+	ExtraEnv []corev1.EnvVar
+
 	NodeName              string
 	Namespace             string
 	Image                 string
@@ -119,6 +124,7 @@ func BuildPodSpec(opts PodSpecOptions) (*corev1.Pod, error) {
 			env = append(env, corev1.EnvVar{Name: name, Value: v})
 		}
 	}
+	env = append(env, opts.ExtraEnv...)
 
 	container := corev1.Container{
 		Name:                     "podtrace",

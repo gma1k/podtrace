@@ -508,7 +508,7 @@ func TestSDKEventExporter_EffectiveSampleRateGauge(t *testing.T) {
 		Type:             bundle.TypeOTLP,
 		Endpoint:         "x:4318",
 		Insecure:         true,
-		Sample:           0.25,
+		Sample:           samplePtrSDK(0.25),
 		PolicyGeneration: 3,
 	}
 	cr := CRKey{Namespace: "ns", Name: "cr"}
@@ -707,3 +707,5 @@ func TestDeliveryObservingExporter_RecordsFailures(t *testing.T) {
 		t.Fatalf("counter changed on success path: got %v want 3", v)
 	}
 }
+
+func samplePtrSDK(v float64) *float64 { return &v }

@@ -75,7 +75,7 @@ func applyPayloadToConfig(p *bundle.Payload) {
 			config.DataDogAPIKey = string(p.Credential)
 		}
 	}
-	if p.Sample > 0 {
-		config.TracingSampleRate = p.Sample
+	if p.Sample != nil {
+		config.TracingSampleRate = *p.Sample
 	}
 }
