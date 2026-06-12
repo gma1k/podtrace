@@ -16,6 +16,7 @@ const (
 	BackendErrPermission       = "permission_denied"
 	BackendErrBTFUnavailable   = "btf_unavailable"
 	BackendErrKernelTooOld     = "kernel_too_old"
+	BackendErrVerifierRejected = "verifier_rejected"
 	BackendErrCollection       = "collection_failed"
 	BackendErrRingBuffer       = "ringbuf_failed"
 	BackendErrMapLookup        = "map_lookup_failed"
@@ -45,7 +46,12 @@ func ClassifyBackendError(err error) string {
 		return BackendErrBTFUnavailable
 	case strings.Contains(msg, "verifier rejected"),
 		strings.Contains(msg, "verifier error"):
-		return BackendErrKernelTooOld
+		// A verifier rejection is NOT evidence of an old kernel: on
+		// modern kernels it usually means the verifier got stricter (or
+		// the program grew past a limit). Classifying it as
+		// kernel_too_old sent operators chasing upgrades that would make
+		// the problem worse, not better.
+		return BackendErrVerifierRejected
 	case strings.Contains(msg, "ring buffer"),
 		strings.Contains(msg, "ringbuf"):
 		return BackendErrRingBuffer

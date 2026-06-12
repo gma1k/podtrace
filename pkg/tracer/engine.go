@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/podtrace/podtrace/internal/events"
 )
@@ -16,19 +17,23 @@ type Config struct {
 
 	ExportBatchSize int
 
+	// ShutdownFlushTimeout bounds the final flush + drain on shutdown so
+	// a hung exporter cannot block engine teardown. Defaults to 10s.
+	ShutdownFlushTimeout time.Duration
+
 	Observer EngineObserver
 }
 
 // EngineStats is a point-in-time counter snapshot. Thread-safe snapshot is
 // exposed via Engine.Stats.
 type EngineStats struct {
-	EventsReceived   int64
-	EventsExported   int64
-	EventsDropped    int64
-	ActiveTargets    int
-	ExporterFailure  int64
-	CgroupsAttached  int64
-	CgroupsDetached  int64
+	EventsReceived  int64
+	EventsExported  int64
+	EventsDropped   int64
+	ActiveTargets   int
+	ExporterFailure int64
+	CgroupsAttached int64
+	CgroupsDetached int64
 }
 
 // Engine orchestrates a TracerBackend + Exporters over a stream of
@@ -70,6 +75,9 @@ func NewEngine(backend TracerBackend, exporters []Exporter, cfg Config) (Engine,
 	}
 	if cfg.ExportBatchSize <= 0 {
 		cfg.ExportBatchSize = 256
+	}
+	if cfg.ShutdownFlushTimeout <= 0 {
+		cfg.ShutdownFlushTimeout = 10 * time.Second
 	}
 	return &engine{
 		backend:       backend,
@@ -144,7 +152,6 @@ func (e *engine) applyTargets(set TargetSet) error {
 	}
 
 	e.mu.Lock()
-	defer e.mu.Unlock()
 
 	added, removed := 0, 0
 	for path := range desired {
@@ -159,10 +166,12 @@ func (e *engine) applyTargets(set TargetSet) error {
 	}
 
 	if added == 0 && removed == 0 {
+		e.mu.Unlock()
 		return nil
 	}
 
 	if err := e.backend.SetCgroups(snapshot); err != nil {
+		e.mu.Unlock()
 		return err
 	}
 
@@ -185,7 +194,11 @@ func (e *engine) applyTargets(set TargetSet) error {
 	e.activeCgroups = next
 	e.cgroupsAttached += int64(added)
 	e.cgroupsDetached += int64(removed)
+	e.mu.Unlock()
 
+	// Observer callbacks run OUTSIDE the engine lock: an observer calling
+	// back into Stats() (which takes a read lock) deadlocked, and a slow
+	// observer stalled every target reconcile.
 	if obs := e.cfg.Observer; obs != nil {
 		if added > 0 {
 			obs.OnCgroupsAttached(added)
@@ -199,31 +212,73 @@ func (e *engine) applyTargets(set TargetSet) error {
 
 func (e *engine) dispatchLoop(ctx context.Context, eventCh <-chan *events.Event) {
 	batch := make([]*events.Event, 0, e.cfg.ExportBatchSize)
-	flush := func() {
+	flush := func(flushCtx context.Context) {
 		if len(batch) == 0 {
 			return
 		}
+		delivered := len(e.exporters) == 0
 		for _, ex := range e.exporters {
-			if err := ex.Export(ctx, batch); err != nil {
+			if err := ex.Export(flushCtx, batch); err != nil {
 				e.mu.Lock()
 				e.exporterFailure++
 				e.mu.Unlock()
+			} else {
+				delivered = true
 			}
 		}
 		e.mu.Lock()
-		e.eventsExported += int64(len(batch))
+		if delivered {
+			e.eventsExported += int64(len(batch))
+		} else {
+			// No exporter accepted the batch: these events are gone.
+			// EventsDropped used to stay permanently 0, which read as
+			// "nothing was ever lost" even when every export failed.
+			e.eventsDropped += int64(len(batch))
+		}
 		e.mu.Unlock()
 		batch = batch[:0]
+	}
+
+	// shutdownFlush gives the FINAL batch a context that survives the
+	// engine's cancellation: flushing with the already-cancelled run
+	// context made every ctx-honoring exporter drop the tail batch of
+	// every run.
+	shutdownFlush := func() {
+		flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), e.cfg.ShutdownFlushTimeout)
+		defer cancel()
+
+		// Drain events still buffered in eventCh (the backend has been
+		// stopped or the channel closed): they were captured and counted
+		// nowhere before.
+	drain:
+		for {
+			select {
+			case ev, ok := <-eventCh:
+				if !ok {
+					break drain
+				}
+				e.mu.Lock()
+				e.eventsReceived++
+				e.mu.Unlock()
+				batch = append(batch, ev)
+				if len(batch) >= e.cfg.ExportBatchSize {
+					flush(flushCtx)
+				}
+			default:
+				break drain
+			}
+		}
+		flush(flushCtx)
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			flush()
+			shutdownFlush()
 			return
 		case ev, ok := <-eventCh:
 			if !ok {
-				flush()
+				shutdownFlush()
 				return
 			}
 			e.mu.Lock()
@@ -231,7 +286,7 @@ func (e *engine) dispatchLoop(ctx context.Context, eventCh <-chan *events.Event)
 			e.mu.Unlock()
 			batch = append(batch, ev)
 			if len(batch) >= e.cfg.ExportBatchSize {
-				flush()
+				flush(ctx)
 			}
 		}
 	}

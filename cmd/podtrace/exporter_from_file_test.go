@@ -14,7 +14,7 @@ func TestApplyPayloadToConfig_OTLP(t *testing.T) {
 	applyPayloadToConfig(&bundle.Payload{
 		Type:     bundle.TypeOTLP,
 		Endpoint: "otel:4318",
-		Sample:   0.25,
+		Sample:   ptrFloat(0.25),
 	})
 	if config.OTLPEndpoint != "otel:4318" {
 		t.Errorf("OTLPEndpoint=%q", config.OTLPEndpoint)
@@ -82,16 +82,16 @@ func TestApplyPayloadToConfig_Zipkin(t *testing.T) {
 	}
 }
 
-func TestApplyPayloadToConfig_ZeroSampleDoesNotOverride(t *testing.T) {
+func TestApplyPayloadToConfig_NilSampleDoesNotOverride(t *testing.T) {
 	defer resetTracingConfig()
 	config.TracingSampleRate = 0.5
 	applyPayloadToConfig(&bundle.Payload{
 		Type:     bundle.TypeOTLP,
 		Endpoint: "otel:4318",
-		Sample:   0,
+		Sample:   nil,
 	})
 	if config.TracingSampleRate != 0.5 {
-		t.Errorf("zero sample should not override; got %v", config.TracingSampleRate)
+		t.Errorf("unset sample must not override; got %v", config.TracingSampleRate)
 	}
 }
 
@@ -209,3 +209,5 @@ func resetTracingConfig() {
 	config.DataDogAPIKey = ""
 	config.TracingSampleRate = config.DefaultTracingSampleRate
 }
+
+func ptrFloat(v float64) *float64 { return &v }

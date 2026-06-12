@@ -55,8 +55,10 @@ func newSDKEventExporter(name string, cr CRKey, b *BundlePayload, spanExporter s
 	defer cancel()
 
 	sampler := sdktrace.AlwaysSample()
-	if b.Sample > 0 && b.Sample < 1 {
-		sampler = sdktrace.TraceIDRatioBased(b.Sample)
+	if b.Sample != nil && *b.Sample < 1 {
+		// An explicit 0 means "export nothing" — TraceIDRatioBased(0)
+		// never samples, which is exactly the user's request.
+		sampler = sdktrace.TraceIDRatioBased(*b.Sample)
 	}
 
 	res, err := resource.New(ctx,

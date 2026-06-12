@@ -314,7 +314,7 @@ func TestNewOTLPEventExporter_RoundTrip(t *testing.T) {
 		Type:     bundle.TypeOTLP,
 		Endpoint: host,
 		Insecure: true,
-		Sample:   0.5,
+		Sample:   samplePtrRT(0.5),
 	})
 	if err != nil {
 		t.Fatalf("newOTLPEventExporter: %v", err)
@@ -673,3 +673,5 @@ func TestMakeCategoryGate_NilBackendReturnsNil(t *testing.T) {
 		t.Error("nil backend must produce nil gate")
 	}
 }
+
+func samplePtrRT(v float64) *float64 { return &v }

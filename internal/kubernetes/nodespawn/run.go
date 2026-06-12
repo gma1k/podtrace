@@ -55,6 +55,10 @@ type RunOptions struct {
 	PollInterval   time.Duration
 
 	KeepSpawnPodOnFailure bool
+
+	// ExtraEnv is forwarded into the spawn pod's environment. Use for
+	// values that must not appear in argv (tokens, credentials).
+	ExtraEnv []corev1.EnvVar
 }
 
 // Run orchestrates the spawn + stream lifecycle. It returns when every per-node
@@ -114,6 +118,7 @@ func Run(ctx context.Context, opts RunOptions) error {
 			ServiceAccountName:    opts.ServiceAccountName,
 			OwnerHost:             opts.OwnerHost,
 			OwnerPID:              opts.OwnerPID,
+			ExtraEnv:              opts.ExtraEnv,
 		})
 		if err != nil {
 			cmu.Lock()

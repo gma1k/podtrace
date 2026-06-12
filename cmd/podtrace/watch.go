@@ -88,7 +88,11 @@ exits. Events flow to the referenced ExporterConfig, not to this terminal.`,
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if !cmd.Flags().Changed("namespace") {
-				if ctxNamespace, ok := kubernetes.NamespaceFromContext(); ok {
+				// Resolve the default namespace from the SAME kubeconfig
+				// the client uses; reading the default loading rules while
+				// the client honors --kubeconfig mixed namespaces across
+				// clusters.
+				if ctxNamespace, ok := kubernetes.NamespaceFromKubeconfig(watchKubeconfig); ok {
 					namespace = ctxNamespace
 				}
 			}

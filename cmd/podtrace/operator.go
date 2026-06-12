@@ -48,7 +48,8 @@ namespace.`,
 			// SIGTERM/SIGINT. It is also process-singleton, so we wire
 			// it once here rather than pushing into internal/operator.
 			ctx := ctrl.SetupSignalHandler()
-			return operator.Run(ctx, toOperatorOptions(opts))
+			leaderNSExplicit := cmd.Flags().Changed("leader-elect-namespace")
+			return operator.Run(ctx, toOperatorOptions(opts, leaderNSExplicit))
 		},
 	}
 
@@ -73,7 +74,7 @@ namespace.`,
 // toOperatorOptions is the sole translation point between the CLI flag
 // struct and the operator package's Options struct. Keeping the CLI
 // layer thin here lets internal/operator be a reusable library.
-func toOperatorOptions(c *operatorOptions) operator.Options {
+func toOperatorOptions(c *operatorOptions, leaderNSExplicit bool) operator.Options {
 	// NODE_NAME / POD_NAMESPACE leak through for leader-elect-namespace
 	// when the user wants "wherever this pod runs"; this first iteration
 	// keeps the flag explicit.
@@ -82,8 +83,11 @@ func toOperatorOptions(c *operatorOptions) operator.Options {
 		leaderNS = c.systemNamespace
 	}
 	// If POD_NAMESPACE is set (common in in-cluster deployments) and the
-	// user did not override leader-elect-namespace, prefer the pod's own NS.
-	if envNS, ok := os.LookupEnv("POD_NAMESPACE"); ok && c.leaderElectNamespace == "podtrace-system" {
+	// user did not pass --leader-elect-namespace, prefer the pod's own NS.
+	// Explicitness comes from cobra's Changed, NOT from comparing against
+	// the default literal: an operator explicitly passing the default
+	// value was silently overridden by the environment.
+	if envNS, ok := os.LookupEnv("POD_NAMESPACE"); ok && !leaderNSExplicit {
 		leaderNS = envNS
 	}
 	return operator.Options{

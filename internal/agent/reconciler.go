@@ -619,8 +619,8 @@ func policySnapshotFromBundle(b *BundlePayload) PolicySnapshot {
 	if b == nil {
 		return out
 	}
-	if b.Sample > 0 {
-		pct := int32(b.Sample*100 + 0.5)
+	if b.Sample != nil {
+		pct := int32(*b.Sample*100 + 0.5)
 		out.EffectiveSamplePercent = &pct
 	}
 	if len(b.Filters) > 0 {

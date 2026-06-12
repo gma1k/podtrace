@@ -81,7 +81,11 @@ type Payload struct {
 
 	Site string `yaml:"site,omitempty"`
 
-	Sample float64 `yaml:"sample,omitempty"`
+	// Sample is the sampling fraction in [0, 1]. nil means "not
+	// configured" (consumers default to sampling everything); an explicit
+	// 0 means "export nothing". A plain float64 could not represent that
+	// difference, so a user asking for 0% silently got 100%.
+	Sample *float64 `yaml:"sample,omitempty"`
 
 	Headers map[string]string `yaml:"headers,omitempty"`
 
@@ -136,7 +140,7 @@ func FromConfigMapData(data map[string]string) (*Payload, error) {
 	if v := data["insecure"]; v != "" {
 		p.Insecure = v == "true"
 	}
-	if v := data["sample_percent"]; v != "" {
+	if v, ok := data["sample_percent"]; ok && v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
 			return nil, fmt.Errorf("bundle: sample_percent %q not an integer: %w", v, err)
@@ -144,7 +148,8 @@ func FromConfigMapData(data map[string]string) (*Payload, error) {
 		if n < 0 || n > 100 {
 			return nil, fmt.Errorf("bundle: sample_percent %d out of range 0-100", n)
 		}
-		p.Sample = float64(n) / 100.0
+		sample := float64(n) / 100.0
+		p.Sample = &sample
 	}
 	for k, v := range data {
 		if rest, ok := strings.CutPrefix(k, "headers."); ok {
@@ -277,8 +282,8 @@ func ToConfigMapData(p *Payload) map[string]string {
 	} else if p.Type == TypeOTLP {
 		out["insecure"] = "false"
 	}
-	if p.Sample > 0 {
-		percent := int(p.Sample*100 + 0.5)
+	if p.Sample != nil {
+		percent := int(*p.Sample*100 + 0.5)
 		out["sample_percent"] = strconv.Itoa(percent)
 	}
 	keys := make([]string, 0, len(p.Headers))
@@ -351,8 +356,8 @@ func PolicyHash(p *Payload) string {
 		filters = dedupeSortedStrings(filters)
 		_, _ = fmt.Fprintf(h, "filters=%s\n", strings.Join(filters, ","))
 	}
-	if p.Sample > 0 {
-		_, _ = fmt.Fprintf(h, "sample_percent=%d\n", int(p.Sample*100+0.5))
+	if p.Sample != nil {
+		_, _ = fmt.Fprintf(h, "sample_percent=%d\n", int(*p.Sample*100+0.5))
 	}
 	if !p.Thresholds.IsZero() {
 		for _, spec := range thresholdFields() {
@@ -376,8 +381,8 @@ func FromYAML(raw []byte) (*Payload, error) {
 	if p.Type == "" {
 		return nil, fmt.Errorf("bundle: missing required field 'type'")
 	}
-	if p.Sample < 0 || p.Sample > 1 {
-		return nil, fmt.Errorf("bundle: sample %v out of range 0-1", p.Sample)
+	if p.Sample != nil && (*p.Sample < 0 || *p.Sample > 1) {
+		return nil, fmt.Errorf("bundle: sample %v out of range 0-1", *p.Sample)
 	}
 	return &p, nil
 }
@@ -391,5 +396,18 @@ func ToYAML(p *Payload) ([]byte, error) {
 	}
 	out := *p
 	out.Version = CurrentVersion
-	return yaml.Marshal(&out)
+	raw, err := yaml.Marshal(&out)
+	if err != nil {
+		return nil, err
+	}
+	// targetNamespaces is tri-state (nil / empty / populated), but
+	// omitempty drops BOTH nil and []string{} — an empty allowlist
+	// ("match nothing") round-tripped to nil ("legacy own-namespace
+	// fallback") and the session traced pods it was told to exclude.
+	// Re-add the key explicitly for the empty-but-set case; FromYAML's
+	// unmarshal already distinguishes a present empty list from absence.
+	if p.TargetNamespaces != nil && len(p.TargetNamespaces) == 0 {
+		raw = append(raw, []byte("targetNamespaces: []\n")...)
+	}
+	return raw, nil
 }
