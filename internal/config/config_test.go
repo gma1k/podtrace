@@ -169,9 +169,10 @@ func TestAllowNonLoopbackMetrics(t *testing.T) {
 		expected bool
 	}{
 		{"enabled", "1", true},
+		{"enabled spelled out", "true", true},
 		{"disabled", "0", false},
 		{"not set", "", false},
-		{"invalid", "true", false},
+		{"garbage fails closed", "yes-please", false},
 	}
 
 	for _, tt := range tests {

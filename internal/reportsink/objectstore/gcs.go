@@ -47,6 +47,9 @@ func newGCSSink(ctx context.Context, cfg Config, d destination) (Sink, error) {
 	if endpoint := stringFromCreds(creds, gcsSecretKeyEndpoint); endpoint != "" {
 		opts = append(opts, option.WithEndpoint(endpoint))
 		if saJSON == "" {
+			_, _ = fmt.Fprintf(os.Stderr,
+				`{"component":"objectstore.gcs","level":"warn","message":"custom endpoint without %s: uploading WITHOUT AUTHENTICATION; this mode is for fake-gcs-server/dev only","endpoint":%q}`+"\n",
+				gcsSecretKeyServiceAccountJSON, endpoint)
 			opts = append(opts, option.WithoutAuthentication())
 		}
 	}

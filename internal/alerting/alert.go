@@ -44,6 +44,26 @@ func (a *Alert) Key() string {
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
+// Clone returns a deep copy. Each delivery goroutine works on its own
+// copy because senders mutate the alert (Sanitize truncates fields) while
+// siblings are marshaling it.
+func (a *Alert) Clone() *Alert {
+	if a == nil {
+		return nil
+	}
+	cp := *a
+	if a.Context != nil {
+		cp.Context = make(map[string]interface{}, len(a.Context))
+		for k, v := range a.Context {
+			cp.Context[k] = v
+		}
+	}
+	if a.Recommendations != nil {
+		cp.Recommendations = append([]string(nil), a.Recommendations...)
+	}
+	return &cp
+}
+
 func (a *Alert) Validate() error {
 	if a == nil {
 		return fmt.Errorf("alert is nil")
@@ -148,4 +168,3 @@ func ShouldSendAlert(severity AlertSeverity) bool {
 	minSeverity := ParseSeverity(config.GetAlertMinSeverity())
 	return SeverityLevel(severity) >= SeverityLevel(minSeverity)
 }
-

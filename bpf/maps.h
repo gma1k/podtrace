@@ -179,17 +179,26 @@ struct resource_limit {
 	u32 resource_type;
 };
 
+/* Keyed by (cgroup, resource type): a plain cgroup-id key made CPU,
+ * memory, and IO entries clobber each other, leaving whichever resource
+ * happened to be written last (Go map iteration order). */
+struct resource_key {
+	u64 cgroup_id;
+	u32 resource_type;
+	u32 _pad;
+};
+
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 1024);
-	__type(key, u64);
+	__type(key, struct resource_key);
 	__type(value, struct resource_limit);
 } cgroup_limits SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 1024);
-	__type(key, u64);
+	__type(key, struct resource_key);
 	__type(value, u32);
 } cgroup_alerts SEC(".maps");
 

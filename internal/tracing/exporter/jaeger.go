@@ -1,190 +1,64 @@
 package exporter
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"net/http"
-	"time"
+	"net/url"
+	"strings"
 
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/diagnose/tracker"
 )
 
+// JaegerExporter ships traces to Jaeger over OTLP/HTTP.
+//
+// The previous implementation POSTed a homegrown JSON shape (modeled on the
+// Jaeger UI's read API) to the collector endpoint. No Jaeger collector
+// release ingests that: the legacy /api/traces endpoint speaks Thrift, and
+// modern Jaeger (1.35+, and all of v2) ingests OTLP natively on :4318.
+// Only the httptest stubs in our own tests ever accepted those payloads.
+// Delegating to the OTLP exporter makes the spans actually land in Jaeger,
+// with their original span IDs and parent/child structure.
 type JaegerExporter struct {
-	endpoint   string
-	client     *http.Client
-	enabled    bool
-	sampleRate float64
-}
-
-type JaegerSpan struct {
-	TraceID       string            `json:"traceID"`
-	SpanID        string            `json:"spanID"`
-	ParentSpanID  string            `json:"parentSpanID,omitempty"`
-	OperationName string            `json:"operationName"`
-	StartTime     int64             `json:"startTime"`
-	Duration      int64             `json:"duration"`
-	Tags          map[string]string `json:"tags"`
-	Logs          []JaegerLog       `json:"logs,omitempty"`
-}
-
-type JaegerLog struct {
-	Timestamp int64             `json:"timestamp"`
-	Fields    map[string]string `json:"fields"`
-}
-
-type JaegerProcess struct {
-	ServiceName string            `json:"serviceName"`
-	Tags        map[string]string `json:"tags,omitempty"`
-}
-
-type JaegerSpanData struct {
-	TraceID   string                   `json:"traceID"`
-	Spans     []JaegerSpan             `json:"spans"`
-	Processes map[string]JaegerProcess `json:"processes"`
+	inner    *OTLPExporter
+	endpoint string
 }
 
 func NewJaegerExporter(endpoint string, sampleRate float64) (*JaegerExporter, error) {
-	if endpoint == "" {
-		endpoint = config.DefaultJaegerEndpoint
+	otlpEndpoint := jaegerToOTLPEndpoint(endpoint)
+	inner, err := NewOTLPExporter(otlpEndpoint, sampleRate)
+	if err != nil {
+		return nil, err
 	}
+	return &JaegerExporter{inner: inner, endpoint: otlpEndpoint}, nil
+}
 
-	return &JaegerExporter{
-		endpoint:   endpoint,
-		client:     &http.Client{Timeout: config.TracingExporterTimeout},
-		enabled:    true,
-		sampleRate: sampleRate,
-	}, nil
+// jaegerToOTLPEndpoint translates a legacy Jaeger collector URL into the
+// collector's OTLP/HTTP endpoint: the "/api/traces" suffix is dropped and
+// the classic Thrift port 14268 becomes the OTLP port 4318. Endpoints that
+// already point at an OTLP listener pass through unchanged.
+func jaegerToOTLPEndpoint(endpoint string) string {
+	raw := strings.TrimSpace(endpoint)
+	if raw == "" {
+		raw = config.DefaultJaegerEndpoint
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		u, err = url.Parse("http://" + raw)
+		if err != nil || u.Host == "" {
+			return raw
+		}
+	}
+	u.Path = strings.TrimSuffix(u.Path, "/api/traces")
+	if u.Port() == "14268" {
+		u.Host = u.Hostname() + ":4318"
+	}
+	return u.String()
 }
 
 func (e *JaegerExporter) ExportTraces(traces []*tracker.Trace) error {
-	if !e.enabled || len(traces) == 0 {
-		return nil
-	}
-
-	var errs []error
-	for _, t := range traces {
-		if !e.shouldSample(t) {
-			continue
-		}
-
-		if err := e.exportTrace(t); err != nil {
-			// Keep exporting the remaining traces, but surface the failure:
-			// returning nil here made the manager's exporter-failure
-			// alerting unreachable dead code.
-			errs = append(errs, fmt.Errorf("trace %s: %w", t.TraceID, err))
-		}
-	}
-
-	return errors.Join(errs...)
-}
-
-func (e *JaegerExporter) shouldSample(_ *tracker.Trace) bool {
-	if e.sampleRate >= 1.0 {
-		return true
-	}
-	if e.sampleRate <= 0.0 {
-		return false
-	}
-	return time.Now().UnixNano()%int64(1.0/e.sampleRate) == 0
-}
-
-func (e *JaegerExporter) exportTrace(t *tracker.Trace) error {
-	if len(t.Spans) == 0 {
-		return nil
-	}
-
-	jaegerSpans := make([]JaegerSpan, 0, len(t.Spans))
-	processes := make(map[string]JaegerProcess)
-
-	for _, span := range t.Spans {
-		span.UpdateDuration()
-
-		jaegerSpan := JaegerSpan{
-			TraceID:       span.TraceID,
-			SpanID:        span.SpanID,
-			ParentSpanID:  span.ParentSpanID,
-			OperationName: span.Operation,
-			StartTime:     span.StartTime.UnixMicro(),
-			Duration:      span.Duration.Microseconds(),
-			Tags:          make(map[string]string),
-			Logs:          make([]JaegerLog, 0),
-		}
-
-		for k, v := range span.Attributes {
-			jaegerSpan.Tags[k] = v
-		}
-
-		if span.Error {
-			jaegerSpan.Tags["error"] = "true"
-		}
-
-		serviceName := span.Service
-		if serviceName == "" {
-			serviceName = "unknown"
-		}
-
-		if _, exists := processes[serviceName]; !exists {
-			processes[serviceName] = JaegerProcess{
-				ServiceName: serviceName,
-				Tags:        make(map[string]string),
-			}
-		}
-
-		for _, event := range span.Events {
-			log := JaegerLog{
-				Timestamp: event.TimestampTime().UnixMicro(),
-				Fields: map[string]string{
-					"event":   event.TypeString(),
-					"target":  event.Target,
-					"latency": fmt.Sprintf("%d", event.LatencyNS),
-				},
-			}
-			if event.Error != 0 {
-				log.Fields["error"] = fmt.Sprintf("%d", event.Error)
-			}
-			jaegerSpan.Logs = append(jaegerSpan.Logs, log)
-		}
-
-		jaegerSpans = append(jaegerSpans, jaegerSpan)
-	}
-
-	spanData := JaegerSpanData{
-		TraceID:   t.TraceID,
-		Spans:     jaegerSpans,
-		Processes: processes,
-	}
-
-	payload, err := json.Marshal([]JaegerSpanData{spanData})
-	if err != nil {
-		return fmt.Errorf("failed to marshal span data: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(context.Background(), "POST", e.endpoint, bytes.NewReader(payload))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := e.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send request: %w", err)
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	return nil
+	return e.inner.ExportTraces(traces)
 }
 
 func (e *JaegerExporter) Shutdown(ctx context.Context) error {
-	return nil
+	return e.inner.Shutdown(ctx)
 }

@@ -57,14 +57,29 @@ func (r *Redactor) Redact(e *events.Event) {
 func defaultRules() []Rule {
 	return []Rule{
 		{
-			Name:    "password",
-			Pattern: regexp.MustCompile(`(?i)(password|passwd|pwd)=[^\s&]+`),
+			Name:    "credential_kv",
+			Pattern: regexp.MustCompile(`(?i)(password|passwd|pwd|token|api[_-]?key|apikey|secret|access[_-]?key|auth)=[^\s&]+`),
 			Replace: "${1}=***",
 		},
 		{
 			Name:    "bearer_token",
 			Pattern: regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9._~+/\-]+=*`),
 			Replace: "Bearer ***",
+		},
+		{
+			Name:    "basic_auth",
+			Pattern: regexp.MustCompile(`(?i)Basic\s+[A-Za-z0-9+/]+=*`),
+			Replace: "Basic ***",
+		},
+		{
+			Name:    "credential_json",
+			Pattern: regexp.MustCompile(`(?i)"(password|passwd|pwd|token|api[_-]?key|apikey|secret|access[_-]?key)"\s*:\s*"[^"]*"`),
+			Replace: `"${1}":"***"`,
+		},
+		{
+			Name:    "credential_yaml",
+			Pattern: regexp.MustCompile(`(?i)\b(password|passwd|pwd|token|api[_-]?key|apikey|secret|access[_-]?key)\s*:\s+[^\s,}]+`),
+			Replace: "${1}: ***",
 		},
 		{
 			Name:    "email",

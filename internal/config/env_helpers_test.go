@@ -48,8 +48,12 @@ func TestSplunkAlertAllowHTTP(t *testing.T) {
 		t.Error("env=1 should allow http")
 	}
 	t.Setenv("PODTRACE_ALERT_SPLUNK_ALLOW_HTTP", "true")
+	if !SplunkAlertAllowHTTP() {
+		t.Error("env=true must also allow http; requiring the literal '1' silently ignored explicit intent")
+	}
+	t.Setenv("PODTRACE_ALERT_SPLUNK_ALLOW_HTTP", "garbage")
 	if SplunkAlertAllowHTTP() {
-		t.Error("only literal '1' should allow http (defensive)")
+		t.Error("unparsable value must fail closed")
 	}
 }
 

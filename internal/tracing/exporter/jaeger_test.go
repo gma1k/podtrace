@@ -3,283 +3,71 @@ package exporter
 import (
 	"context"
 	"testing"
-	"time"
 
-	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/diagnose/tracker"
-	"github.com/podtrace/podtrace/internal/events"
 )
 
-func TestNewJaegerExporter(t *testing.T) {
+func TestNewJaegerExporter_DefaultEndpointTranslatesToOTLP(t *testing.T) {
 	exporter, err := NewJaegerExporter("", 1.0)
 	if err != nil {
 		t.Fatalf("NewJaegerExporter() error = %v", err)
 	}
-	if exporter == nil {
-		t.Fatal("NewJaegerExporter() returned nil")
-	}
-	if exporter.endpoint != config.DefaultJaegerEndpoint {
-		t.Errorf("Expected endpoint %s, got %s", config.DefaultJaegerEndpoint, exporter.endpoint)
+	defer func() { _ = exporter.Shutdown(context.Background()) }()
+	// The legacy default (localhost:14268/api/traces) speaks Thrift; the
+	// exporter must target the collector's OTLP listener instead.
+	if exporter.endpoint != "http://localhost:4318" {
+		t.Errorf("endpoint = %q, want the translated OTLP endpoint", exporter.endpoint)
 	}
 }
 
-func TestJaegerExporter_ExportTraces_Disabled(t *testing.T) {
-	exporter := &JaegerExporter{enabled: false}
-	err := exporter.ExportTraces([]*tracker.Trace{})
-	if err != nil {
-		t.Errorf("ExportTraces() error = %v", err)
+func TestJaegerToOTLPEndpoint(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"", "http://localhost:4318"},
+		{"http://localhost:14268/api/traces", "http://localhost:4318"},
+		{"http://jaeger-collector:14268/api/traces", "http://jaeger-collector:4318"},
+		{"https://jaeger.example.com/api/traces", "https://jaeger.example.com"},
+		{"http://localhost:4318", "http://localhost:4318"},
+		{"https://jaeger.example.com:4318", "https://jaeger.example.com:4318"},
+	}
+	for _, c := range cases {
+		if got := jaegerToOTLPEndpoint(c.in); got != c.want {
+			t.Errorf("jaegerToOTLPEndpoint(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }
 
 func TestJaegerExporter_ExportTraces_Empty(t *testing.T) {
-	exporter := &JaegerExporter{enabled: true}
-	err := exporter.ExportTraces([]*tracker.Trace{})
+	exporter, err := NewJaegerExporter("", 1.0)
 	if err != nil {
+		t.Fatalf("NewJaegerExporter() error = %v", err)
+	}
+	defer func() { _ = exporter.Shutdown(context.Background()) }()
+	if err := exporter.ExportTraces([]*tracker.Trace{}); err != nil {
 		t.Errorf("ExportTraces() error = %v", err)
 	}
 }
 
-func TestJaegerExporter_shouldSample(t *testing.T) {
-	tests := []struct {
-		name       string
-		sampleRate float64
-	}{
-		{"rate 1.0", 1.0},
-		{"rate 0.0", 0.0},
-		{"rate 0.5", 0.5},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			exporter := &JaegerExporter{sampleRate: tt.sampleRate}
-			trace := &tracker.Trace{TraceID: "test"}
-			result := exporter.shouldSample(trace)
-			if tt.sampleRate == 1.0 && !result {
-				t.Error("Sample rate 1.0 should always sample")
-			}
-			if tt.sampleRate == 0.0 && result {
-				t.Error("Sample rate 0.0 should never sample")
-			}
-		})
-	}
-}
-
-func TestJaegerExporter_exportTrace_NoSpans(t *testing.T) {
-	exporter := &JaegerExporter{enabled: true}
-	trace := &tracker.Trace{
-		TraceID: "test",
-		Spans:   []*tracker.Span{},
-	}
-	err := exporter.exportTrace(trace)
-	if err != nil {
-		t.Errorf("exportTrace() error = %v", err)
-	}
-}
-
-func TestJaegerExporter_exportTrace_WithSpans(t *testing.T) {
-	exporter, err := NewJaegerExporter("http://localhost:14268/api/traces", 1.0)
+func TestJaegerExporter_ExportTraces_NotSampled(t *testing.T) {
+	exporter, err := NewJaegerExporter("", 0.0)
 	if err != nil {
 		t.Fatalf("NewJaegerExporter() error = %v", err)
 	}
-	trace := &tracker.Trace{
-		TraceID: "test123",
-		Spans: []*tracker.Span{
-			{
-				TraceID:   "test123",
-				SpanID:    "span123",
-				Operation: "test-op",
-				Service:   "test-service",
-				StartTime: time.Now(),
-				Duration:  100 * time.Millisecond,
-				Events: []*events.Event{
-					{
-						Type:      events.EventHTTPReq,
-						Target:    "http://example.com",
-						Timestamp: uint64(time.Now().UnixNano()),
-					},
-				},
-			},
-		},
-	}
-	exportErr := exporter.exportTrace(trace)
-	if exportErr != nil {
-		t.Logf("exportTrace() error (expected for test without server): %v", exportErr)
+	defer func() { _ = exporter.Shutdown(context.Background()) }()
+	traces := errorSurfaceTrace()
+	if err := exporter.ExportTraces(traces); err != nil {
+		t.Errorf("ExportTraces() with rate 0 must be a no-op, got %v", err)
 	}
 }
 
 func TestJaegerExporter_Shutdown(t *testing.T) {
-	exporter := &JaegerExporter{}
-	ctx := context.Background()
-	err := exporter.Shutdown(ctx)
+	exporter, err := NewJaegerExporter("", 1.0)
 	if err != nil {
+		t.Fatalf("NewJaegerExporter() error = %v", err)
+	}
+	if err := exporter.Shutdown(context.Background()); err != nil {
 		t.Errorf("Shutdown() error = %v", err)
-	}
-}
-
-func TestJaegerExporter_ExportTraces_WithSampledTrace(t *testing.T) {
-	exporter, err := NewJaegerExporter("http://localhost:14268/api/traces", 1.0)
-	if err != nil {
-		t.Fatalf("NewJaegerExporter() error = %v", err)
-	}
-
-	trace := &tracker.Trace{
-		TraceID: "test123",
-		Spans: []*tracker.Span{
-			{
-				TraceID:   "test123",
-				SpanID:    "span123",
-				Operation: "test-op",
-				Service:   "test-service",
-				StartTime: time.Now(),
-				Duration:  100 * time.Millisecond,
-			},
-		},
-	}
-
-	err = exporter.ExportTraces([]*tracker.Trace{trace})
-	if err != nil {
-		t.Logf("ExportTraces() error (expected for test without server): %v", err)
-	}
-}
-
-func TestJaegerExporter_ExportTraces_WithNotSampledTrace(t *testing.T) {
-	exporter, err := NewJaegerExporter("http://localhost:14268/api/traces", 0.0)
-	if err != nil {
-		t.Fatalf("NewJaegerExporter() error = %v", err)
-	}
-
-	trace := &tracker.Trace{
-		TraceID: "test123",
-		Spans: []*tracker.Span{
-			{
-				TraceID:   "test123",
-				SpanID:    "span123",
-				Operation: "test-op",
-				Service:   "test-service",
-				StartTime: time.Now(),
-				Duration:  100 * time.Millisecond,
-			},
-		},
-	}
-
-	err = exporter.ExportTraces([]*tracker.Trace{trace})
-	if err != nil {
-		t.Errorf("ExportTraces() error = %v", err)
-	}
-}
-
-func TestJaegerExporter_exportTrace_WithErrorSpan(t *testing.T) {
-	exporter, err := NewJaegerExporter("http://localhost:14268/api/traces", 1.0)
-	if err != nil {
-		t.Fatalf("NewJaegerExporter() error = %v", err)
-	}
-
-	trace := &tracker.Trace{
-		TraceID: "test123",
-		Spans: []*tracker.Span{
-			{
-				TraceID:    "test123",
-				SpanID:     "span123",
-				Operation:  "test-op",
-				Service:    "test-service",
-				StartTime:  time.Now(),
-				Duration:   100 * time.Millisecond,
-				Error:      true,
-				Attributes: map[string]string{"key": "value"},
-			},
-		},
-	}
-
-	err = exporter.exportTrace(trace)
-	if err != nil {
-		t.Logf("exportTrace() error (expected for test without server): %v", err)
-	}
-}
-
-func TestJaegerExporter_exportTrace_WithEmptyServiceName(t *testing.T) {
-	exporter, err := NewJaegerExporter("http://localhost:14268/api/traces", 1.0)
-	if err != nil {
-		t.Fatalf("NewJaegerExporter() error = %v", err)
-	}
-
-	trace := &tracker.Trace{
-		TraceID: "test123",
-		Spans: []*tracker.Span{
-			{
-				TraceID:   "test123",
-				SpanID:    "span123",
-				Operation: "test-op",
-				Service:   "",
-				StartTime: time.Now(),
-				Duration:  100 * time.Millisecond,
-			},
-		},
-	}
-
-	err = exporter.exportTrace(trace)
-	if err != nil {
-		t.Logf("exportTrace() error (expected for test without server): %v", err)
-	}
-}
-
-func TestJaegerExporter_exportTrace_WithEventError(t *testing.T) {
-	exporter, err := NewJaegerExporter("http://localhost:14268/api/traces", 1.0)
-	if err != nil {
-		t.Fatalf("NewJaegerExporter() error = %v", err)
-	}
-
-	trace := &tracker.Trace{
-		TraceID: "test123",
-		Spans: []*tracker.Span{
-			{
-				TraceID:   "test123",
-				SpanID:    "span123",
-				Operation: "test-op",
-				Service:   "test-service",
-				StartTime: time.Now(),
-				Duration:  100 * time.Millisecond,
-				Events: []*events.Event{
-					{
-						Type:      events.EventHTTPReq,
-						Target:    "http://example.com",
-						Timestamp: uint64(time.Now().UnixNano()),
-						Error:     500,
-						LatencyNS: 1000000,
-					},
-				},
-			},
-		},
-	}
-
-	err = exporter.exportTrace(trace)
-	if err != nil {
-		t.Logf("exportTrace() error (expected for test without server): %v", err)
-	}
-}
-
-func TestJaegerExporter_exportTrace_WithParentSpanID(t *testing.T) {
-	exporter, err := NewJaegerExporter("http://localhost:14268/api/traces", 1.0)
-	if err != nil {
-		t.Fatalf("NewJaegerExporter() error = %v", err)
-	}
-
-	trace := &tracker.Trace{
-		TraceID: "test123",
-		Spans: []*tracker.Span{
-			{
-				TraceID:      "test123",
-				SpanID:       "span123",
-				ParentSpanID: "parent123",
-				Operation:    "test-op",
-				Service:      "test-service",
-				StartTime:    time.Now(),
-				Duration:     100 * time.Millisecond,
-			},
-		},
-	}
-
-	err = exporter.exportTrace(trace)
-	if err != nil {
-		t.Logf("exportTrace() error (expected for test without server): %v", err)
 	}
 }

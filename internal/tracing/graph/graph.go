@@ -70,15 +70,19 @@ func (gb *GraphBuilder) processTrace(trace *tracker.Trace) {
 		return trace.Spans[i].StartTime.Before(trace.Spans[j].StartTime)
 	})
 
-	for i, span := range trace.Spans {
+	byID := make(map[string]*tracker.Span, len(trace.Spans))
+	for _, span := range trace.Spans {
+		byID[span.SpanID] = span
+	}
+
+	for _, span := range trace.Spans {
 		span.UpdateDuration()
 
 		sourceID := gb.getNodeID(span.Service, trace.Services)
 		gb.ensureNode(sourceID, span.Service, trace.Services)
 
-		if i > 0 {
-			parentSpan := trace.Spans[i-1]
-			if span.ParentSpanID == parentSpan.SpanID {
+		if span.ParentSpanID != "" {
+			if parentSpan, ok := byID[span.ParentSpanID]; ok {
 				targetID := gb.getNodeID(parentSpan.Service, trace.Services)
 				gb.ensureNode(targetID, parentSpan.Service, trace.Services)
 

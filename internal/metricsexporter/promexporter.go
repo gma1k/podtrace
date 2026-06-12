@@ -7,6 +7,7 @@ import (
 	"net/http"
 	pprofhttp "net/http/pprof"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -445,19 +446,28 @@ func RecordProfilingFetchError(podIP, profileType string) {
 }
 
 func HandleEvents(ch <-chan *events.Event) {
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Error("Panic in metrics event handler",
-				zap.Any("panic", r),
-				zap.ByteString("stack", debug.Stack()))
-		}
-	}()
 	for e := range ch {
 		if e == nil {
 			continue
 		}
-		HandleEvent(e)
+		handleEventRecovered(e)
 	}
+}
+
+// handleEventRecovered isolates a panic to the one event that caused it.
+// A function-scope recover around the whole consumer loop meant a single
+// poisoned event killed metrics consumption permanently — the gauges froze
+// and every producer blocked on the full channel.
+func handleEventRecovered(e *events.Event) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("Panic in metrics event handler; event skipped",
+				zap.Any("panic", r),
+				zap.String("event_type", e.TypeString()),
+				zap.ByteString("stack", debug.Stack()))
+		}
+	}()
+	HandleEvent(e)
 }
 
 func HandleEvent(e *events.Event) {
@@ -777,6 +787,24 @@ func rateLimitMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// addrIsLoopback reports whether the listen address is confined to the
+// loopback interface. The previous guard only fired when the host parsed
+// as a non-loopback IP — ":9090" (empty host = ALL interfaces), hostnames,
+// and unparsable addresses all skipped it and bound publicly.
+func addrIsLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "" {
+		return false // empty host means listen on every interface
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return strings.EqualFold(host, "localhost")
+}
+
 type Server struct {
 	server *http.Server
 }
@@ -785,24 +813,26 @@ func StartServer() *Server {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", securityHeadersMiddleware(rateLimitMiddleware(promhttp.Handler())))
 	if config.MetricsEnablePprof() {
-		mux.HandleFunc("/debug/pprof/", pprofhttp.Index)
-		mux.HandleFunc("/debug/pprof/cmdline", pprofhttp.Cmdline)
-		mux.HandleFunc("/debug/pprof/profile", pprofhttp.Profile)
-		mux.HandleFunc("/debug/pprof/symbol", pprofhttp.Symbol)
-		mux.HandleFunc("/debug/pprof/trace", pprofhttp.Trace)
+		// pprof goes through the same security/rate-limit middleware as
+		// /metrics: a 30-second CPU profile request is a cheap DoS against
+		// a privileged pod when the handlers are exposed raw.
+		wrap := func(h http.HandlerFunc) http.Handler {
+			return securityHeadersMiddleware(rateLimitMiddleware(h))
+		}
+		mux.Handle("/debug/pprof/", wrap(pprofhttp.Index))
+		mux.Handle("/debug/pprof/cmdline", wrap(pprofhttp.Cmdline))
+		mux.Handle("/debug/pprof/profile", wrap(pprofhttp.Profile))
+		mux.Handle("/debug/pprof/symbol", wrap(pprofhttp.Symbol))
+		mux.Handle("/debug/pprof/trace", wrap(pprofhttp.Trace))
 	}
 
 	addr := config.GetMetricsAddress()
 
-	if host, _, err := net.SplitHostPort(addr); err == nil {
-		if ip := net.ParseIP(host); ip != nil && !ip.IsLoopback() {
-			if !config.AllowNonLoopbackMetrics() {
-				logger.Warn("Rejecting non-loopback metrics address, falling back to default",
-					zap.String("requested_addr", addr),
-					zap.String("fallback", fmt.Sprintf("%s:%d", config.DefaultMetricsHost, config.DefaultMetricsPort)))
-				addr = config.DefaultMetricsHost + ":" + fmt.Sprintf("%d", config.DefaultMetricsPort)
-			}
-		}
+	if !addrIsLoopback(addr) && !config.AllowNonLoopbackMetrics() {
+		logger.Warn("Rejecting non-loopback metrics address, falling back to default",
+			zap.String("requested_addr", addr),
+			zap.String("fallback", fmt.Sprintf("%s:%d", config.DefaultMetricsHost, config.DefaultMetricsPort)))
+		addr = config.DefaultMetricsHost + ":" + fmt.Sprintf("%d", config.DefaultMetricsPort)
 	}
 
 	server := &http.Server{

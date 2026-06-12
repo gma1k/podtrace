@@ -199,7 +199,7 @@ func (h *Handler) GenerateSection(allEvents []*events.Event, duration time.Durat
 	cr.PodIP = h.podIP
 
 	// Merge pprof availability from profiler discovery.
-	if h.profiler.foundPort != 0 {
+	if h.profiler.foundPort.Load() != 0 {
 		cr.PprofAvailable = true
 	}
 
@@ -255,17 +255,17 @@ func (h *Handler) HTTPStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	h.mu.RLock()
 	hasResult := h.result != nil
-	pprofAvail := h.profiler.foundPort != 0
+	pprofAvail := h.profiler.foundPort.Load() != 0
 	h.mu.RUnlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"pprof_available":  pprofAvail,
-		"pprof_port":       h.profiler.foundPort,
-		"has_result":       hasResult,
-		"auto_triggered":   h.triggered.Load(),
+		"pprof_available":      pprofAvail,
+		"pprof_port":           h.profiler.foundPort.Load(),
+		"has_result":           hasResult,
+		"auto_triggered":       h.triggered.Load(),
 		"trigger_threshold_ms": config.ProfilingAutoTriggerMS,
-		"pod_ip":           h.podIP,
+		"pod_ip":               h.podIP,
 	})
 }
 

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/podtrace/podtrace/internal/events"
+	"github.com/podtrace/podtrace/internal/safeconv"
 )
 
 // Segment is one contribution to a request's total latency.
@@ -54,12 +55,14 @@ func isBoundary(t events.EventType) bool {
 }
 
 // Feed processes one event. It is safe to call from multiple goroutines.
+// The emit callback runs after the analyzer's lock is released, so a slow
+// (or re-entrant) callback can neither stall the event hot path nor
+// deadlock the analyzer.
 func (a *Analyzer) Feed(e *events.Event) {
 	if e == nil || e.LatencyNS == 0 {
 		return
 	}
 	a.mu.Lock()
-	defer a.mu.Unlock()
 
 	pid := e.PID
 	w, ok := a.windows[pid]
@@ -69,41 +72,69 @@ func (a *Analyzer) Feed(e *events.Event) {
 	}
 	w.lastSeen = time.Now()
 
-	label := e.TypeString()
-	if e.Details != "" {
-		label = e.Details
-	}
-	w.segments = append(w.segments, Segment{Label: label, LatencyNS: e.LatencyNS})
-
+	var path CriticalPath
+	finalized := false
 	if isBoundary(e.Type) {
-		a.finalize(pid, w)
+		if len(w.segments) == 0 {
+			label := e.TypeString()
+			if e.Details != "" {
+				label = e.Details
+			}
+			w.segments = append(w.segments, Segment{Label: label, LatencyNS: e.LatencyNS})
+		}
+		path, finalized = a.buildPath(pid, w, e.LatencyNS)
 		delete(a.windows, pid)
+	} else {
+		label := e.TypeString()
+		if e.Details != "" {
+			label = e.Details
+		}
+		w.segments = append(w.segments, Segment{Label: label, LatencyNS: e.LatencyNS})
+	}
+	a.mu.Unlock()
+
+	if finalized && a.emit != nil {
+		a.emit(path)
 	}
 }
 
 // Evict removes windows older than the timeout and finalizes them.
-// Call periodically to prevent unbounded memory growth.
+// Call periodically to prevent unbounded memory growth. Like Feed, emit
+// callbacks run after the lock is released.
 func (a *Analyzer) Evict() {
 	now := time.Now()
 	a.mu.Lock()
-	defer a.mu.Unlock()
+	var finalized []CriticalPath
 	for pid, w := range a.windows {
 		if now.Sub(w.lastSeen) > a.timeout {
-			if len(w.segments) > 0 {
-				a.finalize(pid, w)
+			if path, ok := a.buildPath(pid, w, 0); ok {
+				finalized = append(finalized, path)
 			}
 			delete(a.windows, pid)
 		}
 	}
+	a.mu.Unlock()
+
+	if a.emit != nil {
+		for _, path := range finalized {
+			a.emit(path)
+		}
+	}
 }
 
-func (a *Analyzer) finalize(pid uint32, w *requestWindow) {
-	if len(w.segments) == 0 || a.emit == nil {
-		return
+// buildPath assembles the CriticalPath for a window. boundaryLatencyNS is
+// the request-spanning latency of the boundary event (0 for timeout
+// evictions, where the segment sum is the best available total). Callers
+// must hold a.mu.
+func (a *Analyzer) buildPath(pid uint32, w *requestWindow, boundaryLatencyNS uint64) (CriticalPath, bool) {
+	if len(w.segments) == 0 {
+		return CriticalPath{}, false
 	}
-	var total uint64
-	for _, s := range w.segments {
-		total += s.LatencyNS
+	total := boundaryLatencyNS
+	if total == 0 {
+		for _, s := range w.segments {
+			total += s.LatencyNS
+		}
 	}
 	segs := make([]Segment, len(w.segments))
 	copy(segs, w.segments)
@@ -112,9 +143,9 @@ func (a *Analyzer) finalize(pid uint32, w *requestWindow) {
 			segs[i].Fraction = float64(segs[i].LatencyNS) / float64(total)
 		}
 	}
-	a.emit(CriticalPath{
+	return CriticalPath{
 		PID:          pid,
-		TotalLatency: time.Duration(total),
+		TotalLatency: time.Duration(safeconv.Uint64ToInt64(total)),
 		Segments:     segs,
-	})
+	}, true
 }

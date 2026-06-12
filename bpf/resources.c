@@ -93,9 +93,13 @@ static inline void emit_resource_alert(u64 cgroup_id, u32 resource_type, u32 uti
     bpf_ringbuf_output(&events, e, sizeof(*e), 0);
     
     u32 alert_level = check_alert_threshold(utilization);
+    struct resource_key alert_key = {
+        .cgroup_id = cgroup_id,
+        .resource_type = resource_type,
+    };
     if (alert_level > 0) {
-        bpf_map_update_elem(&cgroup_alerts, &cgroup_id, &alert_level, BPF_ANY);
+        bpf_map_update_elem(&cgroup_alerts, &alert_key, &alert_level, BPF_ANY);
     } else {
-        bpf_map_delete_elem(&cgroup_alerts, &cgroup_id);
+        bpf_map_delete_elem(&cgroup_alerts, &alert_key);
     }
 }

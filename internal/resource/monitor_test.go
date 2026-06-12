@@ -364,7 +364,9 @@ func TestReadCgroupFile(t *testing.T) {
 		t.Fatalf("readCgroupFile() error = %v", err)
 	}
 
-	expected := "test content"
+	// The whole file comes back (multi-device cgroup files need every
+	// line); parsers trim whitespace themselves.
+	expected := "test content\n"
 	if got != expected {
 		t.Errorf("readCgroupFile() = %q, want %q", got, expected)
 	}
@@ -392,14 +394,13 @@ func TestParseIOV1(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := parseIOV1(tt.input)
+			got := parseBlkioServiceBytes(tt.input)
 			if got != tt.want {
-				t.Errorf("parseIOV1() = %v, want %v", got, tt.want)
+				t.Errorf("parseBlkioServiceBytes() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
-
 
 func TestResourceMonitor_ReadLimitsV2(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -412,11 +413,11 @@ func TestResourceMonitor_ReadLimitsV2(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(cgroupPath, "cgroup.controllers"), []byte("cpu memory io"), 0644)
 
 	tests := []struct {
-		name     string
-		setup    func() error
-		wantCPU  bool
-		wantMem  bool
-		wantIO   bool
+		name    string
+		setup   func() error
+		wantCPU bool
+		wantMem bool
+		wantIO  bool
 	}{
 		{
 			name: "all limits",
@@ -505,7 +506,7 @@ func TestResourceMonitor_ReadLimitsV1(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(cgroupPath, "cpu", "cpu.cfs_quota_us"), []byte("100000"), 0644)
 	_ = os.WriteFile(filepath.Join(cgroupPath, "cpu", "cpu.cfs_period_us"), []byte("100000"), 0644)
 	_ = os.WriteFile(filepath.Join(cgroupPath, "memory", "memory.limit_in_bytes"), []byte("1073741824"), 0644)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "blkio", "blkio.throttle.read_bps_device"), []byte("8:0 Read 1048576"), 0644)
+	_ = os.WriteFile(filepath.Join(cgroupPath, "blkio", "blkio.throttle.read_bps_device"), []byte("8:0 1048576"), 0644)
 
 	eventChan := make(chan *events.Event, 10)
 	monitor, err := NewResourceMonitor(cgroupPath, nil, nil, eventChan, "test-ns")
@@ -647,7 +648,7 @@ func TestResourceMonitor_CheckAlerts_WithNilAlertsMap(t *testing.T) {
 	monitor.mu.Lock()
 	monitor.limits[ResourceCPU] = &ResourceLimit{
 		LimitBytes:   100000,
-		UsageBytes:  96000,
+		UsageBytes:   96000,
 		ResourceType: ResourceCPU,
 	}
 	monitor.mu.Unlock()
@@ -734,7 +735,7 @@ func TestResourceMonitor_CheckAlerts_ZeroLimit(t *testing.T) {
 	monitor.mu.Lock()
 	monitor.limits[ResourceCPU] = &ResourceLimit{
 		LimitBytes:   0,
-		UsageBytes:  100000,
+		UsageBytes:   100000,
 		ResourceType: ResourceCPU,
 	}
 	monitor.mu.Unlock()
@@ -1310,7 +1311,7 @@ func TestResourceMonitor_ReadLimitsV1_ZeroIO(t *testing.T) {
 	}
 
 	_ = os.MkdirAll(filepath.Join(cgroupPath, "blkio"), 0755)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "blkio", "blkio.throttle.read_bps_device"), []byte("8:0 Read 0"), 0644)
+	_ = os.WriteFile(filepath.Join(cgroupPath, "blkio", "blkio.throttle.read_bps_device"), []byte("8:0 0"), 0644)
 
 	eventChan := make(chan *events.Event, 10)
 	monitor, err := NewResourceMonitor(cgroupPath, nil, nil, eventChan, "test-ns")
@@ -1340,7 +1341,7 @@ func TestResourceMonitor_CheckAlerts_Over100Percent(t *testing.T) {
 	monitor.mu.Lock()
 	monitor.limits[ResourceCPU] = &ResourceLimit{
 		LimitBytes:   100000,
-		UsageBytes:  150000,
+		UsageBytes:   150000,
 		ResourceType: ResourceCPU,
 	}
 	monitor.mu.Unlock()
@@ -1370,7 +1371,7 @@ func TestResourceMonitor_CheckAlerts_UnknownResourceType(t *testing.T) {
 	monitor.mu.Lock()
 	monitor.limits[99] = &ResourceLimit{
 		LimitBytes:   100000,
-		UsageBytes:  95000,
+		UsageBytes:   95000,
 		ResourceType: 99,
 	}
 	monitor.mu.Unlock()
@@ -1455,9 +1456,9 @@ func TestParseIOV1_MultipleFormats(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := parseIOV1(tt.input)
+			got := parseBlkioServiceBytes(tt.input)
 			if got != tt.want {
-				t.Errorf("parseIOV1() = %v, want %v", got, tt.want)
+				t.Errorf("parseBlkioServiceBytes() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -1589,7 +1590,7 @@ func TestResourceMonitor_CheckAlerts_NoAlerts(t *testing.T) {
 	monitor.mu.Lock()
 	monitor.limits[ResourceCPU] = &ResourceLimit{
 		LimitBytes:   100000,
-		UsageBytes:  50000,
+		UsageBytes:   50000,
 		ResourceType: ResourceCPU,
 	}
 	monitor.mu.Unlock()
@@ -1619,7 +1620,7 @@ func TestResourceMonitor_CheckAlerts_Unlimited(t *testing.T) {
 	monitor.mu.Lock()
 	monitor.limits[ResourceCPU] = &ResourceLimit{
 		LimitBytes:   ^uint64(0),
-		UsageBytes:  100000,
+		UsageBytes:   100000,
 		ResourceType: ResourceCPU,
 	}
 	monitor.mu.Unlock()
@@ -1649,7 +1650,7 @@ func TestResourceMonitor_CheckAlerts_NoAlertsMap_Nil(t *testing.T) {
 	monitor.mu.Lock()
 	monitor.limits[ResourceCPU] = &ResourceLimit{
 		LimitBytes:   100000,
-		UsageBytes:  95000,
+		UsageBytes:   95000,
 		ResourceType: ResourceCPU,
 	}
 	monitor.mu.Unlock()
@@ -1675,7 +1676,7 @@ func TestResourceMonitor_CheckAlerts_ChannelFull_Blocked(t *testing.T) {
 	monitor.mu.Lock()
 	monitor.limits[ResourceCPU] = &ResourceLimit{
 		LimitBytes:   100000,
-		UsageBytes:  95000,
+		UsageBytes:   95000,
 		ResourceType: ResourceCPU,
 	}
 	monitor.mu.Unlock()

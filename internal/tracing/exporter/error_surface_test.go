@@ -39,9 +39,16 @@ func TestExportTraces_SurfacesBackendFailures(t *testing.T) {
 
 	traces := errorSurfaceTrace()
 
-	jaeger := &JaegerExporter{enabled: true, endpoint: srv.URL, client: srv.Client(), sampleRate: 1.0}
+	// Jaeger now ships OTLP; a permanent 400 fails fast (5xx would be
+	// retried by the OTLP client until its timeout).
+	badReq := failingServer(http.StatusBadRequest)
+	defer badReq.Close()
+	jaeger, err := NewJaegerExporter(badReq.URL, 1.0)
+	if err != nil {
+		t.Fatalf("NewJaegerExporter: %v", err)
+	}
 	if err := jaeger.ExportTraces(traces); err == nil {
-		t.Error("jaeger: expected an error for a 500 backend, got nil")
+		t.Error("jaeger: expected an error for a 400 backend, got nil")
 	}
 
 	zipkin := &ZipkinExporter{enabled: true, endpoint: srv.URL, client: srv.Client(), sampleRate: 1.0}

@@ -28,7 +28,7 @@ func TestDoProfile_HeapAvailable_MergesResult(t *testing.T) {
 
 	host, port := mustParseAddr(t, srv.Listener.Addr().String())
 	h := NewHandler(host, []int{port})
-	h.profiler.foundPort = port
+	h.profiler.foundPort.Store(int64(port))
 
 	h.doProfile(context.Background(), ProfileHeap, 0)
 
@@ -62,7 +62,7 @@ runtime.gopark()
 
 	host, port := mustParseAddr(t, srv.Listener.Addr().String())
 	h := NewHandler(host, []int{port})
-	h.profiler.foundPort = port
+	h.profiler.foundPort.Store(int64(port))
 
 	h.doProfile(context.Background(), ProfileGoroutine, 0)
 
@@ -125,7 +125,7 @@ func TestDoProfile_CPU_SetsMetadataOnly(t *testing.T) {
 
 	host, port := mustParseAddr(t, srv.Listener.Addr().String())
 	h := NewHandler(host, []int{port})
-	h.profiler.foundPort = port
+	h.profiler.foundPort.Store(int64(port))
 
 	h.doProfile(context.Background(), ProfileCPU, 0)
 

@@ -52,9 +52,9 @@ var (
 	EventChannelBufferSize    = getIntEnvOrDefault("PODTRACE_EVENT_BUFFER_SIZE", 10000)
 	CacheMaxSize              = getIntEnvOrDefault("PODTRACE_CACHE_MAX_SIZE", MaxProcessCacheSize)
 	CacheTTLSeconds           = getIntEnvOrDefault("PODTRACE_CACHE_TTL_SECONDS", DefaultCacheTTLSeconds)
-	ErrorBackoffEnabled       = getEnvOrDefault("PODTRACE_ERROR_BACKOFF_ENABLED", "true") == "true"
-	CircuitBreakerEnabled     = getEnvOrDefault("PODTRACE_CIRCUIT_BREAKER_ENABLED", "true") == "true"
-	TracingEnabled            = getEnvOrDefault("PODTRACE_TRACING_ENABLED", "false") == "true"
+	ErrorBackoffEnabled       = getBoolEnvOrDefault("PODTRACE_ERROR_BACKOFF_ENABLED", true)
+	CircuitBreakerEnabled     = getBoolEnvOrDefault("PODTRACE_CIRCUIT_BREAKER_ENABLED", true)
+	TracingEnabled            = getBoolEnvOrDefault("PODTRACE_TRACING_ENABLED", false)
 	TracingSampleRate         = getFloatEnvOrDefault("PODTRACE_TRACING_SAMPLE_RATE", DefaultTracingSampleRate)
 	OTLPEndpoint              = getEnvOrDefault("PODTRACE_OTLP_ENDPOINT", DefaultOTLPEndpoint)
 	JaegerEndpoint            = getEnvOrDefault("PODTRACE_JAEGER_ENDPOINT", DefaultJaegerEndpoint)
@@ -66,11 +66,11 @@ var (
 	MaxTraceIDLength          = 32
 	MaxSpanIDLength           = 16
 	MaxTraceStateLength       = 512
-	AlertingEnabled           = getEnvOrDefault("PODTRACE_ALERTING_ENABLED", "false") == "true"
+	AlertingEnabled           = getBoolEnvOrDefault("PODTRACE_ALERTING_ENABLED", false)
 	AlertWebhookURL           = getEnvOrDefault("PODTRACE_ALERT_WEBHOOK_URL", "")
 	AlertSlackWebhookURL      = getEnvOrDefault("PODTRACE_ALERT_SLACK_WEBHOOK_URL", "")
 	AlertSlackChannel         = getEnvOrDefault("PODTRACE_ALERT_SLACK_CHANNEL", "#alerts")
-	AlertSplunkEnabled        = getEnvOrDefault("PODTRACE_ALERT_SPLUNK_ENABLED", "false") == "true"
+	AlertSplunkEnabled        = getBoolEnvOrDefault("PODTRACE_ALERT_SPLUNK_ENABLED", false)
 	AlertDeduplicationWindow  = getDurationEnvOrDefault("PODTRACE_ALERT_DEDUP_WINDOW", DefaultAlertDedupWindow)
 	AlertRateLimitPerMinute   = getIntEnvOrDefault("PODTRACE_ALERT_RATE_LIMIT", DefaultAlertRateLimitPerMin)
 	AlertHTTPTimeout          = getDurationEnvOrDefault("PODTRACE_ALERT_HTTP_TIMEOUT", DefaultAlertHTTPTimeout)
@@ -118,13 +118,13 @@ var (
 	ManagementPort = getIntEnvOrDefault("PODTRACE_MANAGEMENT_PORT", 0)
 
 	GRPCPort             = getIntEnvOrDefault("PODTRACE_GRPC_PORT", 50051)
-	USDTEnabled          = getEnvOrDefault("PODTRACE_USDT_ENABLED", "false") == "true"
-	RedactPII            = getEnvOrDefault("PODTRACE_REDACT_PII", "false") == "true"
+	USDTEnabled          = getBoolEnvOrDefault("PODTRACE_USDT_ENABLED", false)
+	RedactPII            = getBoolEnvOrDefault("PODTRACE_REDACT_PII", false)
 	RedactCustomRules    = getEnvOrDefault("PODTRACE_REDACT_CUSTOM_RULES", "")
-	CriticalPathEnabled  = getEnvOrDefault("PODTRACE_CRITICAL_PATH", "true") == "true"
+	CriticalPathEnabled  = getBoolEnvOrDefault("PODTRACE_CRITICAL_PATH", true)
 	CriticalPathWindowMS = getIntEnvOrDefault("PODTRACE_CRITICAL_PATH_WINDOW_MS", 500)
 
-	ProfilingEnabled         = getEnvOrDefault("PODTRACE_PROFILING_ENABLED", "false") == "true"
+	ProfilingEnabled         = getBoolEnvOrDefault("PODTRACE_PROFILING_ENABLED", false)
 	ProfilingPprofPorts      = getEnvOrDefault("PODTRACE_PROFILING_PPROF_PORTS", "6060,8080,8081,9090,2345")
 	ProfilingAutoTriggerMS   = getFloatEnvOrDefault("PODTRACE_PROFILING_AUTO_TRIGGER_MS", DefaultProfilingAutoTriggerMS)
 	ProfilingDefaultDuration = getDurationEnvOrDefault("PODTRACE_PROFILING_DEFAULT_DURATION", DefaultProfilingDuration)
@@ -332,6 +332,32 @@ var (
 	ConnectLatencyThresholdMS  = getFloatEnvOrDefault("PODTRACE_CONNECT_LATENCY_MS", 1.0)
 )
 
+// getBoolEnvOrDefault parses the env var with strconv.ParseBool, so
+// "true", "TRUE", "True", "1", "t" (and their negatives) all work — the
+// previous string comparison silently treated "TRUE" or "1" as false. A
+// set-but-unparsable value is reported instead of silently ignored.
+func getBoolEnvOrDefault(key string, defaultValue bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	b, err := strconv.ParseBool(strings.TrimSpace(value))
+	if err != nil {
+		warnIgnoredEnv(key, value, "not a boolean")
+		return defaultValue
+	}
+	return b
+}
+
+// warnIgnoredEnv surfaces configuration that LOOKS set but is being
+// ignored. It writes directly to stderr because internal/logger imports
+// this package (cycle).
+func warnIgnoredEnv(key, value, reason string) {
+	_, _ = fmt.Fprintf(os.Stderr,
+		`{"level":"warn","component":"config","message":"environment variable ignored","key":%q,"value":%q,"reason":%q}`+"\n",
+		key, value, reason)
+}
+
 func getEnvOrDefault(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -344,15 +370,21 @@ func getFloatEnvOrDefault(key string, defaultValue float64) float64 {
 		if f, err := strconv.ParseFloat(value, 64); err == nil {
 			return f
 		}
+		warnIgnoredEnv(key, value, "not a number")
 	}
 	return defaultValue
 }
 
+// getIntEnvOrDefault keeps the positive-only constraint (every consumer is
+// a size, port, or count where 0/negative would disable or break the
+// feature), but a set-and-ignored value is now reported instead of
+// silently falling back to the default.
 func getIntEnvOrDefault(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
 		if i, err := strconv.Atoi(value); err == nil && i > 0 {
 			return i
 		}
+		warnIgnoredEnv(key, value, "must be a positive integer")
 	}
 	return defaultValue
 }
@@ -391,6 +423,7 @@ func getDurationEnvOrDefault(key string, defaultValue time.Duration) time.Durati
 		if d, err := time.ParseDuration(value); err == nil && d > 0 {
 			return d
 		}
+		warnIgnoredEnv(key, value, "must be a positive Go duration")
 	}
 	return defaultValue
 }
@@ -404,7 +437,7 @@ func GetMetricsAddress() string {
 }
 
 func AllowNonLoopbackMetrics() bool {
-	return os.Getenv("PODTRACE_METRICS_INSECURE_ALLOW_ANY_ADDR") == "1"
+	return getBoolEnvOrDefault("PODTRACE_METRICS_INSECURE_ALLOW_ANY_ADDR", false)
 }
 
 func GetAlertMinSeverity() string {
@@ -462,17 +495,17 @@ func GetUserAgent() string {
 }
 
 func OTLPAllowInsecureNonLoopback() bool {
-	return os.Getenv("PODTRACE_OTLP_INSECURE") == "1"
+	return getBoolEnvOrDefault("PODTRACE_OTLP_INSECURE", false)
 }
 
 func MetricsEnablePprof() bool {
-	return os.Getenv("PODTRACE_METRICS_ENABLE_PPROF") == "1" || ProfilingEnabled
+	return getBoolEnvOrDefault("PODTRACE_METRICS_ENABLE_PPROF", false) || ProfilingEnabled
 }
 
 func SplunkAlertAllowHTTP() bool {
-	return os.Getenv("PODTRACE_ALERT_SPLUNK_ALLOW_HTTP") == "1"
+	return getBoolEnvOrDefault("PODTRACE_ALERT_SPLUNK_ALLOW_HTTP", false)
 }
 
 func AllowCgroupFilterAutoDisable() bool {
-	return os.Getenv("PODTRACE_ALLOW_CGROUP_FILTER_DISABLE") == "1"
+	return getBoolEnvOrDefault("PODTRACE_ALLOW_CGROUP_FILTER_DISABLE", false)
 }

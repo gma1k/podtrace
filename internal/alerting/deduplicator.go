@@ -34,6 +34,19 @@ func (d *AlertDeduplicator) ShouldSend(alert *Alert) bool {
 	return true
 }
 
+// Forget removes the alert's dedup record so the next occurrence is sent
+// again. Called when every sender failed: ShouldSend records the alert at
+// decision time (so concurrent duplicates do not stampede), but a total
+// delivery failure must not silence the alert for the whole window.
+func (d *AlertDeduplicator) Forget(alert *Alert) {
+	if alert == nil {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.seenAlerts, alert.Key())
+}
+
 func (d *AlertDeduplicator) Cleanup(olderThan time.Duration) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -50,5 +63,3 @@ func (d *AlertDeduplicator) Reset() {
 	defer d.mu.Unlock()
 	d.seenAlerts = make(map[string]time.Time)
 }
-
-
