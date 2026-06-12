@@ -5,7 +5,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-    helm.sh/resource-policy: keep
+    helm.sh/resource-policy: {{ ternary "keep" "delete" .Values.crds.keep }}
   name: podtracesessions.podtrace.io
 spec:
   group: podtrace.io

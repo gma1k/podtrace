@@ -28,7 +28,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: {{ include "podtrace.fullname" . }}-crd-labeler
-  namespace: {{ .Values.namespace.name }}
+  namespace: {{ include "podtrace.systemNamespace" . }}
   labels:
     app.kubernetes.io/name: podtrace
     app.kubernetes.io/instance: {{ .Release.Name }}
@@ -77,13 +77,13 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: {{ include "podtrace.fullname" . }}-crd-labeler
-    namespace: {{ .Values.namespace.name }}
+    namespace: {{ include "podtrace.systemNamespace" . }}
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: {{ include "podtrace.fullname" . }}-crd-labeler
-  namespace: {{ .Values.namespace.name }}
+  namespace: {{ include "podtrace.systemNamespace" . }}
   labels:
     app.kubernetes.io/name: podtrace
     app.kubernetes.io/instance: {{ .Release.Name }}
@@ -131,7 +131,10 @@ spec:
             - -c
             - |
               set -eu
-              CRDS="podtraces.podtrace.io podtracesessions.podtrace.io exporterconfigs.podtrace.io tracerconfigs.podtrace.io"
+              # All SIX CRDs: the adoption list previously missed
+              # podtraceschedules and applicationtraces, so Helm hit
+              # "invalid ownership metadata" on upgrade-over-quickstart.
+              CRDS="podtraces.podtrace.io podtracesessions.podtrace.io podtraceschedules.podtrace.io applicationtraces.podtrace.io exporterconfigs.podtrace.io tracerconfigs.podtrace.io"
               RELEASE="{{ .Release.Name }}"
               RELEASE_NS="{{ .Release.Namespace }}"
               for crd in $CRDS; do

@@ -17,7 +17,7 @@ For project background, architecture, and CLI usage, see the
 ```bash
 helm install podtrace \
   oci://ghcr.io/gma1k/charts/podtrace \
-  --version 0.1.0 \
+  --version <chart-version> \
   --namespace podtrace-system \
   --create-namespace
 ```

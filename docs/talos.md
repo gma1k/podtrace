@@ -127,8 +127,8 @@ helm install podtrace oci://ghcr.io/gma1k/charts/podtrace \
 
 After install you get:
 
-- **Operator** Deployment reconciling 5 CRDs (`PodTrace`, `PodTraceSession`,
-  `PodTraceSchedule`, `ExporterConfig`, `TracerConfig`)
+- **Operator** Deployment reconciling 6 CRDs (`PodTrace`, `PodTraceSession`,
+  `PodTraceSchedule`, `ApplicationTrace`, `ExporterConfig`, `TracerConfig`)
 - **Agent** DaemonSet — one privileged pod per node, attaches eBPF locally,
   filters events by cgroup_id
 - **Validating webhook** — admits only well-formed CRs (must have cert-manager)
@@ -146,7 +146,7 @@ kubectl -n podtrace-system get pods
 # expect: podtrace-operator Running, podtrace-agent (N) Running
 
 kubectl get crd | grep podtrace.io
-# expect: 5 CRDs
+# expect: 6 CRDs
 
 kubectl get validatingwebhookconfigurations | grep podtrace
 # expect: podtrace-validating-webhook
@@ -332,6 +332,6 @@ simply skipped with a one-shot, non-fatal message; tracing is unaffected:
 - BTF loading from `/sys/kernel/btf/vmlinux` (all Talos kernels ≥ 1.3 ship BTF)
 - containerd via `/run/containerd/containerd.sock`
 - User-space stack symbolication (addr2line on `/proc/<pid>/exe`)
-- All 5 CRDs reconciling
+- All 6 CRDs reconciling
 - Validating webhook (once cert-manager is installed)
 - Chainsaw e2e suite (validated 13/13 functional)

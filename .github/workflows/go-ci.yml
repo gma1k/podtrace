@@ -26,6 +26,9 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -80,11 +83,14 @@ jobs:
             -coverprofile=coverage.out -covermode=atomic \
             ./cmd/... ./internal/...
 
+      # NO -short here: every integration test skips itself in short mode,
+      # so the old invocation was a permanently green, permanently empty
+      # suite.
       - name: Run integration suite
         timeout-minutes: 5
         run: |
           GOTOOLCHAIN=auto go test \
-            -short -tags=integration -timeout=5m \
+            -tags=integration -timeout=5m \
             ./test/...
 
       - name: Generate coverage report

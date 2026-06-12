@@ -561,7 +561,7 @@ helm install podtrace deploy/charts/podtrace \
 
 This single command:
 
-- Renders the four CRDs (`TracerConfig`, `PodTrace`, `PodTraceSession`, `ExporterConfig`).
+- Renders all six CRDs (`TracerConfig`, `PodTrace`, `PodTraceSession`, `PodTraceSchedule`, `ApplicationTrace`, `ExporterConfig`).
 - Creates `podtrace-system` with PSA `enforce: privileged` (the agent DaemonSet and session Jobs need this; user namespaces stay restricted).
 - Deploys the operator (unprivileged, single replica with leader election).
 - Installs operator ClusterRole + agent RBAC (cluster-scoped ClusterRole + namespaced Role for bundle reads in `podtrace-system`).
