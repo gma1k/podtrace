@@ -36,7 +36,7 @@ func TestDiscover_EmptyPodIP(t *testing.T) {
 
 func TestDiscover_AlreadyDiscovered(t *testing.T) {
 	p := NewPodProfiler("127.0.0.1", []int{6060})
-	p.foundPort = 9999
+	p.foundPort.Store(9999)
 	if !p.Discover(context.Background()) {
 		t.Error("Discover should return true when foundPort already set")
 	}
@@ -64,8 +64,8 @@ func TestDiscover_LiveServer(t *testing.T) {
 	if !p.Discover(context.Background()) {
 		t.Error("Discover should return true for a live server with /debug/pprof/")
 	}
-	if p.foundPort != port {
-		t.Errorf("expected foundPort=%d, got %d", port, p.foundPort)
+	if p.foundPort.Load() != int64(port) {
+		t.Errorf("expected foundPort=%d, got %d", port, p.foundPort.Load())
 	}
 }
 
@@ -120,7 +120,7 @@ func TestFetchHeap_LiveServer(t *testing.T) {
 
 	host, port := mustParseAddr(t, srv.Listener.Addr().String())
 	p := NewPodProfiler(host, []int{port})
-	p.foundPort = port
+	p.foundPort.Store(int64(port))
 	r := p.FetchHeap(context.Background())
 	if !r.Available {
 		t.Errorf("expected Available=true, error=%q", r.Error)
@@ -151,7 +151,7 @@ runtime.gopark()
 
 	host, port := mustParseAddr(t, srv.Listener.Addr().String())
 	p := NewPodProfiler(host, []int{port})
-	p.foundPort = port
+	p.foundPort.Store(int64(port))
 	r := p.FetchGoroutine(context.Background())
 	if !r.Available {
 		t.Errorf("expected Available=true, error=%q", r.Error)
@@ -173,7 +173,7 @@ func TestFetchCPUProfile_LiveServer(t *testing.T) {
 
 	host, port := mustParseAddr(t, srv.Listener.Addr().String())
 	p := NewPodProfiler(host, []int{port})
-	p.foundPort = port
+	p.foundPort.Store(int64(port))
 	r := p.FetchCPUProfile(context.Background(), 1*time.Second)
 	if !r.Available {
 		t.Errorf("expected Available=true, error=%q", r.Error)
@@ -191,7 +191,7 @@ func TestFetchHeap_ServerReturns500(t *testing.T) {
 
 	host, port := mustParseAddr(t, srv.Listener.Addr().String())
 	p := NewPodProfiler(host, []int{port})
-	p.foundPort = port
+	p.foundPort.Store(int64(port))
 	r := p.FetchHeap(context.Background())
 	if r.Available {
 		t.Error("expected Available=false for 500 response")
@@ -206,7 +206,7 @@ func TestFetchCPUProfile_ServerReturns404(t *testing.T) {
 
 	host, port := mustParseAddr(t, srv.Listener.Addr().String())
 	p := NewPodProfiler(host, []int{port})
-	p.foundPort = port
+	p.foundPort.Store(int64(port))
 	r := p.FetchCPUProfile(context.Background(), 1*time.Second)
 	if r.Available {
 		t.Error("expected Available=false for 404 response")
@@ -381,9 +381,9 @@ func TestCorrelate_OOMAndPageFault(t *testing.T) {
 
 func TestCorrelate_SlowEvents_SortedByLatency(t *testing.T) {
 	evts := []*events.Event{
-		{Type: events.EventTCPSend, LatencyNS: 500_000_000, PID: 1},  // 500ms
+		{Type: events.EventTCPSend, LatencyNS: 500_000_000, PID: 1},   // 500ms
 		{Type: events.EventTCPSend, LatencyNS: 1_000_000_000, PID: 2}, // 1s
-		{Type: events.EventTCPSend, LatencyNS: 100_000_000, PID: 3},  // 100ms
+		{Type: events.EventTCPSend, LatencyNS: 100_000_000, PID: 3},   // 100ms
 	}
 	cr := Correlate(evts, nil, nil, 50.0) // 50ms threshold
 	if len(cr.SlowEvents) == 0 {
@@ -416,7 +416,7 @@ func TestCorrelate_SchedSwitchCorrelation(t *testing.T) {
 		},
 	}
 	cr := Correlate(evts, nil, nil, 100.0) // 100ms threshold
-	_ = cr // result depends on clock alignment; just ensure no panic
+	_ = cr                                 // result depends on clock alignment; just ensure no panic
 }
 
 func TestCorrelate_WithPprofData(t *testing.T) {
@@ -726,8 +726,8 @@ func TestHandler_GenerateSection_WithResult(t *testing.T) {
 	h := NewHandler("10.0.0.1", []int{})
 	h.mu.Lock()
 	h.result = &CorrelatedResult{
-		PprofAvailable: true,
-		PodIP:          "10.0.0.1",
+		PprofAvailable:  true,
+		PodIP:           "10.0.0.1",
 		PageFaultCounts: map[uint32]int{},
 		HeapProfile: &ProfileResult{
 			Available: true,

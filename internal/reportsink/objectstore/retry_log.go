@@ -3,6 +3,7 @@ package objectstore
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -29,6 +30,22 @@ func (defaultRetryLogger) OnAttempt(backend, method, url string, status, attempt
 		`{"component":"objectstore.retry","backend":%q,"method":%q,"url":%q,"status":%d,"attempt":%d,"took_ms":%d,"error":%q}`+"\n",
 		backend, method, url, status, attempt, took.Milliseconds(), errStr,
 	)
+}
+
+// redactURL strips query and fragment before logging: presigned S3 URLs
+// and Azure SAS tokens carry their credentials in the query string, and a
+// retry log line must not leak them to stderr.
+func redactURL(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+	c := *u
+	if c.RawQuery != "" {
+		c.RawQuery = "REDACTED"
+	}
+	c.Fragment = ""
+	c.User = nil
+	return c.String()
 }
 
 // loggingTransport is an http.RoundTripper that wraps an inner
@@ -77,6 +94,6 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	if resp != nil {
 		status = resp.StatusCode
 	}
-	t.logger.OnAttempt(t.backend, req.Method, req.URL.String(), status, attempt, took, err)
+	t.logger.OnAttempt(t.backend, req.Method, redactURL(req.URL), status, attempt, took, err)
 	return resp, err
 }

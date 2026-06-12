@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -54,6 +55,17 @@ type limitMapValue struct {
 	LimitBytes   uint64
 	UsageBytes   uint64
 	LastUpdateNS uint64
+	ResourceType uint32
+	_            [4]byte
+}
+
+// resourceMapKey mirrors struct resource_key in bpf/maps.h. Keying the
+// BPF maps by cgroup inode alone made CPU, memory, and IO entries
+// clobber each other — the surviving entry depended on Go map iteration
+// order, so the kernel-visible limit and alert level flapped between
+// resource types on every sync.
+type resourceMapKey struct {
+	CgroupID     uint64
 	ResourceType uint32
 	_            [4]byte
 }
@@ -247,14 +259,16 @@ func (rm *ResourceMonitor) readLimitsV1() error {
 	}
 
 	ioRead, _ := readCgroupFile(filepath.Join(rm.cgroupPath, "blkio", "blkio.throttle.read_bps_device"))
-	if ioRead != "" {
-		limit := parseIOV1(ioRead)
-		if limit > 0 {
-			rm.limits[ResourceIO] = &ResourceLimit{
-				LimitBytes:   limit,
-				ResourceType: ResourceIO,
-				LastUpdateNS: uint64(time.Now().UnixNano()),
-			}
+	ioWrite, _ := readCgroupFile(filepath.Join(rm.cgroupPath, "blkio", "blkio.throttle.write_bps_device"))
+	limit := parseBlkioThrottleBps(ioRead)
+	if w := parseBlkioThrottleBps(ioWrite); w > limit {
+		limit = w
+	}
+	if limit > 0 {
+		rm.limits[ResourceIO] = &ResourceLimit{
+			LimitBytes:   limit,
+			ResourceType: ResourceIO,
+			LastUpdateNS: uint64(time.Now().UnixNano()),
 		}
 	}
 
@@ -333,7 +347,7 @@ func (rm *ResourceMonitor) updateUsageV1() error {
 
 	ioBytes, err := readCgroupFile(filepath.Join(rm.cgroupPath, "blkio", "blkio.io_service_bytes"))
 	if err == nil {
-		usage := parseIOV1(ioBytes)
+		usage := parseBlkioServiceBytes(ioBytes)
 		if limit, ok := rm.limits[ResourceIO]; ok {
 			limit.UsageBytes = usage
 			limit.LastUpdateNS = uint64(time.Now().UnixNano())
@@ -349,7 +363,7 @@ func (rm *ResourceMonitor) syncToBPF() error {
 	}
 
 	for resourceType, limit := range rm.limits {
-		key := rm.cgroupInode
+		key := resourceMapKey{CgroupID: rm.cgroupInode, ResourceType: resourceType}
 		value := limitMapValue{
 			LimitBytes:   limit.LimitBytes,
 			UsageBytes:   limit.UsageBytes,
@@ -359,7 +373,7 @@ func (rm *ResourceMonitor) syncToBPF() error {
 
 		if err := rm.limitsMap.Put(key, value); err != nil {
 			logger.Warn("Failed to update BPF map",
-				zap.Uint64("cgroup_inode", key),
+				zap.Uint64("cgroup_inode", rm.cgroupInode),
 				zap.Uint32("resource_type", resourceType),
 				zap.Error(err))
 		}
@@ -452,18 +466,22 @@ func (rm *ResourceMonitor) checkAlerts() {
 		}
 		utilizationUint32 := safeconv.Uint64ToUint32(utilization)
 
+		// Same thresholds the BPF side reads from the alert_thresholds
+		// map — hardcoding 95/90/80 here ignored PODTRACE_ALERT_*_PCT
+		// for every userspace-evaluated alert.
 		var alertLevel uint32
-		if utilizationUint32 >= 95 {
+		switch {
+		case utilizationUint32 >= safeconv.IntToUint32(config.AlertEmergPct):
 			alertLevel = AlertEmergency
-		} else if utilizationUint32 >= 90 {
+		case utilizationUint32 >= safeconv.IntToUint32(config.AlertCritPct):
 			alertLevel = AlertCritical
-		} else if utilizationUint32 >= 80 {
+		case utilizationUint32 >= safeconv.IntToUint32(config.AlertWarnPct):
 			alertLevel = AlertWarning
-		} else {
+		default:
 			alertLevel = AlertNone
 		}
 
-		key := rm.cgroupInode
+		key := resourceMapKey{CgroupID: rm.cgroupInode, ResourceType: resourceType}
 		if alertLevel > 0 {
 			if err := rm.alertsMap.Put(key, alertLevel); err != nil {
 				logger.Warn("Failed to update alert map", zap.Error(err))
@@ -609,11 +627,14 @@ func readCgroupFile(path string) (string, error) {
 		}
 	}()
 
-	scanner := bufio.NewScanner(file)
-	if scanner.Scan() {
-		return scanner.Text(), nil
+	// Read the WHOLE file: io.max, io.stat, and the blkio v1 files carry
+	// one line per device, and returning only the first line meant only
+	// the first device was ever counted.
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return "", err
 	}
-	return "", scanner.Err()
+	return string(data), nil
 }
 
 func parseCPUMax(cpuMax string) (quota, period uint64, unlimited bool) {
@@ -662,13 +683,35 @@ func parseIOMax(ioMax string) uint64 {
 	return maxBytes
 }
 
-func parseIOV1(ioData string) uint64 {
+// parseBlkioThrottleBps parses blkio.throttle.{read,write}_bps_device,
+// whose real format is two fields per line ("MAJ:MIN bytes_per_sec").
+// The previous parser required three fields, so a configured v1 IO limit
+// never parsed. The strictest (largest) per-device limit is reported,
+// mirroring parseIOMax's treatment of v2 io.max.
+func parseBlkioThrottleBps(ioData string) uint64 {
+	var maxBps uint64
+	scanner := bufio.NewScanner(strings.NewReader(ioData))
+	for scanner.Scan() {
+		parts := strings.Fields(scanner.Text())
+		if len(parts) == 2 && strings.Contains(parts[0], ":") {
+			if val, err := strconv.ParseUint(parts[1], 10, 64); err == nil && val > maxBps {
+				maxBps = val
+			}
+		}
+	}
+	return maxBps
+}
+
+// parseBlkioServiceBytes sums the Read and Write rows of
+// blkio.io_service_bytes ("MAJ:MIN Read N"). Summing every 3-field row
+// also counted the Sync/Async/Total rows, which already contain the
+// Read/Write bytes — usage was roughly tripled.
+func parseBlkioServiceBytes(ioData string) uint64 {
 	var total uint64
 	scanner := bufio.NewScanner(strings.NewReader(ioData))
 	for scanner.Scan() {
-		line := scanner.Text()
-		parts := strings.Fields(line)
-		if len(parts) >= 3 {
+		parts := strings.Fields(scanner.Text())
+		if len(parts) == 3 && (parts[1] == "Read" || parts[1] == "Write") {
 			if val, err := strconv.ParseUint(parts[2], 10, 64); err == nil {
 				total += val
 			}

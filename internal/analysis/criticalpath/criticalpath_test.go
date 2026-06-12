@@ -34,20 +34,23 @@ func TestFeed_EmitsOnBoundary(t *testing.T) {
 	if cp.PID != 42 {
 		t.Errorf("PID: want 42, got %d", cp.PID)
 	}
-	if len(cp.Segments) != 3 {
-		t.Fatalf("expected 3 segments, got %d", len(cp.Segments))
+	// The boundary response (10ms) spans the whole request, so it IS the
+	// total; the DB and Redis segments are parts of it. The old behavior
+	// summed the boundary on top of its parts (16ms "total" for a 10ms
+	// request) — fractions were diluted by the double count.
+	if len(cp.Segments) != 2 {
+		t.Fatalf("expected 2 segments (boundary excluded), got %d", len(cp.Segments))
 	}
 	totalNS := uint64(cp.TotalLatency)
-	if totalNS != 16_000_000 {
-		t.Errorf("TotalLatency: want 16ms, got %d ns", totalNS)
+	if totalNS != 10_000_000 {
+		t.Errorf("TotalLatency: want the boundary's 10ms, got %d ns", totalNS)
 	}
-	// Fractions should sum to ~1.0
 	var sum float64
 	for _, s := range cp.Segments {
 		sum += s.Fraction
 	}
-	if sum < 0.999 || sum > 1.001 {
-		t.Errorf("fractions should sum to 1.0, got %f", sum)
+	if sum < 0.599 || sum > 0.601 {
+		t.Errorf("fractions: want 0.6 of the request attributed (5ms+1ms of 10ms), got %f", sum)
 	}
 }
 

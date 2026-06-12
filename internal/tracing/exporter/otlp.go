@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-	"time"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/sdk/instrumentation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 	"go.opentelemetry.io/otel/trace"
 
@@ -24,8 +25,7 @@ import (
 
 type OTLPExporter struct {
 	exporter   sdktrace.SpanExporter
-	tracer     trace.Tracer
-	tp         *sdktrace.TracerProvider
+	resource   *resource.Resource
 	endpoint   string
 	enabled    bool
 	sampleRate float64
@@ -93,17 +93,9 @@ func NewOTLPExporter(endpoint string, sampleRate float64) (*OTLPExporter, error)
 		return nil, fmt.Errorf("failed to create resource: %w", err)
 	}
 
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(otlpExporter),
-		sdktrace.WithResource(res),
-	)
-
-	otel.SetTracerProvider(tp)
-
 	return &OTLPExporter{
 		exporter:   otlpExporter,
-		tp:         tp,
-		tracer:     tp.Tracer("Podtrace"),
+		resource:   res,
 		endpoint:   endpointURL,
 		enabled:    true,
 		sampleRate: sampleRate,
@@ -117,71 +109,91 @@ func (e *OTLPExporter) ExportTraces(traces []*tracker.Trace) error {
 
 	ctx := context.Background()
 	var errs []error
+	var snapshots []sdktrace.ReadOnlySpan
 	for _, t := range traces {
 		if !e.shouldSample(t) {
 			continue
 		}
 
 		for _, span := range t.Spans {
-			if err := e.exportSpan(ctx, span, t); err != nil {
+			snapshot, err := e.spanSnapshot(span)
+			if err != nil {
 				// Keep exporting, but surface the failure: returning nil
 				// here made the manager's exporter-failure alerting
 				// unreachable dead code.
 				errs = append(errs, fmt.Errorf("trace %s span %s: %w", t.TraceID, span.SpanID, err))
+				continue
 			}
+			snapshots = append(snapshots, snapshot)
+		}
+	}
+
+	if len(snapshots) > 0 {
+		if err := e.exporter.ExportSpans(ctx, snapshots); err != nil {
+			errs = append(errs, fmt.Errorf("export %d spans: %w", len(snapshots), err))
 		}
 	}
 
 	return errors.Join(errs...)
 }
 
-func (e *OTLPExporter) shouldSample(_ *tracker.Trace) bool {
-	if e.sampleRate >= 1.0 {
-		return true
-	}
-	if e.sampleRate <= 0.0 {
-		return false
-	}
-	return time.Now().UnixNano()%int64(1.0/e.sampleRate) == 0
+func (e *OTLPExporter) shouldSample(t *tracker.Trace) bool {
+	return sampleTrace(t.TraceID, e.sampleRate)
 }
 
-func (e *OTLPExporter) exportSpan(ctx context.Context, span *tracker.Span, _ *tracker.Trace) error {
+// spanSnapshot converts a tracker span into a ReadOnlySpan that carries the
+// ORIGINAL trace, span, and parent IDs. The previous implementation replayed
+// spans through the SDK tracer, which mints a fresh span ID for every span
+// and demotes the original ID to its parent — every OTLP backend then showed
+// a broken parent/child structure with phantom intermediate spans.
+func (e *OTLPExporter) spanSnapshot(span *tracker.Span) (sdktrace.ReadOnlySpan, error) {
 	span.UpdateDuration()
 
 	traceID, err := trace.TraceIDFromHex(span.TraceID)
 	if err != nil {
-		return fmt.Errorf("invalid trace ID: %w", err)
+		return nil, fmt.Errorf("invalid trace ID: %w", err)
 	}
 
 	spanID, err := trace.SpanIDFromHex(span.SpanID)
 	if err != nil {
-		return fmt.Errorf("invalid span ID: %w", err)
+		return nil, fmt.Errorf("invalid span ID: %w", err)
 	}
 
-	spanContext := trace.NewSpanContext(trace.SpanContextConfig{
-		TraceID:    traceID,
-		SpanID:     spanID,
-		Remote:     false,
-		TraceFlags: trace.FlagsSampled,
-	})
+	stub := tracetest.SpanStub{
+		Name: span.Operation,
+		SpanContext: trace.NewSpanContext(trace.SpanContextConfig{
+			TraceID:    traceID,
+			SpanID:     spanID,
+			TraceFlags: trace.FlagsSampled,
+		}),
+		StartTime: span.StartTime,
+		EndTime:   span.StartTime.Add(span.Duration),
+		Resource:  e.resource,
+		InstrumentationScope: instrumentation.Scope{
+			Name: "Podtrace",
+		},
+	}
 
-	ctx = trace.ContextWithSpanContext(ctx, spanContext)
-
-	_, otelSpan := e.tracer.Start(ctx, span.Operation,
-		trace.WithTimestamp(span.StartTime),
-	)
+	if span.ParentSpanID != "" {
+		parentID, err := trace.SpanIDFromHex(span.ParentSpanID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid parent span ID: %w", err)
+		}
+		stub.Parent = trace.NewSpanContext(trace.SpanContextConfig{
+			TraceID:    traceID,
+			SpanID:     parentID,
+			TraceFlags: trace.FlagsSampled,
+		})
+	}
 
 	attrs := make([]attribute.KeyValue, 0, len(span.Attributes))
 	for k, v := range span.Attributes {
 		attrs = append(attrs, attribute.String(k, v))
 	}
-	if span.ParentSpanID != "" {
-		attrs = append(attrs, attribute.String("parent_span_id", span.ParentSpanID))
-	}
-	otelSpan.SetAttributes(attrs...)
+	stub.Attributes = attrs
 
 	if span.Error {
-		otelSpan.RecordError(fmt.Errorf("span error"))
+		stub.Status = sdktrace.Status{Code: codes.Error}
 	}
 
 	for _, event := range span.Events {
@@ -205,20 +217,19 @@ func (e *OTLPExporter) exportSpan(ctx context.Context, span *tracker.Span, _ *tr
 				attrs = append(attrs, attribute.String("dns.transport", "tcp"))
 			}
 		}
-		otelSpan.AddEvent(event.TypeString(),
-			trace.WithTimestamp(event.TimestampTime()),
-			trace.WithAttributes(attrs...),
-		)
+		stub.Events = append(stub.Events, sdktrace.Event{
+			Name:       event.TypeString(),
+			Time:       event.TimestampTime(),
+			Attributes: attrs,
+		})
 	}
 
-	otelSpan.End(trace.WithTimestamp(span.StartTime.Add(span.Duration)))
-
-	return nil
+	return stub.Snapshot(), nil
 }
 
 func (e *OTLPExporter) Shutdown(ctx context.Context) error {
-	if e.tp != nil {
-		return e.tp.Shutdown(ctx)
+	if e.exporter != nil {
+		return e.exporter.Shutdown(ctx)
 	}
 	return nil
 }

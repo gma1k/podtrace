@@ -171,7 +171,12 @@ func ValidatePath(path string, basePath string) error {
 	}
 	cleanPath := filepath.Clean(path)
 	cleanBase := filepath.Clean(basePath)
-	if !strings.HasPrefix(cleanPath, cleanBase) {
+	// The prefix check must stop at a path-separator boundary: a bare
+	// HasPrefix accepted "/base-evil" as being inside "/base".
+	inside := cleanPath == cleanBase ||
+		cleanBase == string(filepath.Separator) && strings.HasPrefix(cleanPath, cleanBase) ||
+		strings.HasPrefix(cleanPath, cleanBase+string(filepath.Separator))
+	if !inside {
 		return fmt.Errorf("path %s is outside base path %s", cleanPath, cleanBase)
 	}
 	if strings.Contains(cleanPath, "..") {

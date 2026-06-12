@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -61,9 +62,12 @@ type ProfileResult struct {
 // PodProfiler discovers and fetches pprof profiles from a running pod.
 // It is safe for concurrent use after construction.
 type PodProfiler struct {
-	podIP      string
-	ports      []int
-	foundPort  int // 0 = not yet discovered / not available
+	podIP string
+	ports []int
+	// foundPort is 0 until discovery succeeds. Atomic because Discover
+	// runs on the trace goroutine while the HTTP fetchers read it from
+	// handler goroutines concurrently.
+	foundPort  atomic.Int64
 	httpClient *http.Client
 }
 
@@ -82,7 +86,7 @@ func NewPodProfiler(podIP string, ports []int) *PodProfiler {
 // Returns true if one is found and caches the port for subsequent fetches.
 // Uses a short per-port timeout to avoid blocking the caller.
 func (p *PodProfiler) Discover(ctx context.Context) bool {
-	if p.foundPort != 0 {
+	if p.foundPort.Load() != 0 {
 		return true
 	}
 	if p.podIP == "" {
@@ -102,7 +106,7 @@ func (p *PodProfiler) Discover(ctx context.Context) bool {
 		}
 		_ = resp.Body.Close()
 		if resp.StatusCode == http.StatusOK {
-			p.foundPort = port
+			p.foundPort.Store(int64(port))
 			logger.Info("Discovered pprof endpoint on target pod",
 				zap.String("pod_ip", p.podIP),
 				zap.Int("port", port))
@@ -118,10 +122,11 @@ func (p *PodProfiler) Discover(ctx context.Context) bool {
 // FetchHeap fetches the heap profile in text mode (?debug=1) and parses
 // top allocating functions.
 func (p *PodProfiler) FetchHeap(ctx context.Context) *ProfileResult {
-	if p.foundPort == 0 {
+	port := p.foundPort.Load()
+	if port == 0 {
 		return &ProfileResult{Type: ProfileHeap, Available: false, Error: "no pprof endpoint discovered"}
 	}
-	url := fmt.Sprintf("http://%s:%d/debug/pprof/heap?debug=1", p.podIP, p.foundPort)
+	url := fmt.Sprintf("http://%s:%d/debug/pprof/heap?debug=1", p.podIP, port)
 	text, raw, err := p.fetchText(ctx, url)
 	if err != nil {
 		return &ProfileResult{Type: ProfileHeap, Available: false, Error: err.Error()}
@@ -140,10 +145,11 @@ func (p *PodProfiler) FetchHeap(ctx context.Context) *ProfileResult {
 // FetchGoroutine fetches the goroutine profile in full text mode (?debug=2)
 // and counts total and blocked goroutines.
 func (p *PodProfiler) FetchGoroutine(ctx context.Context) *ProfileResult {
-	if p.foundPort == 0 {
+	port := p.foundPort.Load()
+	if port == 0 {
 		return &ProfileResult{Type: ProfileGoroutine, Available: false, Error: "no pprof endpoint discovered"}
 	}
-	url := fmt.Sprintf("http://%s:%d/debug/pprof/goroutine?debug=2", p.podIP, p.foundPort)
+	url := fmt.Sprintf("http://%s:%d/debug/pprof/goroutine?debug=2", p.podIP, port)
 	text, raw, err := p.fetchText(ctx, url)
 	if err != nil {
 		return &ProfileResult{Type: ProfileGoroutine, Available: false, Error: err.Error()}
@@ -164,14 +170,15 @@ func (p *PodProfiler) FetchGoroutine(ctx context.Context) *ProfileResult {
 // raw binary bytes. The binary is not parsed here — it can be written to a file
 // and inspected with `go tool pprof`.
 func (p *PodProfiler) FetchCPUProfile(ctx context.Context, duration time.Duration) *ProfileResult {
-	if p.foundPort == 0 {
+	port := p.foundPort.Load()
+	if port == 0 {
 		return &ProfileResult{Type: ProfileCPU, Available: false, Error: "no pprof endpoint discovered"}
 	}
 	secs := int(duration.Seconds())
 	if secs < 1 {
 		secs = 1
 	}
-	url := fmt.Sprintf("http://%s:%d/debug/pprof/profile?seconds=%d", p.podIP, p.foundPort, secs)
+	url := fmt.Sprintf("http://%s:%d/debug/pprof/profile?seconds=%d", p.podIP, port, secs)
 	// Use a longer timeout for CPU profiles — duration + 5s buffer.
 	fetchCtx, cancel := context.WithTimeout(ctx, duration+5*time.Second)
 	defer cancel()
@@ -321,15 +328,15 @@ func parseHeapText(text string) []FunctionSample {
 // semacquire, IO wait, sleep, syscall, etc.
 func parseGoroutineText(text string) (total, blocked int) {
 	blockedStates := map[string]bool{
-		"chan receive":  true,
-		"chan send":     true,
-		"select":       true,
-		"semacquire":   true,
-		"IO wait":      true,
-		"sleep":        true,
-		"syscall":      true,
-		"sync.Mutex":   true,
-		"sync.RWMutex": true,
+		"chan receive":           true,
+		"chan send":              true,
+		"select":                 true,
+		"semacquire":             true,
+		"IO wait":                true,
+		"sleep":                  true,
+		"syscall":                true,
+		"sync.Mutex":             true,
+		"sync.RWMutex":           true,
 		"timer goroutine (idle)": true,
 	}
 	scanner := bufio.NewScanner(strings.NewReader(text))

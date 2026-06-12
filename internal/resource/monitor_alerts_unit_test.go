@@ -18,17 +18,17 @@ import (
 
 type fakeBPFMap struct {
 	mu      sync.Mutex
-	entries map[uint64]interface{}
+	entries map[resourceMapKey]interface{}
 }
 
 func newFakeBPFMap() *fakeBPFMap {
-	return &fakeBPFMap{entries: make(map[uint64]interface{})}
+	return &fakeBPFMap{entries: make(map[resourceMapKey]interface{})}
 }
 
 func (f *fakeBPFMap) Put(key, value interface{}) error {
-	k, ok := key.(uint64)
+	k, ok := key.(resourceMapKey)
 	if !ok {
-		return fmt.Errorf("fakeBPFMap.Put: key must be uint64, got %T", key)
+		return fmt.Errorf("fakeBPFMap.Put: key must be resourceMapKey, got %T", key)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -37,9 +37,9 @@ func (f *fakeBPFMap) Put(key, value interface{}) error {
 }
 
 func (f *fakeBPFMap) Delete(key interface{}) error {
-	k, ok := key.(uint64)
+	k, ok := key.(resourceMapKey)
 	if !ok {
-		return fmt.Errorf("fakeBPFMap.Delete: key must be uint64, got %T", key)
+		return fmt.Errorf("fakeBPFMap.Delete: key must be resourceMapKey, got %T", key)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -50,7 +50,7 @@ func (f *fakeBPFMap) Delete(key interface{}) error {
 	return nil
 }
 
-func (f *fakeBPFMap) get(key uint64) (interface{}, bool) {
+func (f *fakeBPFMap) get(key resourceMapKey) (interface{}, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	v, ok := f.entries[key]
@@ -177,27 +177,26 @@ func TestSyncToBPF_WritesLimitsToMap(t *testing.T) {
 		t.Fatalf("syncToBPF() error = %v", err)
 	}
 
-	// All resource types share the cgroup-inode key, so the map holds one
-	// entry: whichever type was written last. Assert it matches that type.
-	raw, ok := limitsMap.get(rm.cgroupInode)
-	if !ok {
-		t.Fatalf("expected an entry at cgroup inode %d", rm.cgroupInode)
-	}
-	got, ok := raw.(limitMapValue)
-	if !ok {
-		t.Fatalf("map value has unexpected type %T", raw)
-	}
+	// Regression: the map is keyed (cgroup, resource type), so EVERY
+	// resource gets its own entry. The old cgroup-only key meant CPU and
+	// memory clobbered each other, leaving whichever was written last.
 	rm.mu.RLock()
 	defer rm.mu.RUnlock()
-	expected := rm.limits[got.ResourceType]
-	if expected == nil {
-		t.Fatalf("map holds unknown resource type %d", got.ResourceType)
-	}
-	if got.LimitBytes != expected.LimitBytes ||
-		got.UsageBytes != expected.UsageBytes ||
-		got.LastUpdateNS != expected.LastUpdateNS {
-		t.Errorf("map value mismatch: got %+v, expected limit %d usage %d updated %d",
-			got, expected.LimitBytes, expected.UsageBytes, expected.LastUpdateNS)
+	for resourceType, expected := range rm.limits {
+		raw, ok := limitsMap.get(resourceMapKey{CgroupID: rm.cgroupInode, ResourceType: resourceType})
+		if !ok {
+			t.Fatalf("expected an entry for resource type %d at cgroup inode %d", resourceType, rm.cgroupInode)
+		}
+		got, ok := raw.(limitMapValue)
+		if !ok {
+			t.Fatalf("map value has unexpected type %T", raw)
+		}
+		if got.LimitBytes != expected.LimitBytes ||
+			got.UsageBytes != expected.UsageBytes ||
+			got.LastUpdateNS != expected.LastUpdateNS {
+			t.Errorf("type %d value mismatch: got %+v, expected limit %d usage %d updated %d",
+				resourceType, got, expected.LimitBytes, expected.UsageBytes, expected.LastUpdateNS)
+		}
 	}
 }
 
@@ -212,7 +211,7 @@ func TestSyncToBPF_EmptyLimits(t *testing.T) {
 	if err := rm.syncToBPF(); err != nil {
 		t.Fatalf("syncToBPF() error = %v", err)
 	}
-	if _, ok := limitsMap.get(rm.cgroupInode); ok {
+	if _, ok := limitsMap.get(resourceMapKey{CgroupID: rm.cgroupInode, ResourceType: ResourceCPU}); ok {
 		t.Errorf("expected no entry in map")
 	}
 }
@@ -255,7 +254,7 @@ func TestCheckAlerts_AlertLevels(t *testing.T) {
 
 			// Seed a prior warning so the "no breach" case exercises the
 			// delete-existing branch.
-			if err := alertsMap.Put(rm.cgroupInode, uint32(AlertWarning)); err != nil {
+			if err := alertsMap.Put(resourceMapKey{CgroupID: rm.cgroupInode, ResourceType: ResourceMemory}, uint32(AlertWarning)); err != nil {
 				t.Fatalf("seed alertsMap: %v", err)
 			}
 
@@ -271,7 +270,7 @@ func TestCheckAlerts_AlertLevels(t *testing.T) {
 
 			rm.checkAlerts()
 
-			raw, ok := alertsMap.get(rm.cgroupInode)
+			raw, ok := alertsMap.get(resourceMapKey{CgroupID: rm.cgroupInode, ResourceType: ResourceMemory})
 			if !tt.wantEntry {
 				if ok {
 					t.Errorf("expected alertsMap entry deleted, but found %v", raw)
@@ -330,7 +329,7 @@ func TestCheckAlerts_BenignDeleteWhenAbsent(t *testing.T) {
 
 	rm.checkAlerts()
 
-	if _, ok := alertsMap.get(rm.cgroupInode); ok {
+	if _, ok := alertsMap.get(resourceMapKey{CgroupID: rm.cgroupInode, ResourceType: ResourceMemory}); ok {
 		t.Errorf("expected no alertsMap entry")
 	}
 }
@@ -360,8 +359,10 @@ func TestCheckAlerts_ZeroAndUnlimitedSkipped(t *testing.T) {
 
 	rm.checkAlerts()
 
-	if _, ok := alertsMap.get(rm.cgroupInode); ok {
-		t.Errorf("expected no alertsMap entry")
+	for _, resourceType := range []uint32{ResourceCPU, ResourceMemory} {
+		if _, ok := alertsMap.get(resourceMapKey{CgroupID: rm.cgroupInode, ResourceType: resourceType}); ok {
+			t.Errorf("expected no alertsMap entry for type %d", resourceType)
+		}
 	}
 	select {
 	case ev := <-eventChan:
@@ -385,7 +386,7 @@ func TestCheckAlerts_UnknownResourceTypeLabel(t *testing.T) {
 
 	rm.checkAlerts()
 
-	raw, ok := alertsMap.get(rm.cgroupInode)
+	raw, ok := alertsMap.get(resourceMapKey{CgroupID: rm.cgroupInode, ResourceType: unknownType})
 	if !ok {
 		t.Fatalf("expected alertsMap entry")
 	}
@@ -427,7 +428,7 @@ func TestCheckAlerts_ChannelFullDoesNotBlock(t *testing.T) {
 	}
 
 	// The map write still happened despite the dropped event.
-	raw, ok := alertsMap.get(rm.cgroupInode)
+	raw, ok := alertsMap.get(resourceMapKey{CgroupID: rm.cgroupInode, ResourceType: ResourceMemory})
 	if !ok {
 		t.Fatalf("expected alertsMap entry")
 	}

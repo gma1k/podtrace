@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/diagnose/tracker"
@@ -62,14 +61,8 @@ func (e *SplunkExporter) ExportTraces(traces []*tracker.Trace) error {
 	return errors.Join(errs...)
 }
 
-func (e *SplunkExporter) shouldSample(_ *tracker.Trace) bool {
-	if e.sampleRate >= 1.0 {
-		return true
-	}
-	if e.sampleRate <= 0.0 {
-		return false
-	}
-	return time.Now().UnixNano()%int64(1.0/e.sampleRate) == 0
+func (e *SplunkExporter) shouldSample(t *tracker.Trace) bool {
+	return sampleTrace(t.TraceID, e.sampleRate)
 }
 
 func (e *SplunkExporter) exportTrace(t *tracker.Trace) error {

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/diagnose/tracker"
@@ -75,14 +74,8 @@ func (e *ZipkinExporter) ExportTraces(traces []*tracker.Trace) error {
 	return errors.Join(errs...)
 }
 
-func (e *ZipkinExporter) shouldSample(_ *tracker.Trace) bool {
-	if e.sampleRate >= 1.0 {
-		return true
-	}
-	if e.sampleRate <= 0.0 {
-		return false
-	}
-	return time.Now().UnixNano()%int64(1.0/e.sampleRate) == 0
+func (e *ZipkinExporter) shouldSample(t *tracker.Trace) bool {
+	return sampleTrace(t.TraceID, e.sampleRate)
 }
 
 func (e *ZipkinExporter) exportTrace(t *tracker.Trace) error {
@@ -168,7 +161,7 @@ func (e *ZipkinExporter) Shutdown(ctx context.Context) error {
 func zipkinKind(span *tracker.Span) string {
 	for _, event := range span.Events {
 		switch event.TypeString() {
-		case "HTTP", "DB", "Redis", "Memcached", "gRPC":
+		case "HTTP", "DB", "CACHE", "gRPC":
 			return "CLIENT"
 		}
 	}

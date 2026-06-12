@@ -23,8 +23,8 @@ const (
 	azureSecretKeyTenantID     = "tenant_id"
 	azureSecretKeyClientID     = "client_id"
 	azureSecretKeyClientSecret = "client_secret"
-	azureSecretKeyAccountKey = "account_key"
-	azureSecretKeyEndpoint = "endpoint"
+	azureSecretKeyAccountKey   = "account_key"
+	azureSecretKeyEndpoint     = "endpoint"
 )
 
 type azureSink struct {
@@ -152,7 +152,7 @@ func (p *azureRetryLogPolicy) Do(req *policy.Request) (*http.Response, error) {
 	}
 	_, _ = fmt.Fprintf(os.Stderr,
 		`{"component":"objectstore.retry","backend":%q,"method":%q,"url":%q,"status":%d,"attempt":%d,"took_ms":%d,"error":%q}`+"\n",
-		SchemeAzure, raw.Method, raw.URL.String(), status, attempt, took.Milliseconds(), errStr,
+		SchemeAzure, raw.Method, redactURL(raw.URL), status, attempt, took.Milliseconds(), errStr,
 	)
 	return resp, err
 }

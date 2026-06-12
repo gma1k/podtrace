@@ -108,8 +108,8 @@ func TestOTLPExporter_exportSpan_DNSEvent(t *testing.T) {
 		},
 	}
 
-	if err := exporter.exportSpan(context.Background(), span, &tracker.Trace{TraceID: "t"}); err != nil {
-		t.Errorf("exportSpan() unexpected error: %v", err)
+	if _, err := exporter.spanSnapshot(span); err != nil {
+		t.Errorf("spanSnapshot() unexpected error: %v", err)
 	}
 }
 
@@ -139,7 +139,7 @@ func TestOTLPExporter_exportSpan_DNSEvent_MinimalFields(t *testing.T) {
 		},
 	}
 
-	if err := exporter.exportSpan(context.Background(), span, &tracker.Trace{TraceID: "t"}); err != nil {
-		t.Errorf("exportSpan() unexpected error: %v", err)
+	if _, err := exporter.spanSnapshot(span); err != nil {
+		t.Errorf("spanSnapshot() unexpected error: %v", err)
 	}
 }

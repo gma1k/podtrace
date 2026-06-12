@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/diagnose/tracker"
@@ -71,14 +70,8 @@ func (e *DataDogExporter) ExportTraces(traces []*tracker.Trace) error {
 	return errors.Join(errs...)
 }
 
-func (e *DataDogExporter) shouldSample(_ *tracker.Trace) bool {
-	if e.sampleRate >= 1.0 {
-		return true
-	}
-	if e.sampleRate <= 0.0 {
-		return false
-	}
-	return time.Now().UnixNano()%int64(1.0/e.sampleRate) == 0
+func (e *DataDogExporter) shouldSample(t *tracker.Trace) bool {
+	return sampleTrace(t.TraceID, e.sampleRate)
 }
 
 func (e *DataDogExporter) exportTrace(t *tracker.Trace) error {
@@ -182,7 +175,7 @@ func spanType(span *tracker.Span) string {
 			return "web"
 		case "DB":
 			return "db"
-		case "Redis", "Memcached":
+		case "CACHE":
 			return "cache"
 		case "gRPC":
 			return "rpc"
