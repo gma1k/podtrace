@@ -41,7 +41,7 @@ kubectl -n podtrace-system logs deploy/podtrace-operator --since=30m \
   | grep -iE '"level":"error"|panic|stacktrace' | head -5
 ```
 
-Expect: operator + N agents Running, 5 CRDs, no error-level log lines.
+Expect: operator + N agents Running, 6 CRDs, no error-level log lines.
 
 ## Agent failure surfaces on the parent CR
 

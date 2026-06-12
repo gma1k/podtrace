@@ -22,6 +22,7 @@ RUN apt-get update \
       llvm \
       libbpf-dev \
       libelf-dev \
+      bpftool \
       make \
       pkg-config \
       ca-certificates \
@@ -46,6 +47,20 @@ ENV BPF_GOARCH=${TARGETARCH} \
     CGO_ENABLED=0 \
     GOOS=${TARGETOS} \
     GOARCH=${TARGETARCH}
+
+ARG REQUIRE_BTF=0
+RUN set -eu; \
+    if [ -s bpf/.generated/vmlinux.h ] && [ "$(wc -l < bpf/.generated/vmlinux.h)" -gt 1000 ]; then \
+        echo "BPF build: full BTF vmlinux.h ($(wc -l < bpf/.generated/vmlinux.h) lines) from build context"; \
+    elif bpftool version >/dev/null 2>&1 && [ -r /sys/kernel/btf/vmlinux ]; then \
+        echo "BPF build: full BTF vmlinux.h will be generated in-container from the build host kernel"; \
+    elif [ "${REQUIRE_BTF}" = "1" ]; then \
+        echo "ERROR: REQUIRE_BTF=1 but no BTF source is available (no pre-generated header, no readable /sys/kernel/btf/vmlinux)." >&2; \
+        echo "Run 'make bpf-btf-header' on a host with bpftool before building." >&2; \
+        exit 1; \
+    else \
+        echo "WARNING: building from the stub bpf/vmlinux.h, gRPC and FastCGI probes will be no-ops in this image" >&2; \
+    fi
 
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \

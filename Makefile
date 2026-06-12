@@ -70,6 +70,17 @@ HAVE_BPFTOOL := $(shell command -v bpftool 2>/dev/null)
 HAVE_WORKING_BPFTOOL := $(shell bpftool version >/dev/null 2>&1 && echo yes)
 HAVE_BTF     := $(shell test -r $(VMLINUX_BTF) && echo yes)
 
+# BPF_VMLINUX_MODE=stub forces the committed stub header. Used for
+# CROSS-ARCH object builds: a BTF header dumped from this host's kernel
+# lacks the foreign architecture's register structs (e.g. user_pt_regs
+# on arm64), so cross builds against it fail to compile. Native-arch
+# builds keep full BTF.
+ifeq ($(BPF_VMLINUX_MODE),stub)
+  HAVE_BPFTOOL :=
+  HAVE_WORKING_BPFTOOL :=
+  HAVE_BTF :=
+endif
+
 ifneq ($(HAVE_BPFTOOL),)
   ifeq ($(HAVE_WORKING_BPFTOOL),yes)
     ifeq ($(HAVE_BTF),yes)
@@ -77,6 +88,22 @@ ifneq ($(HAVE_BPFTOOL),)
       BPF_CFLAGS += -DPODTRACE_VMLINUX_FROM_BTF
     endif
   endif
+endif
+
+# A pre-generated BTF header in the tree (docker build context, produced
+# by `make bpf-btf-header` on the host) must ALSO enable the BTF define:
+# the gate above keys on bpftool being runnable HERE, but inside a build
+# container bpftool is absent while the full header is present — without
+# this, the gRPC/FastCGI probe bodies (#ifdef PODTRACE_VMLINUX_FROM_BTF)
+# still compiled to no-ops despite the full vmlinux.h. The stub header is
+# 79 lines; any real BTF dump is six figures.
+ifneq ($(USE_BTF_VMLINUX),yes)
+ifneq ($(BPF_VMLINUX_MODE),stub)
+  HAVE_PREGEN_BTF := $(shell test -f $(VMLINUX_GEN) && [ "$$(wc -l < $(VMLINUX_GEN))" -gt 1000 ] && echo yes)
+  ifeq ($(HAVE_PREGEN_BTF),yes)
+    BPF_CFLAGS += -DPODTRACE_VMLINUX_FROM_BTF
+  endif
+endif
 endif
 
 ifeq ($(HAVE_BTF),yes)
@@ -98,7 +125,7 @@ $(VMLINUX_GEN): _vmlinux_btf_gen
 else
 $(VMLINUX_GEN):
 	@mkdir -p "$(BPF_GEN_DIR)"
-	@[ -f bpf/vmlinux.h ] || (echo "Error: bpf/vmlinux.h missing and bpftool unavailable"; exit 1)
+	@[ -f bpf/vmlinux.h ] || (echo "Error: committed bpf/vmlinux.h missing and bpftool unavailable"; exit 1)
 	@cp bpf/vmlinux.h "$(VMLINUX_GEN)"
 endif
 
@@ -126,9 +153,14 @@ RELEASE_TARGETS = linux-amd64 linux-arm64 darwin-amd64 darwin-arm64
 
 .PHONY: release release-bpf-objects
 
+# Native-arch objects build against full kernel BTF; cross-arch objects
+# fall back to the stub header (this host's BTF lacks the foreign arch's
+# register structs). Stub objects compile the BTF-dependent gRPC/FastCGI
+# probes into no-ops — full cross-arch coverage needs a native runner
+# per arch (the ebpf-build workflow matrix already does this for PR CI).
+HOST_GOARCH := $(shell $(GO) env GOHOSTARCH)
 release-bpf-objects:
-	$(MAKE) internal/ebpf/embedded/podtrace.amd64.bpf.o BPF_GOARCH=amd64
-	$(MAKE) internal/ebpf/embedded/podtrace.arm64.bpf.o BPF_GOARCH=arm64
+	@set -e; for arch in amd64 arm64; do 	  if [ "$$arch" = "$(HOST_GOARCH)" ]; then 	    $(MAKE) internal/ebpf/embedded/podtrace.$$arch.bpf.o BPF_GOARCH=$$arch; 	  else 	    echo "WARNING: cross-building $$arch BPF object from the stub header (gRPC/FastCGI no-ops); use a native $$arch runner for full coverage" >&2; 	    $(MAKE) internal/ebpf/embedded/podtrace.$$arch.bpf.o BPF_GOARCH=$$arch BPF_VMLINUX_MODE=stub; 	  fi; 	done
 
 release: release-bpf-objects
 	@rm -rf $(RELEASE_DIR)
@@ -285,7 +317,10 @@ manifests: operator-tools
 
 # docker-build produces the container image used by the CLI, agent, operator,
 # and session Jobs. Override IMAGE_REPO / IMAGE_TAG to push to your registry.
-docker-build:
+.PHONY: bpf-btf-header
+bpf-btf-header: $(VMLINUX_GEN)
+
+docker-build: bpf-btf-header
 	docker build \
 	  --build-arg GO_VERSION=$(GO_VERSION) \
 	  --build-arg VERSION=$(IMAGE_TAG) \

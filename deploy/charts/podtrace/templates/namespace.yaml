@@ -143,7 +143,14 @@ spec:
               kind: Namespace
               metadata:
                 name: $NS
+{{- with .Values.namespace.annotations }}
+                annotations:
+{{ toYaml . | indent 18 }}
+{{- end }}
                 labels:
+{{- with .Values.namespace.labels }}
+{{ toYaml . | indent 18 }}
+{{- end }}
                   app.kubernetes.io/name: podtrace
                   app.kubernetes.io/instance: {{ .Release.Name }}
                   app.kubernetes.io/managed-by: {{ .Release.Service }}

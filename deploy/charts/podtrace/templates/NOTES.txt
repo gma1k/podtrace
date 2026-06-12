@@ -13,6 +13,8 @@ Installed resources
                                 regular templates):
     PodTrace          continuous realtime tracing
     PodTraceSession   bounded diagnose-mode tracing
+    PodTraceSchedule  cron-style recurring sessions
+    ApplicationTrace  app-centric multi-CR convenience
     ExporterConfig    reusable trace exporter
     TracerConfig      cluster-scoped infrastructure
 {{- if .Values.namespace.create }}

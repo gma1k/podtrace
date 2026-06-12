@@ -58,9 +58,10 @@ run_test() {
 	local test_output
 	local test_exit_code
 	set +e
-	test_output=$(sudo "${PROJECT_ROOT}/bin/podtrace" -n "${NAMESPACE}" "${pod_name}" --diagnose "${duration}" 2>&1 | head -30 || true)
-	test_exit_code=${PIPESTATUS[0]}
+	test_output=$(sudo "${PROJECT_ROOT}/bin/podtrace" -n "${NAMESPACE}" "${pod_name}" --diagnose "${duration}" 2>&1)
+	test_exit_code=$?
 	set -e
+	test_output=$(printf '%s\n' "${test_output}" | head -30)
 	echo "${test_output}"
 	if [[ ${test_exit_code} -eq 0 ]]; then
 		echo -e "${GREEN}✓ ${test_name} passed${NC}"

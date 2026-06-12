@@ -47,7 +47,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ include "podtrace.fullname" . }}-cr-bootstrap
-  namespace: {{ .Values.namespace.name }}
+  namespace: {{ include "podtrace.systemNamespace" . }}
   labels:
     {{- include "podtrace.labels" . | nindent 4 }}
     app.kubernetes.io/component: cr-bootstrap
@@ -135,7 +135,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: {{ include "podtrace.fullname" . }}-cr-bootstrap
-  namespace: {{ .Values.namespace.name }}
+  namespace: {{ include "podtrace.systemNamespace" . }}
   labels:
     {{- include "podtrace.labels" . | nindent 4 }}
     app.kubernetes.io/component: cr-bootstrap
@@ -178,13 +178,13 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: {{ include "podtrace.fullname" . }}-cr-bootstrap
-    namespace: {{ .Values.namespace.name }}
+    namespace: {{ include "podtrace.systemNamespace" . }}
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: {{ include "podtrace.fullname" . }}-cr-bootstrap
-  namespace: {{ .Values.namespace.name }}
+  namespace: {{ include "podtrace.systemNamespace" . }}
   labels:
     {{- include "podtrace.labels" . | nindent 4 }}
     app.kubernetes.io/component: cr-bootstrap

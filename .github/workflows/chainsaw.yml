@@ -21,6 +21,9 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -48,7 +51,7 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2  # v5.0.0
         with:
-          version: v4.2.1
+          version: v4.2.0
 
       - name: Install chainsaw
         run: |
@@ -66,6 +69,15 @@ jobs:
           kind load docker-image ghcr.io/gma1k/podtrace:ci \
             --name podtrace-chainsaw
 
+      - name: Preload hook-job image into kind
+        run: |
+          for i in 1 2 3; do
+            docker pull alpine/k8s:1.30.4 && break
+            echo "pull attempt $i failed; retrying in 15s" >&2
+            sleep 15
+          done
+          kind load docker-image alpine/k8s:1.30.4 --name podtrace-chainsaw
+
       - name: Install operator via Helm
         run: |
           kubectl create namespace podtrace-system --dry-run=client -o yaml | kubectl apply -f -
@@ -75,7 +87,7 @@ jobs:
             pod-security.kubernetes.io/warn=privileged \
             --overwrite
 
-          helm install podtrace deploy/charts/podtrace \
+          timeout 420 helm install podtrace deploy/charts/podtrace \
             --namespace podtrace-system \
             --set namespace.create=false \
             --set operator.enabled=true \
@@ -132,7 +144,11 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2  # v5.0.0
         with:
-          version: v4.2.1
+          # Pinned: helm v4.2.1 hangs indefinitely in the pre-install hook
+          # phase on this chart (reproduced locally; v4.2.0 is fine). Do
+          # not bump past v4.2.0 until verified against `helm install
+          # deploy/charts/podtrace` on a kind cluster.
+          version: v4.2.0
 
       - name: Install BPF toolchain
         uses: ./.github/actions/setup-bpf-toolchain

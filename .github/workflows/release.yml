@@ -46,6 +46,18 @@ jobs:
       - uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3  # v4.1.0
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5  # v4.1.0
 
+      # The build container has no bpftool and no readable kernel BTF, so
+      # without this the released images compile the BTF-dependent gRPC
+      # and FastCGI probes into silent no-ops. Generate the full vmlinux.h
+      # on the runner and ship it in the build context; REQUIRE_BTF=1
+      # makes a stub release build impossible.
+      - name: Generate BTF vmlinux.h for the build context
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y "linux-tools-$(uname -r)" || sudo apt-get install -y linux-tools-generic
+          make bpf-btf-header
+          wc -l bpf/.generated/vmlinux.h
+
       - uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee  # v4.2.0
         with:
           registry: ${{ env.REGISTRY }}
@@ -74,6 +86,7 @@ jobs:
           build-args: |
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
+            REQUIRE_BTF=1
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: mode=max
@@ -219,11 +232,20 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Same toolchain as PR CI (single source of truth): the hand-rolled
+      # package list here was missing bpftool, so Krew binaries shipped
+      # stub-built BPF objects with gRPC/FastCGI compiled out.
       - name: Install BPF toolchain
+        uses: ./.github/actions/setup-bpf-toolchain
+
+      - name: Verify the release builds against full kernel BTF
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            clang llvm libbpf-dev libelf-dev make pkg-config
+          make bpf-btf-header
+          lines=$(wc -l < bpf/.generated/vmlinux.h)
+          if [ "$lines" -lt 1000 ]; then
+            echo "ERROR: vmlinux.h has only $lines lines — stub fallback; refusing to release stub-built binaries" >&2
+            exit 1
+          fi
 
       - name: Build CLI tarballs (linux+darwin x amd64+arm64)
         run: make release VERSION=${{ github.ref_name }}

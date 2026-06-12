@@ -4,10 +4,11 @@
 # controller-gen so they participate in the Helm chart's CRD-management
 # lifecycle.
 #
-#   helm.sh/resource-policy: keep
-#     Never delete CRDs on `helm uninstall`. Losing a CRD orphans every
-#     CR of that type — surprising and unsafe. Users who really want to
-#     drop CRDs do so explicitly via `kubectl delete crd`.
+#   helm.sh/resource-policy: keep   (templated on .Values.crds.keep)
+#     Never delete CRDs on `helm uninstall` by default. Losing a CRD
+#     orphans every CR of that type — surprising and unsafe. crds.keep
+#     was documented in values.yaml but wired to nothing: the annotation
+#     was hardcoded, so setting keep=false silently did nothing.
 #
 # Safe to re-run on already-annotated files: each annotation is a no-op
 # if already present.
@@ -106,7 +107,7 @@ if not match:
 
 indent = match.group(1)
 annotations = [
-    ('helm.sh/resource-policy', 'keep'),
+    ('helm.sh/resource-policy', '{{ ternary "keep" "delete" .Values.crds.keep }}'),
 ]
 
 addenda = []
