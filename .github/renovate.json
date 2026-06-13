@@ -77,9 +77,7 @@
       "matchDepNames": [
         "helm/helm"
       ],
-      "ignoreVersions": [
-        "4.2.1"
-      ]
+      "allowedVersions": "<4.2.1 || >4.2.1"
     }
   ]
 }
