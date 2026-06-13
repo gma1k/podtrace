@@ -67,9 +67,6 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["get", "list", "watch", "create", "patch"]
-  - apiGroups: ["events.k8s.io"]
-    resources: ["events"]
-    verbs: ["get", "list", "watch"]
   # Leader election lease
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
