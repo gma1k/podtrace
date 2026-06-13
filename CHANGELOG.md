@@ -9,6 +9,13 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.13.2](https://github.com/gma1k/podtrace/compare/v0.13.1...v0.13.2) (2026-06-13)
+
+
+### Bug Fixes
+
+* **ci:** download static bpftool ([#231](https://github.com/gma1k/podtrace/issues/231)) ([c06df08](https://github.com/gma1k/podtrace/commit/c06df0800c7f48dc766c950700c96014e9d4096a))
+
 ## [0.13.1](https://github.com/gma1k/podtrace/compare/v0.13.0...v0.13.1) (2026-06-13)
 
 
