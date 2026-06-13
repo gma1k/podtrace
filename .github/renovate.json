@@ -75,8 +75,7 @@
     {
       "description": "Skip helm v4.2.1 only: a WaitForDelete regression hangs chart installs with before-hook-creation hooks.",
       "matchDepNames": [
-        "helm/helm"
-      ],
+        "helm"      ],
       "allowedVersions": "<4.2.1 || >4.2.1"
     }
   ]
