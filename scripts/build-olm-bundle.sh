@@ -79,7 +79,8 @@ mkdir -p "${MANIFESTS_DIR}" "${METADATA_DIR}"
 
 for src in "${crd_files[@]}"; do
 	dst="${MANIFESTS_DIR}/$(basename "${src}")"
-	grep -v -E '^\s*\{\{' "${src}" >"${dst}"
+	grep -v -E '^\s*\{\{' "${src}" |
+		grep -v -E '^\s*helm\.sh/resource-policy:' >"${dst}"
 done
 
 # --- render CSV --------------------------------------------------------

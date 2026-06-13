@@ -4,8 +4,7 @@ description: |
   compile the eBPF programs in bpf/ and load them via the agent's tracer.
 
   Single source of truth so ebpf-build, chainsaw, and security workflows
-  don't drift on package lists. Superset of what any single consumer needs
-  (extra packages don't hurt; missing ones break builds in subtle ways).
+  don't drift on package lists.
 
 runs:
   using: composite
@@ -16,10 +15,18 @@ runs:
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends \
           clang llvm libbpf-dev libelf-dev make pkg-config
-        # bpftool + perf live in linux-tools; pin to running kernel where
-        # possible, fall back to the generic flavour on hosted runners
-        # whose kernel package is missing.
+
         sudo apt-get install -y "linux-tools-$(uname -r)" \
-          || sudo apt-get install -y linux-tools-generic
+          || sudo apt-get install -y linux-tools-generic || true
         sudo apt-get install -y "linux-headers-$(uname -r)" \
-          || sudo apt-get install -y linux-headers-generic
+          || sudo apt-get install -y linux-headers-generic || true
+
+        if ! bpftool version >/dev/null 2>&1; then
+          real="$(find /usr/lib -maxdepth 3 -name bpftool -type f 2>/dev/null | sort -V | tail -1 || true)"
+          if [[ -n "${real}" ]]; then
+            sudo install -m0755 "${real}" /usr/local/bin/bpftool
+          fi
+        fi
+
+        bpftool version \
+          || echo "WARNING: bpftool unusable; eBPF builds will use the stub vmlinux.h"

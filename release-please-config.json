@@ -91,8 +91,7 @@
           "type": "style",
           "section": "Maintenance"
         }
-      ],
-      "release-as": "0.13.0"
+      ]
     }
   }
 }

@@ -117,11 +117,6 @@ func buildSessionReportRules(ref *podtracev1alpha1.ReportReference) []rbacv1.Pol
 			Resources: []string{"events"},
 			Verbs:     []string{"get", "list", "watch"},
 		},
-		{
-			APIGroups: []string{"events.k8s.io"},
-			Resources: []string{"events"},
-			Verbs:     []string{"get", "list", "watch"},
-		},
 	}
 	resource, name := reportRefResource(ref)
 	if resource == "" || name == "" {
