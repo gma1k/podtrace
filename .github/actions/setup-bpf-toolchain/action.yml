@@ -16,10 +16,19 @@ runs:
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends \
           clang llvm libbpf-dev libelf-dev make pkg-config
-        # bpftool + perf live in linux-tools; pin to running kernel where
-        # possible, fall back to the generic flavour on hosted runners
-        # whose kernel package is missing.
+
         sudo apt-get install -y "linux-tools-$(uname -r)" \
           || sudo apt-get install -y linux-tools-generic
         sudo apt-get install -y "linux-headers-$(uname -r)" \
           || sudo apt-get install -y linux-headers-generic
+
+        if ! bpftool version >/dev/null 2>&1; then
+          sudo apt-get install -y bpftool || true
+        fi
+        if ! bpftool version >/dev/null 2>&1; then
+          real="$(find /usr/lib/linux-tools -maxdepth 2 -name bpftool -type f 2>/dev/null | sort -V | tail -1 || true)"
+          if [[ -n "${real}" ]]; then
+            sudo install -m0755 "${real}" /usr/local/bin/bpftool
+          fi
+        fi
+        bpftool version
