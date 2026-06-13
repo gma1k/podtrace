@@ -111,7 +111,7 @@ type PodTraceScheduleStatus struct {
 // +kubebuilder:resource:shortName=ptsch,categories=podtrace
 // +kubebuilder:printcolumn:name="Schedule",type=string,JSONPath=`.spec.schedule`
 // +kubebuilder:printcolumn:name="Suspend",type=boolean,JSONPath=`.spec.suspend`
-// +kubebuilder:printcolumn:name="Active",type=integer,JSONPath=`.status.active[*]`,priority=1
+// +kubebuilder:printcolumn:name="Active",type=string,JSONPath=`.status.active[*].name`,priority=1
 // +kubebuilder:printcolumn:name="Last Schedule",type=date,JSONPath=`.status.lastScheduleTime`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

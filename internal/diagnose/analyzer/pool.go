@@ -63,26 +63,32 @@ func AnalyzePool(acquireEvents, releaseEvents, exhaustedEvents []*events.Event) 
 		peak    int
 	})
 
-	for _, e := range acquireEvents {
-		poolID := e.Target
-		if poolID == "" {
-			poolID = "default"
-		}
-		pool := poolTracker[poolID]
-		pool.current++
-		if pool.current > pool.peak {
-			pool.peak = pool.current
-		}
-		poolTracker[poolID] = pool
+	type poolEvent struct {
+		ts     uint64
+		target string
+		acq    bool
 	}
-
+	timeline := make([]poolEvent, 0, len(acquireEvents)+len(releaseEvents))
+	for _, e := range acquireEvents {
+		timeline = append(timeline, poolEvent{ts: e.Timestamp, target: e.Target, acq: true})
+	}
 	for _, e := range releaseEvents {
-		poolID := e.Target
+		timeline = append(timeline, poolEvent{ts: e.Timestamp, target: e.Target, acq: false})
+	}
+	sort.SliceStable(timeline, func(i, j int) bool { return timeline[i].ts < timeline[j].ts })
+
+	for _, ev := range timeline {
+		poolID := ev.target
 		if poolID == "" {
 			poolID = "default"
 		}
 		pool := poolTracker[poolID]
-		if pool.current > 0 {
+		if ev.acq {
+			pool.current++
+			if pool.current > pool.peak {
+				pool.peak = pool.current
+			}
+		} else if pool.current > 0 {
 			pool.current--
 		}
 		poolTracker[poolID] = pool

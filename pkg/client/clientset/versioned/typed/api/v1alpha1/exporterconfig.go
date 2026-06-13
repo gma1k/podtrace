@@ -21,6 +21,7 @@ import (
 	context "context"
 
 	apiv1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	applyconfigurationapiv1alpha1 "github.com/podtrace/podtrace/pkg/client/applyconfiguration/api/v1alpha1"
 	scheme "github.com/podtrace/podtrace/pkg/client/clientset/versioned/scheme"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -46,18 +47,21 @@ type ExporterConfigInterface interface {
 	List(ctx context.Context, opts v1.ListOptions) (*apiv1alpha1.ExporterConfigList, error)
 	Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error)
 	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *apiv1alpha1.ExporterConfig, err error)
+	Apply(ctx context.Context, exporterConfig *applyconfigurationapiv1alpha1.ExporterConfigApplyConfiguration, opts v1.ApplyOptions) (result *apiv1alpha1.ExporterConfig, err error)
+	// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
+	ApplyStatus(ctx context.Context, exporterConfig *applyconfigurationapiv1alpha1.ExporterConfigApplyConfiguration, opts v1.ApplyOptions) (result *apiv1alpha1.ExporterConfig, err error)
 	ExporterConfigExpansion
 }
 
 // exporterConfigs implements ExporterConfigInterface
 type exporterConfigs struct {
-	*gentype.ClientWithList[*apiv1alpha1.ExporterConfig, *apiv1alpha1.ExporterConfigList]
+	*gentype.ClientWithListAndApply[*apiv1alpha1.ExporterConfig, *apiv1alpha1.ExporterConfigList, *applyconfigurationapiv1alpha1.ExporterConfigApplyConfiguration]
 }
 
 // newExporterConfigs returns a ExporterConfigs
 func newExporterConfigs(c *PodtraceV1alpha1Client, namespace string) *exporterConfigs {
 	return &exporterConfigs{
-		gentype.NewClientWithList[*apiv1alpha1.ExporterConfig, *apiv1alpha1.ExporterConfigList](
+		gentype.NewClientWithListAndApply[*apiv1alpha1.ExporterConfig, *apiv1alpha1.ExporterConfigList, *applyconfigurationapiv1alpha1.ExporterConfigApplyConfiguration](
 			"exporterconfigs",
 			c.RESTClient(),
 			scheme.ParameterCodec,

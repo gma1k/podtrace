@@ -165,9 +165,6 @@ spec:
                 - endpoint
                 type: object
               samplePercent:
-                description: |-
-                  SamplePercent sets an exporter-level sampling rate cap, 0-100.
-                  If both this and the referent trace's SamplePercent are set, the minimum applies.
                 format: int32
                 maximum: 100
                 minimum: 0
@@ -196,7 +193,7 @@ spec:
                 - tokenSecretRef
                 type: object
               type:
-                description: Type selects the exporter implementation.
+                description: ExporterType enumerates supported trace exporters.
                 enum:
                 - otlp
                 - jaeger
@@ -227,7 +224,6 @@ spec:
             description: ExporterConfigStatus reports the observed state of an ExporterConfig.
             properties:
               conditions:
-                description: Conditions is the latest available observations.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -287,18 +283,16 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               observedGeneration:
-                description: ObservedGeneration is the most recent generation observed.
                 format: int64
                 type: integer
               ready:
-                description: Ready is true when referenced Secrets exist and credentials
-                  validate.
+                default: false
                 type: boolean
               referencedBy:
-                description: ReferencedBy counts how many PodTraces and PodTraceSessions
-                  reference this exporter.
                 format: int32
                 type: integer
+            required:
+            - ready
             type: object
         type: object
     served: true

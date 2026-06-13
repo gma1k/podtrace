@@ -85,6 +85,15 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 	if dpc := tc.Spec.Agent.DNSPacketCapture; dpc != nil && !*dpc {
 		env = append(env, corev1.EnvVar{Name: "PODTRACE_DNS_PACKET_CAPTURE", Value: "false"})
 	}
+	if a := tc.Spec.Agent.Alerting; a != nil && a.Enabled {
+		env = append(env, corev1.EnvVar{Name: "PODTRACE_ALERTING_ENABLED", Value: "true"})
+		if a.WebhookURL != "" {
+			env = append(env, corev1.EnvVar{Name: "PODTRACE_ALERT_WEBHOOK_URL", Value: a.WebhookURL})
+		}
+		if a.AllowInsecureWebhook {
+			env = append(env, corev1.EnvVar{Name: "PODTRACE_ALERT_WEBHOOK_ALLOW_HTTP", Value: "true"})
+		}
+	}
 
 	args := []string{
 		"agent",

@@ -1,0 +1,127 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alert-receiver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alert-receiver
+  template:
+    metadata:
+      labels:
+        app: alert-receiver
+    spec:
+      containers:
+        - name: receiver
+          image: python:3.12-alpine
+          command:
+            - python3
+            - -c
+            - |
+              import http.server
+              class H(http.server.BaseHTTPRequestHandler):
+                  def do_POST(self):
+                      n = int(self.headers.get('content-length', 0) or 0)
+                      body = self.rfile.read(n).decode('utf-8', 'replace')
+                      print('ALERT ' + body, flush=True)
+                      self.send_response(200)
+                      self.end_headers()
+                  def log_message(self, *a):
+                      pass
+              http.server.HTTPServer(('0.0.0.0', 8080), H).serve_forever()
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: 100m
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alert-receiver
+spec:
+  selector:
+    app: alert-receiver
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cpu-burn-a
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      trace: cpu
+      inst: a
+  template:
+    metadata:
+      labels:
+        trace: cpu
+        inst: a
+    spec:
+      containers:
+        - name: burn
+          image: busybox:1.36
+          command: ["sh", "-c", "while true; do :; done"]
+          resources:
+            limits:
+              cpu: 100m
+              memory: 64Mi
+            requests:
+              cpu: 100m
+              memory: 64Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cpu-burn-b
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      trace: cpu
+      inst: b
+  template:
+    metadata:
+      labels:
+        trace: cpu
+        inst: b
+    spec:
+      containers:
+        - name: burn
+          image: busybox:1.36
+          command: ["sh", "-c", "while true; do :; done"]
+          resources:
+            limits:
+              cpu: 100m
+              memory: 64Mi
+            requests:
+              cpu: 100m
+              memory: 64Mi
+---
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: alert-otlp
+spec:
+  type: otlp
+  otlp:
+    endpoint: otel-collector:4318
+    protocol: http
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: cpu-burn-trace
+spec:
+  selector:
+    matchLabels:
+      trace: cpu
+  filters: [cpu]
+  exporterRef:
+    name: alert-otlp

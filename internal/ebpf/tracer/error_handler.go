@@ -65,15 +65,20 @@ type timeBucket struct {
 }
 
 type slidingWindow struct {
-	buckets []timeBucket
-	window  time.Duration
-	mu      sync.Mutex
+	buckets    []timeBucket
+	window     time.Duration
+	numBuckets int
+	mu         sync.Mutex
 }
 
 func newSlidingWindow(window time.Duration, numBuckets int) *slidingWindow {
+	if numBuckets <= 0 {
+		numBuckets = 1
+	}
 	return &slidingWindow{
-		buckets: make([]timeBucket, 0, numBuckets),
-		window:  window,
+		buckets:    make([]timeBucket, 0, numBuckets),
+		window:     window,
+		numBuckets: numBuckets,
 	}
 }
 
@@ -91,7 +96,7 @@ func (sw *slidingWindow) addError() {
 		}
 	}
 
-	if len(validBuckets) == 0 || now.Sub(validBuckets[len(validBuckets)-1].timestamp) >= sw.window/time.Duration(cap(sw.buckets)) {
+	if len(validBuckets) == 0 || now.Sub(validBuckets[len(validBuckets)-1].timestamp) >= sw.window/time.Duration(sw.numBuckets) {
 		validBuckets = append(validBuckets, timeBucket{
 			count:     1,
 			timestamp: now,
@@ -153,8 +158,14 @@ func (cb *circuitBreaker) recordFailure() {
 	cb.failureCount++
 	cb.lastFailure = time.Now()
 
-	if cb.state == circuitBreakerClosed && cb.failureCount >= cb.threshold {
+	switch cb.state {
+	case circuitBreakerClosed:
+		if cb.failureCount >= cb.threshold {
+			cb.state = circuitBreakerOpen
+		}
+	case circuitBreakerHalfOpen:
 		cb.state = circuitBreakerOpen
+		cb.successCount = 0
 	}
 }
 

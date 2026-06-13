@@ -19,19 +19,20 @@ package fake
 
 import (
 	v1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
-	apiv1alpha1 "github.com/podtrace/podtrace/pkg/client/clientset/versioned/typed/api/v1alpha1"
+	apiv1alpha1 "github.com/podtrace/podtrace/pkg/client/applyconfiguration/api/v1alpha1"
+	typedapiv1alpha1 "github.com/podtrace/podtrace/pkg/client/clientset/versioned/typed/api/v1alpha1"
 	gentype "k8s.io/client-go/gentype"
 )
 
 // fakePodTraces implements PodTraceInterface
 type fakePodTraces struct {
-	*gentype.FakeClientWithList[*v1alpha1.PodTrace, *v1alpha1.PodTraceList]
+	*gentype.FakeClientWithListAndApply[*v1alpha1.PodTrace, *v1alpha1.PodTraceList, *apiv1alpha1.PodTraceApplyConfiguration]
 	Fake *FakePodtraceV1alpha1
 }
 
-func newFakePodTraces(fake *FakePodtraceV1alpha1, namespace string) apiv1alpha1.PodTraceInterface {
+func newFakePodTraces(fake *FakePodtraceV1alpha1, namespace string) typedapiv1alpha1.PodTraceInterface {
 	return &fakePodTraces{
-		gentype.NewFakeClientWithList[*v1alpha1.PodTrace, *v1alpha1.PodTraceList](
+		gentype.NewFakeClientWithListAndApply[*v1alpha1.PodTrace, *v1alpha1.PodTraceList, *apiv1alpha1.PodTraceApplyConfiguration](
 			fake.Fake,
 			namespace,
 			v1alpha1.SchemeGroupVersion.WithResource("podtraces"),

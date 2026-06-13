@@ -135,7 +135,7 @@ func main() {
 	rootCmd.Flags().StringVar(&diagnoseDuration, "diagnose", "", "Run in diagnose mode for the specified duration (e.g., 10s, 5m)")
 	rootCmd.Flags().BoolVar(&enableMetrics, "metrics", false, "Enable Prometheus metrics server")
 	rootCmd.Flags().StringVar(&exportFormat, "export", "", "Export format for diagnose report (json, csv)")
-	rootCmd.Flags().StringVar(&eventFilter, "filter", "", "Filter events by type (dns,net,fs,cpu)")
+	rootCmd.Flags().StringVar(&eventFilter, "filter", "", "Filter events by type (dns,net,fs,cpu,proc)")
 	rootCmd.Flags().StringVar(&containerName, "container", "", "Container name to trace (default: first container)")
 	rootCmd.Flags().Float64Var(&errorRateThreshold, "error-threshold", config.DefaultErrorRateThreshold, "Error rate threshold percentage for issue detection")
 	rootCmd.Flags().Float64Var(&rttSpikeThreshold, "rtt-threshold", config.DefaultRTTThreshold, "RTT spike threshold in milliseconds")
@@ -237,9 +237,10 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		if tracingSplunkToken != "" {
 			config.SplunkToken = tracingSplunkToken
 		}
-		if tracingSampleRate >= 0.0 && tracingSampleRate <= 1.0 {
-			config.TracingSampleRate = tracingSampleRate
+		if tracingSampleRate < 0.0 || tracingSampleRate > 1.0 {
+			return fmt.Errorf("--tracing-sample-rate must be between 0.0 and 1.0, got %v", tracingSampleRate)
 		}
+		config.TracingSampleRate = tracingSampleRate
 	}
 
 	alertManager, err := alerting.NewManager()
@@ -375,7 +376,7 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create pod resolver: %w", err)
 	}
 
-	resolveCtx, resolveCancel := context.WithTimeout(context.Background(), config.DefaultPodResolveTimeout)
+	resolveCtx, resolveCancel := context.WithTimeout(ctx, config.DefaultPodResolveTimeout)
 	defer resolveCancel()
 	selectionDefaultNamespace := namespace
 	selectionNamespaces := namespaces
@@ -907,7 +908,7 @@ func filterEvents(ctx context.Context, in <-chan *events.Event, out chan<- *even
 					logger.Warn("Filtered event channel full, dropping event",
 						zap.String("event_type", event.TypeString()),
 						zap.Uint32("pid", event.PID))
-					metricsexporter.RecordRingBufferDrop()
+					metricsexporter.RecordFilteredEventDrop()
 				}
 			}
 		}

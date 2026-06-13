@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,8 +30,19 @@ func (b *BootstrapDefaultTracerConfig) Start(ctx context.Context) error {
 	logger := log.FromContext(ctx).WithName("tracerconfig-bootstrap")
 
 	var existing podtracev1alpha1.TracerConfigList
-	if err := b.Client.List(ctx, &existing); err != nil {
-		logger.Error(err, "list TracerConfig failed; skipping bootstrap")
+	var listErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		if listErr = b.Client.List(ctx, &existing); listErr == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(time.Duration(attempt+1) * time.Second):
+		}
+	}
+	if listErr != nil {
+		logger.Error(listErr, "list TracerConfig failed after retries; skipping bootstrap")
 		return nil
 	}
 	if len(existing.Items) > 0 {

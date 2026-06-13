@@ -68,20 +68,13 @@ static __always_inline int redis_emit(struct pt_regs *ctx, u32 pair, u32 pid, u3
 	e->bytes      = 0;
 	e->tcp_state  = 0;
 
-	/* Command name */
 	char *cmd_ptr = bpf_map_lookup_elem(&redis_cmds, &key);
 	if (cmd_ptr)
 		bpf_probe_read_kernel_str(e->details, sizeof(e->details), cmd_ptr);
 	else
 		e->details[0] = '\0';
 
-	/* Server target (URL blackboard written by the http_request uprobe) */
-	u64 conn_key = get_key(pid, tid);
-	char *conn_ptr = bpf_map_lookup_elem(&socket_conns, &conn_key);
-	if (conn_ptr)
-		bpf_probe_read_kernel_str(e->target, sizeof(e->target), conn_ptr);
-	else
-		e->target[0] = '\0';
+	e->target[0] = '\0';
 
 	capture_user_stack(ctx, pid, tid, e);
 	bpf_ringbuf_output(&events, e, sizeof(*e), 0);

@@ -64,9 +64,7 @@ func redactURLForLog(raw string) string {
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return "[invalid-url]"
 	}
-	u.RawQuery = ""
-	u.Fragment = ""
-	return u.String()
+	return u.Scheme + "://" + u.Host
 }
 
 func NewManager() (*Manager, error) {
@@ -130,10 +128,11 @@ func (m *Manager) SendAlert(alert *Alert) {
 	if !ShouldSendAlert(alert.Severity) {
 		return
 	}
-	if !m.rateLimiter.Allow() {
+	if !m.deduplicator.ShouldSend(alert) {
 		return
 	}
-	if !m.deduplicator.ShouldSend(alert) {
+	if !m.rateLimiter.Allow() {
+		m.deduplicator.Forget(alert)
 		return
 	}
 	m.mu.RLock()

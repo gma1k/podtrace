@@ -50,6 +50,30 @@ func (f *fakeBPFMap) Delete(key interface{}) error {
 	return nil
 }
 
+// Lookup satisfies bpfAlertReadMap.
+func (f *fakeBPFMap) Lookup(key, valueOut interface{}) error {
+	k, ok := key.(resourceMapKey)
+	if !ok {
+		return fmt.Errorf("fakeBPFMap.Lookup: key must be resourceMapKey, got %T", key)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	v, exists := f.entries[k]
+	if !exists {
+		return ebpf.ErrKeyNotExist
+	}
+	out, ok := valueOut.(*uint32)
+	if !ok {
+		return fmt.Errorf("fakeBPFMap.Lookup: valueOut must be *uint32, got %T", valueOut)
+	}
+	level, ok := v.(uint32)
+	if !ok {
+		return fmt.Errorf("fakeBPFMap.Lookup: stored value must be uint32, got %T", v)
+	}
+	*out = level
+	return nil
+}
+
 func (f *fakeBPFMap) get(key resourceMapKey) (interface{}, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

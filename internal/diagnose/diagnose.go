@@ -226,12 +226,6 @@ func (d *Diagnostician) GenerateReportWithContext(ctx context.Context) string {
 	result += report.GenerateSyscallSection(d, duration)
 	result += report.GenerateApplicationTracing(d, duration)
 	result += tracker.GenerateConnectionCorrelation(allEvents)
-	poolEvents := d.FilterEvents(events.EventPoolAcquire)
-	poolEvents = append(poolEvents, d.FilterEvents(events.EventPoolRelease)...)
-	poolEvents = append(poolEvents, d.FilterEvents(events.EventPoolExhausted)...)
-	if len(poolEvents) > 0 {
-		result += tracker.GeneratePoolCorrelation(poolEvents)
-	}
 
 	if d.podCommTracker != nil {
 		summaries := d.podCommTracker.GetSummary()

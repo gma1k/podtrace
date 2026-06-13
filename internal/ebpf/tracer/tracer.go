@@ -38,7 +38,6 @@ import (
 	"github.com/podtrace/podtrace/internal/metricsexporter"
 	"github.com/podtrace/podtrace/internal/procfs"
 	"github.com/podtrace/podtrace/internal/redactor"
-	"github.com/podtrace/podtrace/internal/resource"
 	"github.com/podtrace/podtrace/internal/sysfs"
 	"github.com/podtrace/podtrace/internal/validation"
 )
@@ -80,8 +79,9 @@ type Tracer struct {
 	containerPID             uint32
 	processNameCache         *cache.LRUCache
 	pathCache                *cache.PathCache
-	resourceMonitor          *resource.ResourceMonitor
+	resourceMgr              *resourceMonitorManager
 	cgroupPath               string
+	lastDNSDrops             uint64
 	cgroupPaths              []string
 	useUserspaceCgroupFilter atomic.Bool
 	targetCgroupID           atomic.Uint64
@@ -292,7 +292,7 @@ func NewTracer() (*Tracer, error) {
 	}
 	hashSize := config.ClampUint32(config.BPFHashMapSize)
 	for name, m := range spec.Maps {
-		if m.Type == ebpf.Hash {
+		if m.Type == ebpf.Hash && m.MaxEntries < hashSize {
 			spec.Maps[name].MaxEntries = hashSize
 		}
 	}
@@ -361,6 +361,7 @@ func NewTracer() (*Tracer, error) {
 		filter:                filter.NewCgroupFilter(),
 		processNameCache:      processCache,
 		pathCache:             cache.NewPathCache(),
+		resourceMgr:           newResourceMonitorManager(),
 	}
 	t.useUserspaceCgroupFilter.Store(true)
 	t.storeCgroupIDs(map[uint64]struct{}{})
@@ -527,10 +528,12 @@ func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 		t.storeCgroupIDs(newIDs)
 		logger.Debug("Cgroup v2 not detected, using userspace filtering only", zap.String("cgroup_base", config.CgroupBasePath))
 	}
-	// attachCgroups holds cgroupWriteMu for its whole body (deferred
-	// unlock), so read the final path set directly.
 	currentPaths := append([]string(nil), t.cgroupPaths...)
 	t.syncDNSPacketProbes(currentPaths)
+
+	if t.resourceMgr != nil {
+		t.resourceMgr.reconcile(currentPaths)
+	}
 
 	logger.Debug("Attached to cgroups",
 		zap.Int("cgroup_count", len(t.cgroupPaths)),
@@ -552,18 +555,12 @@ func (t *Tracer) syncTargetCgroupMap() error {
 
 	ids := t.loadCgroupIDs()
 
-	// When the target set empties, disable the filter before draining the
-	// map so there is no window where the flag is on and the allowlist is
-	// empty (which would drop every event in the kernel).
 	if len(ids) == 0 {
 		if err := t.setCgroupFilterEnabled(false); err != nil {
 			return err
 		}
 	}
 
-	// Diff-based sync: delete stale keys and upsert current ones. The old
-	// clear-then-repopulate approach opened a window during which the
-	// allowlist was empty on every resync.
 	var key uint64
 	var val uint8
 	stale := make([]uint64, 0)
@@ -597,10 +594,7 @@ func (t *Tracer) syncTargetCgroupMap() error {
 }
 
 // setCgroupFilterEnabled flips the dedicated flag the BPF side consults
-// before applying the in-kernel cgroup prefilter. The previous design probed
-// target_cgroup_ids for key 0 to decide whether the filter was active, but
-// the Go side never writes key 0 (real cgroup IDs are never 0), so the
-// prefilter silently allowed everything.
+// before applying the in-kernel cgroup prefilter.
 func (t *Tracer) setCgroupFilterEnabled(enabled bool) error {
 	if t.collection == nil || t.collection.Maps == nil {
 		return nil
@@ -705,25 +699,10 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 	t.cgroupWriteMu.Unlock()
 	t.syncDNSPacketProbes(dnsCgroups)
 
-	if t.cgroupPath != "" {
-		limitsMap := t.collection.Maps["cgroup_limits"]
-		alertsMap := t.collection.Maps["cgroup_alerts"]
-		if limitsMap != nil && alertsMap != nil {
-			rm, err := resource.NewResourceMonitor(t.cgroupPath, limitsMap, alertsMap, eventChan, "")
-			if err != nil {
-				logger.Warn("Failed to create resource monitor", zap.Error(err), zap.String("cgroup_path", t.cgroupPath))
-			} else {
-				t.resourceMonitor = rm
-				logger.Debug("Resource monitor initialized", zap.String("cgroup_path", t.cgroupPath))
-				rm.Start(ctx)
-				logger.Debug("Resource monitor started")
-			}
-		} else {
-			logger.Warn("Resource monitor maps not found in BPF collection")
-		}
-	} else {
-		logger.Debug("Cgroup path not set, skipping resource monitor initialization")
-	}
+	t.resourceMgr.activate(ctx, eventChan,
+		t.collection.Maps["cgroup_limits"],
+		t.collection.Maps["cgroup_alerts"],
+		t.collection.Maps["cgroup_cpu_quota"])
 
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
@@ -936,15 +915,6 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 					t.cpAnalyzer.Feed(event)
 				}
 
-				if event.Target != "" && event.Target != "<disconnected>" {
-					cacheKey := fmt.Sprintf("%d:%s", event.PID, event.Target)
-					if cached, ok := t.pathCache.Get(cacheKey); ok {
-						event.Target = cached
-					} else {
-						t.pathCache.Set(cacheKey, event.Target)
-					}
-				}
-
 				if event.Error != 0 {
 					metricsexporter.RecordError(event.TypeString(), event.Error)
 				}
@@ -1043,8 +1013,8 @@ func (t *Tracer) Stop() error {
 		t.pathCache.Clear()
 	}
 
-	if t.resourceMonitor != nil {
-		t.resourceMonitor.Stop()
+	if t.resourceMgr != nil {
+		t.resourceMgr.stopAll()
 	}
 
 	return nil

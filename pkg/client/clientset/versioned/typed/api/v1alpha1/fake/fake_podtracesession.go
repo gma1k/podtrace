@@ -19,19 +19,20 @@ package fake
 
 import (
 	v1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
-	apiv1alpha1 "github.com/podtrace/podtrace/pkg/client/clientset/versioned/typed/api/v1alpha1"
+	apiv1alpha1 "github.com/podtrace/podtrace/pkg/client/applyconfiguration/api/v1alpha1"
+	typedapiv1alpha1 "github.com/podtrace/podtrace/pkg/client/clientset/versioned/typed/api/v1alpha1"
 	gentype "k8s.io/client-go/gentype"
 )
 
 // fakePodTraceSessions implements PodTraceSessionInterface
 type fakePodTraceSessions struct {
-	*gentype.FakeClientWithList[*v1alpha1.PodTraceSession, *v1alpha1.PodTraceSessionList]
+	*gentype.FakeClientWithListAndApply[*v1alpha1.PodTraceSession, *v1alpha1.PodTraceSessionList, *apiv1alpha1.PodTraceSessionApplyConfiguration]
 	Fake *FakePodtraceV1alpha1
 }
 
-func newFakePodTraceSessions(fake *FakePodtraceV1alpha1, namespace string) apiv1alpha1.PodTraceSessionInterface {
+func newFakePodTraceSessions(fake *FakePodtraceV1alpha1, namespace string) typedapiv1alpha1.PodTraceSessionInterface {
 	return &fakePodTraceSessions{
-		gentype.NewFakeClientWithList[*v1alpha1.PodTraceSession, *v1alpha1.PodTraceSessionList](
+		gentype.NewFakeClientWithListAndApply[*v1alpha1.PodTraceSession, *v1alpha1.PodTraceSessionList, *apiv1alpha1.PodTraceSessionApplyConfiguration](
 			fake.Fake,
 			namespace,
 			v1alpha1.SchemeGroupVersion.WithResource("podtracesessions"),

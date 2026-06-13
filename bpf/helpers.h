@@ -27,36 +27,37 @@ static inline u64 calc_latency(u64 start) {
 	return now > start ? now - start : 0;
 }
 
+static __attribute__((noinline)) u32 append_dec(char *buf, u32 idx, u32 max_idx, u32 val) {
+	u32 divisor = 10000;
+	int started = 0;
+	for (int i = 0; i < 5; i++) {
+		u32 digit = (val / divisor) % 10;
+		if (digit != 0 || started || divisor == 1) {
+			if (idx < max_idx) buf[idx++] = '0' + digit;
+			started = 1;
+		}
+		divisor /= 10;
+	}
+	return idx;
+}
+
 static inline void format_ip_port(u32 ip, u16 port, char *buf) {
 	u8 a = (ip >> 24) & 0xFF;
 	u8 b = (ip >> 16) & 0xFF;
 	u8 c = (ip >> 8) & 0xFF;
 	u8 d = ip & 0xFF;
-	u16 p = port;
 	u32 idx = 0;
 	u32 max_idx = MAX_STRING_LEN - 1;
-	
-	if (idx < max_idx) buf[idx++] = '0' + (a / 100) % 10;
-	if (idx < max_idx) buf[idx++] = '0' + (a / 10) % 10;
-	if (idx < max_idx) buf[idx++] = '0' + a % 10;
+
+	idx = append_dec(buf, idx, max_idx, a);
 	if (idx < max_idx) buf[idx++] = '.';
-	if (idx < max_idx) buf[idx++] = '0' + (b / 100) % 10;
-	if (idx < max_idx) buf[idx++] = '0' + (b / 10) % 10;
-	if (idx < max_idx) buf[idx++] = '0' + b % 10;
+	idx = append_dec(buf, idx, max_idx, b);
 	if (idx < max_idx) buf[idx++] = '.';
-	if (idx < max_idx) buf[idx++] = '0' + (c / 100) % 10;
-	if (idx < max_idx) buf[idx++] = '0' + (c / 10) % 10;
-	if (idx < max_idx) buf[idx++] = '0' + c % 10;
+	idx = append_dec(buf, idx, max_idx, c);
 	if (idx < max_idx) buf[idx++] = '.';
-	if (idx < max_idx) buf[idx++] = '0' + (d / 100) % 10;
-	if (idx < max_idx) buf[idx++] = '0' + (d / 10) % 10;
-	if (idx < max_idx) buf[idx++] = '0' + d % 10;
+	idx = append_dec(buf, idx, max_idx, d);
 	if (idx < max_idx) buf[idx++] = ':';
-	if (idx < max_idx) buf[idx++] = '0' + (p / 10000) % 10;
-	if (idx < max_idx) buf[idx++] = '0' + (p / 1000) % 10;
-	if (idx < max_idx) buf[idx++] = '0' + (p / 100) % 10;
-	if (idx < max_idx) buf[idx++] = '0' + (p / 10) % 10;
-	if (idx < max_idx) buf[idx++] = '0' + p % 10;
+	idx = append_dec(buf, idx, max_idx, port);
 	buf[idx < MAX_STRING_LEN ? idx : max_idx] = '\0';
 }
 
@@ -87,11 +88,7 @@ static inline void format_ipv6_port(const u8 *ipv6, u16 port, char *buf) {
 	
 	if (idx < port_start_limit) {
 		if (idx < max_idx) buf[idx++] = ':';
-		if (idx < max_idx) buf[idx++] = '0' + (p / 10000) % 10;
-		if (idx < max_idx) buf[idx++] = '0' + (p / 1000) % 10;
-		if (idx < max_idx) buf[idx++] = '0' + (p / 100) % 10;
-		if (idx < max_idx) buf[idx++] = '0' + (p / 10) % 10;
-		if (idx < max_idx) buf[idx++] = '0' + p % 10;
+		idx = append_dec(buf, idx, max_idx, p);
 	}
 	buf[idx < MAX_STRING_LEN ? idx : max_idx] = '\0';
 }

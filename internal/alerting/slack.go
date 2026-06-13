@@ -53,8 +53,9 @@ func NewSlackSender(webhookURL, channel string, timeout time.Duration) (*SlackSe
 	if parsedURL.Scheme != "https" {
 		return nil, fmt.Errorf("slack webhook URL must use https scheme")
 	}
-	if !strings.Contains(webhookURL, "hooks.slack.com") {
-		return nil, fmt.Errorf("invalid slack webhook URL format")
+	host := parsedURL.Hostname()
+	if host != "hooks.slack.com" && !strings.HasSuffix(host, ".slack.com") {
+		return nil, fmt.Errorf("slack webhook host must be hooks.slack.com, got %q", host)
 	}
 	if channel == "" {
 		channel = "#alerts"

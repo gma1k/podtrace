@@ -8,12 +8,10 @@ spec:
     Restart the agent DaemonSet; existing PodTrace CRs must stay
     Reconciled and the per-node status array reappears post-restart.
 
-    SCOPE: control-plane only. The agent's continuous path uses
-    NoopBackend today, so this test does NOT assert event continuity
-    (no events flow through the agent regardless of restart). When
-    the real eBPF backend is wired into the agent's event loop
-    this test could be extended to compare event counts
-    pre/post restart.
+    SCOPE: control-plane only by choice. The agent runs the real eBPF
+    backend, but this test does NOT compare pre/post event counts —
+    that would make it timing-sensitive. It asserts the control plane
+    survives a restart; resource-alert covers the agent data path.
   timeouts:
     apply: 30s
     assert: 120s

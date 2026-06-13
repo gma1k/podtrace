@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -134,7 +133,6 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("register TracerConfig bootstrap: %w", err)
 	}
 
-	utilruntime.Must(nil)
 	return mgr.Start(ctx)
 }
 

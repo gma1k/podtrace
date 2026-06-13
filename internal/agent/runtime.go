@@ -26,6 +26,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	"github.com/podtrace/podtrace/internal/alerting"
+	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/ebpf/probes"
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/pkg/tracer"
@@ -77,6 +79,18 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	ctrl.SetLogger(zap.New(zap.UseDevMode(false)))
 	logger := ctrllog.Log.WithName("agent").WithValues("node", opts.NodeName)
+
+	if alertManager, mErr := alerting.NewManager(); mErr != nil {
+		logger.Error(mErr, "failed to create alert manager; resource alerts disabled")
+	} else if alertManager != nil {
+		alerting.SetGlobalManager(alertManager)
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), config.ShutdownTimeout)
+			defer cancel()
+			_ = alertManager.Shutdown(shutdownCtx)
+		}()
+		logger.Info("alert manager initialized", "enabled", alertManager.IsEnabled())
+	}
 
 	scheme, err := newAgentScheme()
 	if err != nil {

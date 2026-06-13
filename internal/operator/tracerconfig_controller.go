@@ -76,21 +76,22 @@ func (r *TracerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if err := r.ensureAgentRBAC(ctx, &tc, systemNS); err != nil {
 		logger.Error(err, "ensure agent RBAC")
 		r.setCondition(&tc, ConditionDegraded, metav1.ConditionTrue, "RBACError", err.Error())
-		_ = r.Status().Update(ctx, &tc)
+		if uerr := r.Status().Update(ctx, &tc); uerr != nil && !apierrors.IsConflict(uerr) {
+			logger.Error(uerr, "update Degraded status after RBAC error")
+		}
 		return ctrl.Result{}, err
 	}
 
 	ds, err := r.ensureAgentDaemonSet(ctx, &tc, systemNS)
 	if err != nil {
-		// Optimistic-concurrency conflict (someone else just touched the
-		// DaemonSet — kubectl rollout restart, helm upgrade, another
-		// reconcile). Requeue silently; controller-runtime will re-list.
 		if apierrors.IsConflict(err) {
 			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
 		logger.Error(err, "ensure agent DaemonSet")
 		r.setCondition(&tc, ConditionDegraded, metav1.ConditionTrue, "DaemonSetError", err.Error())
-		_ = r.Status().Update(ctx, &tc)
+		if uerr := r.Status().Update(ctx, &tc); uerr != nil && !apierrors.IsConflict(uerr) {
+			logger.Error(uerr, "update Degraded status after DaemonSet error")
+		}
 		return ctrl.Result{}, err
 	}
 

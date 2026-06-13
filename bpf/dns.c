@@ -18,6 +18,7 @@
 #define MAX_ANSWERS 4
 #define MAX_NAME_LABELS 32
 #define DNS_OFF_MASK 0x7ff
+#define DNS_NAME_SCAN_LEN 96
 #define IP6_HOPOPTS 0
 #define IP6_ROUTING 43
 #define IP6_FRAGMENT 44
@@ -44,6 +45,11 @@ static __always_inline int l4_offset(struct __sk_buff *skb, u8 *is_v6, u8 *proto
 		if (bpf_skb_load_bytes(skb, 9, &proto, 1) < 0)
 			return -1;
 		if (proto != IPPROTO_UDP && proto != IPPROTO_TCP)
+			return -1;
+		__u16 frag = 0;
+		if (bpf_skb_load_bytes(skb, 6, &frag, sizeof(frag)) < 0)
+			return -1;
+		if (bpf_ntohs(frag) & 0x1FFF)
 			return -1;
 		*is_v6 = 0;
 		*proto_out = proto;
@@ -123,6 +129,45 @@ static __noinline int parse_qname(struct __sk_buff *skb, int off, char *out) {
 		}
 	}
 	return off;
+}
+
+static __noinline void parse_name_compressed(struct __sk_buff *skb, int dns_off, int off, char *out) {
+	__u8 first = 0;
+	if (bpf_skb_load_bytes(skb, off, &first, 1) < 0)
+		return;
+	if ((first & 0xc0) == 0xc0) {
+		__u8 lo = 0;
+		if (bpf_skb_load_bytes(skb, off + 1, &lo, 1) < 0)
+			return;
+		off = (dns_off + (((first & 0x3f) << 8) | lo)) & DNS_OFF_MASK;
+	}
+
+	int j = 0, label_remaining = 0, need_len = 1;
+	for (int i = 0; i < DNS_NAME_SCAN_LEN; i++) {
+		__u8 c = 0;
+		if (bpf_skb_load_bytes(skb, off, &c, 1) < 0)
+			break;
+		off++;
+		if (need_len) {
+			if ((c & 0xc0) == 0xc0)
+				break;
+			if (c == 0)
+				break;
+			if (c > 63)
+				break;
+			if (j > 0 && j < MAX_STRING_LEN - 1)
+				out[j++] = '.';
+			label_remaining = c;
+			need_len = 0;
+		} else {
+			if (j < MAX_STRING_LEN - 1)
+				out[j & (MAX_STRING_LEN - 1)] = c;
+			j++;
+			label_remaining--;
+			if (label_remaining <= 0)
+				need_len = 1;
+		}
+	}
 }
 
 static __always_inline int is_known_doh(__u32 d) {
@@ -387,7 +432,7 @@ int dns_ingress(struct __sk_buff *skb) {
 				}
 			}
 		} else if (atype == DNS_TYPE_CNAME && !wrote_detail) {
-			parse_qname(skb, rdata, e->details);
+			parse_name_compressed(skb, dns_off, rdata, e->details);
 		}
 		aoff = (rdata + (rdlen & DNS_OFF_MASK)) & DNS_OFF_MASK;
 	}

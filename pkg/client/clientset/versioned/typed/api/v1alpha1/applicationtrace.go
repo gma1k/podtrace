@@ -21,6 +21,7 @@ import (
 	context "context"
 
 	apiv1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	applyconfigurationapiv1alpha1 "github.com/podtrace/podtrace/pkg/client/applyconfiguration/api/v1alpha1"
 	scheme "github.com/podtrace/podtrace/pkg/client/clientset/versioned/scheme"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -46,18 +47,21 @@ type ApplicationTraceInterface interface {
 	List(ctx context.Context, opts v1.ListOptions) (*apiv1alpha1.ApplicationTraceList, error)
 	Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error)
 	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *apiv1alpha1.ApplicationTrace, err error)
+	Apply(ctx context.Context, applicationTrace *applyconfigurationapiv1alpha1.ApplicationTraceApplyConfiguration, opts v1.ApplyOptions) (result *apiv1alpha1.ApplicationTrace, err error)
+	// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
+	ApplyStatus(ctx context.Context, applicationTrace *applyconfigurationapiv1alpha1.ApplicationTraceApplyConfiguration, opts v1.ApplyOptions) (result *apiv1alpha1.ApplicationTrace, err error)
 	ApplicationTraceExpansion
 }
 
 // applicationTraces implements ApplicationTraceInterface
 type applicationTraces struct {
-	*gentype.ClientWithList[*apiv1alpha1.ApplicationTrace, *apiv1alpha1.ApplicationTraceList]
+	*gentype.ClientWithListAndApply[*apiv1alpha1.ApplicationTrace, *apiv1alpha1.ApplicationTraceList, *applyconfigurationapiv1alpha1.ApplicationTraceApplyConfiguration]
 }
 
 // newApplicationTraces returns a ApplicationTraces
 func newApplicationTraces(c *PodtraceV1alpha1Client, namespace string) *applicationTraces {
 	return &applicationTraces{
-		gentype.NewClientWithList[*apiv1alpha1.ApplicationTrace, *apiv1alpha1.ApplicationTraceList](
+		gentype.NewClientWithListAndApply[*apiv1alpha1.ApplicationTrace, *apiv1alpha1.ApplicationTraceList, *applyconfigurationapiv1alpha1.ApplicationTraceApplyConfiguration](
 			"applicationtraces",
 			c.RESTClient(),
 			scheme.ParameterCodec,

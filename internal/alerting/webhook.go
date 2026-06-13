@@ -33,8 +33,8 @@ func NewWebhookSender(webhookURL string, timeout time.Duration) (*WebhookSender,
 	}
 	host := strings.ToLower(parsedURL.Hostname())
 	if host != "localhost" && host != "127.0.0.1" && host != "::1" {
-		if parsedURL.Scheme == "http" {
-			return nil, fmt.Errorf("non-localhost URLs must use https")
+		if parsedURL.Scheme == "http" && !config.WebhookAllowHTTP() {
+			return nil, fmt.Errorf("non-localhost URLs must use https (set PODTRACE_ALERT_WEBHOOK_ALLOW_HTTP=1 for a trusted in-cluster receiver)")
 		}
 	}
 	return &WebhookSender{

@@ -310,12 +310,12 @@ func TestManager_SendAlert_SeverityBelowThreshold(t *testing.T) {
 		_ = origMinSev
 	}()
 
-	var sent bool
+	var sent atomic.Bool
 	m := &Manager{
 		enabled: true,
 		senders: []Sender{&testMockSender{
 			sendFunc: func(_ context.Context, _ *Alert) error {
-				sent = true
+				sent.Store(true)
 				return nil
 			},
 		}},
@@ -334,7 +334,7 @@ func TestManager_SendAlert_SeverityBelowThreshold(t *testing.T) {
 	m.SendAlert(alert)
 	time.Sleep(50 * time.Millisecond)
 	// Whether sent or not depends on the config's min severity parsing.
-	_ = sent
+	_ = sent.Load()
 }
 
 func TestManager_SendAlert_RateLimitExhausted(t *testing.T) {
@@ -342,12 +342,12 @@ func TestManager_SendAlert_RateLimitExhausted(t *testing.T) {
 	config.AlertingEnabled = true
 	defer func() { config.AlertingEnabled = origEnabled }()
 
-	var sendCount int
+	var sendCount atomic.Int64
 	m := &Manager{
 		enabled: true,
 		senders: []Sender{&testMockSender{
 			sendFunc: func(_ context.Context, _ *Alert) error {
-				sendCount++
+				sendCount.Add(1)
 				return nil
 			},
 		}},
@@ -365,7 +365,7 @@ func TestManager_SendAlert_RateLimitExhausted(t *testing.T) {
 	m.SendAlert(alert)
 	time.Sleep(20 * time.Millisecond)
 	// With rate=0, the rate limiter may or may not allow depending on implementation.
-	_ = sendCount
+	_ = sendCount.Load()
 }
 
 func TestManager_SendAlert_DeduplicatorFilters(t *testing.T) {

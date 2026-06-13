@@ -42,8 +42,7 @@ spec:
       openAPIV3Schema:
         description: |-
           TracerConfig is the cluster-wide infrastructure configuration for the
-          podtrace operator. A single TracerConfig named "default" governs the
-          fleet-wide DaemonSet and Session Jobs.
+          podtrace operator.
         properties:
           apiVersion:
             description: |-
@@ -68,7 +67,7 @@ spec:
               because it governs a fleet-wide DaemonSet and the Jobs the operator spawns.
             properties:
               affinity:
-                description: Affinity applied to agent and session pods.
+                description: Affinity is a group of affinity scheduling rules.
                 properties:
                   nodeAffinity:
                     description: Describes node affinity scheduling rules for the
@@ -980,23 +979,26 @@ spec:
                     type: object
                 type: object
               agent:
-                description: Agent configures the DaemonSet that provides realtime
-                  tracing.
+                description: AgentSpec tunes the per-node tracer DaemonSet.
                 properties:
+                  alerting:
+                    description: AgentAlertingSpec configures agent-side resource-limit
+                      alert delivery.
+                    properties:
+                      allowInsecureWebhook:
+                        type: boolean
+                      enabled:
+                        type: boolean
+                      webhookURL:
+                        type: string
+                    type: object
                   dnsPacketCapture:
-                    description: |-
-                      DNSPacketCapture enables libc-independent DNS capture by parsing packets
-                      in the kernel.
                     type: boolean
                   eventBufferSize:
-                    description: EventBufferSize is the per-agent event channel capacity.
-                      Default 10000.
                     format: int32
                     minimum: 128
                     type: integer
                   logLevel:
-                    description: 'LogLevel applied to agent pods. One of: debug, info,
-                      warn, error.'
                     enum:
                     - debug
                     - info
@@ -1004,12 +1006,10 @@ spec:
                     - error
                     type: string
                   priorityClassName:
-                    description: |-
-                      PriorityClassName applied to agent pods. Defaults to system-node-critical
-                      when unset and the priority class exists on the cluster.
                     type: string
                   resources:
-                    description: Resources applied to each agent pod.
+                    description: ResourceRequirements describes the compute resource
+                      requirements.
                     properties:
                       claims:
                         description: |-
@@ -1068,26 +1068,22 @@ spec:
                         type: object
                     type: object
                   statusReportInterval:
-                    description: |-
-                      StatusReportInterval controls how often each agent patches PodTrace
-                      status.nodeStatus. Default 30s.
                     type: string
                 type: object
               btfMode:
-                description: BTFMode controls how the agent resolves BTF.
+                description: BTFMode controls how the agent resolves BTF for CO-RE.
                 enum:
                 - auto
                 - host
                 - embedded
                 type: string
               image:
-                description: Image for both the agent DaemonSet and session Job pods.
                 type: string
               imagePullPolicy:
-                description: ImagePullPolicy. Defaults to IfNotPresent.
+                description: PullPolicy describes a policy for if/when to pull a container
+                  image
                 type: string
               imagePullSecrets:
-                description: ImagePullSecrets referenced by agent and session pods.
                 items:
                   description: |-
                     LocalObjectReference contains enough information to let you locate the
@@ -1106,41 +1102,30 @@ spec:
                   x-kubernetes-map-type: atomic
                 type: array
               maxConcurrentSessionsPerNode:
-                description: |-
-                  MaxConcurrentSessionsPerNode caps privileged Job pods per node.
-                  Defaults to 2.
                 format: int32
                 minimum: 1
                 type: integer
               nodeSelector:
                 additionalProperties:
                   type: string
-                description: NodeSelector applied to agent and session pods.
                 type: object
               session:
-                description: Session configures per-session Job pods spawned for PodTraceSession
-                  CRs.
+                description: SessionRuntimeSpec tunes the per-session Job pods the
+                  operator creates.
                 properties:
                   activeDeadlineSecondsOffset:
-                    description: |-
-                      ActiveDeadlineSecondsOffset is added to spec.duration to compute the
-                      Job's activeDeadlineSeconds (giving the Job grace to finish reporting).
-                      Default 30.
                     format: int32
                     minimum: 0
                     type: integer
                   backoffLimit:
-                    description: BackoffLimit for the Job. Default 0 (fail fast).
                     format: int32
                     minimum: 0
                     type: integer
                   maxDuration:
-                    description: |-
-                      MaxDuration caps spec.duration on any PodTraceSession reconciled against
-                      this TracerConfig. If unset, no cap is enforced by the operator.
                     type: string
                   resources:
-                    description: Resources applied to each session Job pod.
+                    description: ResourceRequirements describes the compute resource
+                      requirements.
                     properties:
                       claims:
                         description: |-
@@ -1201,22 +1186,13 @@ spec:
                   sidecarUploader:
                     type: boolean
                   ttlSecondsAfterFinished:
-                    description: |-
-                      TTLSecondsAfterFinished default applied to session Jobs when a session
-                      does not specify its own. Default 300.
                     format: int32
                     minimum: 0
                     type: integer
                 type: object
               systemNamespace:
-                description: |-
-                  SystemNamespace is the namespace in which the operator creates the
-                  agent DaemonSet, session Jobs, and resolved exporter bundles.
-                  Defaults to "podtrace-system". Must be a Pod-Security-Admission
-                  "privileged" namespace.
                 type: string
               tolerations:
-                description: Tolerations applied to agent and session pods.
                 items:
                   description: |-
                     The pod this Toleration is attached to tolerates any taint that matches
@@ -1262,12 +1238,9 @@ spec:
             description: TracerConfigStatus reflects the observed state of a TracerConfig.
             properties:
               activeSessions:
-                description: ActiveSessions is the number of PodTraceSession Jobs
-                  currently Running.
                 format: int32
                 type: integer
               conditions:
-                description: Conditions is the latest available observations.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -1327,16 +1300,12 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               desiredAgents:
-                description: DesiredAgents is the number of nodes the agent DaemonSet
-                  targets.
                 format: int32
                 type: integer
               observedGeneration:
-                description: ObservedGeneration is the most recent generation observed.
                 format: int64
                 type: integer
               readyAgents:
-                description: ReadyAgents is the number of agent pods currently Ready.
                 format: int32
                 type: integer
             type: object

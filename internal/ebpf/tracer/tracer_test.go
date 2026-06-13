@@ -1436,9 +1436,9 @@ func TestTracer_Start_WithResourceMonitorError(t *testing.T) {
 
 func TestTracer_Stop_WithResourceMonitor(t *testing.T) {
 	tracer := &Tracer{
-		filter:          filter.NewCgroupFilter(),
-		links:           []link.Link{},
-		resourceMonitor: nil,
+		filter:      filter.NewCgroupFilter(),
+		links:       []link.Link{},
+		resourceMgr: newResourceMonitorManager(),
 	}
 
 	err := tracer.Stop()
@@ -1449,9 +1449,9 @@ func TestTracer_Stop_WithResourceMonitor(t *testing.T) {
 
 func TestTracer_Stop_WithPathCache(t *testing.T) {
 	tracer := &Tracer{
-		filter:     filter.NewCgroupFilter(),
-		links:      []link.Link{},
-		pathCache:  cache.NewPathCache(),
+		filter:    filter.NewCgroupFilter(),
+		links:     []link.Link{},
+		pathCache: cache.NewPathCache(),
 	}
 
 	err := tracer.Stop()
@@ -1469,7 +1469,7 @@ func TestTracer_Stop_CompleteCleanup(t *testing.T) {
 		collection:       nil,
 		processNameCache: cache.NewLRUCache(config.CacheMaxSize, ttl),
 		pathCache:        cache.NewPathCache(),
-		resourceMonitor:  nil,
+		resourceMgr:      newResourceMonitorManager(),
 	}
 
 	err := tracer.Stop()
@@ -1565,7 +1565,7 @@ func TestTracer_Stop_WithAllComponents(t *testing.T) {
 		collection:       nil,
 		processNameCache: cache.NewLRUCache(config.CacheMaxSize, ttl),
 		pathCache:        cache.NewPathCache(),
-		resourceMonitor:  nil,
+		resourceMgr:      newResourceMonitorManager(),
 	}
 
 	err := tracer.Stop()
@@ -1610,7 +1610,7 @@ func TestTracer_Stop_WithNilResourceMonitor(t *testing.T) {
 		links:            []link.Link{},
 		processNameCache: cache.NewLRUCache(config.CacheMaxSize, ttl),
 		pathCache:        cache.NewPathCache(),
-		resourceMonitor:  nil,
+		resourceMgr:      newResourceMonitorManager(),
 	}
 
 	err := tracer.Stop()
@@ -1748,9 +1748,6 @@ func TestTracer_Start_PathCacheCleanupGoroutine(t *testing.T) {
 	}
 }
 
-
-
-
 func TestRoundUpPow2_BelowMin(t *testing.T) {
 	for _, n := range []uint32{0, 1, 100, 4095} {
 		if got := roundUpPow2(n); got != 4096 {
@@ -1787,7 +1784,6 @@ func TestRoundUpPow2_NonPowers(t *testing.T) {
 	}
 }
 
-
 func TestIsCgroupV2Base_Exists(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "cgroup.controllers"), []byte("cpu io memory"), 0o644); err != nil {
@@ -1811,7 +1807,6 @@ func TestIsCgroupV2Base_EmptyPath(t *testing.T) {
 	}
 }
 
-
 func TestGetCgroupIDFromPath_ValidPath(t *testing.T) {
 	dir := t.TempDir()
 	id, err := getCgroupIDFromPath(dir)
@@ -1829,7 +1824,6 @@ func TestGetCgroupIDFromPath_NonExistent(t *testing.T) {
 		t.Error("expected error for non-existent path")
 	}
 }
-
 
 func TestReadFirstPIDFromCgroupProcs_Valid(t *testing.T) {
 	base := t.TempDir()
@@ -1887,7 +1881,6 @@ func TestReadFirstPIDFromCgroupProcs_LeadingBlankLines(t *testing.T) {
 		t.Errorf("expected PID 9999, got %d", pid)
 	}
 }
-
 
 func TestAttachToCgroup_EmptyPath(t *testing.T) {
 	tr := &Tracer{filter: filter.NewCgroupFilter()}
@@ -1952,12 +1945,10 @@ func TestAttachToCgroup_PreserveExistingPID(t *testing.T) {
 	}
 }
 
-
 func TestPollBPFMapUtilization_NilCollection(t *testing.T) {
 	tr := &Tracer{collection: nil}
 	tr.pollBPFMapUtilization() // must not panic
 }
-
 
 func TestActiveProbeGroups_Empty(t *testing.T) {
 	tr := &Tracer{probeGroups: make(map[probes.ProbeGroup][]link.Link)}
@@ -2094,7 +2085,6 @@ func TestDisableProbeGroup_EmptyLinks(t *testing.T) {
 	}
 }
 
-
 func TestServeManagementAPI_GetProbes(t *testing.T) {
 	tr := &Tracer{probeGroups: make(map[probes.ProbeGroup][]link.Link)}
 	tr.probeGroups[probes.GroupNetwork] = nil
@@ -2218,7 +2208,6 @@ func TestServeManagementAPI_BadPathMethod(t *testing.T) {
 	}
 }
 
-
 func TestServeManagementAPI_RealServer_ContextCancel(t *testing.T) {
 	tr := &Tracer{probeGroups: make(map[probes.ProbeGroup][]link.Link)}
 
@@ -2227,7 +2216,6 @@ func TestServeManagementAPI_RealServer_ContextCancel(t *testing.T) {
 
 	tr.serveManagementAPI(ctx, 0)
 }
-
 
 func TestStop_WithCaches(t *testing.T) {
 	tr := &Tracer{
@@ -2243,13 +2231,11 @@ func TestStop_WithCaches(t *testing.T) {
 	}
 }
 
-
 func TestGetProcessNameQuick_NonExistentPID(t *testing.T) {
 	tr := &Tracer{processNameCache: cache.NewLRUCache(16, time.Minute)}
 	result := tr.getProcessNameQuick(55555)
 	_ = result
 }
-
 
 func TestServeManagementAPI_Integration(t *testing.T) {
 	// Find a free port by opening a listener and closing it.
@@ -2340,7 +2326,6 @@ func TestServeManagementAPI_Integration(t *testing.T) {
 		t.Error("serveManagementAPI did not shut down in time")
 	}
 }
-
 
 // Verify that the fmt import is used so the file compiles without "imported and not used".
 var _ = fmt.Sprintf

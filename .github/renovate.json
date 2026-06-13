@@ -9,7 +9,9 @@
     "schedule:earlyMondays",
     "helpers:pinGitHubActionDigests"
   ],
-  "labels": ["dependencies"],
+  "labels": [
+    "dependencies"
+  ],
   "prConcurrentLimit": 5,
   "prHourlyLimit": 2,
   "rebaseWhen": "behind-base-branch",
@@ -18,23 +20,36 @@
   "configMigration": true,
   "lockFileMaintenance": {
     "enabled": true,
-    "schedule": ["before 5am on monday"]
+    "schedule": [
+      "before 5am on monday"
+    ]
   },
   "vulnerabilityAlerts": {
-    "labels": ["security", "dependencies"],
+    "labels": [
+      "security",
+      "dependencies"
+    ],
     "schedule": []
   },
   "packageRules": [
     {
       "description": "Group all non-major Go module updates",
-      "matchManagers": ["gomod"],
-      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
       "groupName": "go modules (non-major)"
     },
     {
       "description": "Pin Kubernetes ecosystem updates together",
       "groupName": "kubernetes ecosystem",
-      "schedule": ["before 5am on monday"],
+      "schedule": [
+        "before 5am on monday"
+      ],
       "matchPackageNames": [
         "/^k8s\\.io//",
         "/^sigs\\.k8s\\.io//"
@@ -42,13 +57,29 @@
     },
     {
       "description": "Group GitHub Actions updates",
-      "matchManagers": ["github-actions"],
+      "matchManagers": [
+        "github-actions"
+      ],
       "groupName": "github actions"
     },
     {
-      "description": "Dockerfile base image — security-sensitive, label clearly",
-      "matchManagers": ["dockerfile"],
-      "labels": ["dependencies", "container-image"]
+      "description": "Dockerfile base image \u2014 security-sensitive, label clearly",
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "labels": [
+        "dependencies",
+        "container-image"
+      ]
+    },
+    {
+      "description": "Skip helm v4.2.1 only: a WaitForDelete regression hangs chart installs with before-hook-creation hooks.",
+      "matchDepNames": [
+        "helm/helm"
+      ],
+      "ignoreVersions": [
+        "4.2.1"
+      ]
     }
   ]
 }

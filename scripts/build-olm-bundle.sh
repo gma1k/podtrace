@@ -130,9 +130,9 @@ sed -e "s|__VERSION__|${VERSION}|g" \
 
 echo "==> Bundle ready at ${OUT_DIR}"
 echo "    Manifests:"
-find "${MANIFESTS_DIR}" -maxdepth 1 -type f -printf "      %f\n" | sort
+find "${MANIFESTS_DIR}" -maxdepth 1 -type f -exec basename {} \; | sed 's/^/      /' | sort
 echo "    Metadata:"
-find "${METADATA_DIR}" -maxdepth 1 -type f -printf "      %f\n" | sort
+find "${METADATA_DIR}" -maxdepth 1 -type f -exec basename {} \; | sed 's/^/      /' | sort
 echo "    Dockerfile: bundle.Dockerfile"
 echo
 echo "Next: validate with 'operator-sdk bundle validate ${OUT_DIR} --select-optional name=community'"

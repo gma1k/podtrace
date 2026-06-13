@@ -65,14 +65,14 @@ func populatedPodTraceSession() *PodTraceSession {
 			Labels: map[string]string{"l": "1"},
 		},
 		Spec: PodTraceSessionSpec{
-			Selector:                &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
-			PodRefs:                 []PodRef{{Name: "p1"}, {Name: "p2", Namespace: "other"}},
-			NamespaceSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
-			Duration:                metav1.Duration{Duration: 60_000_000_000}, // 60s
-			Filters:                 []EventFilter{FilterFS, FilterCPU},
-			ExporterRef:             LocalObjectReference{Name: "ec"},
-			Thresholds:              &Thresholds{ErrorRatePercent: ptrI32(10)},
-			SamplePercent:           &rate,
+			Selector:          &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
+			PodRefs:           []PodRef{{Name: "p1"}, {Name: "p2", Namespace: "other"}},
+			NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
+			Duration:          metav1.Duration{Duration: 60_000_000_000}, // 60s
+			Filters:           []EventFilter{FilterFS, FilterCPU},
+			ExporterRef:       LocalObjectReference{Name: "ec"},
+			Thresholds:        &Thresholds{ErrorRatePercent: ptrI32(10)},
+			SamplePercent:     &rate,
 			ReportRef: &ReportReference{
 				ConfigMap:   &corev1.LocalObjectReference{Name: "cm"},
 				Secret:      &corev1.LocalObjectReference{Name: "sec"},
@@ -137,7 +137,7 @@ func populatedTracerConfig() *TracerConfig {
 func populatedExporterConfig() *ExporterConfig {
 	rate := int32(100)
 	return &ExporterConfig{
-		TypeMeta: metav1.TypeMeta{Kind: "ExporterConfig", APIVersion: "podtrace.io/v1alpha1"},
+		TypeMeta:   metav1.TypeMeta{Kind: "ExporterConfig", APIVersion: "podtrace.io/v1alpha1"},
 		ObjectMeta: metav1.ObjectMeta{Name: "ec", Namespace: "ns"},
 		Spec: ExporterConfigSpec{
 			Type: ExporterTypeOTLP,
@@ -159,6 +159,77 @@ func populatedExporterConfig() *ExporterConfig {
 		},
 		Status: ExporterConfigStatus{
 			Conditions: []metav1.Condition{{Type: "Ready", Status: metav1.ConditionTrue}},
+		},
+	}
+}
+
+func populatedPodTraceSchedule() *PodTraceSchedule {
+	tt := metav1.NewTime(metav1.Now().Time)
+	deadline := int64(120)
+	hist := int32(3)
+	suspend := false
+	maxActive := int32(2)
+	tz := "Europe/Amsterdam"
+	return &PodTraceSchedule{
+		TypeMeta: metav1.TypeMeta{Kind: "PodTraceSchedule", APIVersion: "podtrace.io/v1alpha1"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "sch", Namespace: "ns",
+			Labels: map[string]string{"l": "1"},
+		},
+		Spec: PodTraceScheduleSpec{
+			Schedule:                       "*/5 * * * *",
+			TimeZone:                       &tz,
+			ConcurrencyPolicy:              ForbidConcurrent,
+			StartingDeadlineSeconds:        &deadline,
+			SuccessfulSessionsHistoryLimit: &hist,
+			FailedSessionsHistoryLimit:     &hist,
+			Suspend:                        &suspend,
+			MaxActiveSessions:              &maxActive,
+			SessionTemplate: PodTraceSessionTemplateSpec{
+				Metadata: PodTraceSessionTemplateMetadata{
+					Labels:      map[string]string{"k": "v"},
+					Annotations: map[string]string{"a": "b"},
+				},
+				Spec: populatedPodTraceSession().Spec,
+			},
+		},
+		Status: PodTraceScheduleStatus{
+			Active:             []corev1.ObjectReference{{Name: "s1", Namespace: "ns"}},
+			LastScheduleTime:   &tt,
+			LastSuccessfulTime: &tt,
+			Conditions: []metav1.Condition{
+				{Type: "Ready", Status: metav1.ConditionTrue, LastTransitionTime: tt},
+			},
+			ObservedGeneration: 3,
+		},
+	}
+}
+
+func populatedApplicationTrace() *ApplicationTrace {
+	rate := int32(75)
+	return &ApplicationTrace{
+		TypeMeta: metav1.TypeMeta{Kind: "ApplicationTrace", APIVersion: "podtrace.io/v1alpha1"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "app", Namespace: "ns",
+			Labels: map[string]string{"l": "1"},
+		},
+		Spec: ApplicationTraceSpec{
+			Selectors:         []metav1.LabelSelector{{MatchLabels: map[string]string{"app": "x"}}},
+			NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
+			ExporterRef:       LocalObjectReference{Name: "ec"},
+			Filters:           []EventFilter{FilterDNS, FilterNet},
+			SamplePercent:     &rate,
+			Thresholds:        &Thresholds{ErrorRatePercent: ptrI32(5)},
+			Paused:            true,
+		},
+		Status: ApplicationTraceStatus{
+			PodTraceRef:      "app-pt",
+			MatchedPods:      4,
+			TargetNamespaces: []string{"ns", "other"},
+			Conditions: []metav1.Condition{
+				{Type: "Ready", Status: metav1.ConditionTrue},
+			},
+			ObservedGeneration: 2,
 		},
 	}
 }
@@ -279,6 +350,36 @@ func TestDeepCopy_NilSafety(t *testing.T) {
 	if (*SecretKeySelector)(nil).DeepCopy() != nil {
 		t.Error("SecretKeySelector nil DeepCopy")
 	}
+	if (*PodTraceSchedule)(nil).DeepCopy() != nil {
+		t.Error("PodTraceSchedule nil DeepCopy")
+	}
+	if (*PodTraceScheduleList)(nil).DeepCopy() != nil {
+		t.Error("PodTraceScheduleList nil DeepCopy")
+	}
+	if (*PodTraceScheduleSpec)(nil).DeepCopy() != nil {
+		t.Error("PodTraceScheduleSpec nil DeepCopy")
+	}
+	if (*PodTraceScheduleStatus)(nil).DeepCopy() != nil {
+		t.Error("PodTraceScheduleStatus nil DeepCopy")
+	}
+	if (*PodTraceSessionTemplateSpec)(nil).DeepCopy() != nil {
+		t.Error("PodTraceSessionTemplateSpec nil DeepCopy")
+	}
+	if (*PodTraceSessionTemplateMetadata)(nil).DeepCopy() != nil {
+		t.Error("PodTraceSessionTemplateMetadata nil DeepCopy")
+	}
+	if (*ApplicationTrace)(nil).DeepCopy() != nil {
+		t.Error("ApplicationTrace nil DeepCopy")
+	}
+	if (*ApplicationTraceList)(nil).DeepCopy() != nil {
+		t.Error("ApplicationTraceList nil DeepCopy")
+	}
+	if (*ApplicationTraceSpec)(nil).DeepCopy() != nil {
+		t.Error("ApplicationTraceSpec nil DeepCopy")
+	}
+	if (*ApplicationTraceStatus)(nil).DeepCopy() != nil {
+		t.Error("ApplicationTraceStatus nil DeepCopy")
+	}
 }
 
 // ─── Round-trip equality, fully-populated values (covers every branch).
@@ -287,7 +388,6 @@ func TestDeepCopy_PodTraceRoundTrip(t *testing.T) {
 	cp := src.DeepCopy()
 	assertDeepCopyOK(t, src, cp)
 
-	// Mutate the copy to assert no aliasing.
 	cp.Spec.Selector.MatchLabels["app"] = "MUTATED"
 	if src.Spec.Selector.MatchLabels["app"] == "MUTATED" {
 		t.Fatal("Selector aliased through DeepCopy")
@@ -358,6 +458,52 @@ func TestDeepCopy_ExporterConfigList(t *testing.T) {
 	assertDeepCopyOK(t, src, cp)
 }
 
+func TestDeepCopy_PodTraceScheduleRoundTrip(t *testing.T) {
+	src := populatedPodTraceSchedule()
+	cp := src.DeepCopy()
+	assertDeepCopyOK(t, src, cp)
+
+	cp.Spec.SessionTemplate.Metadata.Labels["k"] = "MUTATED"
+	if src.Spec.SessionTemplate.Metadata.Labels["k"] == "MUTATED" {
+		t.Fatal("SessionTemplate labels aliased")
+	}
+	cp.Status.Active[0].Name = "MUTATED"
+	if src.Status.Active[0].Name == "MUTATED" {
+		t.Fatal("Active slice aliased")
+	}
+}
+
+func TestDeepCopy_PodTraceScheduleList(t *testing.T) {
+	src := &PodTraceScheduleList{
+		Items: []PodTraceSchedule{*populatedPodTraceSchedule()},
+	}
+	cp := src.DeepCopy()
+	assertDeepCopyOK(t, src, cp)
+}
+
+func TestDeepCopy_ApplicationTraceRoundTrip(t *testing.T) {
+	src := populatedApplicationTrace()
+	cp := src.DeepCopy()
+	assertDeepCopyOK(t, src, cp)
+
+	cp.Spec.Selectors[0].MatchLabels["app"] = "MUTATED"
+	if src.Spec.Selectors[0].MatchLabels["app"] == "MUTATED" {
+		t.Fatal("Selectors slice aliased")
+	}
+	cp.Status.TargetNamespaces[0] = "MUTATED"
+	if src.Status.TargetNamespaces[0] == "MUTATED" {
+		t.Fatal("TargetNamespaces slice aliased")
+	}
+}
+
+func TestDeepCopy_ApplicationTraceList(t *testing.T) {
+	src := &ApplicationTraceList{
+		Items: []ApplicationTrace{*populatedApplicationTrace()},
+	}
+	cp := src.DeepCopy()
+	assertDeepCopyOK(t, src, cp)
+}
+
 // ─── DeepCopyObject (root types only): the runtime.Object surface.
 func TestDeepCopyObject_RootKinds(t *testing.T) {
 	cases := []runtime.Object{
@@ -369,6 +515,10 @@ func TestDeepCopyObject_RootKinds(t *testing.T) {
 		&ExporterConfigList{Items: []ExporterConfig{*populatedExporterConfig()}},
 		populatedTracerConfig(),
 		&TracerConfigList{Items: []TracerConfig{*populatedTracerConfig()}},
+		populatedPodTraceSchedule(),
+		&PodTraceScheduleList{Items: []PodTraceSchedule{*populatedPodTraceSchedule()}},
+		populatedApplicationTrace(),
+		&ApplicationTraceList{Items: []ApplicationTrace{*populatedApplicationTrace()}},
 	}
 	for _, src := range cases {
 		cp := src.DeepCopyObject()
@@ -410,10 +560,23 @@ func TestDeepCopyObject_NilReceiverReturnsNilObject(t *testing.T) {
 	if (*TracerConfigList)(nil).DeepCopyObject() != nil {
 		t.Error("TracerConfigList nil DeepCopyObject")
 	}
+	if (*PodTraceSchedule)(nil).DeepCopyObject() != nil {
+		t.Error("PodTraceSchedule nil DeepCopyObject")
+	}
+	if (*PodTraceScheduleList)(nil).DeepCopyObject() != nil {
+		t.Error("PodTraceScheduleList nil DeepCopyObject")
+	}
+	if (*ApplicationTrace)(nil).DeepCopyObject() != nil {
+		t.Error("ApplicationTrace nil DeepCopyObject")
+	}
+	if (*ApplicationTraceList)(nil).DeepCopyObject() != nil {
+		t.Error("ApplicationTraceList nil DeepCopyObject")
+	}
 }
 
 // ─── Smaller leaf types — exercise DeepCopyInto branches missed by the
-//     populatedX builders (mostly sparse/nil-pointer combinations).
+//
+//	populatedX builders.
 func TestDeepCopy_LeafTypes(t *testing.T) {
 	t.Run("OTLPHeader literal vs ValueFrom", func(t *testing.T) {
 		lit := OTLPHeader{Name: "X", Value: "v"}

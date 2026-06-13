@@ -18,7 +18,7 @@ func TestRateLimiter_Allow(t *testing.T) {
 }
 
 func TestRateLimiter_Allow_TimeWindow(t *testing.T) {
-	rl := NewRateLimiter(2)
+	rl := NewRateLimiterWithWindow(2, 50*time.Millisecond)
 	if !rl.Allow() {
 		t.Error("First request should be allowed")
 	}
@@ -28,7 +28,7 @@ func TestRateLimiter_Allow_TimeWindow(t *testing.T) {
 	if rl.Allow() {
 		t.Error("Third request should not be allowed")
 	}
-	time.Sleep(61 * time.Second)
+	time.Sleep(70 * time.Millisecond)
 	if !rl.Allow() {
 		t.Error("Request after window should be allowed")
 	}
@@ -46,5 +46,3 @@ func TestRateLimiter_Reset(t *testing.T) {
 		t.Error("Request should be allowed after reset")
 	}
 }
-
-

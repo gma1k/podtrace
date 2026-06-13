@@ -19,19 +19,20 @@ package fake
 
 import (
 	v1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
-	apiv1alpha1 "github.com/podtrace/podtrace/pkg/client/clientset/versioned/typed/api/v1alpha1"
+	apiv1alpha1 "github.com/podtrace/podtrace/pkg/client/applyconfiguration/api/v1alpha1"
+	typedapiv1alpha1 "github.com/podtrace/podtrace/pkg/client/clientset/versioned/typed/api/v1alpha1"
 	gentype "k8s.io/client-go/gentype"
 )
 
 // fakeApplicationTraces implements ApplicationTraceInterface
 type fakeApplicationTraces struct {
-	*gentype.FakeClientWithList[*v1alpha1.ApplicationTrace, *v1alpha1.ApplicationTraceList]
+	*gentype.FakeClientWithListAndApply[*v1alpha1.ApplicationTrace, *v1alpha1.ApplicationTraceList, *apiv1alpha1.ApplicationTraceApplyConfiguration]
 	Fake *FakePodtraceV1alpha1
 }
 
-func newFakeApplicationTraces(fake *FakePodtraceV1alpha1, namespace string) apiv1alpha1.ApplicationTraceInterface {
+func newFakeApplicationTraces(fake *FakePodtraceV1alpha1, namespace string) typedapiv1alpha1.ApplicationTraceInterface {
 	return &fakeApplicationTraces{
-		gentype.NewFakeClientWithList[*v1alpha1.ApplicationTrace, *v1alpha1.ApplicationTraceList](
+		gentype.NewFakeClientWithListAndApply[*v1alpha1.ApplicationTrace, *v1alpha1.ApplicationTraceList, *apiv1alpha1.ApplicationTraceApplyConfiguration](
 			fake.Fake,
 			namespace,
 			v1alpha1.SchemeGroupVersion.WithResource("applicationtraces"),

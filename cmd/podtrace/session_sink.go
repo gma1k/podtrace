@@ -228,9 +228,7 @@ func parseReportToSpec(spec string) (kind, namespace, name string, err error) {
 }
 
 // upsertReportConfigMap creates or updates a ConfigMap with the report
-// under the deterministic data key "report.txt". Idempotent: repeated
-// invocations overwrite. A separate key holds the summary JSON so the
-// final artifact is self-describing.
+// under the deterministic data key "report.txt".
 func upsertReportConfigMap(ctx context.Context, client kubernetes.Interface, namespace, name, reportText string) error {
 	data := map[string]string{"report.txt": reportText}
 	cm := &corev1.ConfigMap{

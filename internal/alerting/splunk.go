@@ -76,10 +76,19 @@ func (s *SplunkAlertSender) Send(ctx context.Context, alert *Alert) error {
 		eventData["recommendations"] = alert.Recommendations
 	}
 	if len(alert.Context) > 0 {
+		reserved := map[string]struct{}{
+			"severity": {}, "title": {}, "message": {}, "source": {},
+			"pod": {}, "namespace": {}, "error_code": {}, "recommendations": {},
+			"time": {}, "host": {}, "sourcetype": {}, "index": {}, "event": {},
+		}
 		for k, v := range alert.Context {
-			if len(k) <= 64 {
-				eventData[k] = v
+			if len(k) > 64 {
+				continue
 			}
+			if _, clash := reserved[k]; clash {
+				k = "ctx_" + k
+			}
+			eventData[k] = v
 		}
 	}
 	event := SplunkAlertEvent{

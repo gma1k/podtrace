@@ -135,6 +135,13 @@ var (
 		},
 	)
 
+	filteredEventDropsCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "podtrace_filtered_event_drops_total",
+			Help: "Total events dropped because the userspace filtered-event channel was full.",
+		},
+	)
+
 	processCacheHitsCounter = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "podtrace_process_cache_hits_total",
@@ -396,6 +403,7 @@ func init() {
 	prometheus.MustRegister(filesystemBytesCounter)
 	prometheus.MustRegister(ringBufferDropsCounter)
 	prometheus.MustRegister(dnsDropsCounter)
+	prometheus.MustRegister(filteredEventDropsCounter)
 	prometheus.MustRegister(processCacheHitsCounter)
 	prometheus.MustRegister(processCacheMissesCounter)
 	prometheus.MustRegister(pidCacheHitsCounter)
@@ -716,6 +724,13 @@ func ExportFilesystemBandwidthMetricWithContext(e *events.Event, operation, name
 
 func RecordRingBufferDrop() {
 	ringBufferDropsCounter.Inc()
+}
+
+// RecordFilteredEventDrop counts an event dropped because the userspace
+// filtered-event channel was full. This is a different failure mode from
+// a kernel ring-buffer drop and must not inflate that metric.
+func RecordFilteredEventDrop() {
+	filteredEventDropsCounter.Inc()
 }
 
 func AddDNSDrops(delta uint64) {

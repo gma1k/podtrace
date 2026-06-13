@@ -19,6 +19,8 @@ type ProcessCPUTime struct {
 	TotalNS uint64 // (utime + stime) converted to nanoseconds
 }
 
+const maxCPUTimeEntries = 16384
+
 var (
 	cpuTimeMu    sync.RWMutex
 	cpuTimes     = map[uint32]ProcessCPUTime{}
@@ -58,6 +60,11 @@ func SnapshotCPUTime(pid uint32) {
 	totalNS := (utime + stime) * (1_000_000_000 / ct)
 
 	cpuTimeMu.Lock()
+	if len(cpuTimes) >= maxCPUTimeEntries {
+		if _, exists := cpuTimes[pid]; !exists {
+			cpuTimes = make(map[uint32]ProcessCPUTime, maxCPUTimeEntries)
+		}
+	}
 	cpuTimes[pid] = ProcessCPUTime{TotalNS: totalNS}
 	cpuTimeMu.Unlock()
 }

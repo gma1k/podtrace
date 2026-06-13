@@ -87,8 +87,6 @@ struct dns_query_state {
 	u8 server_ip6[16];
 };
 
-/* LRU: queries that never get an answer (timeouts, drops) would otherwise
- * accumulate until the map is full and every new query fails to record. */
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 4096);
@@ -96,8 +94,6 @@ struct {
 	__type(value, struct dns_query_state);
 } dns_inflight SEC(".maps");
 
-/* LRU: nothing ever prunes resolved-name entries, so a long-lived agent
- * would stop learning new IP->name mappings once a plain hash filled up. */
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 8192);
@@ -179,9 +175,10 @@ struct resource_limit {
 	u32 resource_type;
 };
 
-/* Keyed by (cgroup, resource type): a plain cgroup-id key made CPU,
- * memory, and IO entries clobber each other, leaving whichever resource
- * happened to be written last (Go map iteration order). */
+#define RESOURCE_CPU    0
+#define RESOURCE_MEMORY 1
+#define RESOURCE_IO     2
+
 struct resource_key {
 	u64 cgroup_id;
 	u32 resource_type;
@@ -216,11 +213,42 @@ struct {
 	__type(value, u32);
 } cgroup_filter_enabled SEC(".maps");
 
+struct cpu_quota {
+	u64 quota_us;
+	u64 period_us;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u64);
+	__type(value, struct cpu_quota);
+} cgroup_cpu_quota SEC(".maps");
+
+struct cpu_window {
+	u64 window_start_ns;
+	u64 runtime_ns;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u64);
+	__type(value, struct cpu_window);
+} cgroup_cpu_window SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 8192);
+	__type(key, u32);
+	__type(value, u64);
+} sched_in_ts SEC(".maps");
+
 struct connect_addr {
 	u16 family;
-	u16 port_be;  /* network order */
-	u32 addr_be;  /* IPv4, network order */
-	u8 addr6[16]; /* IPv6 */
+	u16 port_be;
+	u32 addr_be;
+	u8 addr6[16];
 };
 
 struct {

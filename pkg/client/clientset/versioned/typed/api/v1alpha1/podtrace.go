@@ -21,6 +21,7 @@ import (
 	context "context"
 
 	apiv1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	applyconfigurationapiv1alpha1 "github.com/podtrace/podtrace/pkg/client/applyconfiguration/api/v1alpha1"
 	scheme "github.com/podtrace/podtrace/pkg/client/clientset/versioned/scheme"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -46,18 +47,21 @@ type PodTraceInterface interface {
 	List(ctx context.Context, opts v1.ListOptions) (*apiv1alpha1.PodTraceList, error)
 	Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error)
 	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *apiv1alpha1.PodTrace, err error)
+	Apply(ctx context.Context, podTrace *applyconfigurationapiv1alpha1.PodTraceApplyConfiguration, opts v1.ApplyOptions) (result *apiv1alpha1.PodTrace, err error)
+	// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
+	ApplyStatus(ctx context.Context, podTrace *applyconfigurationapiv1alpha1.PodTraceApplyConfiguration, opts v1.ApplyOptions) (result *apiv1alpha1.PodTrace, err error)
 	PodTraceExpansion
 }
 
 // podTraces implements PodTraceInterface
 type podTraces struct {
-	*gentype.ClientWithList[*apiv1alpha1.PodTrace, *apiv1alpha1.PodTraceList]
+	*gentype.ClientWithListAndApply[*apiv1alpha1.PodTrace, *apiv1alpha1.PodTraceList, *applyconfigurationapiv1alpha1.PodTraceApplyConfiguration]
 }
 
 // newPodTraces returns a PodTraces
 func newPodTraces(c *PodtraceV1alpha1Client, namespace string) *podTraces {
 	return &podTraces{
-		gentype.NewClientWithList[*apiv1alpha1.PodTrace, *apiv1alpha1.PodTraceList](
+		gentype.NewClientWithListAndApply[*apiv1alpha1.PodTrace, *apiv1alpha1.PodTraceList, *applyconfigurationapiv1alpha1.PodTraceApplyConfiguration](
 			"podtraces",
 			c.RESTClient(),
 			scheme.ParameterCodec,

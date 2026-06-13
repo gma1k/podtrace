@@ -27,10 +27,10 @@ spec:
     - jsonPath: .spec.suspend
       name: Suspend
       type: boolean
-    - jsonPath: .status.active[*]
+    - jsonPath: .status.active[*].name
       name: Active
       priority: 1
-      type: integer
+      type: string
     - jsonPath: .status.lastScheduleTime
       name: Last Schedule
       type: date
