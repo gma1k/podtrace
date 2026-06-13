@@ -47,22 +47,28 @@ session lifecycle test to complete.
 | [exporter-credential-rotation](tests/exporter-credential-rotation) | Update an upstream `ExporterConfig` Secret; operator refreshes the bundle Secret in `podtrace-system`. **Control-plane only** — does not assert delivery to a real receiver. |
 | [psa-enforcement](tests/psa-enforcement) | PSA `enforce: privileged` admits agent pods in `podtrace-system` and rejects equivalent pod specs in a `restricted` namespace. |
 | [schedule-cr-lifecycle](tests/schedule-cr-lifecycle) | `PodTraceSchedule` fires a child `PodTraceSession` on a per-minute cron; verifies `status.lastScheduleTime`, ownership via `podtrace.io/schedule` label, and that `spec.suspend=true` halts further fires. |
+| [resource-alert](tests/resource-alert) | **Serial.** Two CPU-burning pods under a 100m limit plus a mock webhook receiver. Enables agent alerting on the default `TracerConfig`, then asserts the per-cgroup resource monitors + in-kernel CPU sampler deliver a **distinct** `Resource Limit` alert for **each** pod's cgroup (multi-cgroup + per-cgroup dedup). |
 
-## Honest scope notes
+## Notes
 
-Two tests are intentionally control-plane only:
+The production agent runs the real eBPF backend by default (`--backend
+real`); `NoopBackend` is only the dev/kind-smoke mode (`--backend noop`),
+which skips kernel attachment to exercise the control plane alone.
 
-- **agent-restart-resilience** — the agent's continuous path uses
-  `NoopBackend` today; events do not actually flow through the agent
-  to the exporter. The test verifies the control plane (CRs stay
-  Ready, status reappears, bundles still mounted, finalizers don't
-  trigger spurious cleanup) but cannot verify event continuity.
-- **exporter-credential-rotation** — without a mock OTLP receiver, we
-  cannot assert that the rotated credential reaches the receiver. The
-  test verifies the operator's refresh path: upstream Secret edit →
-  bundle Secret in `podtrace-system` carries the new credential.
+- **agent-restart-resilience** — control-plane scoped *by choice*: it
+  asserts CRs stay Ready, per-node status reappears, bundles stay
+  mounted, and finalizers don't trigger spurious cleanup across a
+  DaemonSet restart. It deliberately does not compare pre/post event
+  counts (that would make the test timing-sensitive), not because the
+  agent can't trace.
+- **exporter-credential-rotation** — without a mock OTLP receiver it
+  asserts the operator's refresh path (upstream Secret edit → bundle
+  Secret in `podtrace-system` carries the new credential), not delivery
+  to a receiver.
 
-Wiring real eBPF events through the agent's continuous loop is future
-work. A mock OTLP receiver pod that records request headers is future
-work. Once those land, tighter assertions move from
-"control-plane updated" to "rotated credential observed at receiver".
+Resource-limit **alerting** is delivered by the continuous agent path,
+where the per-cgroup `ResourceMonitor` runs; `resource-alert` exercises
+it end-to-end through a webhook receiver. One-shot `PodTraceSession`
+diagnostics capture resource *events* but do not run the continuous
+monitor, so they do not deliver threshold alerts — that is intentional
+(sessions are point-in-time; alerting is a steady-state concern).

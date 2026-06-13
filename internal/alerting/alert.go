@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/podtrace/podtrace/internal/config"
 )
@@ -36,11 +37,12 @@ func (a *Alert) Key() string {
 		return ""
 	}
 	h := sha256.New()
-	h.Write([]byte(a.Severity))
-	h.Write([]byte(a.Source))
-	h.Write([]byte(a.PodName))
-	h.Write([]byte(a.Namespace))
-	h.Write([]byte(a.Title))
+	for _, field := range []string{
+		string(a.Severity), a.Source, a.PodName, a.Namespace, a.Title,
+	} {
+		h.Write([]byte(field))
+		h.Write([]byte{0})
+	}
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
@@ -90,32 +92,34 @@ func (a *Alert) Sanitize() {
 	if a == nil {
 		return
 	}
-	if len(a.Title) > 256 {
-		a.Title = a.Title[:253] + "..."
-	}
-	if len(a.Message) > 1024 {
-		a.Message = a.Message[:1021] + "..."
-	}
-	if len(a.PodName) > 256 {
-		a.PodName = a.PodName[:253] + "..."
-	}
-	if len(a.Namespace) > 256 {
-		a.Namespace = a.Namespace[:253] + "..."
-	}
-	if len(a.Source) > 128 {
-		a.Source = a.Source[:125] + "..."
-	}
-	if len(a.ErrorCode) > 64 {
-		a.ErrorCode = a.ErrorCode[:61] + "..."
-	}
+	a.Title = truncateUTF8(a.Title, 256)
+	a.Message = truncateUTF8(a.Message, 1024)
+	a.PodName = truncateUTF8(a.PodName, 256)
+	a.Namespace = truncateUTF8(a.Namespace, 256)
+	a.Source = truncateUTF8(a.Source, 128)
+	a.ErrorCode = truncateUTF8(a.ErrorCode, 64)
 	if len(a.Recommendations) > 10 {
 		a.Recommendations = a.Recommendations[:10]
 	}
 	for i, rec := range a.Recommendations {
-		if len(rec) > 512 {
-			a.Recommendations[i] = rec[:509] + "..."
-		}
+		a.Recommendations[i] = truncateUTF8(rec, 512)
 	}
+}
+
+// truncateUTF8 caps s to at most max bytes without splitting a multi-byte
+// rune.
+func truncateUTF8(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max - 3
+	if cut < 0 {
+		cut = 0
+	}
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
 }
 
 func MapResourceAlertLevel(level uint32) AlertSeverity {

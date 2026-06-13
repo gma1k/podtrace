@@ -144,10 +144,6 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2  # v5.0.0
         with:
-          # Pinned: helm v4.2.1 hangs indefinitely in the pre-install hook
-          # phase on this chart (reproduced locally; v4.2.0 is fine). Do
-          # not bump past v4.2.0 until verified against `helm install
-          # deploy/charts/podtrace` on a kind cluster.
           version: v4.2.0
 
       - name: Install BPF toolchain

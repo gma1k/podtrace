@@ -2,6 +2,7 @@ package profiling
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/podtrace/podtrace/internal/config"
@@ -187,7 +188,10 @@ func AnalyzeConnectionPattern(connectEvents []*events.Event, startTime, endTime 
 		mean = sum / float64(len(windowCounts))
 	}
 	variance := (sumSq / float64(len(windowCounts))) - (mean * mean)
-	stdDev := variance
+	if variance < 0 {
+		variance = 0
+	}
+	stdDev := math.Sqrt(variance)
 
 	var pattern string
 	if stdDev > mean*0.5 {

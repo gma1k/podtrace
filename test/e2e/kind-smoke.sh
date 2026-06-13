@@ -13,10 +13,10 @@
 #      ExporterConfig into the system namespace.
 #   4. Reports the session's phase on .status.phase.
 #
-# The script only asserts control-plane behaviour. The agent and session
-# Jobs will CrashLoopBackOff until the agent runtime lands —
-# that is expected, and does not affect the operator's reconciliation
-# loop.
+# The script asserts control-plane behaviour plus agent readiness. The
+# agent runs the real eBPF backend and reaches Ready; this smoke check
+# does not assert event/alert delivery (see the resource-alert chainsaw
+# test for the agent data path).
 #
 # Usage:
 #
@@ -58,8 +58,6 @@ cleanup() {
 	strip_finalizers podtracesessions.podtrace.io "${SAMPLE_NS}"
 	strip_finalizers tracerconfigs.podtrace.io ""
 
-	# User-namespace CRs first so their finalizers don't block the
-	# operator teardown.
 	kubectl delete podtrace --all -n "${SAMPLE_NS}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
 	kubectl delete podtracesession --all -n "${SAMPLE_NS}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
 	kubectl delete tracerconfig --all --ignore-not-found --wait=false >/dev/null 2>&1 || true

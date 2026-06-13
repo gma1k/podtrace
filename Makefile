@@ -42,7 +42,7 @@ BPF_CFLAGS = -O2 -g -target bpf $(BPF_ARCH_DEFINE) -mcpu=$(BPF_MCPU) \
 all: check-go build
 
 check-go:
-	@if ! $(GO) version | grep -qE "go1\.(2[1-9]|[3-9][0-9])"; then \
+	@if ! $(GO) version | grep -qE "go1\.(2[4-9]|[3-9][0-9])"; then \
 		echo ""; \
 		echo "   Error: Go 1.24+ required (or Go 1.21+ with GOTOOLCHAIN=auto)"; \
 		echo "   Current version: $$($(GO) version)"; \
@@ -302,6 +302,7 @@ clientset:
 	  --clientset-name=versioned \
 	  --input-base="" \
 	  --input=github.com/podtrace/podtrace/api/v1alpha1 \
+	  --apply-configuration-package=github.com/podtrace/podtrace/pkg/client/applyconfiguration \
 	  --output-dir=pkg/client/clientset \
 	  --output-pkg=github.com/podtrace/podtrace/pkg/client/clientset
 

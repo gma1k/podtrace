@@ -2,6 +2,7 @@ package profiling
 
 import (
 	"fmt"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,6 +34,9 @@ func GenerateCPUUsageReport(allEvents []*events.Event, duration time.Duration) s
 		}
 		if totalNS > 0 {
 			cpuPercent := (float64(totalNS) / 1e9) / durationSec * 100.0
+			if maxPercent := 100.0 * float64(runtime.NumCPU()); cpuPercent > maxPercent {
+				cpuPercent = maxPercent
+			}
 			pidCPUTimes[info.Pid] = cpuTimeInfo{
 				cpuPercent: cpuPercent,
 				cpuTimeSec: float64(totalNS) / 1e9,
@@ -146,13 +150,18 @@ func getProcessCPUTime(pid uint32) cpuTimeInfo {
 		return cpuTimeInfo{}
 	}
 
-	fields := strings.Fields(string(data))
-	if len(fields) < 14 {
+	raw := string(data)
+	rparen := strings.LastIndex(raw, ")")
+	if rparen < 0 || rparen+2 > len(raw) {
+		return cpuTimeInfo{}
+	}
+	fields := strings.Fields(raw[rparen+1:])
+	if len(fields) < 13 {
 		return cpuTimeInfo{}
 	}
 
-	utime, _ := strconv.ParseUint(fields[13], 10, 64)
-	stime, _ := strconv.ParseUint(fields[14], 10, 64)
+	utime, _ := strconv.ParseUint(fields[11], 10, 64)
+	stime, _ := strconv.ParseUint(fields[12], 10, 64)
 
 	clockTicks := uint64(100)
 	if data, err := procfs.ReadFile("self/auxv"); err == nil {

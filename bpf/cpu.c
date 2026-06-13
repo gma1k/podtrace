@@ -5,20 +5,42 @@
 #include "events.h"
 #include "helpers.h"
 
-/* EVENT_SCHED_SWITCH carries OFF-CPU (blocked/runqueue-wait) time. The
- * previous implementation stamped at switch-IN and emitted at switch-OUT,
- * which measures the ON-CPU slice — the exact inverse of the "thread
- * blocked" message every consumer renders.
- *
- * Measuring off-CPU time needs the stamp at switch-out and the delta at the
- * next switch-in. But at switch-in the current task is still `prev` (the
- * tracepoint fires before the context switch completes), so emitting there
- * would attribute the event to the wrong task's cgroup/comm. Instead the
- * blocked interval is parked in sched_pending_blocked and emitted at the
- * task's NEXT switch-out, when the task itself is current and
- * get_event_buf() fills the right identity — which also lets the event carry
- * the task's TGID like every other event type (the old code emitted the raw
- * TID). */
+#define CPU_SAMPLE_WINDOW_NS (1000ULL * 1000ULL * 1000ULL)
+
+static __always_inline void cpu_sample_accumulate(void *ctx, u64 on_cpu_ns, u64 now)
+{
+	u64 cgid = bpf_get_current_cgroup_id();
+
+	if (!bpf_map_lookup_elem(&target_cgroup_ids, &cgid))
+		return;
+
+	struct cpu_window *w = bpf_map_lookup_elem(&cgroup_cpu_window, &cgid);
+	if (!w) {
+		struct cpu_window init = {.window_start_ns = now, .runtime_ns = on_cpu_ns};
+		bpf_map_update_elem(&cgroup_cpu_window, &cgid, &init, BPF_ANY);
+		return;
+	}
+
+	w->runtime_ns += on_cpu_ns;
+
+	u64 elapsed = now > w->window_start_ns ? now - w->window_start_ns : 0;
+	if (elapsed < CPU_SAMPLE_WINDOW_NS)
+		return;
+
+	struct cpu_quota *q = bpf_map_lookup_elem(&cgroup_cpu_quota, &cgid);
+	if (q && q->quota_us > 0 && elapsed > 0) {
+		u64 numerator = w->runtime_ns * q->period_us * 100ULL;
+		u64 denominator = elapsed * q->quota_us;
+		u32 util = denominator ? (u32)(numerator / denominator) : 0;
+		if (util > 100)
+			util = 100;
+		emit_resource_alert(cgid, RESOURCE_CPU, util, q->quota_us, w->runtime_ns);
+	}
+
+	w->window_start_ns = now;
+	w->runtime_ns = 0;
+}
+
 struct sched_switch_args {
 	unsigned short common_type;
 	unsigned char common_flags;
@@ -49,7 +71,6 @@ int tracepoint_sched_switch(void *ctx) {
 	u32 next_pid = args_local.next_pid;
 	u64 now = bpf_ktime_get_ns();
 
-	/* The task coming on-CPU just finished an off-CPU interval. */
 	if (next_pid > 0) {
 		u64 *out_ts = bpf_map_lookup_elem(&sched_out_ts, &next_pid);
 		if (out_ts) {
@@ -59,10 +80,9 @@ int tracepoint_sched_switch(void *ctx) {
 				bpf_map_update_elem(&sched_pending_blocked, &next_pid, &blocked, BPF_ANY);
 			}
 		}
+		bpf_map_update_elem(&sched_in_ts, &next_pid, &now, BPF_ANY);
 	}
 
-	/* The task going off-CPU is current here: emit its parked interval with
-	 * correct attribution, then stamp this switch-out. */
 	if (prev_pid > 0) {
 		u64 *pending = bpf_map_lookup_elem(&sched_pending_blocked, &prev_pid);
 		if (pending) {
@@ -85,6 +105,16 @@ int tracepoint_sched_switch(void *ctx) {
 				bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 			}
 		}
+
+		u64 *in_ts = bpf_map_lookup_elem(&sched_in_ts, &prev_pid);
+		if (in_ts) {
+			u64 on_cpu = now > *in_ts ? now - *in_ts : 0;
+			bpf_map_delete_elem(&sched_in_ts, &prev_pid);
+			if (on_cpu > 0) {
+				cpu_sample_accumulate(ctx, on_cpu, now);
+			}
+		}
+
 		bpf_map_update_elem(&sched_out_ts, &prev_pid, &now, BPF_ANY);
 	}
 

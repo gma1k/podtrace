@@ -4,6 +4,8 @@ metadata:
   name: shared-pt-a
 status:
   (conditions[?type == 'Reconciled'].status | [0]): "True"
+  (length(nodeStatus || `[]`) >= `1`): true
+  (length((nodeStatus || `[]`)[?ready == `true`]) >= `1`): true
 ---
 apiVersion: podtrace.io/v1alpha1
 kind: PodTrace
@@ -11,3 +13,5 @@ metadata:
   name: shared-pt-b
 status:
   (conditions[?type == 'Reconciled'].status | [0]): "True"
+  (length(nodeStatus || `[]`) >= `1`): true
+  (length((nodeStatus || `[]`)[?ready == `true`]) >= `1`): true

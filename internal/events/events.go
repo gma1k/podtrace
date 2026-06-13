@@ -120,6 +120,8 @@ func (e *Event) TypeString() string {
 		return "FS"
 	case EventFsync:
 		return "FS"
+	case EventOpen, EventClose:
+		return "FS"
 	case EventSchedSwitch:
 		return "CPU"
 	case EventPageFault, EventOOMKill:
@@ -132,7 +134,7 @@ func (e *Event) TypeString() string {
 		return "NET"
 	case EventDBQuery:
 		return "DB"
-	case EventExec, EventFork, EventOpen, EventClose:
+	case EventExec, EventFork:
 		return "PROC"
 	case EventTLSHandshake, EventTLSError:
 		return "TLS"

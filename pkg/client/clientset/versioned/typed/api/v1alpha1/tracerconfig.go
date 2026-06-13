@@ -21,6 +21,7 @@ import (
 	context "context"
 
 	apiv1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	applyconfigurationapiv1alpha1 "github.com/podtrace/podtrace/pkg/client/applyconfiguration/api/v1alpha1"
 	scheme "github.com/podtrace/podtrace/pkg/client/clientset/versioned/scheme"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -46,18 +47,21 @@ type TracerConfigInterface interface {
 	List(ctx context.Context, opts v1.ListOptions) (*apiv1alpha1.TracerConfigList, error)
 	Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error)
 	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *apiv1alpha1.TracerConfig, err error)
+	Apply(ctx context.Context, tracerConfig *applyconfigurationapiv1alpha1.TracerConfigApplyConfiguration, opts v1.ApplyOptions) (result *apiv1alpha1.TracerConfig, err error)
+	// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
+	ApplyStatus(ctx context.Context, tracerConfig *applyconfigurationapiv1alpha1.TracerConfigApplyConfiguration, opts v1.ApplyOptions) (result *apiv1alpha1.TracerConfig, err error)
 	TracerConfigExpansion
 }
 
 // tracerConfigs implements TracerConfigInterface
 type tracerConfigs struct {
-	*gentype.ClientWithList[*apiv1alpha1.TracerConfig, *apiv1alpha1.TracerConfigList]
+	*gentype.ClientWithListAndApply[*apiv1alpha1.TracerConfig, *apiv1alpha1.TracerConfigList, *applyconfigurationapiv1alpha1.TracerConfigApplyConfiguration]
 }
 
 // newTracerConfigs returns a TracerConfigs
 func newTracerConfigs(c *PodtraceV1alpha1Client) *tracerConfigs {
 	return &tracerConfigs{
-		gentype.NewClientWithList[*apiv1alpha1.TracerConfig, *apiv1alpha1.TracerConfigList](
+		gentype.NewClientWithListAndApply[*apiv1alpha1.TracerConfig, *apiv1alpha1.TracerConfigList, *applyconfigurationapiv1alpha1.TracerConfigApplyConfiguration](
 			"tracerconfigs",
 			c.RESTClient(),
 			scheme.ParameterCodec,

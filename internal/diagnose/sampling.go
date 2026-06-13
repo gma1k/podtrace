@@ -6,29 +6,29 @@ import (
 )
 
 var eventTypeSamplingRates = map[events.EventType]int{
-	events.EventOOMKill:      1,
-	events.EventPageFault:     1,
-	events.EventNetDevError:   1,
-	events.EventTCPRetrans:    5,
-	events.EventDNS:           10,
-	events.EventConnect:       20,
-	events.EventHTTPReq:       30,
-	events.EventHTTPResp:      30,
-	events.EventTCPSend:       50,
-	events.EventTCPRecv:       50,
-	events.EventUDPSend:       50,
-	events.EventUDPRecv:       50,
-	events.EventWrite:         100,
-	events.EventRead:          100,
-	events.EventFsync:         100,
-	events.EventSchedSwitch:  200,
+	events.EventOOMKill:        1,
+	events.EventPageFault:      1,
+	events.EventNetDevError:    1,
+	events.EventTCPRetrans:     5,
+	events.EventDNS:            10,
+	events.EventConnect:        20,
+	events.EventHTTPReq:        30,
+	events.EventHTTPResp:       30,
+	events.EventTCPSend:        50,
+	events.EventTCPRecv:        50,
+	events.EventUDPSend:        50,
+	events.EventUDPRecv:        50,
+	events.EventWrite:          100,
+	events.EventRead:           100,
+	events.EventFsync:          100,
+	events.EventSchedSwitch:    200,
 	events.EventLockContention: 50,
-	events.EventDBQuery:       20,
+	events.EventDBQuery:        20,
 	events.EventExec:           10,
 	events.EventFork:           10,
 	events.EventOpen:           100,
-	events.EventClose:          200,
-	events.EventTCPState:      100,
+	events.EventClose:          100,
+	events.EventTCPState:       100,
 }
 
 func getEventPriority(event *events.Event) int {
@@ -69,4 +69,3 @@ func shouldSampleEvent(event *events.Event, eventCount int) bool {
 
 	return eventCount%samplingRate == 0
 }
-

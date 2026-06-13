@@ -93,6 +93,14 @@ type ResourceMonitor struct {
 	cpuQuotaMicros  uint64
 	cpuPeriodMicros uint64
 	previousSamples map[uint32]resourceSample
+
+	cpuQuotaMap      bpfLimitMap
+	cpuAlertsReadMap bpfAlertReadMap
+	cpuSamplerOn     bool
+}
+
+type bpfAlertReadMap interface {
+	Lookup(key, valueOut interface{}) error
 }
 
 func NewResourceMonitor(cgroupPath string, limitsMap, alertsMap *ebpf.Map, eventChan chan<- *events.Event, namespace string) (*ResourceMonitor, error) {
@@ -157,6 +165,7 @@ func (rm *ResourceMonitor) monitorLoop(ctx context.Context) {
 				logger.Debug("Failed to update resource usage", zap.Error(err))
 			}
 			rm.checkAlerts()
+			rm.checkBPFCPUAlerts()
 		}
 	}
 }
@@ -387,15 +396,6 @@ func isBenignMapDeleteError(err error) bool {
 }
 
 // utilizationPercent returns the 0-100 utilization for one resource.
-//
-// Memory compares current bytes against the byte limit directly. CPU and IO
-// usage counters are CUMULATIVE (cpu.stat usage_usec, io.stat rbytes+wbytes),
-// while their limits are RATES (quota per period, bytes per second) — the
-// previous code divided one by the other, so after ~0.1 CPU-seconds of total
-// runtime "utilization" saturated at 100% and fired AlertEmergency every tick
-// forever. Both are now computed as the consumption rate between the last two
-// samples relative to the allowed rate; the first tick (no previous sample)
-// and counter resets (container restart) report no data.
 func (rm *ResourceMonitor) utilizationPercent(resourceType uint32, limit *ResourceLimit) (uint64, bool) {
 	clamp := func(v float64) (uint64, bool) {
 		if v < 0 {
@@ -460,15 +460,16 @@ func (rm *ResourceMonitor) checkAlerts() {
 			continue
 		}
 
+		if resourceType == ResourceCPU && rm.cpuSamplerOn {
+			continue
+		}
+
 		utilization, ok := rm.utilizationPercent(resourceType, limit)
 		if !ok {
 			continue
 		}
 		utilizationUint32 := safeconv.Uint64ToUint32(utilization)
 
-		// Same thresholds the BPF side reads from the alert_thresholds
-		// map — hardcoding 95/90/80 here ignored PODTRACE_ALERT_*_PCT
-		// for every userspace-evaluated alert.
 		var alertLevel uint32
 		switch {
 		case utilizationUint32 >= safeconv.IntToUint32(config.AlertEmergPct):
@@ -511,7 +512,7 @@ func (rm *ResourceMonitor) checkAlerts() {
 			manager := alerting.GetGlobalManager()
 			if manager != nil {
 				severity := alerting.MapResourceAlertLevel(alertLevel)
-				title := fmt.Sprintf("Resource Limit %s", severity)
+				title := fmt.Sprintf("Resource Limit %s: %s", severity, resourceTypeLabel)
 				message := fmt.Sprintf("%s utilization: %d%% (limit: %d bytes, usage: %d bytes)",
 					resourceTypeLabel, utilizationUint32, limit.LimitBytes, limit.UsageBytes)
 				recommendations := []string{
@@ -528,7 +529,7 @@ func (rm *ResourceMonitor) checkAlerts() {
 					Message:   message,
 					Timestamp: time.Now(),
 					Source:    "resource_monitor",
-					PodName:   "",
+					PodName:   rm.cgroupPath,
 					Namespace: rm.namespace,
 					Context: map[string]interface{}{
 						"resource_type":       resourceTypeLabel,
@@ -627,9 +628,6 @@ func readCgroupFile(path string) (string, error) {
 		}
 	}()
 
-	// Read the WHOLE file: io.max, io.stat, and the blkio v1 files carry
-	// one line per device, and returning only the first line meant only
-	// the first device was ever counted.
 	data, err := io.ReadAll(file)
 	if err != nil {
 		return "", err
@@ -685,9 +683,6 @@ func parseIOMax(ioMax string) uint64 {
 
 // parseBlkioThrottleBps parses blkio.throttle.{read,write}_bps_device,
 // whose real format is two fields per line ("MAJ:MIN bytes_per_sec").
-// The previous parser required three fields, so a configured v1 IO limit
-// never parsed. The strictest (largest) per-device limit is reported,
-// mirroring parseIOMax's treatment of v2 io.max.
 func parseBlkioThrottleBps(ioData string) uint64 {
 	var maxBps uint64
 	scanner := bufio.NewScanner(strings.NewReader(ioData))
@@ -703,9 +698,7 @@ func parseBlkioThrottleBps(ioData string) uint64 {
 }
 
 // parseBlkioServiceBytes sums the Read and Write rows of
-// blkio.io_service_bytes ("MAJ:MIN Read N"). Summing every 3-field row
-// also counted the Sync/Async/Total rows, which already contain the
-// Read/Write bytes — usage was roughly tripled.
+// blkio.io_service_bytes ("MAJ:MIN Read N").
 func parseBlkioServiceBytes(ioData string) uint64 {
 	var total uint64
 	scanner := bufio.NewScanner(strings.NewReader(ioData))

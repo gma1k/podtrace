@@ -118,7 +118,6 @@ type DataDogExporter struct {
 // Exactly one of the typed fields (OTLP, Jaeger, Zipkin, Splunk, DataDog)
 // must be populated, and it must match the Type field.
 type ExporterConfigSpec struct {
-	// Type selects the exporter implementation.
 	// +kubebuilder:validation:Required
 	Type ExporterType `json:"type"`
 
@@ -133,8 +132,6 @@ type ExporterConfigSpec struct {
 	// +optional
 	DataDog *DataDogExporter `json:"datadog,omitempty"`
 
-	// SamplePercent sets an exporter-level sampling rate cap, 0-100.
-	// If both this and the referent trace's SamplePercent are set, the minimum applies.
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=100
 	// +optional
@@ -143,10 +140,9 @@ type ExporterConfigSpec struct {
 
 // ExporterConfigStatus reports the observed state of an ExporterConfig.
 type ExporterConfigStatus struct {
-	// Ready is true when referenced Secrets exist and credentials validate.
-	Ready bool `json:"ready,omitempty"`
+	// +kubebuilder:default=false
+	Ready bool `json:"ready"`
 
-	// Conditions is the latest available observations.
 	// +optional
 	// +patchMergeKey=type
 	// +patchStrategy=merge
@@ -154,10 +150,8 @@ type ExporterConfigStatus struct {
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 
-	// ReferencedBy counts how many PodTraces and PodTraceSessions reference this exporter.
 	ReferencedBy int32 `json:"referencedBy,omitempty"`
 
-	// ObservedGeneration is the most recent generation observed.
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
 

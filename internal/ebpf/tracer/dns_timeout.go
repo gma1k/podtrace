@@ -67,8 +67,6 @@ func (t *Tracer) runDNSTimeoutSweeper(ctx context.Context, eventChan chan<- *eve
 	}
 }
 
-var lastDNSDrops uint64
-
 func (t *Tracer) recordDNSDrops() {
 	if t.collection == nil {
 		return
@@ -85,11 +83,11 @@ func (t *Tracer) recordDNSDrops() {
 	for _, v := range perCPU {
 		total += v
 	}
-	if total > lastDNSDrops {
-		metricsexporter.AddDNSDrops(total - lastDNSDrops)
-		logger.Debug("DNS records dropped (map/ringbuf full)", zap.Uint64("delta", total-lastDNSDrops))
+	if total > t.lastDNSDrops {
+		metricsexporter.AddDNSDrops(total - t.lastDNSDrops)
+		logger.Debug("DNS records dropped (map/ringbuf full)", zap.Uint64("delta", total-t.lastDNSDrops))
 	}
-	lastDNSDrops = total
+	t.lastDNSDrops = total
 }
 
 func (t *Tracer) sweepDNSTimeouts(ctx context.Context, eventChan chan<- *events.Event) {

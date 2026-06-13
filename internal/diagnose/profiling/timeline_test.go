@@ -3,6 +3,7 @@ package profiling
 import (
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -411,7 +412,7 @@ func makeConnectEvents(startTime time.Time, count int) []*events.Event {
 }
 
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr))
+	return strings.Contains(s, substr)
 }
 
 func TestAnalyzeTimeline_BucketIndexEdgeCases(t *testing.T) {

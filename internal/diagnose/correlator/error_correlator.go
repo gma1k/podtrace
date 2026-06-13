@@ -9,25 +9,29 @@ import (
 )
 
 type ErrorChain struct {
-	RootCause    *ErrorEvent
-	Chain        []*ErrorEvent
-	Suggestions  []string
-	Severity     string
+	RootCause   *ErrorEvent
+	Chain       []*ErrorEvent
+	Suggestions []string
+	Severity    string
 }
 
 type ErrorEvent struct {
-	Event       *events.Event
-	Timestamp   time.Time
-	ErrorCode   int32
-	Operation   string
-	Target      string
-	Context     map[string]string
+	Event     *events.Event
+	Timestamp time.Time
+	ErrorCode int32
+	Operation string
+	Target    string
+	Context   map[string]string
 }
 
+// maxRetainedErrors bounds the correlator's error buffer.
+const maxRetainedErrors = 10000
+
 type ErrorCorrelator struct {
-	errors      []*ErrorEvent
-	chains      []*ErrorChain
-	timeWindow  time.Duration
+	errors     []*ErrorEvent
+	chains     []*ErrorChain
+	timeWindow time.Duration
+	dirty      bool // chains need rebuilding before the next read
 }
 
 func NewErrorCorrelator(timeWindow time.Duration) *ErrorCorrelator {
@@ -68,7 +72,20 @@ func (ec *ErrorCorrelator) AddEvent(event *events.Event, k8sContext interface{})
 	}
 
 	ec.errors = append(ec.errors, errorEvent)
-	ec.buildChains()
+	if len(ec.errors) > maxRetainedErrors {
+		drop := len(ec.errors) - maxRetainedErrors
+		ec.errors = ec.errors[:copy(ec.errors, ec.errors[drop:])]
+	}
+	ec.dirty = true
+}
+
+// ensureChains rebuilds the chain set if errors changed since the last
+// build.
+func (ec *ErrorCorrelator) ensureChains() {
+	if ec.dirty {
+		ec.buildChains()
+		ec.dirty = false
+	}
 }
 
 func (ec *ErrorCorrelator) buildChains() {
@@ -187,6 +204,7 @@ func (ec *ErrorCorrelator) calculateSeverity(chain []*ErrorEvent) string {
 }
 
 func (ec *ErrorCorrelator) GetChains() []*ErrorChain {
+	ec.ensureChains()
 	return ec.chains
 }
 
@@ -194,6 +212,7 @@ func (ec *ErrorCorrelator) GetErrorSummary() string {
 	if len(ec.errors) == 0 {
 		return ""
 	}
+	ec.ensureChains()
 
 	report := "Error Correlation & Root Cause Analysis:\n"
 	report += fmt.Sprintf("  Total errors: %d\n", len(ec.errors))
@@ -226,4 +245,3 @@ func (ec *ErrorCorrelator) GetErrorSummary() string {
 	report += "\n"
 	return report
 }
-

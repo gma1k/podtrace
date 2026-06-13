@@ -21,6 +21,7 @@ import (
 	context "context"
 
 	apiv1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	applyconfigurationapiv1alpha1 "github.com/podtrace/podtrace/pkg/client/applyconfiguration/api/v1alpha1"
 	scheme "github.com/podtrace/podtrace/pkg/client/clientset/versioned/scheme"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -46,18 +47,21 @@ type PodTraceScheduleInterface interface {
 	List(ctx context.Context, opts v1.ListOptions) (*apiv1alpha1.PodTraceScheduleList, error)
 	Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error)
 	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *apiv1alpha1.PodTraceSchedule, err error)
+	Apply(ctx context.Context, podTraceSchedule *applyconfigurationapiv1alpha1.PodTraceScheduleApplyConfiguration, opts v1.ApplyOptions) (result *apiv1alpha1.PodTraceSchedule, err error)
+	// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
+	ApplyStatus(ctx context.Context, podTraceSchedule *applyconfigurationapiv1alpha1.PodTraceScheduleApplyConfiguration, opts v1.ApplyOptions) (result *apiv1alpha1.PodTraceSchedule, err error)
 	PodTraceScheduleExpansion
 }
 
 // podTraceSchedules implements PodTraceScheduleInterface
 type podTraceSchedules struct {
-	*gentype.ClientWithList[*apiv1alpha1.PodTraceSchedule, *apiv1alpha1.PodTraceScheduleList]
+	*gentype.ClientWithListAndApply[*apiv1alpha1.PodTraceSchedule, *apiv1alpha1.PodTraceScheduleList, *applyconfigurationapiv1alpha1.PodTraceScheduleApplyConfiguration]
 }
 
 // newPodTraceSchedules returns a PodTraceSchedules
 func newPodTraceSchedules(c *PodtraceV1alpha1Client, namespace string) *podTraceSchedules {
 	return &podTraceSchedules{
-		gentype.NewClientWithList[*apiv1alpha1.PodTraceSchedule, *apiv1alpha1.PodTraceScheduleList](
+		gentype.NewClientWithListAndApply[*apiv1alpha1.PodTraceSchedule, *apiv1alpha1.PodTraceScheduleList, *applyconfigurationapiv1alpha1.PodTraceScheduleApplyConfiguration](
 			"podtraceschedules",
 			c.RESTClient(),
 			scheme.ParameterCodec,

@@ -55,3 +55,33 @@ spec:
                 name: every-minute
               status:
                 (length(conditions[?type == 'Paused' && status == 'True'])): 1
+    - name: no-new-fires-while-suspended
+      description: |
+        The Paused condition only proves the controller acknowledged the
+        suspend; it does not prove fires stopped. Record lastScheduleTime,
+        wait past a full cron period, and assert it did not advance and no
+        new owned session appeared.
+      try:
+        - script:
+            timeout: 120s
+            content: |
+              set -eu
+              before=$(kubectl -n "$NAMESPACE" get podtraceschedule every-minute \
+                -o jsonpath='{.status.lastScheduleTime}')
+              sessions_before=$(kubectl -n "$NAMESPACE" get podtracesession \
+                -l podtrace.io/schedule=every-minute --no-headers 2>/dev/null | wc -l)
+              # Cron is per-minute; wait past one tick plus slack.
+              sleep 75
+              after=$(kubectl -n "$NAMESPACE" get podtraceschedule every-minute \
+                -o jsonpath='{.status.lastScheduleTime}')
+              sessions_after=$(kubectl -n "$NAMESPACE" get podtracesession \
+                -l podtrace.io/schedule=every-minute --no-headers 2>/dev/null | wc -l)
+              if [ "$before" != "$after" ]; then
+                echo "suspended schedule still fired: lastScheduleTime $before -> $after" >&2
+                exit 1
+              fi
+              if [ "$sessions_before" != "$sessions_after" ]; then
+                echo "suspended schedule created sessions: $sessions_before -> $sessions_after" >&2
+                exit 1
+              fi
+              echo "ok: no new fires while suspended (lastScheduleTime=$after, sessions=$sessions_after)"

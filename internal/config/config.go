@@ -506,6 +506,10 @@ func SplunkAlertAllowHTTP() bool {
 	return getBoolEnvOrDefault("PODTRACE_ALERT_SPLUNK_ALLOW_HTTP", false)
 }
 
+func WebhookAllowHTTP() bool {
+	return getBoolEnvOrDefault("PODTRACE_ALERT_WEBHOOK_ALLOW_HTTP", false)
+}
+
 func AllowCgroupFilterAutoDisable() bool {
 	return getBoolEnvOrDefault("PODTRACE_ALLOW_CGROUP_FILTER_DISABLE", false)
 }

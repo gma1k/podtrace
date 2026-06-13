@@ -9,6 +9,7 @@ package operator
 
 import (
 	"fmt"
+	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -82,6 +83,7 @@ func SessionJobName(sessionUID types.UID, nodeName string) string {
 	if len(raw) > 63 {
 		raw = raw[:63]
 	}
+	raw = strings.TrimRight(raw, "-.")
 	return raw
 }
 

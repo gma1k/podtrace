@@ -1,0 +1,94 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: resource-alert
+spec:
+  concurrent: false
+  description: |
+    End-to-end resource-limit alerting through the real agent:
+      1. Deploy TWO CPU-burning pods under a 100m limit and a mock webhook
+         receiver that logs POST bodies.
+      2. Enable agent alerting on the default TracerConfig, pointing the
+         webhook at the receiver, and wait for the agent rollout.
+      3. Create one PodTrace selecting both burn pods. The agent attaches
+         each pod's cgroup, starts an independent per-cgroup ResourceMonitor
+         for each, and the in-kernel CPU sampler crosses the threshold.
+      4. Assert a distinct "Resource Limit" alert lands at the receiver for
+         EACH pod's cgroup.
+
+    Proves the multi-cgroup per-cgroup resource-monitor manager, the agent
+    alert wiring, and the per-cgroup alert dedup key (without it, multiple pods'
+    alerts collapse to one).
+  timeouts:
+    apply: 60s
+    assert: 180s
+    cleanup: 120s
+  steps:
+    - name: setup-workload-and-receiver
+      try:
+        - apply:
+            file: ./resources.yaml
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: alert-receiver
+              status:
+                readyReplicas: 1
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: cpu-burn-a
+              status:
+                readyReplicas: 1
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: cpu-burn-b
+              status:
+                readyReplicas: 1
+
+    - name: enable-alerting-and-assert
+      try:
+        - script:
+            timeout: 150s
+            content: |
+              set -eu
+              kubectl patch tracerconfig default --type=merge -p \
+                "{\"spec\":{\"agent\":{\"alerting\":{\"enabled\":true,\"allowInsecureWebhook\":true,\"webhookURL\":\"http://alert-receiver.${NAMESPACE}.svc.cluster.local:8080\"}}}}"
+              for i in $(seq 1 30); do
+                if kubectl -n podtrace-system get ds podtrace-agent \
+                     -o jsonpath='{.spec.template.spec.containers[0].env[*].name}' \
+                     | grep -q PODTRACE_ALERTING_ENABLED; then
+                  break
+                fi
+                sleep 2
+              done
+              kubectl -n podtrace-system rollout status ds/podtrace-agent --timeout=120s
+        - script:
+            timeout: 180s
+            content: |
+              set -eu
+              for i in $(seq 1 50); do
+                subjects=$(kubectl -n "${NAMESPACE}" logs deploy/alert-receiver --tail=999 2>/dev/null \
+                  | grep -i "Resource Limit" \
+                  | grep -oE '"pod":"[^"]*scope"' | sort -u | wc -l)
+                if [ "${subjects}" -ge 2 ]; then
+                  echo "ok: distinct resource-limit alerts delivered for ${subjects} cgroups"
+                  exit 0
+                fi
+                sleep 3
+              done
+              echo "expected resource-limit alerts for 2 distinct cgroups, got ${subjects:-0}" >&2
+              kubectl -n "${NAMESPACE}" logs deploy/alert-receiver --tail=50 >&2 || true
+              exit 1
+      finally:
+        - script:
+            content: |
+              kubectl patch tracerconfig default --type=merge -p \
+                "{\"spec\":{\"agent\":{\"alerting\":{\"enabled\":false}}}}" || true

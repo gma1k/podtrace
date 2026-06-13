@@ -21,6 +21,7 @@ import (
 	context "context"
 
 	apiv1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	applyconfigurationapiv1alpha1 "github.com/podtrace/podtrace/pkg/client/applyconfiguration/api/v1alpha1"
 	scheme "github.com/podtrace/podtrace/pkg/client/clientset/versioned/scheme"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -46,18 +47,21 @@ type PodTraceSessionInterface interface {
 	List(ctx context.Context, opts v1.ListOptions) (*apiv1alpha1.PodTraceSessionList, error)
 	Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error)
 	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *apiv1alpha1.PodTraceSession, err error)
+	Apply(ctx context.Context, podTraceSession *applyconfigurationapiv1alpha1.PodTraceSessionApplyConfiguration, opts v1.ApplyOptions) (result *apiv1alpha1.PodTraceSession, err error)
+	// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
+	ApplyStatus(ctx context.Context, podTraceSession *applyconfigurationapiv1alpha1.PodTraceSessionApplyConfiguration, opts v1.ApplyOptions) (result *apiv1alpha1.PodTraceSession, err error)
 	PodTraceSessionExpansion
 }
 
 // podTraceSessions implements PodTraceSessionInterface
 type podTraceSessions struct {
-	*gentype.ClientWithList[*apiv1alpha1.PodTraceSession, *apiv1alpha1.PodTraceSessionList]
+	*gentype.ClientWithListAndApply[*apiv1alpha1.PodTraceSession, *apiv1alpha1.PodTraceSessionList, *applyconfigurationapiv1alpha1.PodTraceSessionApplyConfiguration]
 }
 
 // newPodTraceSessions returns a PodTraceSessions
 func newPodTraceSessions(c *PodtraceV1alpha1Client, namespace string) *podTraceSessions {
 	return &podTraceSessions{
-		gentype.NewClientWithList[*apiv1alpha1.PodTraceSession, *apiv1alpha1.PodTraceSessionList](
+		gentype.NewClientWithListAndApply[*apiv1alpha1.PodTraceSession, *apiv1alpha1.PodTraceSessionList, *applyconfigurationapiv1alpha1.PodTraceSessionApplyConfiguration](
 			"podtracesessions",
 			c.RESTClient(),
 			scheme.ParameterCodec,

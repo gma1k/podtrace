@@ -46,11 +46,16 @@ wait_for_pods() {
 	local attempt=0
 
 	while [[ "${attempt}" -lt "${max_attempts}" ]]; do
-		if kubectl get pods -n "${NAMESPACE}" -o jsonpath='{.items[*].status.phase}' | grep -q Running || true; then
+		local phases
+		phases=$(kubectl get pods -n "${NAMESPACE}" -o jsonpath='{.items[*].status.phase}' 2>/dev/null || true)
+		case "${phases}" in
+		*Running*)
 			echo -e "${GREEN}Pods are ready${NC}"
-			sleep 3 # Give pods a moment to start generating activity
+			sleep 3
 			return 0
-		fi
+			;;
+		*) ;;
+		esac
 		attempt=$((attempt + 1))
 		sleep 2
 	done

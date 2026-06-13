@@ -11,10 +11,10 @@ import (
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
 )
 
-// TestSchemeRegistration is a tripwire: if any of the four root types or
-// their List counterparts fall out of the scheme, controller-runtime's
-// client will fail in obscure ways at runtime. Keep this asserting the
-// exact known-good count.
+// TestSchemeRegistration is a tripwire: if any of the root types or their
+// List counterparts fall out of the scheme, controller-runtime's client
+// will fail in obscure ways at runtime. Keep this asserting every kind —
+// add new ones here as they are introduced.
 func TestSchemeRegistration(t *testing.T) {
 	s := runtime.NewScheme()
 	if err := podtracev1alpha1.AddToScheme(s); err != nil {
@@ -29,6 +29,10 @@ func TestSchemeRegistration(t *testing.T) {
 		&podtracev1alpha1.ExporterConfigList{},
 		&podtracev1alpha1.TracerConfig{},
 		&podtracev1alpha1.TracerConfigList{},
+		&podtracev1alpha1.PodTraceSchedule{},
+		&podtracev1alpha1.PodTraceScheduleList{},
+		&podtracev1alpha1.ApplicationTrace{},
+		&podtracev1alpha1.ApplicationTraceList{},
 	}
 	for _, obj := range want {
 		gvks, _, err := s.ObjectKinds(obj)
@@ -90,7 +94,7 @@ func TestPodTraceRoundTrip(t *testing.T) {
 func TestPodTraceSessionDurationEncoded(t *testing.T) {
 	orig := &podtracev1alpha1.PodTraceSession{
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
-			Duration: metav1.Duration{Duration: 5 * time.Minute},
+			Duration:    metav1.Duration{Duration: 5 * time.Minute},
 			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "x"},
 		},
 	}
