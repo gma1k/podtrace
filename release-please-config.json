@@ -35,21 +35,64 @@
         }
       ],
       "changelog-sections": [
-        { "type": "feat",      "section": "Features" },
-        { "type": "fix",       "section": "Bug Fixes" },
-        { "type": "perf",      "section": "Performance" },
-        { "type": "security",  "section": "Security" },
-        { "type": "deprecate", "section": "Deprecated" },
-        { "type": "remove",    "section": "Removed" },
-        { "type": "revert",    "section": "Reverts" },
-        { "type": "refactor",  "section": "Refactors" },
-        { "type": "docs",      "section": "Documentation" },
-        { "type": "test",      "section": "Tests" },
-        { "type": "build",     "section": "Build System" },
-        { "type": "ci",        "section": "CI" },
-        { "type": "chore",     "section": "Maintenance" },
-        { "type": "style",     "section": "Maintenance" }
-      ]
+        {
+          "type": "feat",
+          "section": "Features"
+        },
+        {
+          "type": "fix",
+          "section": "Bug Fixes"
+        },
+        {
+          "type": "perf",
+          "section": "Performance"
+        },
+        {
+          "type": "security",
+          "section": "Security"
+        },
+        {
+          "type": "deprecate",
+          "section": "Deprecated"
+        },
+        {
+          "type": "remove",
+          "section": "Removed"
+        },
+        {
+          "type": "revert",
+          "section": "Reverts"
+        },
+        {
+          "type": "refactor",
+          "section": "Refactors"
+        },
+        {
+          "type": "docs",
+          "section": "Documentation"
+        },
+        {
+          "type": "test",
+          "section": "Tests"
+        },
+        {
+          "type": "build",
+          "section": "Build System"
+        },
+        {
+          "type": "ci",
+          "section": "CI"
+        },
+        {
+          "type": "chore",
+          "section": "Maintenance"
+        },
+        {
+          "type": "style",
+          "section": "Maintenance"
+        }
+      ],
+      "release-as": "0.13.0"
     }
   }
 }
