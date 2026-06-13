@@ -14,19 +14,45 @@ runs:
         set -euo pipefail
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends \
-          clang llvm libbpf-dev libelf-dev make pkg-config
+          clang llvm libbpf-dev libelf-dev make pkg-config curl ca-certificates
 
         sudo apt-get install -y "linux-tools-$(uname -r)" \
+          || sudo apt-get install -y linux-tools-azure \
           || sudo apt-get install -y linux-tools-generic || true
         sudo apt-get install -y "linux-headers-$(uname -r)" \
           || sudo apt-get install -y linux-headers-generic || true
 
-        if ! bpftool version >/dev/null 2>&1; then
-          real="$(find /usr/lib -maxdepth 3 -name bpftool -type f 2>/dev/null | sort -V | tail -1 || true)"
+        bpftool_works() { bpftool version 2>&1 | grep -qi 'bpftool v'; }
+
+        ensure_bpftool() {
+          bpftool_works && return 0
+
+          local real
+          real="$(find /usr -maxdepth 4 -type f -name bpftool 2>/dev/null \
+            | grep -v '/sbin/bpftool$' | sort -V | tail -1 || true)"
           if [[ -n "${real}" ]]; then
             sudo install -m0755 "${real}" /usr/local/bin/bpftool
+            hash -r
+            bpftool_works && return 0
           fi
-        fi
 
-        bpftool version \
-          || echo "WARNING: bpftool unusable; eBPF builds will use the stub vmlinux.h"
+          local arch url
+          arch="$(dpkg --print-architecture)"
+          url="$(curl -fsSL https://api.github.com/repos/libbpf/bpftool/releases/latest 2>/dev/null \
+            | grep -oE '"browser_download_url": *"[^"]+"' | cut -d'"' -f4 \
+            | grep -E "bpftool-.*-${arch}\.tar\.gz$" | head -1 || true)"
+          if [[ -n "${url}" ]] && curl -fsSL "${url}" -o /tmp/bpftool.tar.gz; then
+            sudo tar -C /usr/local/bin -xzf /tmp/bpftool.tar.gz bpftool || true
+            sudo chmod 0755 /usr/local/bin/bpftool 2>/dev/null || true
+            hash -r
+            bpftool_works && return 0
+          fi
+
+          return 1
+        }
+
+        if ensure_bpftool; then
+          echo "bpftool OK: $(command -v bpftool) ($(bpftool version 2>&1 | head -1))"
+        else
+          echo "WARNING: bpftool unusable; eBPF builds will use the stub vmlinux.h"
+        fi
