@@ -12,8 +12,8 @@ description: |
   when a TracerConfig is created.
 type: application
 kubeVersion: '>=1.28.0-0'
-version: 0.12.10
-appVersion: 0.12.10
+version: 0.13.0
+appVersion: 0.13.0
 keywords:
   - ebpf
   - tracing

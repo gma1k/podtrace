@@ -9,6 +9,31 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.13.0](https://github.com/gma1k/podtrace/compare/v0.12.10...v0.13.0) (2026-06-13)
+
+
+### Features
+
+* deliver per-cgroup resource-limit alerts from the agent ([#224](https://github.com/gma1k/podtrace/issues/224)) ([3c25113](https://github.com/gma1k/podtrace/commit/3c25113cad954829aeed58bb3c09b13969f10d2d))
+
+
+### Bug Fixes
+
+* harden agent routing, k8s resolution, and nodespawn lifecycle ([#217](https://github.com/gma1k/podtrace/issues/217)) ([f77680a](https://github.com/gma1k/podtrace/commit/f77680a229664d2a729ce52079679c7276c9974d))
+* harden CLI lifecycle, bundle wire format, and tracer engine ([#220](https://github.com/gma1k/podtrace/issues/220)) ([b3b9de4](https://github.com/gma1k/podtrace/commit/b3b9de4fd297ac5c7cc9e17c2d4ed60ba4530011))
+* harden exporters, alerting, metrics, and resource monitoring ([#218](https://github.com/gma1k/podtrace/issues/218)) ([8ecb383](https://github.com/gma1k/podtrace/commit/8ecb3830a72145e3ea80d3438fdc5ea00a3951a7))
+* harden operator reconcile loops against conflict and drift ([#215](https://github.com/gma1k/podtrace/issues/215)) ([dc0a96d](https://github.com/gma1k/podtrace/commit/dc0a96d8d0e2d438bc7e5cfc81dc0680feb7f8af))
+* make BPF builds BTF-complete and harden chart, CI, and tests ([#221](https://github.com/gma1k/podtrace/issues/221)) ([1218381](https://github.com/gma1k/podtrace/commit/1218381fa2913c6b23fe30b5502a88d5a27fc577))
+* **renovate:** match helm uses-with dep name so v4.2.1 skip applies ([9de9ef0](https://github.com/gma1k/podtrace/commit/9de9ef0e1f88d152c7edc2e2e45273114089a0a0))
+* **renovate:** replace removed ignoreVersions with allowedVersions ([#227](https://github.com/gma1k/podtrace/issues/227)) ([13fbb18](https://github.com/gma1k/podtrace/commit/13fbb18fac66e080281c4aa4cea9792886ca2437))
+
+
+### Maintenance
+
+* **deps:** update github actions to v4.2.1 ([#219](https://github.com/gma1k/podtrace/issues/219)) ([310c40d](https://github.com/gma1k/podtrace/commit/310c40d51adbaa787ca166586cc306628c502c3f))
+* **deps:** update kubernetes ecosystem to v0.36.2 ([#223](https://github.com/gma1k/podtrace/issues/223)) ([cfbeebd](https://github.com/gma1k/podtrace/commit/cfbeebd9c01d8aad31eb68fe0c642c560efa7074))
+* trigger release 0.13.0 ([#226](https://github.com/gma1k/podtrace/issues/226)) ([85d0df6](https://github.com/gma1k/podtrace/commit/85d0df65da0973bcbac042c24af2e8d920656892))
+
 ## [0.12.10](https://github.com/gma1k/podtrace/compare/v0.12.9...v0.12.10) (2026-06-11)
 
 

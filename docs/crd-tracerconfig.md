@@ -46,7 +46,7 @@ kind: TracerConfig
 metadata:
   name: default
 spec:
-  image: ghcr.io/gma1k/podtrace:0.12.10 # x-release-please-version
+  image: ghcr.io/gma1k/podtrace:0.13.0 # x-release-please-version
   imagePullPolicy: IfNotPresent
   systemNamespace: podtrace-system
   maxConcurrentSessionsPerNode: 2
