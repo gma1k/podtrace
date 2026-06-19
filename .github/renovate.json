@@ -73,7 +73,7 @@
       ]
     },
     {
-      "description": "Skip helm v4.2.1 only: a WaitForDelete regression hangs chart installs with before-hook-creation hooks.",
+      "description": "Skip helm v4.2.1 only: an intermittent WaitForDelete race affecting before-hook-creation hooks (upstream helm#32214), reverted in v4.2.2 (commit b05881c). v4.2.2+ is allowed by this range.",
       "matchDepNames": [
         "helm"
       ],
