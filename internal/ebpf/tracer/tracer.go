@@ -379,7 +379,12 @@ func NewTracer() (*Tracer, error) {
 	}
 
 	if config.RedactPII {
-		t.piiRedactor = redactor.Default()
+		r, err := redactor.DefaultWithCustomRules(config.RedactCustomRules)
+		if err != nil {
+			logger.Error("Ignoring invalid PODTRACE_REDACT_CUSTOM_RULES; built-in redaction still active",
+				zap.Error(err))
+		}
+		t.piiRedactor = r
 	}
 
 	return t, nil

@@ -109,7 +109,6 @@ metrics:
     enabled: false
     labels: {}
     interval: 30s
-    # -- Override the scrape path. Agent exposes /metrics on port 9090.
     path: /metrics
 
 tracerConfig:
@@ -117,16 +116,16 @@ tracerConfig:
   name: default
   sidecarUploader: false
 
+  redaction:
+    enabled: false
+    redactDNSNames: false
+    customRules: []
+
 examples:
-  # -- Apply a starter ExporterConfig CR alongside the operator. Useful
-  # for getting `kubectl apply -f examples/diagnose-demo.yaml` working
-  # immediately after `helm install` with no extra prerequisites.
   exporterconfig:
     enabled: false
     namespace: default
     name: starter-otlp
-    # -- OTLP endpoint the example pushes to. Reaching it is optional —
-    # when unreachable, sessions still write reportRef ConfigMaps/Secrets.
     endpoint: otel-collector.observability:4318
     protocol: http
     insecure: true

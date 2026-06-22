@@ -94,6 +94,7 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 			env = append(env, corev1.EnvVar{Name: "PODTRACE_ALERT_WEBHOOK_ALLOW_HTTP", Value: "true"})
 		}
 	}
+	env = append(env, redactionEnv(tc.Spec.Redaction)...)
 
 	args := []string{
 		"agent",
@@ -116,7 +117,7 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 			Spec: corev1.PodSpec{
 				ServiceAccountName:            AgentServiceAccountName(),
 				PriorityClassName:             priorityClassName,
-				HostPID:                       true, // needed for pid→cgroup traversal via /proc
+				HostPID:                       true,
 				NodeSelector:                  tc.Spec.NodeSelector,
 				Tolerations:                   tc.Spec.Tolerations,
 				Affinity:                      tc.Spec.Affinity,

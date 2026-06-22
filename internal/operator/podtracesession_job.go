@@ -141,6 +141,9 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 		// missing/unreachable OTLP endpoint isn't a noisy startup warn.
 		{Name: "PODTRACE_OTLP_INSECURE", Value: "1"},
 	}
+	if tc != nil {
+		mainEnv = append(mainEnv, redactionEnv(tc.Spec.Redaction)...)
+	}
 
 	mainContainer := corev1.Container{
 		Name:                     "podtrace",

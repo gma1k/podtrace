@@ -33,6 +33,7 @@ populates the CR from `values.yaml`:
 | `session.backoffLimit` | `spec.session.backoffLimit` |
 | `session.maxConcurrentSessionsPerNode` | `spec.maxConcurrentSessionsPerNode` |
 | `tracerConfig.sidecarUploader` | `spec.session.sidecarUploader` |
+| `tracerConfig.redaction` | `spec.redaction` |
 
 To change a setting, prefer `helm upgrade --reuse-values --set …`
 rather than editing the CR directly — direct edits get reverted on the
@@ -87,6 +88,13 @@ spec:
 - **`session.sidecarUploader`** — opt-in native sidecar that re-uploads
   the report to `spec.reportRef`. Acts as a backup if the CLI crashes
   before its own self-upload completes. Requires Kubernetes 1.29+.
+- **`redaction`** — PII scrubbing of event `Target`/`Details` before any
+  exporter or report sink. `enabled` turns on the built-in rules
+  (credentials, Bearer/Basic auth, JSON/YAML secrets, emails, card
+  numbers); `redactDNSNames` additionally masks DNS query names;
+  `customRules` adds regex rules (`name`, `pattern`, `replace`). Applies
+  to both the agent DaemonSet and session Jobs. Off by default. See
+  [language-runtime-adapters.md](language-runtime-adapters.md#pii-redaction).
 
 ## Status reference
 
