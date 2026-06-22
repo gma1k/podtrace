@@ -66,6 +66,7 @@ const (
 	EventKafkaProduce // 36: Kafka produce (librdkafka)
 	EventKafkaFetch   // 37: Kafka consumer_poll result (librdkafka)
 	EventDNSQuery     // 38: DNS query seen on egress
+	EventAFALG        // 39: AF_ALG crypto socket bind
 )
 
 type Event struct {
@@ -152,6 +153,8 @@ func (e *Event) TypeString() string {
 		return "gRPC"
 	case EventKafkaProduce, EventKafkaFetch:
 		return "KAFKA"
+	case EventAFALG:
+		return "CRYPTO"
 	default:
 		return "UNKNOWN"
 	}
@@ -717,11 +720,31 @@ func formatEventMessage(e *Event, realtime bool) string {
 		}
 		return msg
 
+	case EventAFALG:
+		algType := truncateString(e.Target, maxTargetLen)
+		if algType == "" {
+			algType = "unknown"
+		}
+		msg := fmt.Sprintf("[CRYPTO] AF_ALG %s bind", sanitizeString(algType))
+		if name := sanitizeString(truncateString(e.Details, maxTargetLen)); name != "" {
+			msg += fmt.Sprintf(": %s", name)
+		}
+		msg += fmt.Sprintf(" (uid=%d)", e.Bytes)
+		if e.IsCopyFailSignal() {
+			msg += " [algif_aead by unprivileged user, Copy Fail vulnerability interface]"
+		}
+		return msg
+
 	default:
 		return fmt.Sprintf("[UNKNOWN] event type %d", e.Type)
 	}
-	// Reached when a case uses break (e.g. HTTP events in realtime mode).
 	return fmt.Sprintf("[UNKNOWN] event type %d", e.Type)
+}
+
+// IsCopyFailSignal reports whether this event is an AF_ALG bind of an "aead"
+// transform by an unprivileged (uid != 0) caller.
+func (e *Event) IsCopyFailSignal() bool {
+	return e.Type == EventAFALG && e.Target == "aead" && e.Bytes != 0
 }
 
 func (e *Event) FormatMessage() string {

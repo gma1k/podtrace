@@ -2052,7 +2052,7 @@ func TestGroupCategoryNeeds_CoversEveryCategory(t *testing.T) {
 			covered[c] = true
 		}
 	}
-	for _, c := range []string{"dns", "net", "fs", "cpu", "proc"} {
+	for _, c := range []string{"dns", "net", "fs", "cpu", "proc", "crypto"} {
 		if !covered[c] {
 			t.Errorf("CRD category %q has no probe group in groupCategoryNeeds", c)
 		}
@@ -2060,7 +2060,7 @@ func TestGroupCategoryNeeds_CoversEveryCategory(t *testing.T) {
 }
 
 func TestGroupsNeededFor_RoundTrip(t *testing.T) {
-	for _, c := range []string{"dns", "net", "fs", "cpu", "proc"} {
+	for _, c := range []string{"dns", "net", "fs", "cpu", "proc", "crypto"} {
 		if got := groupsNeededFor(c); len(got) == 0 {
 			t.Errorf("groupsNeededFor(%q) returned nothing — category cannot be re-attached", c)
 		}

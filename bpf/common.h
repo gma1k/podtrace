@@ -37,8 +37,6 @@ typedef __u64 u64;
 #include <bpf/bpf_core_read.h>
 
 #ifndef PODTRACE_VMLINUX_FROM_BTF
-/* Field names match kernel BTF (short register names without the 'r' prefix).
- * bpf_tracing.h PT_REGS_* macros are overridden below to match. */
 struct pt_regs {
 	unsigned long r15;
 	unsigned long r14;
@@ -63,8 +61,6 @@ struct pt_regs {
 	unsigned long ss;
 };
 
-/* Override PT_REGS_* macros to match our short-named struct pt_regs fields,
- * regardless of whether bpf_tracing.h was compiled with __VMLINUX_H__ set. */
 #undef PT_REGS_PARM1
 #undef PT_REGS_PARM2
 #undef PT_REGS_PARM3
@@ -91,6 +87,19 @@ struct sockaddr_in {
 		u32 s_addr;
 	} sin_addr;
 	u8 sin_zero[8];
+};
+
+struct trace_entry {
+	u16 type;
+	u8  flags;
+	u8  preempt_count;
+	s32 pid;
+};
+struct trace_event_raw_sys_enter {
+	struct trace_entry ent;
+	long id;
+	unsigned long args[6];
+	char __data[0];
 };
 
 struct __sk_buff {
@@ -132,6 +141,15 @@ struct __sk_buff {
 
 #define AF_INET 2
 #define AF_INET6 10
+#define AF_ALG 38
+
+struct podtrace_sockaddr_alg {
+	u16 salg_family;
+	u8  salg_type[14];
+	u32 salg_feat;
+	u32 salg_mask;
+	u8  salg_name[64];
+};
 #define IPPROTO_TCP 6
 #define EAGAIN 11
 #define HEX_ADDR_LEN 16

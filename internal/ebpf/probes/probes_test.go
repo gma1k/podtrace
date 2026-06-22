@@ -156,7 +156,7 @@ func TestAllProbeGroups_StableOrdering(t *testing.T) {
 	want := []ProbeGroup{
 		GroupNetwork, GroupFileSystem, GroupDatabase, GroupTLS,
 		GroupMemory, GroupCPU, GroupPool, GroupCache,
-		GroupMessaging, GroupFastCGI,
+		GroupMessaging, GroupFastCGI, GroupCrypto,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("allProbeGroups length = %d, want %d", len(got), len(want))

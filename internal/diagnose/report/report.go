@@ -644,6 +644,40 @@ func determinePoolHealthFromSummary(summary tracker.PoolSummary) string {
 	return "OK - Pool operating normally"
 }
 
+// GenerateSecuritySection warns when an AF_ALG "aead" socket was bound by an
+// unprivileged process — the CVE-2026-31431 ("Copy-Fail") interface.
+func GenerateSecuritySection(d Diagnostician) string {
+	victims := map[string]string{} // pod -> "process, uid N"
+	for _, e := range d.FilterEvents(events.EventAFALG) {
+		if !e.IsCopyFailSignal() {
+			continue
+		}
+		pod := "(unknown pod)"
+		if e.K8s != nil && e.K8s.PodName != "" {
+			pod = e.K8s.PodName
+		}
+		victims[pod] = fmt.Sprintf("%s, uid %d", e.ProcessName, e.Bytes)
+	}
+	if len(victims) == 0 {
+		return ""
+	}
+
+	pods := make([]string, 0, len(victims))
+	for p := range victims {
+		pods = append(pods, p)
+	}
+	sort.Strings(pods)
+
+	report := "Security Findings:\n"
+	report += "  Possible privilege-escalation attempt: Copy-Fail (CVE-2026-31431)\n"
+	report += "  A non-root process could gain root on unpatched nodes.\n"
+	for _, p := range pods {
+		report += fmt.Sprintf("    - %s (%s)\n", p, victims[p])
+	}
+	report += "    Fix: patch the node kernel\n"
+	return report
+}
+
 func GenerateResourceSection(d Diagnostician) string {
 	resourceEvents := d.FilterEvents(events.EventResourceLimit)
 	if len(resourceEvents) == 0 {

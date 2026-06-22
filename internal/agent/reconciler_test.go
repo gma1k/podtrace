@@ -123,6 +123,7 @@ func TestFilterToEventTypes_AllCategories(t *testing.T) {
 		{podtracev1alpha1.FilterFS, true},
 		{podtracev1alpha1.FilterCPU, true},
 		{podtracev1alpha1.FilterProc, true},
+		{podtracev1alpha1.FilterCrypto, true},
 		{"unknown-filter", false},
 	}
 	for _, c := range cases {
