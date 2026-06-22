@@ -92,6 +92,7 @@ spec:
                   - fs
                   - cpu
                   - proc
+                  - crypto
                   type: string
                 type: array
               namespaceSelector:
@@ -148,12 +149,8 @@ spec:
                   description: PodRef references a specific pod by namespace/name.
                   properties:
                     name:
-                      description: Name is the name of the pod.
                       type: string
                     namespace:
-                      description: |-
-                        Namespace is the namespace of the pod. If empty, defaults to the
-                        namespace of the owning CR (for namespaced CRs).
                       type: string
                   required:
                   - name
@@ -166,9 +163,8 @@ spec:
                 properties:
                   configMap:
                     description: |-
-                      ConfigMap in the same namespace as the session. The operator will
-                      create/update it with the report payload. Use this sink for small
-                      reports; ConfigMaps are capped at 1MiB of data by etcd.
+                      LocalObjectReference contains enough information to let you locate the
+                      referenced object inside the same namespace.
                     properties:
                       name:
                         default: ""
@@ -182,16 +178,22 @@ spec:
                     type: object
                     x-kubernetes-map-type: atomic
                   objectStore:
-                    description: |-
-                      ObjectStore uploads the report to a cloud bucket (s3, gs, azblob).
-                      Use this sink for reports that may exceed the 1MiB ConfigMap/Secret
-                      limit. Requires the session pod to be on a Kubernetes 1.29+ cluster
-                      so the native sidecar restartPolicy is honoured.
+                    description: "ObjectStoreReference names a cloud-storage destination
+                      for a session\nreport. When CredentialsSecretRef is unset, the
+                      uploader uses the\ncloud SDK's default credential chain (IRSA
+                      / Workload Identity /\nManaged Identity) — the cloud-native
+                      preferred path. The explicit\nSecret is the fallback for clusters
+                      without ambient credentials.\n\nPer-backend Secret key schema
+                      (all optional — missing keys defer to\nthe SDK default chain):\n\n\tS3:
+                      \    access_key_id, secret_access_key, session_token,\n\t        region,
+                      endpoint, force_path_style\n\tGCS:    service_account_json,
+                      endpoint\n\tAzure:  tenant_id, client_id, client_secret,\n\t
+                      \       account_key, endpoint"
                     properties:
                       credentialsSecretRef:
                         description: |-
-                          CredentialsSecretRef names a Secret in the session's namespace
-                          whose keys the uploader reads.
+                          LocalObjectReference contains enough information to let you locate the
+                          referenced object inside the same namespace.
                         properties:
                           name:
                             default: ""
@@ -222,8 +224,8 @@ spec:
                     type: object
                   secret:
                     description: |-
-                      Secret in the same namespace as the session. Prefer this sink when the
-                      report may contain sensitive hostnames/paths/payloads.
+                      LocalObjectReference contains enough information to let you locate the
+                      referenced object inside the same namespace.
                     properties:
                       name:
                         default: ""
@@ -295,24 +297,15 @@ spec:
                 description: Thresholds control anomaly detection on the agent side.
                 properties:
                   errorRatePercent:
-                    description: |-
-                      ErrorRatePercent triggers issue detection when errors exceed this
-                      percentage over the rolling window. 0-100.
                     format: int32
                     maximum: 100
                     minimum: 0
                     type: integer
                   fsSlowMs:
-                    description: |-
-                      FSSlowMs triggers issue detection when a filesystem operation takes
-                      longer than this value in milliseconds.
                     format: int32
                     minimum: 0
                     type: integer
                   rttSpikeMs:
-                    description: |-
-                      RTTSpikeMs triggers issue detection when network RTT exceeds this
-                      value in milliseconds.
                     format: int32
                     minimum: 0
                     type: integer
@@ -446,6 +439,7 @@ spec:
                       - fs
                       - cpu
                       - proc
+                      - crypto
                       type: string
                     type: array
                   generation:
@@ -458,24 +452,15 @@ spec:
                       side.
                     properties:
                       errorRatePercent:
-                        description: |-
-                          ErrorRatePercent triggers issue detection when errors exceed this
-                          percentage over the rolling window. 0-100.
                         format: int32
                         maximum: 100
                         minimum: 0
                         type: integer
                       fsSlowMs:
-                        description: |-
-                          FSSlowMs triggers issue detection when a filesystem operation takes
-                          longer than this value in milliseconds.
                         format: int32
                         minimum: 0
                         type: integer
                       rttSpikeMs:
-                        description: |-
-                          RTTSpikeMs triggers issue detection when network RTT exceeds this
-                          value in milliseconds.
                         format: int32
                         minimum: 0
                         type: integer

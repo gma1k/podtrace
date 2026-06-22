@@ -81,6 +81,7 @@ spec:
                   - fs
                   - cpu
                   - proc
+                  - crypto
                   type: string
                 type: array
               namespaceSelector:
@@ -195,24 +196,15 @@ spec:
                 description: Thresholds control anomaly detection on the agent side.
                 properties:
                   errorRatePercent:
-                    description: |-
-                      ErrorRatePercent triggers issue detection when errors exceed this
-                      percentage over the rolling window. 0-100.
                     format: int32
                     maximum: 100
                     minimum: 0
                     type: integer
                   fsSlowMs:
-                    description: |-
-                      FSSlowMs triggers issue detection when a filesystem operation takes
-                      longer than this value in milliseconds.
                     format: int32
                     minimum: 0
                     type: integer
                   rttSpikeMs:
-                    description: |-
-                      RTTSpikeMs triggers issue detection when network RTT exceeds this
-                      value in milliseconds.
                     format: int32
                     minimum: 0
                     type: integer

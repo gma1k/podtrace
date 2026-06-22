@@ -1283,6 +1283,7 @@ var groupCategoryNeeds = map[probes.ProbeGroup][]string{
 	probes.GroupMemory:     {"proc"},
 	probes.GroupFastCGI:    {"net"},
 	probes.GroupTLS:        {"dns", "cpu", "net"},
+	probes.GroupCrypto:     {"crypto"},
 }
 
 // DisableProbeGroup closes all links associated with the given group.

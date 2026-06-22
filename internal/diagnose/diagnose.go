@@ -209,6 +209,7 @@ func (d *Diagnostician) GenerateReportWithContext(ctx context.Context) string {
 	var result string
 
 	result += report.GenerateSummarySection(d, duration)
+	result += report.GenerateSecuritySection(d)
 	result += report.GenerateCgroupScopeSection(d)
 	result += report.GenerateDNSSection(d, duration)
 	result += report.GenerateTCPSection(d, duration)

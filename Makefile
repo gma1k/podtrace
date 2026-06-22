@@ -323,6 +323,8 @@ bpf-btf-header: $(VMLINUX_GEN)
 
 docker-build: bpf-btf-header
 	docker build \
+	  --provenance=false \
+	  --sbom=false \
 	  --build-arg GO_VERSION=$(GO_VERSION) \
 	  --build-arg VERSION=$(IMAGE_TAG) \
 	  --build-arg COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown) \

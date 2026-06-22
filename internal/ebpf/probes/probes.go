@@ -89,7 +89,7 @@ func allProbeGroups() []ProbeGroup {
 	return []ProbeGroup{
 		GroupNetwork, GroupFileSystem, GroupDatabase, GroupTLS,
 		GroupMemory, GroupCPU, GroupPool, GroupCache,
-		GroupMessaging, GroupFastCGI,
+		GroupMessaging, GroupFastCGI, GroupCrypto,
 	}
 }
 
@@ -193,6 +193,7 @@ var tracepointProbes = []tracepointSpec{
 	{"tracepoint_oom_mark_victim", "oom", "mark_victim", "OOM kill tracking unavailable"},
 	{"tracepoint_sched_process_fork", "sched", "sched_process_fork", "Process fork tracking unavailable"},
 	{"tracepoint_sched_process_exec", "sched", "sched_process_exec", "Process exec tracking unavailable"},
+	{"tracepoint_sys_enter_bind", "syscalls", "sys_enter_bind", "AF_ALG crypto-socket detection unavailable"},
 }
 
 // attachTracepointSpec attaches one tracepoint, returning (link, true) on

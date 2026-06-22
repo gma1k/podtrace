@@ -19,5 +19,6 @@
 #include "kafka.c"
 #include "fastcgi.c"
 #include "grpc.c"
+#include "crypto.c"
 
 char LICENSE[] SEC("license") = "GPL";

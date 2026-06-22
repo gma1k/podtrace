@@ -15,6 +15,7 @@ const (
 	GroupCache      ProbeGroup = "cache"     // Redis, Memcached
 	GroupMessaging  ProbeGroup = "messaging" // Kafka
 	GroupFastCGI    ProbeGroup = "fastcgi"   // PHP-FPM / FastCGI unix socket probes
+	GroupCrypto     ProbeGroup = "crypto"    // AF_ALG crypto-socket detection
 )
 
 // probeGroupMap maps each BPF program name to its ProbeGroup.
@@ -106,6 +107,9 @@ var probeGroupMap = map[string]ProbeGroup{
 
 	// gRPC (second kprobe on tcp_sendmsg for HTTP/2 inspection)
 	"kprobe_grpc_tcp_sendmsg": GroupNetwork,
+
+	// Crypto (AF_ALG bind detection, "Copy-Fail" vulnerability interface)
+	"tracepoint_sys_enter_bind": GroupCrypto,
 }
 
 // GroupForProbe returns the ProbeGroup for a BPF program name.

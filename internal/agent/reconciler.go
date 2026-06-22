@@ -752,6 +752,8 @@ func filterToEventTypes(f podtracev1alpha1.EventFilter) []events.EventType {
 		return []events.EventType{events.EventSchedSwitch, events.EventLockContention}
 	case podtracev1alpha1.FilterProc:
 		return []events.EventType{events.EventExec, events.EventFork, events.EventOOMKill}
+	case podtracev1alpha1.FilterCrypto:
+		return []events.EventType{events.EventAFALG}
 	default:
 		return nil
 	}

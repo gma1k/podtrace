@@ -31,6 +31,7 @@ Welcome to the `Podtrace` documentation. This directory contains comprehensive g
 - **[Tracing Exporters Setup](tracing-exporters.md)** - Detailed exporter configuration (OTLP, Jaeger, Splunk HEC, DataDog, Zipkin)
 - **[Alerting Guide](alerting.md)** - Real-time alerts via webhooks, Slack, and Splunk HEC
 - **[Performance Profiling](profiling.md)** - On-demand CPU/memory profiling with eBPF event correlation
+- **[Crypto-Socket Detection](crypto-detection.md)** - Opt-in Copy-Fail (CVE-2026-31431) interface detection
 
 ### Application Tracing
 - **[Language-Runtime Adapters](language-runtime-adapters.md)** - Redis, Memcached, FastCGI, gRPC, Kafka uprobes; PII redaction; USDT auto-detection

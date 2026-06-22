@@ -45,6 +45,7 @@ enum event_type {
 	EVENT_KAFKA_PRODUCE,    /* 36: Kafka produce (librdkafka: rd_kafka_produce) */
 	EVENT_KAFKA_FETCH,      /* 37: Kafka consumer_poll result (librdkafka) */
 	EVENT_DNS_QUERY,        /* 38: DNS query seen on egress */
+	EVENT_AF_ALG,           /* 39: AF_ALG crypto socket bind */
 };
 
 struct event {
