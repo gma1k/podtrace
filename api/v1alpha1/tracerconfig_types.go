@@ -10,8 +10,8 @@ import (
 type BTFMode string
 
 const (
-	BTFModeAuto BTFMode = "auto"
-	BTFModeHost BTFMode = "host"
+	BTFModeAuto     BTFMode = "auto"
+	BTFModeHost     BTFMode = "host"
 	BTFModeEmbedded BTFMode = "embedded"
 )
 
@@ -51,6 +51,35 @@ type AgentAlertingSpec struct {
 
 	// +optional
 	AllowInsecureWebhook bool `json:"allowInsecureWebhook,omitempty"`
+}
+
+// RedactionSpec configures PII redaction applied to event Target and Details
+// fields in the tracer, before any exporter or report sink receives them.
+type RedactionSpec struct {
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// +optional
+	RedactDNSNames bool `json:"redactDNSNames,omitempty"`
+
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	CustomRules []RedactionRule `json:"customRules,omitempty"`
+}
+
+// RedactionRule is a single user-supplied redaction pattern.
+type RedactionRule struct {
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Pattern string `json:"pattern"`
+
+	// +optional
+	Replace string `json:"replace,omitempty"`
 }
 
 // SessionRuntimeSpec tunes the per-session Job pods the operator creates.
@@ -93,6 +122,9 @@ type TracerConfigSpec struct {
 
 	// +optional
 	Session SessionRuntimeSpec `json:"session,omitempty"`
+
+	// +optional
+	Redaction *RedactionSpec `json:"redaction,omitempty"`
 
 	// +optional
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`

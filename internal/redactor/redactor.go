@@ -1,6 +1,8 @@
 package redactor
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"regexp"
 
@@ -12,6 +14,14 @@ type Rule struct {
 	Name    string
 	Pattern *regexp.Regexp
 	Replace string
+}
+
+// ruleSpec is the JSON shape of a custom rule as carried in the
+// PODTRACE_REDACT_CUSTOM_RULES env var.
+type ruleSpec struct {
+	Name    string `json:"name"`
+	Pattern string `json:"pattern"`
+	Replace string `json:"replace"`
 }
 
 // Redactor applies a list of Rules to event Target and Details fields in-place.
@@ -31,6 +41,43 @@ func Default() *Redactor {
 // New creates a Redactor with the provided rules.
 func New(rules []Rule) *Redactor {
 	return &Redactor{rules: rules}
+}
+
+// DefaultWithCustomRules returns a Redactor with the built-in rules plus any
+// custom rules parsed from jsonSpec (a JSON array of {name,pattern,replace}).
+func DefaultWithCustomRules(jsonSpec string) (*Redactor, error) {
+	r := Default()
+	if jsonSpec == "" {
+		return r, nil
+	}
+	extra, err := ParseRules(jsonSpec)
+	r.rules = append(r.rules, extra...)
+	return r, err
+}
+
+// ParseRules compiles a JSON array of custom rules into Rules.
+func ParseRules(jsonSpec string) ([]Rule, error) {
+	var specs []ruleSpec
+	if err := json.Unmarshal([]byte(jsonSpec), &specs); err != nil {
+		return nil, fmt.Errorf("redactor: parse custom rules: %w", err)
+	}
+	rules := make([]Rule, 0, len(specs))
+	var firstErr error
+	for i, s := range specs {
+		re, err := regexp.Compile(s.Pattern)
+		if err != nil {
+			if firstErr == nil {
+				name := s.Name
+				if name == "" {
+					name = fmt.Sprintf("#%d", i)
+				}
+				firstErr = fmt.Errorf("redactor: rule %q has invalid pattern: %w", name, err)
+			}
+			continue
+		}
+		rules = append(rules, Rule{Name: s.Name, Pattern: re, Replace: s.Replace})
+	}
+	return rules, firstErr
 }
 
 // Redact modifies e.Target and e.Details in-place, applying all rules.

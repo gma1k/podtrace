@@ -132,7 +132,29 @@ Built-in redaction rules:
 
 ### Custom Redaction Rules
 
-Set `PODTRACE_REDACT_CUSTOM_RULES` to a JSON array of additional rules (applied after built-in rules). Each rule requires a `name`, `pattern` (Go regex), and `replace` string.
+Set `PODTRACE_REDACT_CUSTOM_RULES` to a JSON array of additional rules (applied after built-in rules). Each rule requires a `name`, `pattern` (Go regex), and `replace` string. A rule with an invalid pattern is skipped with a logged error — the built-in rules and any valid custom rules still apply, so redaction never silently degrades to a no-op.
+
+### Enabling redaction in Kubernetes
+
+The env vars above configure a standalone tracer. In a cluster, set redaction once on the `TracerConfig` and it applies to **both** the agent DaemonSet and every session Job — no per-pod env editing, and it survives operator reconciliation:
+
+```yaml
+apiVersion: podtrace.io/v1alpha1
+kind: TracerConfig
+metadata:
+  name: default
+spec:
+  image: ghcr.io/gma1k/podtrace:latest
+  redaction:
+    enabled: true
+    redactDNSNames: false        # also scrub DNS query names
+    customRules:
+      - name: ssn
+        pattern: '\d{3}-\d{2}-\d{4}'
+        replace: '***-**-****'
+```
+
+Via Helm, the same is exposed under `tracerConfig.redaction` in `values.yaml`. The operator translates these fields into the `PODTRACE_REDACT_*` env vars on the tracer containers.
 
 ## USDT Auto-Detection
 

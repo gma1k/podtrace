@@ -110,6 +110,15 @@ data:
         activeDeadlineSecondsOffset: {{ .Values.session.activeDeadlineSecondsOffset }}
         backoffLimit: {{ .Values.session.backoffLimit }}
         sidecarUploader: {{ .Values.tracerConfig.sidecarUploader }}
+      {{- if .Values.tracerConfig.redaction.enabled }}
+      redaction:
+        enabled: true
+        redactDNSNames: {{ .Values.tracerConfig.redaction.redactDNSNames }}
+        {{- with .Values.tracerConfig.redaction.customRules }}
+        customRules:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      {{- end }}
   {{- end }}
   {{- if $ecEnabled }}
   exporterconfig.yaml: |

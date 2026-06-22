@@ -1109,6 +1109,37 @@ spec:
                 additionalProperties:
                   type: string
                 type: object
+              redaction:
+                description: |-
+                  RedactionSpec configures PII redaction applied to event Target and Details
+                  fields in the tracer, before any exporter or report sink receives them.
+                properties:
+                  customRules:
+                    items:
+                      description: RedactionRule is a single user-supplied redaction
+                        pattern.
+                      properties:
+                        name:
+                          minLength: 1
+                          type: string
+                        pattern:
+                          minLength: 1
+                          type: string
+                        replace:
+                          type: string
+                      required:
+                      - name
+                      - pattern
+                      type: object
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                  enabled:
+                    type: boolean
+                  redactDNSNames:
+                    type: boolean
+                type: object
               session:
                 description: SessionRuntimeSpec tunes the per-session Job pods the
                   operator creates.
