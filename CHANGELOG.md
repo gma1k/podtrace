@@ -9,6 +9,26 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.13.3](https://github.com/gma1k/podtrace/compare/v0.13.2...v0.13.3) (2026-06-22)
+
+
+### Features
+
+* detect unprivileged AF_ALG aead binds (CVE-2026-31431 Copy-Fail) ([#243](https://github.com/gma1k/podtrace/issues/243)) ([3b6c49f](https://github.com/gma1k/podtrace/commit/3b6c49f66d6980501cb62fd7161036b7184a581e))
+* wire PII redaction through TracerConfig and honor custom rules ([#242](https://github.com/gma1k/podtrace/issues/242)) ([7d82d3c](https://github.com/gma1k/podtrace/commit/7d82d3cdc72b166acce6be779db338386b377743))
+
+
+### Maintenance
+
+* **deps:** pin helm to v4.2.2 and free runner disk in chainsaw ([#240](https://github.com/gma1k/podtrace/issues/240)) ([f9ea5fa](https://github.com/gma1k/podtrace/commit/f9ea5fa08eb756bc7d018f27d5801fb031a27a5d))
+* **deps:** update docker/dockerfile docker tag to v1.25 ([#238](https://github.com/gma1k/podtrace/issues/238)) ([dfc1c7a](https://github.com/gma1k/podtrace/commit/dfc1c7a1493cc614df2184e22f18b53be6dc8140))
+* **deps:** update github actions to v3.0.1 ([#241](https://github.com/gma1k/podtrace/issues/241)) ([3da05f3](https://github.com/gma1k/podtrace/commit/3da05f327fcbfba3d84f5156f7eec3a0995861aa))
+* **deps:** update github actions to v7 ([#239](https://github.com/gma1k/podtrace/issues/239)) ([307fe16](https://github.com/gma1k/podtrace/commit/307fe161667e38022dc101c87f8b95fd4958428c))
+* **deps:** update go modules (non-major) ([#236](https://github.com/gma1k/podtrace/issues/236)) ([8722398](https://github.com/gma1k/podtrace/commit/87223988f0aa9de713da2abb4ecd3e5a70afd744))
+* **deps:** update go modules (non-major) ([#244](https://github.com/gma1k/podtrace/issues/244)) ([a40827c](https://github.com/gma1k/podtrace/commit/a40827c7101104bbb13fefc7138590c3ca08296f))
+* **deps:** update go modules (non-major) to v1.14.0 ([#235](https://github.com/gma1k/podtrace/issues/235)) ([bcae399](https://github.com/gma1k/podtrace/commit/bcae399cd152e5e4e3a25f30356ab0da4331686e))
+* **deps:** update go modules (non-major) to v1.8.0 ([#233](https://github.com/gma1k/podtrace/issues/233)) ([8308935](https://github.com/gma1k/podtrace/commit/83089350fe41a61543829908cf25a9a7a782bdda))
+
 ## [0.13.2](https://github.com/gma1k/podtrace/compare/v0.13.1...v0.13.2) (2026-06-13)
 
 
