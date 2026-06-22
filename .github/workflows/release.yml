@@ -17,12 +17,21 @@ on:
   push:
     tags: ["v*", "test*"]
   workflow_dispatch:
+    inputs:
+      olm_bundle_only:
+        description: "Use to re-submit community-operators."
+        type: boolean
+        default: false
+      version:
+        description: "Version to submit when olm_bundle_only=true. Ignored otherwise; tag push uses github.ref_name."
+        type: string
+        required: false
 
 permissions:
-  contents: write       # GitHub Release create/update + asset upload
-  packages: write       # push to ghcr.io
-  id-token: write       # cosign keyless OIDC
-  attestations: write   # SLSA provenance attestation
+  contents: write
+  packages: write
+  id-token: write
+  attestations: write
 
 env:
   REGISTRY: ghcr.io
@@ -35,7 +44,7 @@ env:
 
 jobs:
   image:
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') && !inputs.olm_bundle_only
     runs-on: ubuntu-latest
     outputs:
       digest: ${{ steps.build.outputs.digest }}
@@ -46,11 +55,6 @@ jobs:
       - uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3  # v4.1.0
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5  # v4.1.0
 
-      # The build container has no bpftool and no readable kernel BTF, so
-      # without this the released images compile the BTF-dependent gRPC
-      # and FastCGI probes into silent no-ops. Generate the full vmlinux.h
-      # on the runner and ship it in the build context; REQUIRE_BTF=1
-      # makes a stub release build impossible.
       - name: Generate BTF vmlinux.h for the build context
         run: |
           sudo apt-get update
@@ -106,7 +110,7 @@ jobs:
           done
 
   chart:
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') && !inputs.olm_bundle_only
     runs-on: ubuntu-latest
     needs: image
     outputs:
@@ -165,7 +169,7 @@ jobs:
             artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml
 
   quickstart:
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') && !inputs.olm_bundle_only
     runs-on: ubuntu-latest
     needs: chart
     steps:
@@ -194,10 +198,6 @@ jobs:
             --set namespace.create=true \
             --set operator.enabled=true \
             >> dist/quickstart.yaml
-          # The demo workload + sample CRs ship as a SEPARATE manifest:
-          # applying CRs in the same kubectl invocation that installs their
-          # CRDs fails with the discovery-cache "ensure CRDs are installed
-          # first" error, so the documented flow is two applies.
           cp deploy/quickstart-sample.yaml dist/quickstart-demo.yaml
           echo "Rendered $(wc -l < dist/quickstart.yaml) + $(wc -l < dist/quickstart-demo.yaml) lines"
 
@@ -218,6 +218,7 @@ jobs:
           fail_on_unmatched_files: true
 
   cli:
+    if: ${{ !inputs.olm_bundle_only }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -232,9 +233,6 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # Same toolchain as PR CI (single source of truth): the hand-rolled
-      # package list here was missing bpftool, so Krew binaries shipped
-      # stub-built BPF objects with gRPC/FastCGI compiled out.
       - name: Install BPF toolchain
         uses: ./.github/actions/setup-bpf-toolchain
 
@@ -286,10 +284,6 @@ jobs:
           VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          # krew-release-bot is not idempotent across re-runs. If a PR for
-          # this version already exists upstream, the bot's push fails with
-          # a non-fast-forward error. Look upstream to decide if the bot
-          # failure is benign (PR already filed) or a real problem.
           branch="gma1k-podtrace-podtrace-${VERSION}"
           existing=$(gh api repos/kubernetes-sigs/krew-index/pulls --paginate \
             --jq "[.[] | select(.head.ref == \"${branch}\")] | length")
@@ -300,9 +294,15 @@ jobs:
           echo "krew-index PR for ${VERSION} already exists — treating bot failure as idempotent re-run"
 
   olm-bundle:
-    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') && !startsWith(github.ref_name, 'test')
-    runs-on: ubuntu-latest
     needs: image
+    if: |
+      !cancelled() && (needs.image.result == 'success' || needs.image.result == 'skipped') && (
+        (github.event_name == 'workflow_dispatch' && inputs.olm_bundle_only && startsWith(inputs.version, 'v') && !contains(inputs.version, '-'))
+        || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') && !startsWith(github.ref_name, 'test'))
+      )
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ (github.event_name == 'workflow_dispatch' && inputs.olm_bundle_only) && inputs.version || github.ref_name }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
 
@@ -316,11 +316,7 @@ jobs:
           GH_TOKEN: ${{ secrets.OPERATORHUB_PAT }}
         run: |
           set -euo pipefail
-          # Highest existing version dir under upstream operators/podtrace/.
-          # The CSV's `replaces:` field needs the exact prior catalog version,
-          # not the prior git tag (which may have been skipped — e.g. v0.11.7
-          # was tagged but never landed in community-operators).
-          current="${GITHUB_REF_NAME#v}"
+          current="${VERSION#v}"
           prev=$(gh api "repos/k8s-operatorhub/community-operators/contents/operators/podtrace" \
                   --jq '[.[] | select(.type=="dir") | .name] | map(select(test("^[0-9]"))) | sort_by(split(".") | map(tonumber)) | last' \
                   2>/dev/null || echo "")
@@ -338,6 +334,5 @@ jobs:
       - name: Submit bundle to community-operators
         env:
           GH_TOKEN: ${{ secrets.OPERATORHUB_PAT }}
-          VERSION: ${{ github.ref_name }}
           PREVIOUS_VERSION: ${{ steps.prev.outputs.previous }}
         run: ./scripts/submit-olm-bundle.sh
