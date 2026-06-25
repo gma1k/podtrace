@@ -226,3 +226,27 @@ func TestParseRawHeaders_MaxHeaderCountOverflow(t *testing.T) {
 		t.Errorf("expected at most %d headers, got %d", MaxHeaderCount, len(headers))
 	}
 }
+
+// TestExtractFromRawHeaders_BPFSingleLineContract locks the contract between
+// bpf/http.c (which writes a single bare "traceparent: <value>" line into the
+// event Details — no other headers, no trailing CRLF) and the userspace
+// extractor that must parse it to stitch spans.
+func TestExtractFromRawHeaders_BPFSingleLineContract(t *testing.T) {
+	const traceID = "0af7651916cd43dd8448eb211c80319c"
+	const appSpan = "b7ad6b7169203331"
+	raw := "traceparent: 00-" + traceID + "-" + appSpan + "-01"
+
+	tc := NewHTTPExtractor().ExtractFromRawHeaders(raw)
+	if tc == nil || !tc.IsValid() {
+		t.Fatalf("expected valid trace context from %q, got %+v", raw, tc)
+	}
+	if tc.TraceID != traceID {
+		t.Errorf("TraceID = %s, want %s", tc.TraceID, traceID)
+	}
+	if tc.ParentSpanID != appSpan {
+		t.Errorf("ParentSpanID = %s, want app span %s", tc.ParentSpanID, appSpan)
+	}
+	if tc.SpanID == "" || tc.SpanID == appSpan {
+		t.Errorf("SpanID = %q, want a freshly generated child span id distinct from the parent", tc.SpanID)
+	}
+}
