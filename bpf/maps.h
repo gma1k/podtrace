@@ -389,6 +389,14 @@ struct {
 	__type(value, u64);
 } http_recv_base SEC(".maps");
 
+#define HTTP_SCAN_BUF_SIZE 512
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, u32);
+	__type(value, char[HTTP_SCAN_BUF_SIZE]);
+} http_scan_buf SEC(".maps");
+
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 256);

@@ -16,6 +16,7 @@ import (
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/internal/logger"
+	"github.com/podtrace/podtrace/internal/tracing/extractor"
 	"github.com/podtrace/podtrace/internal/safeconv"
 	bundlepkg "github.com/podtrace/podtrace/pkg/exporter/bundle"
 	"github.com/podtrace/podtrace/pkg/tracer"
@@ -30,6 +31,7 @@ type sdkEventExporter struct {
 	tp         *sdktrace.TracerProvider
 	thresholds *PolicyThresholds
 	metrics    *Metrics
+	extractor  *extractor.HTTPExtractor
 }
 
 type sdkOption func(*sdkOptions)
@@ -43,7 +45,7 @@ func withMetrics(m *Metrics) sdkOption {
 }
 
 // newSDKEventExporter wires an SDK SpanExporter (the wire-format
-// adapter — OTLP, Zipkin, etc.) into a TracerProvider shaped to the
+// adapter, OTLP, Zipkin, etc.) into a TracerProvider shaped to the
 // bundle's sampling, resource attribution, and batch settings, then
 // returns a tracer.Exporter that emits one span per event.
 func newSDKEventExporter(name string, cr CRKey, b *BundlePayload, spanExporter sdktrace.SpanExporter, opts ...sdkOption) (tracer.Exporter, error) {
@@ -90,10 +92,11 @@ func newSDKEventExporter(name string, cr CRKey, b *BundlePayload, spanExporter s
 	)
 
 	exp := &sdkEventExporter{
-		name:    fmt.Sprintf("%s/%s", name, cr.String()),
-		cr:      cr,
-		tp:      tp,
-		metrics: cfg.metrics,
+		name:      fmt.Sprintf("%s/%s", name, cr.String()),
+		cr:        cr,
+		tp:        tp,
+		metrics:   cfg.metrics,
+		extractor: extractor.NewHTTPExtractor(),
 	}
 	if b != nil && !b.Thresholds.IsZero() {
 		exp.thresholds = policyThresholdsFromBundle(b.Thresholds)
@@ -160,7 +163,11 @@ func (e *sdkEventExporter) Export(ctx context.Context, batch []*events.Event) er
 			endedAt = startedAt
 		}
 
-		_, span := tr.Start(ctx, eventSpanName(ev), trace.WithTimestamp(startedAt))
+		spanCtx := ctx
+		if parent, ok := e.remoteParent(ev); ok {
+			spanCtx = trace.ContextWithSpanContext(ctx, parent)
+		}
+		_, span := tr.Start(spanCtx, eventSpanName(ev), trace.WithTimestamp(startedAt))
 		attrs := []attribute.KeyValue{
 			attribute.String("podtrace.event.type", eventTypeString(ev.Type)),
 			attribute.Int64("podtrace.event.pid", int64(ev.PID)),
@@ -177,6 +184,42 @@ func (e *sdkEventExporter) Export(ctx context.Context, batch []*events.Event) er
 		span.End(trace.WithTimestamp(endedAt))
 	}
 	return nil
+}
+
+// remoteParent derives the application span this event should hang under,
+// from W3C/B3 trace context.
+func (e *sdkEventExporter) remoteParent(ev *events.Event) (trace.SpanContext, bool) {
+	traceIDHex, parentSpanHex := ev.TraceID, ev.ParentSpanID
+	sampled := ev.TraceFlags&0x01 == 1
+	if traceIDHex == "" && (ev.Type == events.EventHTTPReq || ev.Type == events.EventHTTPResp) && ev.Details != "" && e.extractor != nil {
+		tc := e.extractor.ExtractFromRawHeaders(ev.Details)
+		if tc == nil || !tc.IsValid() {
+			return trace.SpanContext{}, false
+		}
+		traceIDHex, parentSpanHex, sampled = tc.TraceID, tc.ParentSpanID, tc.IsSampled()
+	}
+	if traceIDHex == "" || parentSpanHex == "" {
+		return trace.SpanContext{}, false
+	}
+	tid, err := trace.TraceIDFromHex(traceIDHex)
+	if err != nil {
+		return trace.SpanContext{}, false
+	}
+	sid, err := trace.SpanIDFromHex(parentSpanHex)
+	if err != nil {
+		return trace.SpanContext{}, false
+	}
+	var flags trace.TraceFlags
+	if sampled {
+		flags = trace.FlagsSampled
+	}
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    tid,
+		SpanID:     sid,
+		TraceFlags: flags,
+		Remote:     true,
+	})
+	return sc, sc.IsValid()
 }
 
 // appendThresholdAttributes evaluates the bundle's thresholds against

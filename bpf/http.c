@@ -42,6 +42,69 @@ static __always_inline int http_should_trace(void)
 	return 1;
 }
 
+struct tp_scan_ctx {
+	u32 rlen;
+	int pos;
+};
+
+static long tp_scan_cb(u32 i, void *vctx)
+{
+	struct tp_scan_ctx *c = (struct tp_scan_ctx *)vctx;
+	if (i + 16 >= HTTP_SCAN_BUF_SIZE || i >= c->rlen)
+		return 1;
+	u32 zero = 0;
+	char *buf = bpf_map_lookup_elem(&http_scan_buf, &zero);
+	if (!buf)
+		return 1;
+	const char needle[] = "traceparent:";
+	u32 diff = 0;
+	u32 j;
+#pragma unroll
+	for (j = 0; j < 12; j++)
+		diff |= (u32)((u8)buf[(i + j) & (HTTP_SCAN_BUF_SIZE - 1)] ^ (u8)needle[j]);
+	if (diff == 0) {
+		c->pos = (int)i;
+		return 1;
+	}
+	return 0;
+}
+
+static __noinline void http_capture_traceparent(void *base, u64 avail, char *out)
+{
+	out[0] = '\0';
+	if (!base)
+		return;
+	u32 zero = 0;
+	char *buf = bpf_map_lookup_elem(&http_scan_buf, &zero);
+	if (!buf)
+		return;
+	u32 rlen = (avail < HTTP_SCAN_BUF_SIZE) ? (u32)avail : HTTP_SCAN_BUF_SIZE;
+	if (rlen < 32)
+		return;
+	if (bpf_probe_read_user(buf, rlen, base) != 0)
+		return;
+
+	struct tp_scan_ctx sc = {.rlen = rlen, .pos = -1};
+	bpf_loop(HTTP_SCAN_BUF_SIZE, tp_scan_cb, &sc, 0);
+	if (sc.pos < 0)
+		return;
+
+	u32 v = (u32)sc.pos + 12;
+	if (v < HTTP_SCAN_BUF_SIZE && buf[v & (HTTP_SCAN_BUF_SIZE - 1)] == ' ')
+		v++;
+
+	const char prefix[] = "traceparent: ";
+	u32 p;
+#pragma unroll
+	for (p = 0; p < 13; p++)
+		out[p] = prefix[p];
+	u32 k;
+#pragma unroll
+	for (k = 0; k < W3C_TRACEPARENT_LEN; k++)
+		out[13 + k] = buf[(v + k) & (HTTP_SCAN_BUF_SIZE - 1)];
+	out[13 + W3C_TRACEPARENT_LEN] = '\0';
+}
+
 SEC("kprobe/tcp_sendmsg")
 int kprobe_http_tcp_sendmsg(struct pt_regs *ctx)
 {
@@ -104,7 +167,7 @@ int kprobe_http_tcp_sendmsg(struct pt_regs *ctx)
 		e->bytes = 0;
 		e->tcp_state = 0;
 		bpf_probe_read_kernel_str(e->target, sizeof(e->target), endpoint);
-		e->details[0] = '\0';
+		http_capture_traceparent(base, avail, e->details);
 		capture_user_stack(ctx, pid, tid, e);
 		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	}

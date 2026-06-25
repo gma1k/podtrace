@@ -39,6 +39,7 @@
 /* === HTTP/1.x socket-level inspection (bpf/http.c) === */
 #define HTTP_INSPECT_LEN     80
 #define HTTP_MIN_REQUEST_LEN 16
+#define W3C_TRACEPARENT_LEN  55
 
 /* === FastCGI NV Pair Helpers === */
 #define FCGI_NV_LEN_4BYTE    0x80
