@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: http-report
+  labels:
+    podtrace.io/kind: session-report
+(contains(data."report.txt", 'HTTP')): true

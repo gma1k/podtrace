@@ -164,7 +164,10 @@ func (t *Tracer) attachGroupUprobes(g probes.ProbeGroup) []link.Link {
 	case probes.GroupFastCGI:
 		return probes.AttachFastCGIProbes(coll)
 	case probes.GroupNetwork:
-		return probes.AttachGRPCProbes(coll)
+		var ls []link.Link
+		ls = append(ls, probes.AttachGRPCProbes(coll)...)
+		ls = append(ls, probes.AttachHTTPProbes(coll)...)
+		return ls
 	}
 	return nil
 }
@@ -369,12 +372,11 @@ func NewTracer() (*Tracer, error) {
 	if config.CriticalPathEnabled {
 		window := time.Duration(config.CriticalPathWindowMS) * time.Millisecond
 		t.cpAnalyzer = criticalpath.New(window, func(cp criticalpath.CriticalPath) {
-			fields := make([]zap.Field, 0, len(cp.Segments)+2)
-			fields = append(fields, zap.Uint32("pid", cp.PID), zap.Duration("total", cp.TotalLatency))
-			for _, s := range cp.Segments {
-				fields = append(fields, zap.String(s.Label, fmt.Sprintf("%.1f%%", s.Fraction*100)))
-			}
-			logger.Info("Critical path", fields...)
+			logger.Debug("Critical path",
+				zap.Uint32("pid", cp.PID),
+				zap.Duration("total", cp.TotalLatency),
+				zap.String("breakdown", cp.Breakdown(5)),
+			)
 		})
 	}
 
@@ -690,6 +692,7 @@ func (t *Tracer) SetContainerIDs(containerIDs []string) error {
 	t.registerGroupLinks(probes.GroupMessaging, probes.AttachKafkaProbesWithPID(t.collection, primary, t.containerPID))
 	t.registerGroupLinks(probes.GroupFastCGI, probes.AttachFastCGIProbes(t.collection))
 	t.registerGroupLinks(probes.GroupNetwork, probes.AttachGRPCProbes(t.collection))
+	t.registerGroupLinks(probes.GroupNetwork, probes.AttachHTTPProbes(t.collection))
 	return nil
 }
 

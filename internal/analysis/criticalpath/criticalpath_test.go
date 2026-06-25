@@ -1,6 +1,7 @@
 package criticalpath_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -115,5 +116,52 @@ func TestNew_ZeroTimeoutDefaulted(t *testing.T) {
 	a := criticalpath.New(0, func(_ criticalpath.CriticalPath) {})
 	if a == nil {
 		t.Fatal("expected non-nil Analyzer")
+	}
+}
+
+func TestCriticalPath_Breakdown_AggregatesAndDedupes(t *testing.T) {
+	cp := criticalpath.CriticalPath{
+		PID:          42,
+		TotalLatency: 100,
+		Segments: []criticalpath.Segment{
+			{Label: "FS", Fraction: 0.0},
+			{Label: "NET", Fraction: 0.5},
+			{Label: "DNS", Fraction: 0.03},
+			{Label: "NET", Fraction: 0.4}, // duplicate label → must aggregate
+			{Label: "CPU", Fraction: 0.25},
+			{Label: "FS", Fraction: 0.0},  // duplicate label
+		},
+	}
+	got := cp.Breakdown(5)
+
+	// No label may appear more than once (the original bug emitted duplicates).
+	for _, label := range []string{"NET", "FS", "DNS", "CPU"} {
+		if c := strings.Count(got, label+" "); c != 1 {
+			t.Errorf("label %q appears %d times in %q, want exactly 1", label, c, got)
+		}
+	}
+	// NET (0.5+0.4=0.9) must lead, ahead of CPU (0.25).
+	if !strings.HasPrefix(got, "NET 90.0%") {
+		t.Errorf("breakdown = %q, want it to lead with aggregated NET 90.0%%", got)
+	}
+	if strings.Index(got, "NET") > strings.Index(got, "CPU") {
+		t.Errorf("breakdown = %q, want NET before CPU (descending)", got)
+	}
+}
+
+func TestCriticalPath_Breakdown_TopNAndEmpty(t *testing.T) {
+	if got := (criticalpath.CriticalPath{}).Breakdown(5); got != "" {
+		t.Errorf("empty breakdown = %q, want \"\"", got)
+	}
+	cp := criticalpath.CriticalPath{Segments: []criticalpath.Segment{
+		{Label: "A", Fraction: 0.5}, {Label: "B", Fraction: 0.4},
+		{Label: "C", Fraction: 0.3}, {Label: "D", Fraction: 0.2},
+	}}
+	got := cp.Breakdown(2)
+	if strings.Count(got, ",") != 1 {
+		t.Errorf("topN=2 breakdown = %q, want exactly 2 entries", got)
+	}
+	if !strings.Contains(got, "A ") || !strings.Contains(got, "B ") || strings.Contains(got, "C ") {
+		t.Errorf("topN=2 breakdown = %q, want only the top 2 (A,B)", got)
 	}
 }

@@ -741,6 +741,7 @@ func filterToEventTypes(f podtracev1alpha1.EventFilter) []events.EventType {
 			events.EventUDPSend, events.EventUDPRecv, events.EventTCPState,
 			events.EventTCPRetrans, events.EventNetDevError,
 			events.EventFastCGIReq, events.EventFastCGIResp,
+			events.EventHTTPReq, events.EventHTTPResp,
 		}
 	case podtracev1alpha1.FilterFS:
 		return []events.EventType{

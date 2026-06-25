@@ -371,6 +371,24 @@ struct {
 	__type(value, char[MAX_STRING_LEN]);
 } grpc_methods SEC(".maps");
 
+struct http_req {
+	u64 start_ns;
+	char endpoint[MAX_STRING_LEN];
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u64);
+	__type(value, struct http_req);
+} http_reqs SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u64);
+	__type(value, u64);
+} http_recv_base SEC(".maps");
+
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 256);

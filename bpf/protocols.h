@@ -36,26 +36,18 @@
 /* HTTP/2 client connection preface length */
 #define HTTP2_PREFACE_LEN    24     /* "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" */
 
+/* === HTTP/1.x socket-level inspection (bpf/http.c) === */
+#define HTTP_INSPECT_LEN     80
+#define HTTP_MIN_REQUEST_LEN 16
+
 /* === FastCGI NV Pair Helpers === */
-/* nameLen > 127 → 4-byte encoding with high bit set */
 #define FCGI_NV_LEN_4BYTE    0x80
 
-/* Minimum FastCGI record header size */
 #define FCGI_HEADER_LEN      8
 
-/* Max bytes to read from a PARAMS record for URI extraction.
- * Kept at 128 to bound the nested loop verifier instruction count on
- * strict 6.x kernels (verifier limit = 1M processed instructions). */
 #define FCGI_PARAMS_SCAN_LEN 128
 
 #ifdef PODTRACE_VMLINUX_FROM_BTF
-/* Resolve the user-space data pointer behind a struct msghdr, handling both
- * iov_iter shapes: ITER_IOVEC (writev/sendmsg with an iovec array) and
- * ITER_UBUF (plain send()/write(), kernels >= 6.0, where the union member is
- * the buffer pointer itself, not a pointer to an iovec). Shared by the
- * FastCGI and gRPC inspectors — gRPC used to read msg_iter.__iov
- * unconditionally, which on >= 6.0 either missed plain send() entirely or
- * scanned a garbage pointer. */
 static __always_inline void *msghdr_user_base(struct msghdr *msg, u64 *avail)
 {
 	if (!msg)

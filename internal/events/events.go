@@ -376,7 +376,6 @@ func formatEventMessage(e *Event, realtime bool) string {
 		return ""
 
 	case EventHTTPReq:
-		// HTTP events are not surfaced in realtime mode (original behavior).
 		if realtime {
 			break
 		}
@@ -384,10 +383,13 @@ func formatEventMessage(e *Event, realtime bool) string {
 		if target == "" {
 			target = "unknown"
 		}
-		return fmt.Sprintf("[HTTP] request to %s took %.2fms", sanitizeString(target), latencyMs)
+		msg := fmt.Sprintf("[HTTP] request %s", sanitizeString(target))
+		if e.LatencyNS > 0 {
+			msg += fmt.Sprintf(" took %.2fms", latencyMs)
+		}
+		return msg
 
 	case EventHTTPResp:
-		// HTTP events are not surfaced in realtime mode (original behavior).
 		if realtime {
 			break
 		}
@@ -395,7 +397,11 @@ func formatEventMessage(e *Event, realtime bool) string {
 		if target == "" {
 			target = "unknown"
 		}
-		msg := fmt.Sprintf("[HTTP] response from %s took %.2fms", sanitizeString(target), latencyMs)
+		statusPart := ""
+		if e.Details != "" {
+			statusPart = " status " + sanitizeString(e.Details)
+		}
+		msg := fmt.Sprintf("[HTTP] response %s%s took %.2fms", sanitizeString(target), statusPart, latencyMs)
 		if e.Bytes > 0 {
 			msg += fmt.Sprintf(" (%d bytes)", e.Bytes)
 		}

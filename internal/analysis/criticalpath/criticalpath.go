@@ -1,6 +1,9 @@
 package criticalpath
 
 import (
+	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +23,32 @@ type CriticalPath struct {
 	PID          uint32
 	TotalLatency time.Duration
 	Segments     []Segment
+}
+
+func (cp CriticalPath) Breakdown(topN int) string {
+	if len(cp.Segments) == 0 {
+		return ""
+	}
+	byLabel := make(map[string]float64, len(cp.Segments))
+	order := make([]string, 0, len(cp.Segments))
+	for _, s := range cp.Segments {
+		if _, ok := byLabel[s.Label]; !ok {
+			order = append(order, s.Label)
+		}
+		byLabel[s.Label] += s.Fraction
+	}
+	sort.SliceStable(order, func(i, j int) bool { return byLabel[order[i]] > byLabel[order[j]] })
+	if topN > 0 && len(order) > topN {
+		order = order[:topN]
+	}
+	var b strings.Builder
+	for i, label := range order {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "%s %.1f%%", label, byLabel[label]*100)
+	}
+	return b.String()
 }
 
 // requestWindow accumulates segments for a single PID until a boundary event arrives.

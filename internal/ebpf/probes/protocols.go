@@ -202,3 +202,33 @@ func AttachGRPCProbes(coll *ebpf.Collection) []link.Link {
 	}
 	return links
 }
+
+// AttachHTTPProbes attaches the socket-level HTTP/1.x inspection kprobes: a
+// third kprobe on tcp_sendmsg (request line) plus a kprobe+kretprobe pair on
+// tcp_recvmsg (status line).
+func AttachHTTPProbes(coll *ebpf.Collection) []link.Link {
+	var links []link.Link
+	attach := func(progName, sym string, ret bool) {
+		prog := coll.Programs[progName]
+		if prog == nil {
+			return
+		}
+		var l link.Link
+		var err error
+		if ret {
+			l, err = link.Kretprobe(sym, prog, nil)
+		} else {
+			l, err = link.Kprobe(sym, prog, nil)
+		}
+		if err == nil {
+			links = append(links, l)
+			logger.Debug("HTTP/1.x probe attached", zap.String("prog", progName))
+		} else {
+			logger.Debug("HTTP/1.x probe unavailable", zap.String("prog", progName), zap.Error(err))
+		}
+	}
+	attach("kprobe_http_tcp_sendmsg", "tcp_sendmsg", false)
+	attach("kprobe_http_tcp_recvmsg", "tcp_recvmsg", false)
+	attach("kretprobe_http_tcp_recvmsg", "tcp_recvmsg", true)
+	return links
+}

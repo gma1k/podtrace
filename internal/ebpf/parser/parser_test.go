@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 	"unsafe"
 
@@ -626,5 +627,40 @@ func TestParseEvent_V6_DNSServerIP6(t *testing.T) {
 	}
 	if got := e.DNSServerAddr(); got != "2606:4700:4700:0000:0000:0000:0000:1111" {
 		t.Errorf("DNSServerAddr = %q", got)
+	}
+}
+
+// TestParseEvent_HTTPSocketEndpoint exercises the socket-level HTTP/1.x path
+// end-to-end through the parser: the request line lands in Target ("METHOD
+// path") and the response status code in Details, and both survive parsing
+// and surface in the formatted message.
+func TestParseEvent_HTTPSocketEndpoint(t *testing.T) {
+	var raw rawEvent
+	raw.Timestamp = 42
+	raw.PID = 99
+	raw.Type = uint32(events.EventHTTPResp)
+	raw.LatencyNS = 5000000 // 5ms
+	raw.Error = 503
+	raw.Bytes = 2048
+	copy(raw.Target[:], "GET /api/users")
+	copy(raw.Details[:], "503")
+
+	var buf bytes.Buffer
+	if err := binary.Write(&buf, binary.LittleEndian, raw); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	event := ParseEvent(buf.Bytes())
+	if event == nil {
+		t.Fatal("ParseEvent returned nil")
+	}
+	if event.Target != "GET /api/users" {
+		t.Errorf("Target = %q, want \"GET /api/users\"", event.Target)
+	}
+	if event.Details != "503" {
+		t.Errorf("Details = %q, want \"503\"", event.Details)
+	}
+	msg := event.FormatMessage()
+	if !strings.Contains(msg, "GET /api/users") || !strings.Contains(msg, "503") {
+		t.Errorf("formatted message %q missing endpoint or status", msg)
 	}
 }
