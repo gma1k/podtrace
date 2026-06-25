@@ -890,7 +890,8 @@ func filterEvents(ctx context.Context, in <-chan *events.Event, out chan<- *even
 			case filterMap["dns"] && event.Type == events.EventDNS:
 				shouldInclude = true
 			case filterMap["net"] && (event.Type == events.EventConnect || event.Type == events.EventTCPSend || event.Type == events.EventTCPRecv ||
-				event.Type == events.EventFastCGIReq || event.Type == events.EventFastCGIResp):
+				event.Type == events.EventFastCGIReq || event.Type == events.EventFastCGIResp ||
+				event.Type == events.EventHTTPReq || event.Type == events.EventHTTPResp):
 				shouldInclude = true
 			case filterMap["fs"] && (event.Type == events.EventRead || event.Type == events.EventWrite || event.Type == events.EventFsync):
 				shouldInclude = true

@@ -137,6 +137,26 @@ func TestFilterToEventTypes_AllCategories(t *testing.T) {
 	}
 }
 
+// TestFilterToEventTypes_NetIncludesHTTP guards against the socket-level
+// HTTP/1.x events being dropped by the agent router.
+func TestFilterToEventTypes_NetIncludesHTTP(t *testing.T) {
+	got := filterToEventTypes(podtracev1alpha1.FilterNet)
+	want := map[events.EventType]bool{
+		events.EventHTTPReq:  false,
+		events.EventHTTPResp: false,
+	}
+	for _, et := range got {
+		if _, ok := want[et]; ok {
+			want[et] = true
+		}
+	}
+	for et, found := range want {
+		if !found {
+			t.Errorf("FilterNet missing event type %v — HTTP endpoints would be dropped by the router", et)
+		}
+	}
+}
+
 func TestPodChangePredicates(t *testing.T) {
 	p := podChangePredicates()
 

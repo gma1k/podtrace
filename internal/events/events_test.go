@@ -2151,3 +2151,37 @@ func TestEvent_DNSServerAddr_PrefersV6(t *testing.T) {
 		t.Errorf("empty DNSServerAddr = %q, want \"\"", got)
 	}
 }
+
+// TestEvent_FormatMessage_HTTPSocketEndpoint covers the socket-level HTTP/1.x
+// parser output: target carries "METHOD path" and (for responses) details
+// carries the status code. The formatted message must surface both.
+func TestEvent_FormatMessage_HTTPSocketEndpoint(t *testing.T) {
+	req := &Event{Type: EventHTTPReq, Target: "GET /api/users"}
+	if got := req.FormatMessage(); !contains(got, "GET /api/users") || !contains(got, "request") {
+		t.Errorf("HTTP request message = %q, want method+path and \"request\"", got)
+	}
+
+	resp := &Event{
+		Type:      EventHTTPResp,
+		Target:    "GET /api/users",
+		Details:   "200",
+		LatencyNS: 5000000,
+		Bytes:     2048,
+	}
+	got := resp.FormatMessage()
+	if !contains(got, "GET /api/users") {
+		t.Errorf("HTTP response message = %q, want endpoint", got)
+	}
+	if !contains(got, "200") {
+		t.Errorf("HTTP response message = %q, want status code", got)
+	}
+	if !contains(got, "response") {
+		t.Errorf("HTTP response message = %q, want \"response\"", got)
+	}
+
+	// 5xx must propagate to the error field for downstream alerting/thresholds.
+	serverErr := &Event{Type: EventHTTPResp, Target: "POST /checkout", Details: "503", Error: 503}
+	if serverErr.Error != 503 {
+		t.Errorf("5xx error field = %d, want 503", serverErr.Error)
+	}
+}

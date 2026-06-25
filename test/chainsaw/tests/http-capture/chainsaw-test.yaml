@@ -1,0 +1,53 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: http-capture
+spec:
+  description: |
+    Verifies zero-instrumentation, socket-level HTTP/1.x endpoint capture
+    end-to-end through the operator path:
+      1. Apply ExporterConfig + an nginx server and a curl client doing
+         plaintext HTTP/1.1 GETs (200 and 404) in a loop.
+      2. Apply a PodTraceSession with filters=[net] targeting the client.
+      3. Session reaches Completed with summary.totalEvents > 0 (HTTP req/resp
+         events parsed off tcp_sendmsg/tcp_recvmsg by bpf/http.c — no library
+         instrumentation, no SSL).
+      4. The report ConfigMap contains HTTP statistics (method/path/status).
+    BTF-only: the kind node kernel must expose /sys/kernel/btf/vmlinux, else
+    the HTTP probes are no-ops (same gating as gRPC/FastCGI).
+  timeouts:
+    apply: 30s
+    assert: 120s
+    delete: 60s
+    cleanup: 120s
+  steps:
+    - name: setup-workload
+      try:
+        - apply:
+            file: ./resources.yaml
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: http-client
+              status:
+                readyReplicas: 1
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: http-server
+              status:
+                readyReplicas: 1
+    - name: apply-session
+      try:
+        - apply:
+            file: ./session.yaml
+        - assert:
+            file: ./assert-completed.yaml
+    - name: report-artifact
+      try:
+        - assert:
+            file: ./assert-report.yaml

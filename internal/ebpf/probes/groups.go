@@ -108,6 +108,11 @@ var probeGroupMap = map[string]ProbeGroup{
 	// gRPC (second kprobe on tcp_sendmsg for HTTP/2 inspection)
 	"kprobe_grpc_tcp_sendmsg": GroupNetwork,
 
+	// HTTP/1.x (socket-level request/response line inspection)
+	"kprobe_http_tcp_sendmsg":    GroupNetwork,
+	"kprobe_http_tcp_recvmsg":    GroupNetwork,
+	"kretprobe_http_tcp_recvmsg": GroupNetwork,
+
 	// Crypto (AF_ALG bind detection, "Copy-Fail" vulnerability interface)
 	"tracepoint_sys_enter_bind": GroupCrypto,
 }
