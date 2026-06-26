@@ -257,6 +257,6 @@ func (e errString) Error() string { return string(e) }
 
 func errSentinel(s string) error { return errString(s) }
 
-func contextWithTimeout(seconds int) (context.Context, func()) {
+func contextWithTimeout(_ int) (context.Context, func()) {
 	return context.WithCancel(context.Background()) //nolint:contextcheck // tests tolerate indefinite ctx
 }

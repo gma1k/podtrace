@@ -144,6 +144,18 @@ func (a *ebpfBackendAdapter) SetContainerID(id string) error {
 	return a.tr.SetContainerID(id)
 }
 
+// SetContainerTargets implements the optional pkg/tracer.ContainerUprobeReconciler
+// interface: it hands the eBPF tracer the full set of currently-targeted
+// containers (with per-container PIDs) so it can attach newly-seen containers'
+// uprobes and detach departed ones.
+func (a *ebpfBackendAdapter) SetContainerTargets(targets []tracer.ContainerUprobeTarget) error {
+	conv := make([]ebpf.ContainerProbeTarget, 0, len(targets))
+	for _, t := range targets {
+		conv = append(conv, ebpf.ContainerProbeTarget{ID: t.ContainerID, PID: t.PID})
+	}
+	return a.tr.SetContainerTargets(conv)
+}
+
 func (a *ebpfBackendAdapter) Start(ctx context.Context, ch chan<- *events.Event) error {
 	return a.tr.Start(ctx, ch)
 }

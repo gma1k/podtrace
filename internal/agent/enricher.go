@@ -157,6 +157,7 @@ type PodCgroupEntry struct {
 	Pod           *corev1.Pod
 	ContainerName string
 	ContainerID   string
+	ContainerPID uint32
 }
 
 // buildK8sMetadata projects a PodCgroupEntry onto the frozen v1

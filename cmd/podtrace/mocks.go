@@ -54,6 +54,10 @@ func (m *mockTracer) SetContainerID(containerID string) error {
 	return nil
 }
 
+func (m *mockTracer) SetContainerTargets(targets []ebpf.ContainerProbeTarget) error {
+	return nil
+}
+
 func (m *mockTracer) Start(ctx context.Context, eventChan chan<- *events.Event) error {
 	if m.startFunc != nil {
 		return m.startFunc(ctx, eventChan)

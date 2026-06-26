@@ -56,6 +56,10 @@ func (m *mockTracerForInterface) SetContainerID(containerID string) error {
 	return nil
 }
 
+func (m *mockTracerForInterface) SetContainerTargets(targets []ContainerProbeTarget) error {
+	return nil
+}
+
 func (m *mockTracerForInterface) Start(ctx context.Context, eventChan chan<- *events.Event) error {
 	return nil
 }

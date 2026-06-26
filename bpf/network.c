@@ -5,11 +5,40 @@
 #include "events.h"
 #include "helpers.h"
 
-/* The destination sockaddr must be captured at kprobe entry: by the time the
- * kretprobe fires, the argument registers have been clobbered by the function
- * body. PARM2 is the KERNEL copy of the caller's sockaddr (the syscall layer
- * runs move_addr_to_kernel before tcp_v4/v6_connect), so it is read with
- * bpf_probe_read_kernel. */
+#ifdef PODTRACE_VMLINUX_FROM_BTF
+static __noinline void stash_tcp_peer(struct pt_regs *ctx, u32 pair)
+{
+	struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
+	if (!sk)
+		return;
+	u16 dport_be = BPF_CORE_READ(sk, __sk_common.skc_dport);
+	if (dport_be == 0)
+		return;
+	u16 family = BPF_CORE_READ(sk, __sk_common.skc_family);
+	char buf[MAX_STRING_LEN] = {};
+	if (family == AF_INET) {
+		u32 daddr_be = BPF_CORE_READ(sk, __sk_common.skc_daddr);
+		if (daddr_be == 0)
+			return;
+		format_ip_port(__builtin_bswap32(daddr_be), __builtin_bswap16(dport_be), buf);
+	} else if (family == AF_INET6) {
+		u8 d6[16] = {};
+		BPF_CORE_READ_INTO(&d6, sk, __sk_common.skc_v6_daddr.in6_u.u6_addr8);
+		format_ipv6_port(d6, __builtin_bswap16(dport_be), buf);
+	} else {
+		return;
+	}
+	struct pair_key key = make_pair_key(pair);
+	bpf_map_update_elem(&tcp_target, &key, buf, BPF_ANY);
+}
+#else
+static __always_inline void stash_tcp_peer(struct pt_regs *ctx, u32 pair)
+{
+	(void)ctx;
+	(void)pair;
+}
+#endif
+
 SEC("kprobe/tcp_v4_connect")
 int kprobe_tcp_connect(struct pt_regs *ctx) {
 	struct pair_key key = make_pair_key(PAIR_TCP_CONNECT_V4);
@@ -152,8 +181,9 @@ int kprobe_tcp_sendmsg(struct pt_regs *ctx) {
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_TCP_SENDMSG);
 	u64 ts = bpf_ktime_get_ns();
-	
+
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
+	stash_tcp_peer(ctx, PAIR_TCP_SENDMSG);
 	return 0;
 }
 
@@ -176,9 +206,6 @@ int kretprobe_tcp_sendmsg(struct pt_regs *ctx) {
 
 	u64 latency_ns = calc_latency(*start_ts);
 
-	/* socket_conns and grpc_methods are cross-probe blackboards written by
-	 * other probes (http_request uprobe, grpc sendmsg kprobe) and stay keyed
-	 * by the plain thread key. */
 	u64 conn_key = get_key(pid, tid);
 
 	struct event *e = get_event_buf();
@@ -195,21 +222,22 @@ int kretprobe_tcp_sendmsg(struct pt_regs *ctx) {
 	e->bytes = bytes;
 	e->tcp_state = 0;
 
-	/* Look up without deleting: the entry belongs to the in-flight
-	 * http_request pair, which removes it when the request returns.
-	 * Deleting here starved the HTTP/Redis consumers of their URL. */
 	char *conn_ptr = bpf_map_lookup_elem(&socket_conns, &conn_key);
 	if (conn_ptr) {
 		bpf_probe_read_kernel_str(e->target, sizeof(e->target), conn_ptr);
 	} else {
-		e->target[0] = '\0';
+		char *peer = bpf_map_lookup_elem(&tcp_target, &key);
+		if (peer) {
+			bpf_probe_read_kernel_str(e->target, sizeof(e->target), peer);
+		} else {
+			e->target[0] = '\0';
+		}
 	}
+	bpf_map_delete_elem(&tcp_target, &key);
 	capture_user_stack(ctx, pid, tid, e);
 	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 
-	/* If kprobe_grpc_tcp_sendmsg detected an HTTP/2 gRPC method path,
-	 * emit an additional EVENT_GRPC_METHOD event for that send. */
 	char *grpc_method_ptr = bpf_map_lookup_elem(&grpc_methods, &conn_key);
 	if (grpc_method_ptr) {
 		struct event *eg = get_event_buf();
@@ -238,8 +266,9 @@ int kprobe_tcp_recvmsg(struct pt_regs *ctx) {
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_TCP_RECVMSG);
 	u64 ts = bpf_ktime_get_ns();
-	
+
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
+	stash_tcp_peer(ctx, PAIR_TCP_RECVMSG);
 	return 0;
 }
 
@@ -273,14 +302,19 @@ int kretprobe_tcp_recvmsg(struct pt_regs *ctx) {
 	e->bytes = bytes;
 	e->tcp_state = 0;
 
-	/* Same blackboard semantics as the sendmsg kretprobe: read-only. */
 	u64 conn_key = get_key(pid, tid);
 	char *conn_ptr = bpf_map_lookup_elem(&socket_conns, &conn_key);
 	if (conn_ptr) {
 		bpf_probe_read_kernel_str(e->target, sizeof(e->target), conn_ptr);
 	} else {
-		e->target[0] = '\0';
+		char *peer = bpf_map_lookup_elem(&tcp_target, &key);
+		if (peer) {
+			bpf_probe_read_kernel_str(e->target, sizeof(e->target), peer);
+		} else {
+			e->target[0] = '\0';
+		}
 	}
+	bpf_map_delete_elem(&tcp_target, &key);
 	capture_user_stack(ctx, pid, tid, e);
 	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
@@ -350,12 +384,6 @@ int uretprobe_getaddrinfo(struct pt_regs *ctx) {
 	return 0;
 }
 
-/* tcp:tcp_set_state was removed in kernel 4.16 (replaced by
- * sock:inet_sock_set_state, commit 563e0bb0dc74), so this handler targets the
- * replacement. Layout pinned to the upstream trace event (verified against a
- * live kernel format file); sport/dport are stored in HOST byte order by the
- * tracepoint (TP_STORE_ADDR_PORTS applies ntohs), the address byte arrays are
- * in network order. */
 struct inet_sock_set_state_args {
 	unsigned short common_type;
 	unsigned char common_flags;
@@ -397,9 +425,6 @@ int tracepoint_inet_sock_set_state(void *ctx) {
 		return 0;
 	}
 
-	/* State changes often fire in softirq context where the current task is
-	 * a bystander, so skip the in-kernel cgroup prefilter and let the
-	 * userspace filter decide. */
 	struct event *e = get_event_buf_unfiltered();
 	if (!e) {
 		return 0;
@@ -429,12 +454,6 @@ int tracepoint_inet_sock_set_state(void *ctx) {
 	return 0;
 }
 
-/* Layout pinned to the post-5.10 tcp_event_sk_skb class (skbaddr, skaddr,
- * state, then ports/family/addresses; `family` landed in v5.10). The previous
- * hand-written struct used a pre-5.10 layout, so sport/dport were read from
- * inside `state` and daddr landed on family+saddr — bogus retransmit targets
- * on any modern kernel. Same bug class as the fixed net_dev_xmit handler;
- * same _Static_assert treatment. Ports are in HOST byte order. */
 struct tcp_retransmit_skb_args {
 	unsigned short common_type;
 	unsigned char common_flags;
@@ -469,9 +488,6 @@ int tracepoint_tcp_retransmit_skb(void *ctx) {
 	if (bpf_probe_read_kernel(&args_local, sizeof(args_local), ctx) != 0) {
 		return 0;
 	}
-
-	/* Retransmits fire from timers/softirq where the current task is a
-	 * bystander; skip the in-kernel cgroup prefilter. */
 	struct event *e = get_event_buf_unfiltered();
 	if (!e) {
 		return 0;
@@ -523,7 +539,6 @@ int tracepoint_net_dev_xmit(void *ctx) {
 	if (args_local.rc == 0) {
 		return 0;
 	}
-	/* Softirq context: current task is a bystander, skip the prefilter. */
 	struct event *e = get_event_buf_unfiltered();
 	if (!e) {
 		return 0;
@@ -781,8 +796,6 @@ int uretprobe_PQexec(struct pt_regs *ctx) {
 	e->pid = pid;
 	e->type = EVENT_DB_QUERY;
 	e->latency_ns = latency;
-	/* PQexec returns PGresult* — NULL on failure, a heap pointer on
-	 * success. Storing the pointer as a status inverted the meaning. */
 	long ret = PT_REGS_RC(ctx);
 	e->error = ret == 0 ? -1 : 0;
 	e->bytes = 0;

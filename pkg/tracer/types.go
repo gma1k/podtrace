@@ -21,6 +21,8 @@ type Target struct {
 
 	ContainerName string
 
+	ContainerPID uint32
+
 	CgroupPath string
 
 	Labels map[string]string
@@ -77,4 +79,13 @@ type EngineObserver interface {
 // filter category.
 type CategoryGateable interface {
 	SetEnabledCategories(categories []string) error
+}
+
+type ContainerUprobeTarget struct {
+	ContainerID string
+	PID         uint32
+}
+
+type ContainerUprobeReconciler interface {
+	SetContainerTargets(targets []ContainerUprobeTarget) error
 }

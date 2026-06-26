@@ -1471,8 +1471,67 @@ func findTLSLibsInContainerWithPID(containerID string, pid uint32, libPatterns [
 		if foundPaths := findTLSLibsViaProcessMapsProcRoot(pid, libPatterns); len(foundPaths) > 0 {
 			return foundPaths
 		}
+		if foundPaths := findTLSLibsViaProcRootScan(pid, libPatterns); len(foundPaths) > 0 {
+			return foundPaths
+		}
 	}
 	return findTLSLibsInContainer(containerID, libPatterns)
+}
+
+// findTLSLibsViaProcRootScan walks the container rootfs (via /proc/<pid>/root)
+// looking for shared-library files whose name matches one of libPatterns,
+// independent of whether the resolved process has them mapped. Symlinks are
+// resolved and de-duplicated so a uprobe is not attached twice to the same
+// underlying file.
+func findTLSLibsViaProcRootScan(pid uint32, libPatterns []string) []string {
+	root := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "root")
+	dirs := append(config.GetDefaultLibSearchPaths(),
+		"/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu",
+		"/usr/lib/aarch64-linux-gnu", "/lib/aarch64-linux-gnu",
+	)
+	patternsLower := make([]string, len(libPatterns))
+	for i, p := range libPatterns {
+		patternsLower[i] = strings.ToLower(p)
+	}
+	var paths []string
+	seen := make(map[string]bool)
+	for _, d := range dirs {
+		dirPath := filepath.Join(root, strings.TrimPrefix(d, "/"))
+		entries, err := os.ReadDir(dirPath)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				logger.Debug("TLS rootfs scan: readdir failed", zap.String("dir", dirPath), zap.Error(err))
+			}
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() || e.Type()&os.ModeSymlink != 0 {
+				continue
+			}
+			nameLower := strings.ToLower(e.Name())
+			if !strings.Contains(nameLower, ".so") {
+				continue
+			}
+			matched := false
+			for _, pat := range patternsLower {
+				if strings.Contains(nameLower, pat) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+			full := filepath.Join(dirPath, e.Name())
+			if seen[full] {
+				continue
+			}
+			seen[full] = true
+			paths = append(paths, full)
+		}
+	}
+	logger.Debug("TLS rootfs scan complete", zap.Uint32("pid", pid), zap.String("root", root), zap.Int("found", len(paths)))
+	return paths
 }
 
 func findTLSLibsViaLdconfig(libPatterns []string) []string {
@@ -1743,7 +1802,14 @@ func AttachTLSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint3
 		"SSL_do_handshake":      {"uprobe_SSL_do_handshake", "uretprobe_SSL_do_handshake"},
 		"gnutls_handshake":      {"uprobe_gnutls_handshake", "uretprobe_gnutls_handshake"},
 		"mbedtls_ssl_handshake": {"uprobe_mbedtls_ssl_handshake", "uretprobe_mbedtls_ssl_handshake"},
+		"SSL_write":             {"uprobe_SSL_write", ""},
+		"SSL_read":              {"uprobe_SSL_read", "uretprobe_SSL_read"},
+		"gnutls_record_send":    {"uprobe_gnutls_record_send", ""},
+		"gnutls_record_recv":    {"uprobe_gnutls_record_recv", "uretprobe_gnutls_record_recv"},
 	}
+
+	logger.Debug("TLS probe attach: candidate libraries",
+		zap.Strings("libs", tlsLibPaths), zap.String("containerID", containerID), zap.Uint32("pid", pid))
 
 	for _, libPath := range tlsLibPaths {
 		info, err := os.Stat(libPath)
@@ -1752,6 +1818,7 @@ func AttachTLSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint3
 		}
 		exe, err := link.OpenExecutable(libPath)
 		if err != nil {
+			logger.Debug("TLS probe: cannot open library", zap.String("lib", libPath), zap.Error(err))
 			continue
 		}
 
@@ -1766,17 +1833,23 @@ func AttachTLSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint3
 				l, err := exe.Uprobe(symbol, uprobeProg, nil)
 				if err == nil {
 					links = append(links, l)
+					logger.Debug("TLS uprobe attached", zap.String("symbol", symbol), zap.String("lib", libPath))
+				} else if !strings.Contains(err.Error(), "not found") {
+					logger.Debug("TLS uprobe attach failed", zap.String("symbol", symbol), zap.String("lib", libPath), zap.Error(err))
 				}
 			}
 			if uretprobeProg != nil {
 				l, err := exe.Uretprobe(symbol, uretprobeProg, nil)
 				if err == nil {
 					links = append(links, l)
+				} else if !strings.Contains(err.Error(), "not found") {
+					logger.Debug("TLS uretprobe attach failed", zap.String("symbol", symbol), zap.String("lib", libPath), zap.Error(err))
 				}
 			}
 		}
 	}
 
+	logger.Debug("TLS probe attach complete", zap.Int("links", len(links)))
 	return links
 }
 

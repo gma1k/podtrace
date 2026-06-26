@@ -142,8 +142,9 @@ func TestFilterToEventTypes_AllCategories(t *testing.T) {
 func TestFilterToEventTypes_NetIncludesHTTP(t *testing.T) {
 	got := filterToEventTypes(podtracev1alpha1.FilterNet)
 	want := map[events.EventType]bool{
-		events.EventHTTPReq:  false,
-		events.EventHTTPResp: false,
+		events.EventHTTPReq:    false,
+		events.EventHTTPResp:   false,
+		events.EventGRPCMethod: false,
 	}
 	for _, et := range got {
 		if _, ok := want[et]; ok {
