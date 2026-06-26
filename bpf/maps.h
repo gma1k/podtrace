@@ -159,6 +159,13 @@ struct {
 	__uint(max_entries, 1024);
 	__type(key, struct pair_key);
 	__type(value, char[MAX_STRING_LEN]);
+} tcp_target SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 1024);
+	__type(key, struct pair_key);
+	__type(value, char[MAX_STRING_LEN]);
 } syscall_paths SEC(".maps");
 
 struct {
@@ -396,6 +403,13 @@ struct {
 	__type(key, u32);
 	__type(value, char[HTTP_SCAN_BUF_SIZE]);
 } http_scan_buf SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u64);
+	__type(value, u64);
+} ssl_read_args SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);

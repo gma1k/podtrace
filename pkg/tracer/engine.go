@@ -175,15 +175,33 @@ func (e *engine) applyTargets(set TargetSet) error {
 		return err
 	}
 
-	for path, t := range desired {
-		if t.ContainerID == "" {
-			continue
+	if rec, ok := e.backend.(ContainerUprobeReconciler); ok {
+		seen := make(map[string]struct{}, len(desired))
+		cts := make([]ContainerUprobeTarget, 0, len(desired))
+		for _, t := range desired {
+			if t.ContainerID == "" {
+				continue
+			}
+			if _, dup := seen[t.ContainerID]; dup {
+				continue
+			}
+			seen[t.ContainerID] = struct{}{}
+			cts = append(cts, ContainerUprobeTarget{ContainerID: t.ContainerID, PID: t.ContainerPID})
 		}
-		if _, alreadyActive := e.activeCgroups[path]; alreadyActive {
-			continue
-		}
-		if err := e.backend.SetContainerID(t.ContainerID); err != nil {
+		if err := rec.SetContainerTargets(cts); err != nil {
 			e.exporterFailure++
+		}
+	} else {
+		for path, t := range desired {
+			if t.ContainerID == "" {
+				continue
+			}
+			if _, alreadyActive := e.activeCgroups[path]; alreadyActive {
+				continue
+			}
+			if err := e.backend.SetContainerID(t.ContainerID); err != nil {
+				e.exporterFailure++
+			}
 		}
 	}
 

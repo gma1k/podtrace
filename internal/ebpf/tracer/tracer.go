@@ -73,6 +73,9 @@ type Tracer struct {
 
 	intentionallyDisabled    map[probes.ProbeGroup]struct{}
 	detachWarned             map[probes.ProbeGroup]struct{}
+
+	containerUprobes       map[string]*containerUprobeSet
+	globalProtocolAttached bool
 	reader                   *ringbuf.Reader
 	filter                   *filter.CgroupFilter
 	containerID              string
@@ -118,6 +121,100 @@ func (t *Tracer) linkCount() int {
 	t.probeGroupsMu.Lock()
 	defer t.probeGroupsMu.Unlock()
 	return len(t.links)
+}
+
+// ContainerProbeTarget is one container the agent wants container-scoped
+// uprobes on, with a host PID used to resolve that container's libraries.
+type ContainerProbeTarget struct {
+	ID  string
+	PID uint32
+}
+
+type containerUprobeSet struct {
+	pid   uint32
+	links []link.Link
+}
+
+// attachGlobalProtocolProbesOnce attaches the protocol kprobes that are NOT
+// container-scoped (HTTP/1.x, gRPC HTTP/2, FastCGI on shared kernel functions)
+// exactly once.
+func (t *Tracer) attachGlobalProtocolProbesOnce() {
+	t.probeGroupsMu.Lock()
+	already := t.globalProtocolAttached
+	t.globalProtocolAttached = true
+	t.probeGroupsMu.Unlock()
+	if already || t.collection == nil {
+		return
+	}
+	t.registerGroupLinks(probes.GroupFastCGI, probes.AttachFastCGIProbes(t.collection))
+	t.registerGroupLinks(probes.GroupNetwork, probes.AttachGRPCProbes(t.collection))
+	t.registerGroupLinks(probes.GroupNetwork, probes.AttachHTTPProbes(t.collection))
+}
+
+// attachContainerUprobes attaches every container-scoped uprobe group for one
+// container (resolved via its own PID) and returns the links, without
+// registering them in the shared probeGroups registry, the per-container
+// lifecycle in SetContainerTargets owns them.
+func (t *Tracer) attachContainerUprobes(id string, pid uint32) []link.Link {
+	coll := t.collection
+	if coll == nil || id == "" {
+		return nil
+	}
+	var ls []link.Link
+	ls = append(ls, probes.AttachDNSProbesWithPID(coll, id, pid)...)
+	ls = append(ls, probes.AttachSyncProbesWithPID(coll, id, pid)...)
+	ls = append(ls, probes.AttachDBProbesWithPID(coll, id, pid)...)
+	ls = append(ls, probes.AttachPoolProbesWithPID(coll, id, pid)...)
+	ls = append(ls, probes.AttachTLSProbesWithPID(coll, id, pid)...)
+	ls = append(ls, probes.AttachRedisProbesWithPID(coll, id, pid)...)
+	ls = append(ls, probes.AttachMemcachedProbesWithPID(coll, id, pid)...)
+	ls = append(ls, probes.AttachKafkaProbesWithPID(coll, id, pid)...)
+	return ls
+}
+
+// SetContainerTargets reconciles container-scoped uprobes against the full set
+// of currently-targeted containers (the agent's dynamic, multi-container path).
+func (t *Tracer) SetContainerTargets(targets []ContainerProbeTarget) error {
+	t.attachGlobalProtocolProbesOnce()
+
+	want := make(map[string]uint32, len(targets))
+	for _, ct := range targets {
+		if ct.ID != "" {
+			want[ct.ID] = ct.PID
+		}
+	}
+
+	t.probeGroupsMu.Lock()
+	if t.containerUprobes == nil {
+		t.containerUprobes = map[string]*containerUprobeSet{}
+	}
+	var stale []link.Link
+	for id, set := range t.containerUprobes {
+		if pid, ok := want[id]; ok && pid == set.pid {
+			continue
+		}
+		stale = append(stale, set.links...)
+		delete(t.containerUprobes, id)
+	}
+	var toAttach []ContainerProbeTarget
+	for id, pid := range want {
+		if _, ok := t.containerUprobes[id]; !ok {
+			toAttach = append(toAttach, ContainerProbeTarget{ID: id, PID: pid})
+		}
+	}
+	t.probeGroupsMu.Unlock()
+
+	for _, l := range stale {
+		_ = l.Close()
+	}
+
+	for _, ct := range toAttach {
+		links := t.attachContainerUprobes(ct.ID, ct.PID)
+		t.probeGroupsMu.Lock()
+		t.containerUprobes[ct.ID] = &containerUprobeSet{pid: ct.PID, links: links}
+		t.probeGroupsMu.Unlock()
+	}
+	return nil
 }
 
 // attachGroupUprobes re-attaches the container-scoped probes belonging to a
@@ -1004,6 +1101,10 @@ func (t *Tracer) Stop() error {
 		closing = append(closing, ls...)
 	}
 	t.dnsPacketLinks = nil
+	for _, set := range t.containerUprobes {
+		closing = append(closing, set.links...)
+	}
+	t.containerUprobes = nil
 	t.probeGroupsMu.Unlock()
 	for _, l := range closing {
 		_ = l.Close()

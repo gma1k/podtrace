@@ -105,28 +105,20 @@ static __noinline void http_capture_traceparent(void *base, u64 avail, char *out
 	out[13 + W3C_TRACEPARENT_LEN] = '\0';
 }
 
-SEC("kprobe/tcp_sendmsg")
-int kprobe_http_tcp_sendmsg(struct pt_regs *ctx)
+static __noinline void http_emit_request(void *ctx, void *base, u64 avail)
 {
-	if (!http_should_trace())
-		return 0;
-
-	struct msghdr *msg = (struct msghdr *)PT_REGS_PARM2(ctx);
-	u64 avail = 0;
-	void *base = msghdr_user_base(msg, &avail);
 	if (!base || avail < HTTP_MIN_REQUEST_LEN)
-		return 0;
+		return;
 
 	u8 buf[HTTP_INSPECT_LEN] = {};
 	u32 read_len = (u32)avail;
 	if (read_len > HTTP_INSPECT_LEN)
 		read_len = HTTP_INSPECT_LEN;
 	if (bpf_probe_read_user(buf, read_len, base) != 0)
-		return 0;
+		return;
 
-	int mlen = http_method_len(buf);
-	if (mlen == 0)
-		return 0;
+	if (http_method_len(buf) == 0)
+		return;
 
 	char endpoint[MAX_STRING_LEN] = {};
 	u32 p = 0;
@@ -144,7 +136,7 @@ int kprobe_http_tcp_sendmsg(struct pt_regs *ctx)
 		endpoint[p++] = c;
 	}
 	if (p == 0)
-		return 0;
+		return;
 	endpoint[p] = '\0';
 
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
@@ -171,6 +163,85 @@ int kprobe_http_tcp_sendmsg(struct pt_regs *ctx)
 		capture_user_stack(ctx, pid, tid, e);
 		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	}
+}
+
+/* Parse an HTTP/1.x response status line from a user buffer (socket recv
+ * buffer or TLS plaintext) and, if it pairs with an in-flight request on this
+ * thread, emit EVENT_HTTP_RESP with status + request->response latency. */
+static __noinline void http_emit_response(void *ctx, void *base, u64 len)
+{
+	if (!base || len == 0 || len >= MAX_BYTES_THRESHOLD)
+		return;
+
+	u32 read_len = (u32)len;
+	if (read_len > HTTP_INSPECT_LEN)
+		read_len = HTTP_INSPECT_LEN;
+
+	u8 buf[HTTP_INSPECT_LEN] = {};
+	if (bpf_probe_read_user(buf, read_len, base) != 0)
+		return;
+
+	if (!(buf[0] == 'H' && buf[1] == 'T' && buf[2] == 'T' && buf[3] == 'P' &&
+	      buf[4] == '/' && buf[5] == '1' && buf[6] == '.'))
+		return;
+
+	char status[4] = {};
+	u32 si = 0;
+	int seen_space = 0;
+	u32 i;
+	for (i = 0; i < HTTP_INSPECT_LEN && si < 3; i++) {
+		u8 c = buf[i];
+		if (!seen_space) {
+			if (c == ' ')
+				seen_space = 1;
+			continue;
+		}
+		if (c < '0' || c > '9')
+			break;
+		status[si++] = c;
+	}
+	if (si == 0)
+		return;
+	status[si] = '\0';
+
+	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 tid = (u32)bpf_get_current_pid_tgid();
+	u64 key = get_key(pid, tid);
+
+	struct http_req *req = bpf_map_lookup_elem(&http_reqs, &key);
+	if (!req)
+		return;
+
+	u64 latency_ns = calc_latency(req->start_ns);
+	s32 status_num = (status[0] - '0') * 100 + (status[1] - '0') * 10 +
+			 (status[2] - '0');
+
+	struct event *e = get_event_buf();
+	if (e) {
+		e->timestamp = bpf_ktime_get_ns();
+		e->pid = pid;
+		e->type = EVENT_HTTP_RESP;
+		e->latency_ns = latency_ns;
+		e->error = status_num >= 500 ? status_num : 0;
+		e->bytes = len;
+		e->tcp_state = 0;
+		bpf_probe_read_kernel_str(e->target, sizeof(e->target), req->endpoint);
+		bpf_probe_read_kernel_str(e->details, sizeof(e->details), status);
+		capture_user_stack(ctx, pid, tid, e);
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	}
+	bpf_map_delete_elem(&http_reqs, &key);
+}
+
+SEC("kprobe/tcp_sendmsg")
+int kprobe_http_tcp_sendmsg(struct pt_regs *ctx)
+{
+	if (!http_should_trace())
+		return 0;
+	struct msghdr *msg = (struct msghdr *)PT_REGS_PARM2(ctx);
+	u64 avail = 0;
+	void *base = msghdr_user_base(msg, &avail);
+	http_emit_request(ctx, base, avail);
 	return 0;
 }
 
@@ -212,63 +283,97 @@ int kretprobe_http_tcp_recvmsg(struct pt_regs *ctx)
 	bpf_map_delete_elem(&http_recv_base, &key);
 
 	s64 ret = PT_REGS_RC(ctx);
-	if (ret <= 0 || (u64)ret >= MAX_BYTES_THRESHOLD)
+	if (ret <= 0)
 		return 0;
+	http_emit_response(ctx, base, (u64)ret);
+	return 0;
+}
 
-	u32 read_len = (u32)ret;
-	if (read_len > HTTP_INSPECT_LEN)
-		read_len = HTTP_INSPECT_LEN;
-
-	u8 buf[HTTP_INSPECT_LEN] = {};
-	if (bpf_probe_read_user(buf, read_len, base) != 0)
+SEC("uprobe/SSL_write")
+int uprobe_SSL_write(struct pt_regs *ctx)
+{
+	if (!http_should_trace())
 		return 0;
+	void *base = (void *)PT_REGS_PARM2(ctx);
+	u64 num = (u64)(s64)PT_REGS_PARM3(ctx);
+	http_emit_request(ctx, base, num);
+	return 0;
+}
 
-	if (!(buf[0] == 'H' && buf[1] == 'T' && buf[2] == 'T' && buf[3] == 'P' &&
-	      buf[4] == '/' && buf[5] == '1' && buf[6] == '.'))
+SEC("uprobe/SSL_read")
+int uprobe_SSL_read(struct pt_regs *ctx)
+{
+	if (!http_should_trace())
 		return 0;
-
-	char status[4] = {};
-	u32 si = 0;
-	int seen_space = 0;
-	u32 i;
-	for (i = 0; i < HTTP_INSPECT_LEN && si < 3; i++) {
-		u8 c = buf[i];
-		if (!seen_space) {
-			if (c == ' ')
-				seen_space = 1;
-			continue;
-		}
-		if (c < '0' || c > '9')
-			break;
-		status[si++] = c;
-	}
-	if (si == 0)
+	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 tid = (u32)bpf_get_current_pid_tgid();
+	u64 key = get_key(pid, tid);
+	if (!bpf_map_lookup_elem(&http_reqs, &key))
 		return 0;
-	status[si] = '\0';
+	u64 base_val = (u64)PT_REGS_PARM2(ctx);
+	bpf_map_update_elem(&ssl_read_args, &key, &base_val, BPF_ANY);
+	return 0;
+}
 
-	struct http_req *req = bpf_map_lookup_elem(&http_reqs, &key);
-	if (!req)
+SEC("uretprobe/SSL_read")
+int uretprobe_SSL_read(struct pt_regs *ctx)
+{
+	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 tid = (u32)bpf_get_current_pid_tgid();
+	u64 key = get_key(pid, tid);
+	u64 *base_ptr = bpf_map_lookup_elem(&ssl_read_args, &key);
+	if (!base_ptr)
 		return 0;
+	void *base = (void *)*base_ptr;
+	bpf_map_delete_elem(&ssl_read_args, &key);
+	s64 ret = PT_REGS_RC(ctx);
+	if (ret <= 0)
+		return 0;
+	http_emit_response(ctx, base, (u64)ret);
+	return 0;
+}
 
-	u64 latency_ns = calc_latency(req->start_ns);
-	s32 status_num = (status[0] - '0') * 100 + (status[1] - '0') * 10 +
-			 (status[2] - '0');
+SEC("uprobe/gnutls_record_send")
+int uprobe_gnutls_record_send(struct pt_regs *ctx)
+{
+	if (!http_should_trace())
+		return 0;
+	void *base = (void *)PT_REGS_PARM2(ctx);
+	u64 num = (u64)PT_REGS_PARM3(ctx);
+	http_emit_request(ctx, base, num);
+	return 0;
+}
 
-	struct event *e = get_event_buf();
-	if (e) {
-		e->timestamp = bpf_ktime_get_ns();
-		e->pid = pid;
-		e->type = EVENT_HTTP_RESP;
-		e->latency_ns = latency_ns;
-		e->error = status_num >= 500 ? status_num : 0;
-		e->bytes = (u64)ret;
-		e->tcp_state = 0;
-		bpf_probe_read_kernel_str(e->target, sizeof(e->target), req->endpoint);
-		bpf_probe_read_kernel_str(e->details, sizeof(e->details), status);
-		capture_user_stack(ctx, pid, tid, e);
-		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
-	}
-	bpf_map_delete_elem(&http_reqs, &key);
+SEC("uprobe/gnutls_record_recv")
+int uprobe_gnutls_record_recv(struct pt_regs *ctx)
+{
+	if (!http_should_trace())
+		return 0;
+	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 tid = (u32)bpf_get_current_pid_tgid();
+	u64 key = get_key(pid, tid);
+	if (!bpf_map_lookup_elem(&http_reqs, &key))
+		return 0;
+	u64 base_val = (u64)PT_REGS_PARM2(ctx);
+	bpf_map_update_elem(&ssl_read_args, &key, &base_val, BPF_ANY);
+	return 0;
+}
+
+SEC("uretprobe/gnutls_record_recv")
+int uretprobe_gnutls_record_recv(struct pt_regs *ctx)
+{
+	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 tid = (u32)bpf_get_current_pid_tgid();
+	u64 key = get_key(pid, tid);
+	u64 *base_ptr = bpf_map_lookup_elem(&ssl_read_args, &key);
+	if (!base_ptr)
+		return 0;
+	void *base = (void *)*base_ptr;
+	bpf_map_delete_elem(&ssl_read_args, &key);
+	s64 ret = PT_REGS_RC(ctx);
+	if (ret <= 0)
+		return 0;
+	http_emit_response(ctx, base, (u64)ret);
 	return 0;
 }
 
@@ -282,5 +387,23 @@ int kprobe_http_tcp_recvmsg(struct pt_regs *ctx) { return 0; }
 
 SEC("kretprobe/tcp_recvmsg")
 int kretprobe_http_tcp_recvmsg(struct pt_regs *ctx) { return 0; }
+
+SEC("uprobe/SSL_write")
+int uprobe_SSL_write(struct pt_regs *ctx) { return 0; }
+
+SEC("uprobe/SSL_read")
+int uprobe_SSL_read(struct pt_regs *ctx) { return 0; }
+
+SEC("uretprobe/SSL_read")
+int uretprobe_SSL_read(struct pt_regs *ctx) { return 0; }
+
+SEC("uprobe/gnutls_record_send")
+int uprobe_gnutls_record_send(struct pt_regs *ctx) { return 0; }
+
+SEC("uprobe/gnutls_record_recv")
+int uprobe_gnutls_record_recv(struct pt_regs *ctx) { return 0; }
+
+SEC("uretprobe/gnutls_record_recv")
+int uretprobe_gnutls_record_recv(struct pt_regs *ctx) { return 0; }
 
 #endif

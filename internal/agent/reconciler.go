@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -27,6 +28,7 @@ import (
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/internal/operator"
+	"github.com/podtrace/podtrace/internal/sysfs"
 	bundlepkg "github.com/podtrace/podtrace/pkg/exporter/bundle"
 	"github.com/podtrace/podtrace/pkg/tracer"
 )
@@ -413,6 +415,7 @@ func scanPodCgroups(pods []*corev1.Pod) []PodCgroupEntry {
 				Pod:           p,
 				ContainerName: containerName,
 				ContainerID:   containerID,
+				ContainerPID:  firstPIDFromCgroupProcs(child),
 			})
 		}
 	}
@@ -470,6 +473,25 @@ func identifyContainerCgroup(dir string, statuses map[string]string) (name, id s
 		}
 	}
 	return "", ""
+}
+
+// firstPIDFromCgroupProcs returns the first host PID listed in a cgroup
+// directory's cgroup.procs, or 0 if none/unreadable.
+func firstPIDFromCgroupProcs(cgroupDir string) uint32 {
+	rel, ok := sysfs.CgroupRelative(cgroupDir)
+	if !ok {
+		return 0
+	}
+	data, err := sysfs.CgroupReadFile(filepath.Join(rel, "cgroup.procs"))
+	if err != nil {
+		return 0
+	}
+	for _, f := range strings.Fields(string(data)) {
+		if pid, err := strconv.ParseUint(f, 10, 32); err == nil && pid > 0 {
+			return uint32(pid)
+		}
+	}
+	return 0
 }
 
 // kubepodsRootCandidates lists the well-known cgroup directories
@@ -571,6 +593,7 @@ func buildTargetSet(rules []CRRule, pods []*corev1.Pod, podEntries []PodCgroupEn
 					Namespace:     entry.Pod.Namespace,
 					ContainerID:   entry.ContainerID,
 					ContainerName: entry.ContainerName,
+					ContainerPID:  entry.ContainerPID,
 					CgroupPath:    entry.CgroupPath,
 					Labels:        copyMap(entry.Pod.Labels),
 					PodIP:         entry.Pod.Status.PodIP,
@@ -742,6 +765,7 @@ func filterToEventTypes(f podtracev1alpha1.EventFilter) []events.EventType {
 			events.EventTCPRetrans, events.EventNetDevError,
 			events.EventFastCGIReq, events.EventFastCGIResp,
 			events.EventHTTPReq, events.EventHTTPResp,
+			events.EventGRPCMethod,
 		}
 	case podtracev1alpha1.FilterFS:
 		return []events.EventType{

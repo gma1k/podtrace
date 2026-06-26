@@ -72,6 +72,14 @@ var probeGroupMap = map[string]ProbeGroup{
 	"uprobe_pthread_mutex_lock":    GroupTLS,
 	"uretprobe_pthread_mutex_lock": GroupTLS,
 
+	// TLS plaintext HTTP capture
+	"uprobe_SSL_write":             GroupTLS,
+	"uprobe_SSL_read":              GroupTLS,
+	"uretprobe_SSL_read":           GroupTLS,
+	"uprobe_gnutls_record_send":    GroupTLS,
+	"uprobe_gnutls_record_recv":    GroupTLS,
+	"uretprobe_gnutls_record_recv": GroupTLS,
+
 	// Database
 	"uprobe_PQexec":    GroupDatabase,
 	"uretprobe_PQexec": GroupDatabase,

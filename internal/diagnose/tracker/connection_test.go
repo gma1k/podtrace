@@ -387,3 +387,25 @@ func TestConnectionTracker_GetConnectionSummary_WithLatency(t *testing.T) {
 		t.Errorf("Expected 15ms avg latency, got %v", summaries[0].AvgLatency)
 	}
 }
+
+// TestConnectionTracker_ReconnectPreservesCounts: a reconnect to a peer we've
+// already accounted send/recv for must refresh timestamps but keep the
+// accumulated op counts (regression: connect used to overwrite the entry,
+// resetting counts to zero on every reconnect).
+func TestConnectionTracker_ReconnectPreservesCounts(t *testing.T) {
+	ct := NewConnectionTracker()
+	ct.ProcessEvent(&events.Event{Type: events.EventConnect, Target: "10.0.0.1:80"})
+	ct.ProcessEvent(&events.Event{Type: events.EventTCPSend, Target: "10.0.0.1:80"})
+	ct.ProcessEvent(&events.Event{Type: events.EventTCPRecv, Target: "10.0.0.1:80"})
+	ct.ProcessEvent(&events.Event{Type: events.EventTCPRecv, Target: "10.0.0.1:80"})
+	// reconnect to the same peer — must NOT wipe the 1 send / 2 recv above
+	ct.ProcessEvent(&events.Event{Type: events.EventConnect, Target: "10.0.0.1:80"})
+
+	s := ct.GetConnectionSummary()
+	if len(s) != 1 {
+		t.Fatalf("expected 1 connection, got %d", len(s))
+	}
+	if s[0].SendCount != 1 || s[0].RecvCount != 2 {
+		t.Errorf("reconnect reset counts: got %d send, %d recv; want 1 send, 2 recv", s[0].SendCount, s[0].RecvCount)
+	}
+}

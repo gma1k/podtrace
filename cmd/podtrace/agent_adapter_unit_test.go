@@ -44,6 +44,10 @@ func (f *fakeTracer) SetContainerID(id string) error {
 	return f.containerIDErr
 }
 
+func (f *fakeTracer) SetContainerTargets(targets []ebpf.ContainerProbeTarget) error {
+	return nil
+}
+
 func (f *fakeTracer) Start(_ context.Context, ch chan<- *events.Event) error {
 	f.startCalled = true
 	f.startCh = ch

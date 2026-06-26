@@ -6,6 +6,8 @@ import (
 
 type TracerInterface = tracer.TracerInterface
 
+type ContainerProbeTarget = tracer.ContainerProbeTarget
+
 func NewTracer() (TracerInterface, error) {
 	return tracer.NewTracer()
 }

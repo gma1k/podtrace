@@ -36,12 +36,16 @@ func (ct *ConnectionTracker) ProcessEvent(event *events.Event) {
 	switch event.Type {
 	case events.EventConnect:
 		if event.Error == 0 && event.Target != "" {
-			conn := &ConnectionInfo{
-				Target:       event.Target,
-				ConnectTime:  event.TimestampTime(),
-				LastActivity: event.TimestampTime(),
+			if conn, exists := ct.connections[event.Target]; exists {
+				conn.ConnectTime = event.TimestampTime()
+				conn.LastActivity = event.TimestampTime()
+			} else {
+				ct.connections[event.Target] = &ConnectionInfo{
+					Target:       event.Target,
+					ConnectTime:  event.TimestampTime(),
+					LastActivity: event.TimestampTime(),
+				}
 			}
-			ct.connections[event.Target] = conn
 		}
 
 	case events.EventTCPSend, events.EventTCPRecv:

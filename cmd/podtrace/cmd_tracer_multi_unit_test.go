@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/podtrace/podtrace/internal/ebpf"
 	"github.com/podtrace/podtrace/internal/events"
 )
 
@@ -18,7 +19,10 @@ type multiTracer struct {
 func (m *multiTracer) SetCgroups([]string) error   { return nil }
 func (m *multiTracer) AttachToCgroup(string) error { return nil }
 func (m *multiTracer) SetContainerID(string) error { return nil }
-func (m *multiTracer) Stop() error                 { return nil }
+func (m *multiTracer) SetContainerTargets([]ebpf.ContainerProbeTarget) error {
+	return nil
+}
+func (m *multiTracer) Stop() error { return nil }
 func (m *multiTracer) Start(context.Context, chan<- *events.Event) error {
 	return nil
 }

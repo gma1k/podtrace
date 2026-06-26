@@ -11,6 +11,7 @@ type TracerInterface interface {
 
 	AttachToCgroup(cgroupPath string) error
 	SetContainerID(containerID string) error
+	SetContainerTargets(targets []ContainerProbeTarget) error
 	Start(ctx context.Context, eventChan chan<- *events.Event) error
 	Stop() error
 }
