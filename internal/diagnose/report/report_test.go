@@ -249,6 +249,60 @@ func TestGenerateHTTPSection_WithEvents(t *testing.T) {
 	}
 }
 
+func TestGenerateHTTPSection_TLSTransport(t *testing.T) {
+	d := &mockDiagnostician{
+		events: []*events.Event{
+			{Type: events.EventHTTPReq, LatencyNS: 5000000, Target: "GET /plain"},
+			{Type: events.EventHTTPReq, LatencyNS: 6000000, Target: "GET /secure", TCPState: events.HTTPTransportTLS},
+			{Type: events.EventHTTPResp, LatencyNS: 7000000, Target: "GET /secure", TCPState: events.HTTPTransportTLS, Bytes: 512},
+		},
+		startTime: time.Now(),
+		endTime:   time.Now().Add(1 * time.Second),
+	}
+	result := GenerateHTTPSection(d, d.endTime.Sub(d.startTime))
+	if !strings.Contains(result, "Transport: 1 HTTP, 2 HTTPS") {
+		t.Errorf("expected transport breakdown line, got:\n%s", result)
+	}
+	if !strings.Contains(result, "GET /secure (https)") {
+		t.Errorf("expected https-tagged URL, got:\n%s", result)
+	}
+	if !strings.Contains(result, "GET /plain (http)") {
+		t.Errorf("expected http-tagged URL, got:\n%s", result)
+	}
+}
+
+func TestGenerateHTTPSection_H2CTransport(t *testing.T) {
+	d := &mockDiagnostician{
+		events: []*events.Event{
+			{Type: events.EventHTTPReq, LatencyNS: 5000000, Target: "GET /h2", TCPState: events.HTTPTransportH2C},
+			{Type: events.EventHTTPResp, LatencyNS: 6000000, Target: "GET /h2", TCPState: events.HTTPTransportH2C},
+		},
+		startTime: time.Now(),
+		endTime:   time.Now().Add(1 * time.Second),
+	}
+	result := GenerateHTTPSection(d, d.endTime.Sub(d.startTime))
+	if !strings.Contains(result, "Transport: 2 HTTP/2") {
+		t.Errorf("expected HTTP/2 transport breakdown, got:\n%s", result)
+	}
+	if !strings.Contains(result, "GET /h2 (http)") {
+		t.Errorf("expected http-scheme-tagged h2 URL, got:\n%s", result)
+	}
+}
+
+func TestGenerateHTTPSection_PlaintextOmitsBreakdown(t *testing.T) {
+	d := &mockDiagnostician{
+		events: []*events.Event{
+			{Type: events.EventHTTPReq, LatencyNS: 5000000, Target: "GET /plain"},
+		},
+		startTime: time.Now(),
+		endTime:   time.Now().Add(1 * time.Second),
+	}
+	result := GenerateHTTPSection(d, d.endTime.Sub(d.startTime))
+	if strings.Contains(result, "Transport:") {
+		t.Errorf("plaintext-only report should omit the transport breakdown, got:\n%s", result)
+	}
+}
+
 func TestGenerateCPUSection_Empty(t *testing.T) {
 	d := &mockDiagnostician{
 		events: []*events.Event{},

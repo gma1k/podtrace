@@ -5,7 +5,6 @@
 #include "events.h"
 #include "helpers.h"
 #include "protocols.h"
-
 #ifdef PODTRACE_VMLINUX_FROM_BTF
 
 static __always_inline int http_method_len(const u8 *b)
@@ -105,7 +104,8 @@ static __noinline void http_capture_traceparent(void *base, u64 avail, char *out
 	out[13 + W3C_TRACEPARENT_LEN] = '\0';
 }
 
-static __noinline void http_emit_request(void *ctx, void *base, u64 avail)
+static __noinline void http_emit_request(void *ctx, void *base, u64 avail,
+					 u8 transport)
 {
 	if (!base || avail < HTTP_MIN_REQUEST_LEN)
 		return;
@@ -157,7 +157,7 @@ static __noinline void http_emit_request(void *ctx, void *base, u64 avail)
 		e->latency_ns = 0;
 		e->error = 0;
 		e->bytes = 0;
-		e->tcp_state = 0;
+		e->tcp_state = transport;
 		bpf_probe_read_kernel_str(e->target, sizeof(e->target), endpoint);
 		http_capture_traceparent(base, avail, e->details);
 		capture_user_stack(ctx, pid, tid, e);
@@ -165,10 +165,8 @@ static __noinline void http_emit_request(void *ctx, void *base, u64 avail)
 	}
 }
 
-/* Parse an HTTP/1.x response status line from a user buffer (socket recv
- * buffer or TLS plaintext) and, if it pairs with an in-flight request on this
- * thread, emit EVENT_HTTP_RESP with status + request->response latency. */
-static __noinline void http_emit_response(void *ctx, void *base, u64 len)
+static __noinline void http_emit_response(void *ctx, void *base, u64 len,
+					  u8 transport)
 {
 	if (!base || len == 0 || len >= MAX_BYTES_THRESHOLD)
 		return;
@@ -224,7 +222,7 @@ static __noinline void http_emit_response(void *ctx, void *base, u64 len)
 		e->latency_ns = latency_ns;
 		e->error = status_num >= 500 ? status_num : 0;
 		e->bytes = len;
-		e->tcp_state = 0;
+		e->tcp_state = transport;
 		bpf_probe_read_kernel_str(e->target, sizeof(e->target), req->endpoint);
 		bpf_probe_read_kernel_str(e->details, sizeof(e->details), status);
 		capture_user_stack(ctx, pid, tid, e);
@@ -241,7 +239,7 @@ int kprobe_http_tcp_sendmsg(struct pt_regs *ctx)
 	struct msghdr *msg = (struct msghdr *)PT_REGS_PARM2(ctx);
 	u64 avail = 0;
 	void *base = msghdr_user_base(msg, &avail);
-	http_emit_request(ctx, base, avail);
+	http_emit_request(ctx, base, avail, HTTP_TRANSPORT_PLAINTEXT);
 	return 0;
 }
 
@@ -285,7 +283,7 @@ int kretprobe_http_tcp_recvmsg(struct pt_regs *ctx)
 	s64 ret = PT_REGS_RC(ctx);
 	if (ret <= 0)
 		return 0;
-	http_emit_response(ctx, base, (u64)ret);
+	http_emit_response(ctx, base, (u64)ret, HTTP_TRANSPORT_PLAINTEXT);
 	return 0;
 }
 
@@ -296,7 +294,7 @@ int uprobe_SSL_write(struct pt_regs *ctx)
 		return 0;
 	void *base = (void *)PT_REGS_PARM2(ctx);
 	u64 num = (u64)(s64)PT_REGS_PARM3(ctx);
-	http_emit_request(ctx, base, num);
+	http_emit_request(ctx, base, num, HTTP_TRANSPORT_TLS);
 	return 0;
 }
 
@@ -329,7 +327,7 @@ int uretprobe_SSL_read(struct pt_regs *ctx)
 	s64 ret = PT_REGS_RC(ctx);
 	if (ret <= 0)
 		return 0;
-	http_emit_response(ctx, base, (u64)ret);
+	http_emit_response(ctx, base, (u64)ret, HTTP_TRANSPORT_TLS);
 	return 0;
 }
 
@@ -340,7 +338,7 @@ int uprobe_gnutls_record_send(struct pt_regs *ctx)
 		return 0;
 	void *base = (void *)PT_REGS_PARM2(ctx);
 	u64 num = (u64)PT_REGS_PARM3(ctx);
-	http_emit_request(ctx, base, num);
+	http_emit_request(ctx, base, num, HTTP_TRANSPORT_TLS);
 	return 0;
 }
 
@@ -373,7 +371,7 @@ int uretprobe_gnutls_record_recv(struct pt_regs *ctx)
 	s64 ret = PT_REGS_RC(ctx);
 	if (ret <= 0)
 		return 0;
-	http_emit_response(ctx, base, (u64)ret);
+	http_emit_response(ctx, base, (u64)ret, HTTP_TRANSPORT_TLS);
 	return 0;
 }
 

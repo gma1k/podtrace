@@ -1,26 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0
-/*
- * Memcached tracing via libmemcached uprobes.
- *
- * Hooks:
- *   uprobe/memcached_get     — char *memcached_get(
- *                                  memcached_st*, const char *key, size_t klen,
- *                                  size_t *vlen, uint32_t *flags, memcached_return_t *err)
- *                                  (returns the VALUE buffer; NULL = miss/error,
- *                                  status goes to the *err out-parameter)
- *   uprobe/memcached_set     — memcached_return_t memcached_set(
- *                                  memcached_st*, const char *key, size_t klen,
- *                                  const char *val, size_t vlen, time_t exp, uint32_t flags)
- *   uprobe/memcached_delete  — memcached_return_t memcached_delete(
- *                                  memcached_st*, const char *key, size_t klen, time_t exp)
- *
- * Field mapping (event struct):
- *   target   = empty (server selection is internal to libmemcached)
- *   details  = "get <key>" / "set <key>" / "del <key>"
- *   bytes    = value size (for set: PARM5; for get: filled at return from *vlen ptr)
- *   error    = memcached_return_t (0 = MEMCACHED_SUCCESS)
- *   latency_ns = call duration
- */
 
 #include "common.h"
 #include "maps.h"
@@ -38,11 +16,9 @@ static __always_inline void mc_store_op(const struct pair_key *key, u64 ts,
 {
 	char buf[MAX_STRING_LEN] = {};
 
-	/* Copy prefix ("get ", "set ", "del ") */
 	if (prefix_len < MAX_STRING_LEN)
 		__builtin_memcpy(buf, op_prefix, prefix_len);
 
-	/* Append key string after prefix */
 	u32 remaining = MAX_STRING_LEN - prefix_len - 1;
 	if (remaining > 0)
 		bpf_probe_read_user_str(buf + prefix_len, remaining, mc_key);
@@ -53,10 +29,6 @@ static __always_inline void mc_store_op(const struct pair_key *key, u64 ts,
 		bpf_map_update_elem(&proto_bytes, key, &bytes_val, BPF_ANY);
 }
 
-/* ret_is_pointer: memcached_get returns char* (NULL = miss/error), while
- * set/delete return memcached_return_t. Treating the GET pointer as a status
- * reported the low 32 bits of a heap pointer as a "nonzero error" on success
- * and 0 (success) on failure. */
 static __always_inline int mc_emit(struct pt_regs *ctx, u32 pid, u32 tid, int ret_is_pointer)
 {
 	struct pair_key key = make_pair_key(PAIR_MEMCACHED);
@@ -81,7 +53,7 @@ static __always_inline int mc_emit(struct pt_regs *ctx, u32 pid, u32 tid, int re
 	if (ret_is_pointer)
 		e->error = PT_REGS_RC(ctx) == 0 ? -1 : 0;
 	else
-		e->error = (s32)PT_REGS_RC(ctx);  /* memcached_return_t */
+		e->error = (s32)PT_REGS_RC(ctx);
 	e->tcp_state  = 0;
 
 	u64 *bptr = bpf_map_lookup_elem(&proto_bytes, &key);
@@ -104,7 +76,6 @@ static __always_inline int mc_emit(struct pt_regs *ctx, u32 pid, u32 tid, int re
 	return 0;
 }
 
-/* uprobe/memcached_get — PARM2=key, PARM3=klen */
 SEC("uprobe/memcached_get")
 int uprobe_memcached_get(struct pt_regs *ctx)
 {

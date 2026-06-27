@@ -412,6 +412,48 @@ struct {
 } ssl_read_args SEC(".maps");
 
 struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u64);
+	__type(value, struct http_req);
+} h2_reqs SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u64);
+	__type(value, u64);
+} h2_recv_base SEC(".maps");
+
+#define H2_READ_LEN 256
+#define H2_VAL_MAX 128
+
+struct h2_loc {
+	u32 start;
+	u32 len;
+	u8 huff;
+	u8 present;
+};
+
+struct h2_scratch {
+	u8 buf[H2_READ_LEN];
+	char method[H2_VAL_MAX];
+	char path[H2_VAL_MAX];
+	char status[H2_VAL_MAX];
+	char tpval[H2_VAL_MAX];
+	u32 hop;
+	u8 hstate;
+	u32 wpos;
+	struct h2_loc wloc[8];
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, u32);
+	__type(value, struct h2_scratch);
+} h2_scratch_map SEC(".maps");
+
+struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 256);
 	__type(key, u64);

@@ -149,6 +149,7 @@ func (t *Tracer) attachGlobalProtocolProbesOnce() {
 	t.registerGroupLinks(probes.GroupFastCGI, probes.AttachFastCGIProbes(t.collection))
 	t.registerGroupLinks(probes.GroupNetwork, probes.AttachGRPCProbes(t.collection))
 	t.registerGroupLinks(probes.GroupNetwork, probes.AttachHTTPProbes(t.collection))
+	t.registerGroupLinks(probes.GroupNetwork, probes.AttachH2Probes(t.collection))
 }
 
 // attachContainerUprobes attaches every container-scoped uprobe group for one
@@ -166,6 +167,7 @@ func (t *Tracer) attachContainerUprobes(id string, pid uint32) []link.Link {
 	ls = append(ls, probes.AttachDBProbesWithPID(coll, id, pid)...)
 	ls = append(ls, probes.AttachPoolProbesWithPID(coll, id, pid)...)
 	ls = append(ls, probes.AttachTLSProbesWithPID(coll, id, pid)...)
+	ls = append(ls, probes.AttachGoTLSProbes(coll, pid)...)
 	ls = append(ls, probes.AttachRedisProbesWithPID(coll, id, pid)...)
 	ls = append(ls, probes.AttachMemcachedProbesWithPID(coll, id, pid)...)
 	ls = append(ls, probes.AttachKafkaProbesWithPID(coll, id, pid)...)
@@ -234,6 +236,7 @@ func (t *Tracer) attachGroupUprobes(g probes.ProbeGroup) []link.Link {
 		ls = append(ls, probes.AttachDNSProbesWithPID(coll, id, pid)...)
 		ls = append(ls, probes.AttachSyncProbesWithPID(coll, id, pid)...)
 		ls = append(ls, probes.AttachTLSProbesWithPID(coll, id, pid)...)
+		ls = append(ls, probes.AttachGoTLSProbes(coll, pid)...)
 		return ls
 	case probes.GroupDatabase:
 		if id == "" {
@@ -264,6 +267,7 @@ func (t *Tracer) attachGroupUprobes(g probes.ProbeGroup) []link.Link {
 		var ls []link.Link
 		ls = append(ls, probes.AttachGRPCProbes(coll)...)
 		ls = append(ls, probes.AttachHTTPProbes(coll)...)
+		ls = append(ls, probes.AttachH2Probes(coll)...)
 		return ls
 	}
 	return nil
@@ -784,12 +788,14 @@ func (t *Tracer) SetContainerIDs(containerIDs []string) error {
 	t.registerGroupLinks(probes.GroupDatabase, probes.AttachDBProbesWithPID(t.collection, primary, t.containerPID))
 	t.registerGroupLinks(probes.GroupPool, probes.AttachPoolProbesWithPID(t.collection, primary, t.containerPID))
 	t.registerGroupLinks(probes.GroupTLS, probes.AttachTLSProbesWithPID(t.collection, primary, t.containerPID))
+	t.registerGroupLinks(probes.GroupTLS, probes.AttachGoTLSProbes(t.collection, t.containerPID))
 	t.registerGroupLinks(probes.GroupCache, probes.AttachRedisProbesWithPID(t.collection, primary, t.containerPID))
 	t.registerGroupLinks(probes.GroupCache, probes.AttachMemcachedProbesWithPID(t.collection, primary, t.containerPID))
 	t.registerGroupLinks(probes.GroupMessaging, probes.AttachKafkaProbesWithPID(t.collection, primary, t.containerPID))
 	t.registerGroupLinks(probes.GroupFastCGI, probes.AttachFastCGIProbes(t.collection))
 	t.registerGroupLinks(probes.GroupNetwork, probes.AttachGRPCProbes(t.collection))
 	t.registerGroupLinks(probes.GroupNetwork, probes.AttachHTTPProbes(t.collection))
+	t.registerGroupLinks(probes.GroupNetwork, probes.AttachH2Probes(t.collection))
 	return nil
 }
 

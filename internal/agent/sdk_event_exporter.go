@@ -16,8 +16,8 @@ import (
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/internal/logger"
-	"github.com/podtrace/podtrace/internal/tracing/extractor"
 	"github.com/podtrace/podtrace/internal/safeconv"
+	"github.com/podtrace/podtrace/internal/tracing/extractor"
 	bundlepkg "github.com/podtrace/podtrace/pkg/exporter/bundle"
 	"github.com/podtrace/podtrace/pkg/tracer"
 )
@@ -177,6 +177,12 @@ func (e *sdkEventExporter) Export(ctx context.Context, batch []*events.Event) er
 			attribute.Int64("podtrace.event.bytes", safeUint64ToInt64(ev.Bytes)),
 			attribute.Int64("podtrace.event.latency_ns", safeUint64ToInt64(ev.LatencyNS)),
 			attribute.Int("podtrace.event.error", int(ev.Error)),
+		}
+		if ev.Type == events.EventHTTPReq || ev.Type == events.EventHTTPResp {
+			attrs = append(attrs,
+				attribute.String("http.scheme", ev.HTTPScheme()),
+				attribute.String("podtrace.http.transport", ev.HTTPProtoLabel()),
+			)
 		}
 		attrs = appendK8sAttributes(attrs, ev.K8s)
 		attrs = e.appendThresholdAttributes(attrs, ev)

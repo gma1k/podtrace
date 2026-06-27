@@ -80,6 +80,9 @@ var probeGroupMap = map[string]ProbeGroup{
 	"uprobe_gnutls_record_recv":    GroupTLS,
 	"uretprobe_gnutls_record_recv": GroupTLS,
 
+	// Go crypto/tls (statically-linked Go HTTPS)
+	"uprobe_go_tls_write": GroupTLS,
+
 	// Database
 	"uprobe_PQexec":    GroupDatabase,
 	"uretprobe_PQexec": GroupDatabase,
@@ -120,6 +123,11 @@ var probeGroupMap = map[string]ProbeGroup{
 	"kprobe_http_tcp_sendmsg":    GroupNetwork,
 	"kprobe_http_tcp_recvmsg":    GroupNetwork,
 	"kretprobe_http_tcp_recvmsg": GroupNetwork,
+
+	// HTTP/2 h2c (HPACK endpoint capture)
+	"kprobe_h2_tcp_sendmsg":    GroupNetwork,
+	"kprobe_h2_tcp_recvmsg":    GroupNetwork,
+	"kretprobe_h2_tcp_recvmsg": GroupNetwork,
 
 	// Crypto (AF_ALG bind detection, "Copy-Fail" vulnerability interface)
 	"tracepoint_sys_enter_bind": GroupCrypto,

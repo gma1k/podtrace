@@ -93,7 +93,6 @@ static inline void format_ipv6_port(const u8 *ipv6, u16 port, char *buf) {
 	buf[idx < MAX_STRING_LEN ? idx : max_idx] = '\0';
 }
 
-/* 64-bit finalizer hash — reduces collision probability vs plain XOR */
 static inline u64 build_stack_key(u32 pid, u32 tid, u64 timestamp) {
 	u64 h = (((u64)pid << 32) | tid) ^ timestamp;
 	h ^= h >> 33;

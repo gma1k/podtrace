@@ -18,9 +18,6 @@ func TestEvent_Latency(t *testing.T) {
 }
 
 func TestEvent_TimestampTime(t *testing.T) {
-	// Timestamp is a bpf_ktime_get_ns() value (nanoseconds since boot), so
-	// TimestampTime must anchor it to the wall clock via the process-wide
-	// monotonic-to-wall offset rather than interpret it as epoch nanoseconds.
 	ts := uint64(1_000_000_000) // 1s after boot
 	e := &Event{Timestamp: ts}
 	result := e.TimestampTime()
@@ -101,6 +98,37 @@ func TestEvent_TypeString(t *testing.T) {
 				t.Errorf("Expected type string '%s', got '%s'", tt.expected, result)
 			}
 		})
+	}
+}
+
+func TestEvent_HTTPTransport(t *testing.T) {
+	plaintextReq := &Event{Type: EventHTTPReq}
+	tlsReq := &Event{Type: EventHTTPReq, TCPState: HTTPTransportTLS}
+	tlsResp := &Event{Type: EventHTTPResp, TCPState: HTTPTransportTLS}
+
+	if got := plaintextReq.HTTPScheme(); got != "http" {
+		t.Errorf("plaintext HTTPScheme() = %q, want http", got)
+	}
+	if got := tlsReq.HTTPScheme(); got != "https" {
+		t.Errorf("TLS HTTPScheme() = %q, want https", got)
+	}
+	if got := plaintextReq.TypeString(); got != "HTTP" {
+		t.Errorf("plaintext TypeString() = %q, want HTTP", got)
+	}
+	if got := tlsReq.TypeString(); got != "HTTPS" {
+		t.Errorf("TLS TypeString() = %q, want HTTPS", got)
+	}
+	if got := tlsResp.TypeString(); got != "HTTPS" {
+		t.Errorf("TLS resp TypeString() = %q, want HTTPS", got)
+	}
+
+	reqMsg := tlsReq.FormatMessage()
+	if !contains(reqMsg, "[HTTPS] request") {
+		t.Errorf("TLS request FormatMessage = %q, want [HTTPS] request prefix", reqMsg)
+	}
+	respMsg := tlsResp.FormatMessage()
+	if !contains(respMsg, "[HTTPS] response") {
+		t.Errorf("TLS response FormatMessage = %q, want [HTTPS] response prefix", respMsg)
 	}
 }
 
@@ -2179,9 +2207,11 @@ func TestEvent_FormatMessage_HTTPSocketEndpoint(t *testing.T) {
 		t.Errorf("HTTP response message = %q, want \"response\"", got)
 	}
 
-	// 5xx must propagate to the error field for downstream alerting/thresholds.
 	serverErr := &Event{Type: EventHTTPResp, Target: "POST /checkout", Details: "503", Error: 503}
 	if serverErr.Error != 503 {
 		t.Errorf("5xx error field = %d, want 503", serverErr.Error)
+	}
+	if msg := serverErr.FormatMessage(); !contains(msg, "POST /checkout") || !contains(msg, "503") {
+		t.Errorf("5xx response message = %q, want endpoint and status", msg)
 	}
 }

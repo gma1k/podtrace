@@ -217,6 +217,12 @@ func (e *OTLPExporter) spanSnapshot(span *tracker.Span) (sdktrace.ReadOnlySpan, 
 				attrs = append(attrs, attribute.String("dns.transport", "tcp"))
 			}
 		}
+		if event.Type == events.EventHTTPReq || event.Type == events.EventHTTPResp {
+			attrs = append(attrs,
+				attribute.String("http.scheme", event.HTTPScheme()),
+				attribute.String("podtrace.http.transport", event.HTTPProtoLabel()),
+			)
+		}
 		stub.Events = append(stub.Events, sdktrace.Event{
 			Name:       event.TypeString(),
 			Time:       event.TimestampTime(),

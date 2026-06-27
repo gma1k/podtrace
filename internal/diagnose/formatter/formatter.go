@@ -3,6 +3,7 @@ package formatter
 import (
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/diagnose/analyzer"
@@ -92,3 +93,35 @@ func TopItems(items map[string]int, limit int, headerLabel, itemLabel string) st
 	return result
 }
 
+// TopItemsWithRate is TopItems with a per-item rate over the collection
+// duration appended, e.g. "- GET /x (3 requests, 0.2/sec)".
+func TopItemsWithRate(items map[string]int, limit int, headerLabel, itemLabel string, duration time.Duration) string {
+	if len(items) == 0 {
+		return ""
+	}
+	type itemCount struct {
+		name  string
+		count int
+	}
+	itemCounts := make([]itemCount, 0, len(items))
+	for name, count := range items {
+		itemCounts = append(itemCounts, itemCount{name: name, count: count})
+	}
+	sort.Slice(itemCounts, func(i, j int) bool {
+		return itemCounts[i].count > itemCounts[j].count
+	})
+	secs := duration.Seconds()
+	var result string
+	result += fmt.Sprintf("  Top %s:\n", headerLabel)
+	for i, ic := range itemCounts {
+		if i >= limit {
+			break
+		}
+		if secs > 0 {
+			result += fmt.Sprintf("    - %s (%d %s, %.1f/sec)\n", ic.name, ic.count, itemLabel, float64(ic.count)/secs)
+		} else {
+			result += fmt.Sprintf("    - %s (%d %s)\n", ic.name, ic.count, itemLabel)
+		}
+	}
+	return result
+}
