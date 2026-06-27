@@ -9,6 +9,25 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.13.4](https://github.com/gma1k/podtrace/compare/v0.13.3...v0.13.4) (2026-06-27)
+
+
+### Features
+
+* capture HTTP/2 (h2c) and Go crypto/tls L7 endpoints ([#253](https://github.com/gma1k/podtrace/issues/253)) ([323e34a](https://github.com/gma1k/podtrace/commit/323e34ae8f3717d17eb4f98a310f5d87b8d631c8))
+* capture HTTPS endpoints via SSL_read/SSL_write uprobes ([#251](https://github.com/gma1k/podtrace/issues/251)) ([cd11ea7](https://github.com/gma1k/podtrace/commit/cd11ea76bf7d71911f2d6c6deb8c31a63c6e8b5a))
+* decode HTTP/2 HPACK in userspace, deleting the in-kernel decoder ([#255](https://github.com/gma1k/podtrace/issues/255)) ([4efb74d](https://github.com/gma1k/podtrace/commit/4efb74d2696b64a1187383338b9d7aeeeea4b2a2))
+* harden Go crypto/tls tracing (stripped binaries, arm64) ([#254](https://github.com/gma1k/podtrace/issues/254)) ([bc05aa7](https://github.com/gma1k/podtrace/commit/bc05aa7e92cd8c3eacc7a6d73a396b5e023ef376))
+* stitch eBPF kernel spans into the apps OpenTelemetry trace ([#249](https://github.com/gma1k/podtrace/issues/249)) ([b7f5bee](https://github.com/gma1k/podtrace/commit/b7f5beef917ecacc86b6ad46f667cfa0876d2939))
+* trace HTTP/1.x endpoints from sockets with zero instrumentation ([#248](https://github.com/gma1k/podtrace/issues/248)) ([831e57d](https://github.com/gma1k/podtrace/commit/831e57dee156f01816cd6d199a8c145a36f0f084))
+
+
+### Maintenance
+
+* **deps:** update github actions ([#246](https://github.com/gma1k/podtrace/issues/246)) ([ac65cd2](https://github.com/gma1k/podtrace/commit/ac65cd2b5c312e3bc87afed9d4a456c9b7be9797))
+* **deps:** update module cloud.google.com/go/storage to v1.63.0 ([#250](https://github.com/gma1k/podtrace/issues/250)) ([5df4780](https://github.com/gma1k/podtrace/commit/5df47800fd644ef137f307359877eb6d338f6f69))
+* **deps:** update module github.com/cilium/ebpf to v0.22.0 ([#252](https://github.com/gma1k/podtrace/issues/252)) ([681c607](https://github.com/gma1k/podtrace/commit/681c607e484d19ef688aa15e5768c60517650f8b))
+
 ## [0.13.3](https://github.com/gma1k/podtrace/compare/v0.13.2...v0.13.3) (2026-06-22)
 
 
