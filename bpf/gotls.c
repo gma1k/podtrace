@@ -6,8 +6,21 @@
 #include "helpers.h"
 #include "protocols.h"
 
-#if defined(PODTRACE_VMLINUX_FROM_BTF) && \
-	(defined(__TARGET_ARCH_x86) || defined(__x86_64__))
+#ifdef PODTRACE_VMLINUX_FROM_BTF
+
+#if defined(__TARGET_ARCH_x86) || defined(__x86_64__)
+#define GO_ARG_PTR(ctx) ((void *)(ctx)->bx)
+#define GO_ARG_LEN(ctx) ((u64)(ctx)->cx)
+#define GO_TLS_SUPPORTED 1
+#elif defined(__TARGET_ARCH_arm64) || defined(__aarch64__)
+#define GO_ARG_PTR(ctx) ((void *)PT_REGS_PARM2(ctx))
+#define GO_ARG_LEN(ctx) ((u64)PT_REGS_PARM3(ctx))
+#define GO_TLS_SUPPORTED 1
+#endif
+
+#endif
+
+#ifdef GO_TLS_SUPPORTED
 
 #define GO_PEEK_LEN 16
 
@@ -17,8 +30,8 @@ int uprobe_go_tls_write(struct pt_regs *ctx)
 	if (!http_should_trace())
 		return 0;
 
-	void *base = (void *)ctx->bx;
-	u64 avail = (u64)ctx->cx;
+	void *base = GO_ARG_PTR(ctx);
+	u64 avail = GO_ARG_LEN(ctx);
 	if (!base || avail < HTTP2_FRAME_HDR)
 		return 0;
 
