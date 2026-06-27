@@ -20,6 +20,8 @@
 #include "fastcgi.c"
 #include "grpc.c"
 #include "http.c"
+#include "h2.c"
+#include "gotls.c"
 #include "crypto.c"
 
 char LICENSE[] SEC("license") = "GPL";

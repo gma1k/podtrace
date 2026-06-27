@@ -51,6 +51,9 @@ type cacheEntry struct {
 	expiresAt time.Time
 }
 
+// negativeCacheTTL bounds how long a "this IP is not a pod" result is cached.
+const negativeCacheTTL = 30 * time.Second
+
 type ContextEnricher struct {
 	clientset       kubernetes.Interface
 	podCache        *sync.Map
@@ -154,18 +157,21 @@ func (ce *ContextEnricher) resolvePodByIP(ctx context.Context, ip string) *PodMe
 	if cached, ok := ce.podCache.Load(ip); ok {
 		entry := cached.(*cacheEntry)
 		if time.Now().Before(entry.expiresAt) {
-			return entry.data.(*PodMetadata)
+			pod, _ := entry.data.(*PodMetadata) // nil for a cached negative result
+			return pod
 		}
 		ce.podCache.Delete(ip)
 	}
 
 	podMeta := ce.fetchPodByIP(ctx, ip)
-	if podMeta != nil {
-		ce.podCache.Store(ip, &cacheEntry{
-			data:      podMeta,
-			expiresAt: time.Now().Add(ce.cacheTTL),
-		})
+	ttl := ce.cacheTTL
+	if podMeta == nil && negativeCacheTTL < ttl {
+		ttl = negativeCacheTTL
 	}
+	ce.podCache.Store(ip, &cacheEntry{
+		data:      podMeta,
+		expiresAt: time.Now().Add(ttl),
+	})
 
 	return podMeta
 }

@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
@@ -41,24 +40,6 @@ func startUnixCRIServer(t *testing.T, info map[string]string) string {
 	t.Cleanup(func() { srv.Stop() })
 
 	return "unix://" + sockPath
-}
-
-// startUnixCRIServerWithConn starts a CRI server AND returns a pre-connected
-// gRPC client connection for use in building a Resolver directly.
-func startUnixCRIServerWithConn(t *testing.T, info map[string]string) (*grpc.ClientConn, string) { //nolint:unused
-	t.Helper()
-	endpoint := startUnixCRIServer(t, info)
-
-	sockPath := endpoint[len("unix://"):]
-	conn, err := grpc.NewClient(
-		"unix://"+sockPath,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		t.Skipf("cannot create grpc client: %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-	return conn, endpoint
 }
 
 // TestResolveCgroupPathCRI_WithFakeServer_NoCgroupPath covers the path where
@@ -124,4 +105,3 @@ func TestResolveCgroupPathCRI_WithFakeServer_LongPath(t *testing.T) {
 	_, err := resolveCgroupPathCRI(context.Background(), "test-container")
 	_ = err // "not found on filesystem" is expected
 }
-

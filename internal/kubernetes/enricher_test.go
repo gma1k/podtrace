@@ -9,7 +9,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/podtrace/podtrace/internal/events"
 )
@@ -428,6 +430,32 @@ func TestResolvePodByIP_ExpiredCacheEntry(t *testing.T) {
 		// If the refetch returned nil, the entry was not re-stored.
 		// Check the data is not the stale one.
 		t.Log("cache entry still present after expired eviction (may be from re-fetch)")
+	}
+}
+
+// TestResolvePodByIP_NegativeCached verifies a miss (IP that is not a pod) is
+// cached so it does not re-issue a cluster-wide pod List on every lookup — the
+// throttle that previously starved event collection under IP-heavy traffic.
+func TestResolvePodByIP_NegativeCached(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	var lists int
+	clientset.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		lists++
+		return true, &corev1.PodList{}, nil
+	})
+	ce := NewContextEnricher(clientset, &PodInfo{PodName: "src", Namespace: "default"})
+
+	ip := "127.0.0.1" // never a pod IP
+	for i := 0; i < 5; i++ {
+		if got := ce.resolvePodByIP(context.Background(), ip); got != nil {
+			t.Fatalf("expected nil for non-pod IP, got %v", got)
+		}
+	}
+	if lists != 1 {
+		t.Errorf("expected the miss to be cached (1 pod List), got %d Lists", lists)
+	}
+	if _, ok := ce.podCache.Load(ip); !ok {
+		t.Error("expected a negative cache entry for the non-pod IP")
 	}
 }
 

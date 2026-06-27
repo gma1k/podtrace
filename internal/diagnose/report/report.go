@@ -297,6 +297,9 @@ func GenerateHTTPSection(d Diagnostician, duration time.Duration) string {
 	respRate := d.CalculateRate(len(httpRespEvents), duration)
 	report += fmt.Sprintf("  Requests: %d (%.1f/sec)\n", len(httpReqEvents), reqRate)
 	report += fmt.Sprintf("  Responses: %d (%.1f/sec)\n", len(httpRespEvents), respRate)
+	if line := httpTransportBreakdown(httpReqEvents, httpRespEvents); line != "" {
+		report += "  Transport: " + line + "\n"
+	}
 
 	allHTTP := append(httpReqEvents, httpRespEvents...)
 	if len(allHTTP) > 0 {
@@ -317,7 +320,7 @@ func GenerateHTTPSection(d Diagnostician, duration time.Duration) string {
 		if len(httpReqEvents) > 0 {
 			urlMap := buildURLMap(httpReqEvents)
 			if len(urlMap) > 0 {
-				report += formatter.TopItems(urlMap, config.TopURLsLimit, "requested URLs", "requests")
+				report += formatter.TopItemsWithRate(urlMap, config.TopURLsLimit, "requested URLs", "requests", duration)
 			}
 		}
 	}
@@ -345,10 +348,35 @@ func buildURLMap(httpReqEvents []*events.Event) map[string]int {
 	urlMap := make(map[string]int)
 	for _, e := range httpReqEvents {
 		if e.Target != "" {
-			urlMap[e.Target]++
+			urlMap[fmt.Sprintf("%s (%s)", e.Target, e.HTTPScheme())]++
 		}
 	}
 	return urlMap
+}
+
+// httpTransportBreakdown tallies HTTP events by protocol label (HTTP, HTTPS,
+// HTTP/2) and renders a one-line summary. Returns "" when every event is plain
+// cleartext HTTP/1.x, so the line only appears when there is something to
+// distinguish (TLS or h2c traffic present).
+func httpTransportBreakdown(eventGroups ...[]*events.Event) string {
+	counts := make(map[string]int)
+	total := 0
+	for _, group := range eventGroups {
+		for _, e := range group {
+			counts[e.HTTPProtoLabel()]++
+			total++
+		}
+	}
+	if total == 0 || counts["HTTP"] == total {
+		return ""
+	}
+	parts := make([]string, 0, len(counts))
+	for _, label := range []string{"HTTP", "HTTPS", "HTTP/2"} {
+		if n := counts[label]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, label))
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 func GenerateCPUSection(d Diagnostician, duration time.Duration) string {

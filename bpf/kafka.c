@@ -1,42 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0
-/*
- * Kafka tracing via librdkafka uprobes.
- *
- * Hooks:
- *   uprobe/rd_kafka_topic_new     — rd_kafka_topic_t *rd_kafka_topic_new(
- *                                       rd_kafka_t *rk, const char *topic,
- *                                       rd_kafka_topic_conf_t *conf)
- *   uretprobe/rd_kafka_topic_new  — captures topic_t* → name mapping
- *
- *   uprobe/rd_kafka_produce       — int rd_kafka_produce(
- *                                       rd_kafka_topic_t *rkt, int32_t partition,
- *                                       int msgflags, void *payload, size_t len, ...)
- *   uretprobe/rd_kafka_produce
- *
- *   uprobe/rd_kafka_consumer_poll — rd_kafka_message_t *rd_kafka_consumer_poll(
- *                                       rd_kafka_t *rk, int timeout_ms)
- *   uretprobe/rd_kafka_consumer_poll
- *
- * Field mapping:
- *   target   = "broker" (not available from librdkafka uprobes without deep struct read)
- *   details  = topic name
- *   bytes    = payload size (produce) or message len (fetch)
- *   error    = return code
- *   latency_ns = call duration
- */
 
 #include "common.h"
 #include "maps.h"
 #include "events.h"
 #include "helpers.h"
 
-/* -----------------------------------------------------------------------
- * rd_kafka_topic_new — build topic_t* → name mapping
- * -----------------------------------------------------------------------
- * Signature: rd_kafka_topic_t *rd_kafka_topic_new(rd_kafka_t *rk,
- *                const char *topic, rd_kafka_topic_conf_t *conf)
- * PARM2 = const char *topic (topic name string)
- */
 SEC("uprobe/rd_kafka_topic_new")
 int uprobe_rd_kafka_topic_new(struct pt_regs *ctx)
 {
@@ -61,7 +29,6 @@ int uretprobe_rd_kafka_topic_new(struct pt_regs *ctx)
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_KAFKA_TOPIC_NEW);
 
-	/* Return value = rd_kafka_topic_t* */
 	u64 topic_ptr = (u64)PT_REGS_RC(ctx);
 	if (!topic_ptr) {
 		bpf_map_delete_elem(&kafka_topic_tmp, &key);
@@ -76,13 +43,6 @@ int uretprobe_rd_kafka_topic_new(struct pt_regs *ctx)
 	return 0;
 }
 
-/* -----------------------------------------------------------------------
- * rd_kafka_produce
- * -----------------------------------------------------------------------
- * Signature: int rd_kafka_produce(rd_kafka_topic_t *rkt, int32_t partition,
- *                int msgflags, void *payload, size_t len, ...)
- * PARM1 = rkt, PARM5 = len
- */
 SEC("uprobe/rd_kafka_produce")
 int uprobe_rd_kafka_produce(struct pt_regs *ctx)
 {
@@ -153,19 +113,6 @@ int uretprobe_rd_kafka_produce(struct pt_regs *ctx)
 	return 0;
 }
 
-/* -----------------------------------------------------------------------
- * rd_kafka_consumer_poll
- * -----------------------------------------------------------------------
- * Signature: rd_kafka_message_t *rd_kafka_consumer_poll(rd_kafka_t *rk,
- *                int timeout_ms)
- * Returns NULL if no message available (timeout).
- * rd_kafka_message_t layout (first fields):
- *   err       rd_kafka_resp_err_t (int32) at offset 0
- *   rkt       rd_kafka_topic_t*           at offset 8  (pointer-aligned)
- *   partition int32_t                     at offset 16
- *   payload   void*                       at offset 24
- *   len       size_t                      at offset 32
- */
 SEC("uprobe/rd_kafka_consumer_poll")
 int uprobe_rd_kafka_consumer_poll(struct pt_regs *ctx)
 {
@@ -190,7 +137,6 @@ int uretprobe_rd_kafka_consumer_poll(struct pt_regs *ctx)
 
 	u64 latency = calc_latency(*start_ts);
 
-	/* Return value = rd_kafka_message_t* (NULL = no message / timeout) */
 	u64 msg_ptr = (u64)PT_REGS_RC(ctx);
 	if (!msg_ptr) {
 		bpf_map_delete_elem(&start_times, &key);
@@ -210,10 +156,6 @@ int uretprobe_rd_kafka_consumer_poll(struct pt_regs *ctx)
 	e->tcp_state  = 0;
 	e->target[0]  = '\0';
 
-	/* Read rd_kafka_message_t fields:
-	 * offset 0  = err (int32) — wrap in s32
-	 * offset 8  = rkt (pointer to topic handle)
-	 * offset 32 = len (size_t) */
 	s32 msg_err = 0;
 	u64 rkt_ptr = 0;
 	u64 msg_len = 0;
@@ -225,7 +167,6 @@ int uretprobe_rd_kafka_consumer_poll(struct pt_regs *ctx)
 	e->error = msg_err;
 	e->bytes = (msg_len < MAX_BYTES_THRESHOLD) ? msg_len : 0;
 
-	/* Topic name from previously mapped rkt_ptr */
 	if (rkt_ptr) {
 		char *topic = bpf_map_lookup_elem(&kafka_topic_names, &rkt_ptr);
 		if (topic)

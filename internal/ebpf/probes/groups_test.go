@@ -29,6 +29,24 @@ func TestGroupForProbe_TLSPlaintextProbes(t *testing.T) {
 	}
 }
 
+func TestGroupForProbe_H2Probes(t *testing.T) {
+	for _, prog := range []string{
+		"kprobe_h2_tcp_sendmsg",
+		"kprobe_h2_tcp_recvmsg",
+		"kretprobe_h2_tcp_recvmsg",
+	} {
+		if got := GroupForProbe(prog); got != GroupNetwork {
+			t.Errorf("GroupForProbe(%q) = %q, want %q", prog, got, GroupNetwork)
+		}
+	}
+}
+
+func TestGroupForProbe_GoTLSProbe(t *testing.T) {
+	if got := GroupForProbe("uprobe_go_tls_write"); got != GroupTLS {
+		t.Errorf("GroupForProbe(uprobe_go_tls_write) = %q, want %q", got, GroupTLS)
+	}
+}
+
 func TestGroupForProbe_UnknownDefaultsToNetwork(t *testing.T) {
 	if got := GroupForProbe("kprobe_does_not_exist"); got != GroupNetwork {
 		t.Errorf("GroupForProbe(unknown) = %q, want %q", got, GroupNetwork)

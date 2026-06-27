@@ -1853,6 +1853,38 @@ func AttachTLSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint3
 	return links
 }
 
+// AttachGoTLSProbes attaches an entry uprobe on crypto/tls.(*Conn).Write in a
+// statically-linked Go binary (resolved via /proc/<pid>/exe), capturing HTTPS
+// request endpoints — HTTP/1.x or h2 — from the plaintext buffer before
+// encryption. Go does not use libssl, so the OpenSSL/GnuTLS uprobes never fire
+// for it. BTF + x86-64 only; requires the Go binary to retain its symbol table
+// (a stripped binary, or a non-Go process, simply yields no attachment).
+func AttachGoTLSProbes(coll *ebpf.Collection, pid uint32) []link.Link {
+	var links []link.Link
+	prog := coll.Programs["uprobe_go_tls_write"]
+	if prog == nil || pid == 0 {
+		return links
+	}
+	exePath := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "exe")
+	exe, err := link.OpenExecutable(exePath)
+	if err != nil {
+		logger.Debug("Go TLS probe: cannot open executable",
+			zap.String("path", exePath), zap.Error(err))
+		return links
+	}
+	const sym = "crypto/tls.(*Conn).Write"
+	l, err := exe.Uprobe(sym, prog, nil)
+	if err != nil {
+		// Expected for stripped binaries and non-Go processes.
+		logger.Debug("Go TLS uprobe not attached",
+			zap.String("symbol", sym), zap.Uint32("pid", pid), zap.Error(err))
+		return links
+	}
+	links = append(links, l)
+	logger.Debug("Go TLS uprobe attached", zap.Uint32("pid", pid))
+	return links
+}
+
 // kernelVersionString returns the running kernel version for use in error messages.
 func kernelVersionString() string {
 	data, err := os.ReadFile("/proc/version")

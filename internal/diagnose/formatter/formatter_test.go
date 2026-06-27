@@ -2,6 +2,7 @@ package formatter
 
 import (
 	"testing"
+	"time"
 
 	"github.com/podtrace/podtrace/internal/diagnose/analyzer"
 )
@@ -124,6 +125,24 @@ func TestTopItems_WithLimit(t *testing.T) {
 	}
 }
 
+func TestTopItemsWithRate(t *testing.T) {
+	items := map[string]int{"GET /a": 30, "GET /b": 10}
+	result := TopItemsWithRate(items, 5, "requested URLs", "requests", 10*time.Second)
+	if !contains(result, "GET /a (30 requests, 3.0/sec)") {
+		t.Errorf("expected per-endpoint rate for /a, got:\n%s", result)
+	}
+	if !contains(result, "GET /b (10 requests, 1.0/sec)") {
+		t.Errorf("expected per-endpoint rate for /b, got:\n%s", result)
+	}
+}
+
+func TestTopItemsWithRate_ZeroDuration(t *testing.T) {
+	result := TopItemsWithRate(map[string]int{"GET /a": 5}, 5, "requested URLs", "requests", 0)
+	if !contains(result, "GET /a (5 requests)") {
+		t.Errorf("expected count-only fallback for zero duration, got:\n%s", result)
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || containsMiddle(s, substr)))
 }
@@ -146,4 +165,3 @@ func countOccurrences(s, substr string) int {
 	}
 	return count
 }
-

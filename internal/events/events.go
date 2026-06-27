@@ -109,6 +109,40 @@ func (e *Event) TimestampTime() time.Time {
 	return clock.BPFTimestampToWall(e.Timestamp)
 }
 
+// HTTP transport for EventHTTPReq/EventHTTPResp, carried in TCPState (unused
+// for HTTP events otherwise). Encoded as a bitfield: bit 0 = TLS (encrypted),
+// bit 1 = HTTP/2.
+const (
+	HTTPTransportPlaintext uint32 = 0 // HTTP/1.x cleartext sockets
+	HTTPTransportTLS       uint32 = 1 // HTTP/1.x over TLS (OpenSSL/GnuTLS/Go)
+	HTTPTransportH2C       uint32 = 2 // HTTP/2 cleartext
+	HTTPTransportH2TLS     uint32 = 3 // HTTP/2 over TLS (Go crypto/tls)
+
+	httpTransportTLSBit uint32 = 1
+	httpTransportH2Bit  uint32 = 2
+)
+
+// HTTPScheme returns the URL scheme implied by an HTTP event's transport:
+// "https" for any TLS-captured traffic, "http" for cleartext (HTTP/1.x or h2c).
+func (e *Event) HTTPScheme() string {
+	if e.TCPState&httpTransportTLSBit != 0 {
+		return "https"
+	}
+	return "http"
+}
+
+// HTTPProtoLabel is the protocol label for an HTTP event, reflecting its
+// transport: "HTTP/2" for any h2 traffic, else "HTTPS" over TLS or "HTTP".
+func (e *Event) HTTPProtoLabel() string {
+	if e.TCPState&httpTransportH2Bit != 0 {
+		return "HTTP/2"
+	}
+	if e.TCPState&httpTransportTLSBit != 0 {
+		return "HTTPS"
+	}
+	return "HTTP"
+}
+
 func (e *Event) TypeString() string {
 	switch e.Type {
 	case EventDNS, EventDNSQuery:
@@ -128,7 +162,7 @@ func (e *Event) TypeString() string {
 	case EventPageFault, EventOOMKill:
 		return "MEM"
 	case EventHTTPReq, EventHTTPResp:
-		return "HTTP"
+		return e.HTTPProtoLabel()
 	case EventLockContention:
 		return "LOCK"
 	case EventTCPRetrans, EventNetDevError:
@@ -383,7 +417,7 @@ func formatEventMessage(e *Event, realtime bool) string {
 		if target == "" {
 			target = "unknown"
 		}
-		msg := fmt.Sprintf("[HTTP] request %s", sanitizeString(target))
+		msg := fmt.Sprintf("[%s] request %s", e.HTTPProtoLabel(), sanitizeString(target))
 		if e.LatencyNS > 0 {
 			msg += fmt.Sprintf(" took %.2fms", latencyMs)
 		}
@@ -401,7 +435,7 @@ func formatEventMessage(e *Event, realtime bool) string {
 		if e.Details != "" {
 			statusPart = " status " + sanitizeString(e.Details)
 		}
-		msg := fmt.Sprintf("[HTTP] response %s%s took %.2fms", sanitizeString(target), statusPart, latencyMs)
+		msg := fmt.Sprintf("[%s] response %s%s took %.2fms", e.HTTPProtoLabel(), sanitizeString(target), statusPart, latencyMs)
 		if e.Bytes > 0 {
 			msg += fmt.Sprintf(" (%d bytes)", e.Bytes)
 		}
@@ -514,9 +548,6 @@ func formatEventMessage(e *Event, realtime bool) string {
 		if target == "" {
 			target = "file"
 		}
-		// Bytes is polymorphic for FS events: either a byte count or
-		// a sign-encoded FD (high bit set means "no FD"). Bit-preserve
-		// the reinterpretation rather than saturate.
 		fd := safeconv.Uint64BitsToInt64(e.Bytes)
 		if e.Error != 0 {
 			return fmt.Sprintf("[FS] open() %s failed: error %d", sanitizeString(target), e.Error)
@@ -533,9 +564,6 @@ func formatEventMessage(e *Event, realtime bool) string {
 		return fmt.Sprintf("[FS] open() %s took %.2fms", sanitizeString(target), latencyMs)
 
 	case EventClose:
-		// Bytes is polymorphic for FS events: either a byte count or
-		// a sign-encoded FD (high bit set means "no FD"). Bit-preserve
-		// the reinterpretation rather than saturate.
 		fd := safeconv.Uint64BitsToInt64(e.Bytes)
 		if fd >= 0 {
 			return fmt.Sprintf("[FS] close() fd=%d", fd)
@@ -552,10 +580,6 @@ func formatEventMessage(e *Event, realtime bool) string {
 		return fmt.Sprintf("[TLS] error: %d", e.Error)
 
 	case EventResourceLimit:
-		// e.Error carries the utilization percentage for this event
-		// type. Compare in plain int — both sides are bounded ([0, 100]
-		// by domain for utilization, and AlertX is pre-clamped to
-		// [0, 100] in config). No narrowing conversion required.
 		utilization := int(e.Error)
 		if utilization < 0 {
 			return ""

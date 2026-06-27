@@ -9,7 +9,7 @@
 #define KAFKA_DEFAULT_PORT      9092
 #define GRPC_DEFAULT_PORT       50051
 
-/* === FastCGI Record Types (RFC 3875 / FastCGI spec) === */
+/* === FastCGI Record Types === */
 #define FCGI_VERSION_1       1
 #define FCGI_BEGIN_REQUEST   1
 #define FCGI_ABORT_REQUEST   2
@@ -19,7 +19,7 @@
 #define FCGI_STDOUT          6
 #define FCGI_STDERR          7
 
-/* === HTTP/2 Frame Types (RFC 7540 §6) === */
+/* === HTTP/2 Frame Types === */
 #define HTTP2_DATA           0x0
 #define HTTP2_HEADERS        0x1
 #define HTTP2_PRIORITY       0x2
@@ -27,8 +27,7 @@
 #define HTTP2_SETTINGS       0x4
 #define HTTP2_GOAWAY         0x7
 
-/* === HPACK Static Table Shortcuts (RFC 7541 Appendix B) === */
-/* Indexed header representation: 0x80 | index */
+/* === HPACK Static Table Shortcuts === */
 #define HPACK_METHOD_GET     0x82   /* :method = GET  (index 2) */
 #define HPACK_METHOD_POST    0x83   /* :method = POST (index 3) */
 #define HPACK_PATH_SLASH     0x84   /* :path = /      (index 4) */
@@ -40,6 +39,12 @@
 #define HTTP_INSPECT_LEN     80
 #define HTTP_MIN_REQUEST_LEN 16
 #define W3C_TRACEPARENT_LEN  55
+
+/* Bit 0 = TLS (encrypted), bit 1 = HTTP/2. */
+#define HTTP_TRANSPORT_PLAINTEXT 0  /* HTTP/1.x cleartext */
+#define HTTP_TRANSPORT_TLS       1  /* HTTP/1.x over TLS (OpenSSL, GnuTLS, Go) */
+#define HTTP_TRANSPORT_H2C       2  /* HTTP/2 cleartext */
+#define HTTP_TRANSPORT_H2_TLS    3  /* HTTP/2 over TLS (Go crypto/tls) */
 
 /* === FastCGI NV Pair Helpers === */
 #define FCGI_NV_LEN_4BYTE    0x80
@@ -88,6 +93,6 @@ static __always_inline int read_msghdr_data(struct msghdr *msg, void *buf, u32 b
 		return -1;
 	return bpf_probe_read_user(buf, buf_size, base);
 }
-#endif /* PODTRACE_VMLINUX_FROM_BTF */
+#endif
 
-#endif /* PODTRACE_PROTOCOLS_H */
+#endif

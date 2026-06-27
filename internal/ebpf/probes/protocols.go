@@ -232,3 +232,33 @@ func AttachHTTPProbes(coll *ebpf.Collection) []link.Link {
 	attach("kretprobe_http_tcp_recvmsg", "tcp_recvmsg", true)
 	return links
 }
+
+// AttachH2Probes attaches the HTTP/2 (h2c) HPACK endpoint-capture kprobes: a
+// kprobe on tcp_sendmsg (request HEADERS) plus a kprobe+kretprobe pair on
+// tcp_recvmsg (response HEADERS).
+func AttachH2Probes(coll *ebpf.Collection) []link.Link {
+	var links []link.Link
+	attach := func(progName, sym string, ret bool) {
+		prog := coll.Programs[progName]
+		if prog == nil {
+			return
+		}
+		var l link.Link
+		var err error
+		if ret {
+			l, err = link.Kretprobe(sym, prog, nil)
+		} else {
+			l, err = link.Kprobe(sym, prog, nil)
+		}
+		if err == nil {
+			links = append(links, l)
+			logger.Debug("HTTP/2 probe attached", zap.String("prog", progName))
+		} else {
+			logger.Debug("HTTP/2 probe unavailable", zap.String("prog", progName), zap.Error(err))
+		}
+	}
+	attach("kprobe_h2_tcp_sendmsg", "tcp_sendmsg", false)
+	attach("kprobe_h2_tcp_recvmsg", "tcp_recvmsg", false)
+	attach("kretprobe_h2_tcp_recvmsg", "tcp_recvmsg", true)
+	return links
+}
