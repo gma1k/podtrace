@@ -397,7 +397,7 @@ The diagnose mode generates a comprehensive report including:
 - **Connection Statistics**: IPv4/IPv6 connection latency, failures, error breakdown, top targets
 - **TCP Connection State Tracking**: State transition analysis, state distribution, connection lifecycle monitoring
 - **File System Statistics**: Read, write, and fsync operation latency, slow operations, bandwidth metrics (total bytes, average bytes, throughput)
-- **HTTP Statistics**: Request/response counts, latency analysis, bandwidth metrics, top requested URLs
+- **HTTP Statistics**: Request/response counts, latency analysis, bandwidth metrics, top requested + response endpoints (method/path/status) and status-code breakdown
 - **Memory Statistics**: Page fault counts and error codes, OOM kill tracking with memory usage details
 - **CPU Statistics**: Thread blocking times and scheduling events
 - **CPU Usage by Process**: CPU percentage per process

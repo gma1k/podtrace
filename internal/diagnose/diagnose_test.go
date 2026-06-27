@@ -751,8 +751,38 @@ func TestGenerateHTTPSection_WithTopURLs(t *testing.T) {
 	duration := d.endTime.Sub(d.startTime)
 	result := report.GenerateHTTPSection(d, duration)
 
-	if !strings.Contains(result, "Top requested URLs") {
-		t.Error("Expected top URLs in HTTP section")
+	if !strings.Contains(result, "Top requested endpoints") {
+		t.Error("Expected top requested endpoints in HTTP section")
+	}
+}
+
+func TestGenerateHTTPSection_ResponseStatusCodes(t *testing.T) {
+	d := NewDiagnostician()
+	d.AddEvent(&events.Event{Type: events.EventHTTPResp, Details: "200", Target: "GET /a"})
+	d.AddEvent(&events.Event{Type: events.EventHTTPResp, Details: "200", Target: "GET /b"})
+	d.AddEvent(&events.Event{Type: events.EventHTTPResp, Details: "404", Target: "GET /c"})
+	d.AddEvent(&events.Event{Type: events.EventHTTPResp, Details: "traceparent: 00-x", Error: 503, Target: "GET /d"})
+	d.Finish()
+
+	duration := d.endTime.Sub(d.startTime)
+	result := report.GenerateHTTPSection(d, duration)
+
+	if !strings.Contains(result, "response status codes") {
+		t.Fatalf("expected response status codes section, got:\n%s", result)
+	}
+	for _, want := range []string{"200", "404", "503"} {
+		if !strings.Contains(result, want) {
+			t.Errorf("expected status %s in section, got:\n%s", want, result)
+		}
+	}
+	if !strings.Contains(result, "response endpoints") {
+		t.Fatalf("expected response endpoints section, got:\n%s", result)
+	}
+	if !strings.Contains(result, "GET /a") || !strings.Contains(result, "-> 200") {
+		t.Errorf("expected per-endpoint response with status, got:\n%s", result)
+	}
+	if !strings.Contains(result, "/sec") {
+		t.Errorf("expected per-second rate in response section, got:\n%s", result)
 	}
 }
 

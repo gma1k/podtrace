@@ -411,47 +411,78 @@ struct {
 	__type(value, u64);
 } ssl_read_args SEC(".maps");
 
+struct h2_recv_info {
+	u64 base;
+	u64 conn_id;
+};
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 1024);
 	__type(key, u64);
-	__type(value, struct http_req);
-} h2_reqs SEC(".maps");
-
-struct {
-	__uint(type, BPF_MAP_TYPE_LRU_HASH);
-	__uint(max_entries, 1024);
-	__type(key, u64);
-	__type(value, u64);
+	__type(value, struct h2_recv_info);
 } h2_recv_base SEC(".maps");
 
-#define H2_READ_LEN 256
-#define H2_VAL_MAX 128
+struct {
+	__uint(type, BPF_MAP_TYPE_RINGBUF);
+	__uint(max_entries, 512 * 1024);
+} h2_hdr_events SEC(".maps");
 
-struct h2_loc {
-	u32 start;
-	u32 len;
-	u8 huff;
-	u8 present;
-};
-
-struct h2_scratch {
-	u8 buf[H2_READ_LEN];
-	char method[H2_VAL_MAX];
-	char path[H2_VAL_MAX];
-	char status[H2_VAL_MAX];
-	char tpval[H2_VAL_MAX];
-	u32 hop;
-	u8 hstate;
-	u32 wpos;
-	struct h2_loc wloc[8];
+struct h2_hdr_scratch {
+	struct h2_hdr_record rec;
+	u8 frag[H2_HDR_FRAG_MAX];
+	u32 off;
 };
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(max_entries, 1);
 	__type(key, u32);
-	__type(value, struct h2_scratch);
-} h2_scratch_map SEC(".maps");
+	__type(value, struct h2_hdr_scratch);
+} h2_hdr_scratch_map SEC(".maps");
+
+struct h2_seq_key {
+	u64 conn_id;
+	u32 dir;
+	u32 _pad;
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 8192);
+	__type(key, struct h2_seq_key);
+	__type(value, u64);
+} h2_seq SEC(".maps");
+
+struct go_tls_read_state {
+	u64 buf;
+	u64 conn;
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u64);
+	__type(value, struct go_tls_read_state);
+} go_tls_read_args SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 8192);
+	__type(key, u64);
+	__type(value, u8);
+} h2_conns SEC(".maps");
+
+struct h2_frame_state {
+	u32 remaining;
+	u32 stream_id;
+	u8  type;
+	u8  flags;
+	u8  preface_seen;
+	u8  _pad;
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 8192);
+	__type(key, struct h2_seq_key);
+	__type(value, struct h2_frame_state);
+} h2_frame_state SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);

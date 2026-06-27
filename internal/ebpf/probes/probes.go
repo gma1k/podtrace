@@ -1888,6 +1888,45 @@ func AttachGoTLSProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 	}
 	links = append(links, l)
 	logger.Debug("Go TLS uprobe attached", zap.Uint32("pid", pid))
+
+	links = append(links, attachGoTLSReadProbes(coll, exe, exePath, pid)...)
+	return links
+}
+
+// attachGoTLSReadProbes attaches the entry + return-address uprobes on
+// crypto/tls.(*Conn).Read so the decrypted response/inbound plaintext is
+// captured on return.
+func attachGoTLSReadProbes(coll *ebpf.Collection, exe *link.Executable, exePath string, pid uint32) []link.Link {
+	var links []link.Link
+	entryProg := coll.Programs["uprobe_go_tls_read"]
+	retProg := coll.Programs["uprobe_go_tls_read_ret"]
+	if entryProg == nil || retProg == nil {
+		return links
+	}
+	const sym = "crypto/tls.(*Conn).Read"
+	entryOff, retOffs, ok := goFuncReturnOffsets(exePath, sym)
+	if !ok {
+		logger.Debug("Go TLS Read probe: no return sites resolved (non-x86 or symbol missing)",
+			zap.Uint32("pid", pid))
+		return links
+	}
+	el, err := exe.Uprobe("", entryProg, &link.UprobeOptions{Address: entryOff})
+	if err != nil {
+		logger.Debug("Go TLS Read entry uprobe not attached", zap.Error(err))
+		return links
+	}
+	links = append(links, el)
+	attached := 0
+	for _, ro := range retOffs {
+		rl, err := exe.Uprobe("", retProg, &link.UprobeOptions{Address: ro})
+		if err != nil {
+			continue
+		}
+		links = append(links, rl)
+		attached++
+	}
+	logger.Debug("Go TLS Read uprobes attached",
+		zap.Uint32("pid", pid), zap.Int("ret_sites", attached))
 	return links
 }
 

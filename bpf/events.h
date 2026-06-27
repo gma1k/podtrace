@@ -35,17 +35,17 @@ enum event_type {
 	EVENT_POOL_ACQUIRE,
 	EVENT_POOL_RELEASE,
 	EVENT_POOL_EXHAUSTED,
-	EVENT_UNLINK,           /* 29: file unlinked via vfs_unlink */
-	EVENT_RENAME,           /* 30: file renamed via vfs_rename */
-	EVENT_REDIS_CMD,        /* 31: Redis command (hiredis: redisCommand/redisCommandArgv) */
-	EVENT_MEMCACHED_CMD,    /* 32: Memcached operation (libmemcached) */
-	EVENT_FASTCGI_REQUEST,  /* 33: FastCGI request begin — BTF-only */
-	EVENT_FASTCGI_RESPONSE, /* 34: FastCGI request complete — BTF-only */
-	EVENT_GRPC_METHOD,      /* 35: gRPC method call via HTTP/2 HEADERS — BTF-only */
-	EVENT_KAFKA_PRODUCE,    /* 36: Kafka produce (librdkafka: rd_kafka_produce) */
-	EVENT_KAFKA_FETCH,      /* 37: Kafka consumer_poll result (librdkafka) */
-	EVENT_DNS_QUERY,        /* 38: DNS query seen on egress */
-	EVENT_AF_ALG,           /* 39: AF_ALG crypto socket bind */
+	EVENT_UNLINK,
+	EVENT_RENAME,
+	EVENT_REDIS_CMD,
+	EVENT_MEMCACHED_CMD,
+	EVENT_FASTCGI_REQUEST,
+	EVENT_FASTCGI_RESPONSE,
+	EVENT_GRPC_METHOD,
+	EVENT_KAFKA_PRODUCE,
+	EVENT_KAFKA_FETCH,
+	EVENT_DNS_QUERY,
+	EVENT_AF_ALG,
 };
 
 struct event {
@@ -61,15 +61,34 @@ struct event {
 	char comm[COMM_LEN];
 	char target[MAX_STRING_LEN];
 	char details[MAX_STRING_LEN];
-	/* V4 additions — populated under PODTRACE_VMLINUX_FROM_BTF */
-	u32 net_ns_id;  /* network namespace inum (0 if BTF unavailable) */
-	u32 _pad2;      /* explicit padding to keep struct 8-byte aligned */
-	/* V5 additions — DNS packet capture (bpf/dns.c) */
-	u32 dns_server_ip;  /* upstream resolver IPv4 (DNS events; 0 otherwise) */
-	u8  dns_transport;  /* 0=UDP, 1=TCP (DNS events) */
-	u8  _pad3[3];       /* keep struct 8-byte aligned */
-	/* V6 additions — IPv6 DNS */
-	u8  dns_server_ip6[16]; /* upstream resolver IPv6 */
+	u32 net_ns_id;
+	u32 _pad2;
+	u32 dns_server_ip;
+	u8  dns_transport;
+	u8  _pad3[3];
+	u8  dns_server_ip6[16];
+};
+
+#define H2_HDR_FRAG_MAX 1024
+
+#define H2_DIR_EGRESS  0
+#define H2_DIR_INGRESS 1
+#define H2_HDR_FLAG_END_HEADERS  0x1
+#define H2_HDR_FLAG_CONTINUATION 0x2
+#define H2_HDR_FLAG_CLOSE        0x4
+
+struct h2_hdr_record {
+	u64 conn_id;
+	u64 timestamp;
+	u64 cgroup_id;
+	u32 pid;
+	u32 seq;
+	u32 stream_id;
+	u16 frag_len;
+	u8  direction;
+	u8  transport;
+	u8  flags;
+	u8  _pad[7];
 };
 
 #endif

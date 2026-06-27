@@ -260,5 +260,6 @@ func AttachH2Probes(coll *ebpf.Collection) []link.Link {
 	attach("kprobe_h2_tcp_sendmsg", "tcp_sendmsg", false)
 	attach("kprobe_h2_tcp_recvmsg", "tcp_recvmsg", false)
 	attach("kretprobe_h2_tcp_recvmsg", "tcp_recvmsg", true)
+	attach("kprobe_h2_tcp_close", "tcp_close", false)
 	return links
 }

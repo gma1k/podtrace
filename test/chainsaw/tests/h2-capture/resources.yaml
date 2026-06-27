@@ -1,0 +1,36 @@
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: h2-otlp
+spec:
+  type: otlp
+  otlp:
+    endpoint: otel-collector:4318
+    protocol: http
+    insecure: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: h2demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: h2demo
+  template:
+    metadata:
+      labels:
+        app: h2demo
+    spec:
+      containers:
+        - name: h2demo
+          image: podtrace-h2demo:ci
+          imagePullPolicy: Never
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi

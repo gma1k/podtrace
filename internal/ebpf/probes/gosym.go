@@ -3,6 +3,9 @@ package probes
 import (
 	"debug/elf"
 	"debug/gosym"
+	"runtime"
+
+	"golang.org/x/arch/x86/x86asm"
 )
 
 // goSymbolFileOffset resolves the executable file offset of a Go function
@@ -47,4 +50,85 @@ func goSymbolFileOffset(exePath, symbol string) (offset uint64, ok bool) {
 		}
 	}
 	return 0, false
+}
+
+// vaddrToFileOffset maps a virtual address to its executable file offset using
+// the PT_LOAD segments.
+func vaddrToFileOffset(f *elf.File, vaddr uint64) (uint64, bool) {
+	for _, prog := range f.Progs {
+		if prog.Type != elf.PT_LOAD {
+			continue
+		}
+		if vaddr >= prog.Vaddr && vaddr < prog.Vaddr+prog.Memsz {
+			return vaddr - prog.Vaddr + prog.Off, true
+		}
+	}
+	return 0, false
+}
+
+// goFuncReturnOffsets resolves the entry file offset of a Go function and the
+// file offsets of every RET instruction within it, by disassembling the
+// function's machine code (x86-64).
+func goFuncReturnOffsets(exePath, symbol string) (entryOff uint64, retOffs []uint64, ok bool) {
+	if runtime.GOARCH != "amd64" {
+		return 0, nil, false
+	}
+	f, err := elf.Open(exePath)
+	if err != nil {
+		return 0, nil, false
+	}
+	defer func() { _ = f.Close() }()
+
+	pcln := f.Section(".gopclntab")
+	text := f.Section(".text")
+	if pcln == nil || text == nil {
+		return 0, nil, false
+	}
+	pclnData, err := pcln.Data()
+	if err != nil {
+		return 0, nil, false
+	}
+	var symtabData []byte
+	if s := f.Section(".gosymtab"); s != nil {
+		symtabData, _ = s.Data()
+	}
+	tbl, err := gosym.NewTable(symtabData, gosym.NewLineTable(pclnData, text.Addr))
+	if err != nil {
+		return 0, nil, false
+	}
+	fn := tbl.LookupFunc(symbol)
+	if fn == nil || fn.End <= fn.Entry {
+		return 0, nil, false
+	}
+
+	entryOff, ok = vaddrToFileOffset(f, fn.Entry)
+	if !ok {
+		return 0, nil, false
+	}
+
+	textData, err := text.Data()
+	if err != nil || fn.Entry < text.Addr {
+		return 0, nil, false
+	}
+	start := fn.Entry - text.Addr
+	end := fn.End - text.Addr
+	if end > uint64(len(textData)) {
+		return 0, nil, false
+	}
+	code := textData[start:end]
+
+	for pos := 0; pos < len(code); {
+		inst, derr := x86asm.Decode(code[pos:], 64)
+		if derr != nil || inst.Len == 0 {
+			pos++
+			continue
+		}
+		if inst.Op == x86asm.RET {
+			if off, ok2 := vaddrToFileOffset(f, fn.Entry+uint64(pos)); ok2 {
+				retOffs = append(retOffs, off)
+			}
+		}
+		pos += inst.Len
+	}
+	return entryOff, retOffs, len(retOffs) > 0
 }

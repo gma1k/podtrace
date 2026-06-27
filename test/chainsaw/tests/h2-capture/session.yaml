@@ -1,0 +1,15 @@
+apiVersion: podtrace.io/v1alpha1
+kind: PodTraceSession
+metadata:
+  name: h2-session
+spec:
+  selector:
+    matchLabels:
+      app: h2demo
+  duration: 25s
+  filters: [net]
+  exporterRef:
+    name: h2-otlp
+  reportRef:
+    configMap:
+      name: h2-report

@@ -30,3 +30,33 @@ func TestGoSymbolFileOffset(t *testing.T) {
 		t.Error("expected not-found for a nonexistent symbol")
 	}
 }
+
+func TestGoFuncReturnOffsets(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("x86-64 disassembly only")
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Skipf("cannot find test executable: %v", err)
+	}
+
+	entryOff, retOffs, ok := goFuncReturnOffsets(exe, "runtime.main")
+	if !ok {
+		t.Fatal("expected to resolve runtime.main return sites")
+	}
+	if entryOff == 0 {
+		t.Error("entry offset is 0")
+	}
+	if len(retOffs) == 0 {
+		t.Fatal("expected at least one RET site")
+	}
+	for _, ro := range retOffs {
+		if ro <= entryOff {
+			t.Errorf("RET offset %#x not after entry %#x", ro, entryOff)
+		}
+	}
+
+	if _, _, ok := goFuncReturnOffsets(exe, "definitely.NotAReal.Func"); ok {
+		t.Error("expected not-found for a nonexistent symbol")
+	}
+}

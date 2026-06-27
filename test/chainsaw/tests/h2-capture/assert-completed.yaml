@@ -1,0 +1,7 @@
+apiVersion: podtrace.io/v1alpha1
+kind: PodTraceSession
+metadata:
+  name: h2-session
+status:
+  state: Completed
+  (summary.totalEvents > `0`): true
