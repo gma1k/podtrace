@@ -25,7 +25,17 @@
 #define HTTP2_PRIORITY       0x2
 #define HTTP2_RST_STREAM     0x3
 #define HTTP2_SETTINGS       0x4
+#define HTTP2_PUSH_PROMISE   0x5
+#define HTTP2_PING           0x6
 #define HTTP2_GOAWAY         0x7
+#define HTTP2_WINDOW_UPDATE  0x8
+#define HTTP2_CONTINUATION   0x9
+
+/* === HTTP/2 frame flags (HEADERS / CONTINUATION) === */
+#define HTTP2_FLAG_END_STREAM  0x01
+#define HTTP2_FLAG_END_HEADERS 0x04
+#define HTTP2_FLAG_PADDED      0x08
+#define HTTP2_FLAG_PRIORITY    0x20
 
 /* === HPACK Static Table Shortcuts === */
 #define HPACK_METHOD_GET     0x82   /* :method = GET  (index 2) */

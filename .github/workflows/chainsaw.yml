@@ -76,6 +76,13 @@ jobs:
           kind load docker-image ghcr.io/gma1k/podtrace:ci \
             --name podtrace-chainsaw
 
+      - name: Build HTTP/2 + Go-TLS workload image
+        run: |
+          docker build --provenance=false \
+            -t podtrace-h2demo:ci \
+            test/chainsaw/tests/h2-capture/workload
+          kind load docker-image podtrace-h2demo:ci --name podtrace-chainsaw
+
       - name: Preload hook-job image into kind
         run: |
           for i in 1 2 3; do

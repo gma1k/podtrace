@@ -1,0 +1,47 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: h2-capture
+spec:
+  description: |
+    Verifies zero-instrumentation HTTP/2 endpoint capture end-to-end through the
+    operator path, using the userspace HPACK decode:
+      1. Apply ExporterConfig + a self-contained Go workload that serves and
+         drives h2c, HTTP/2-over-TLS (Go crypto/tls) and HTTP/1.1, including a
+         HOT repeated h2c route and varied methods (GET/POST/PUT/DELETE).
+      2. Apply a PodTraceSession with filters=[net] targeting the workload.
+      3. Session reaches Completed with summary.totalEvents > 0 (HTTP/2 HEADERS
+         shipped raw off tcp_sendmsg/tcp_recvmsg + crypto/tls Read/Write by
+         bpf/h2.c + bpf/gotls.c, decoded by internal/ebpf/h2decode — no library
+         instrumentation).
+      4. The report ConfigMap reflects HTTP/2 traffic.
+    BTF-only: the kind node kernel must expose /sys/kernel/btf/vmlinux, else the
+    HTTP/2 probes are no-ops.
+  timeouts:
+    apply: 30s
+    assert: 120s
+    delete: 60s
+    cleanup: 120s
+  steps:
+    - name: setup-workload
+      try:
+        - apply:
+            file: ./resources.yaml
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: h2demo
+              status:
+                readyReplicas: 1
+    - name: apply-session
+      try:
+        - apply:
+            file: ./session.yaml
+        - assert:
+            file: ./assert-completed.yaml
+    - name: report-artifact
+      try:
+        - assert:
+            file: ./assert-report.yaml

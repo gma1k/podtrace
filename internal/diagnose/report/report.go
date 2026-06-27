@@ -3,6 +3,7 @@ package report
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -320,7 +321,17 @@ func GenerateHTTPSection(d Diagnostician, duration time.Duration) string {
 		if len(httpReqEvents) > 0 {
 			urlMap := buildURLMap(httpReqEvents)
 			if len(urlMap) > 0 {
-				report += formatter.TopItemsWithRate(urlMap, config.TopURLsLimit, "requested URLs", "requests", duration)
+				report += formatter.TopItemsWithRate(urlMap, config.TopURLsLimit, "requested endpoints", "requests", duration)
+			}
+		}
+		if len(httpRespEvents) > 0 {
+			endpointMap := buildResponseEndpointMap(httpRespEvents)
+			if len(endpointMap) > 0 {
+				report += formatter.TopItemsWithRate(endpointMap, config.TopURLsLimit, "response endpoints", "responses", duration)
+			}
+			statusMap := buildStatusMap(httpRespEvents)
+			if len(statusMap) > 0 {
+				report += formatter.TopItemsWithRate(statusMap, config.TopURLsLimit, "response status codes", "responses", duration)
 			}
 		}
 	}
@@ -352,6 +363,47 @@ func buildURLMap(httpReqEvents []*events.Event) map[string]int {
 		}
 	}
 	return urlMap
+}
+
+// buildResponseEndpointMap counts HTTP response events by endpoint + status,
+// mirroring buildURLMap for the request side.
+func buildResponseEndpointMap(httpRespEvents []*events.Event) map[string]int {
+	endpointMap := make(map[string]int)
+	for _, e := range httpRespEvents {
+		if !strings.Contains(e.Target, "/") {
+			continue
+		}
+		label := fmt.Sprintf("%s (%s)", e.Target, e.HTTPScheme())
+		if code := responseStatus(e); code != "" {
+			label += " -> " + code
+		}
+		endpointMap[label]++
+	}
+	return endpointMap
+}
+
+// buildStatusMap counts HTTP response events by status code so the report can
+// surface the response side.
+func buildStatusMap(httpRespEvents []*events.Event) map[string]int {
+	statusMap := make(map[string]int)
+	for _, e := range httpRespEvents {
+		if code := responseStatus(e); code != "" {
+			statusMap[code]++
+		}
+	}
+	return statusMap
+}
+
+// responseStatus extracts the 3-digit status code from a response event. The
+// code is carried in Details.
+func responseStatus(e *events.Event) string {
+	if n, err := strconv.Atoi(strings.TrimSpace(e.Details)); err == nil && n >= 100 && n <= 599 {
+		return strconv.Itoa(n)
+	}
+	if e.Error >= 100 && e.Error <= 599 {
+		return strconv.Itoa(int(e.Error))
+	}
+	return ""
 }
 
 // httpTransportBreakdown tallies HTTP events by protocol label (HTTP, HTTPS,

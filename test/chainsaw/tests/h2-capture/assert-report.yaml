@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: h2-report
+  labels:
+    podtrace.io/kind: session-report
+(contains(data."report.txt", 'HTTP/2')): true

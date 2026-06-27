@@ -5,494 +5,305 @@
 #include "events.h"
 #include "helpers.h"
 #include "protocols.h"
-#include "hpack_huffman.h"
-
-#define MAX_H2_FIELDS 16
-#define H2_BUF_MASK   (H2_READ_LEN - 1)
-#define H2_VAL_MASK   (H2_VAL_MAX - 1)
 
 #ifdef PODTRACE_VMLINUX_FROM_BTF
 
-static __always_inline struct h2_scratch *h2_scratch_lookup(void)
+static __always_inline struct h2_hdr_scratch *h2_hdr_scratch_lookup(void)
 {
 	u32 zero = 0;
-	return bpf_map_lookup_elem(&h2_scratch_map, &zero);
+	return bpf_map_lookup_elem(&h2_hdr_scratch_map, &zero);
 }
 
-static __always_inline u8 h2b(const u8 *buf, u32 i)
+static __always_inline u32 h2_next_seq(u64 conn_id, u32 dir)
 {
-	return buf[i & H2_BUF_MASK];
-}
-
-static __always_inline void h2w(char *out, u32 i, char v)
-{
-	out[i & H2_VAL_MASK] = v;
-}
-
-static __always_inline char h2vr(const char *buf, u32 i)
-{
-	return buf[i & H2_VAL_MASK];
-}
-
-static __always_inline u32 hpack_int(const u8 *buf, u32 pos, u32 limit,
-				     u32 prefix, u32 *out)
-{
-	u32 mask = (1u << prefix) - 1;
-	u32 val = h2b(buf, pos) & mask;
-	if (val < mask) {
-		*out = val;
-		return 1;
+	struct h2_seq_key k = { .conn_id = conn_id, .dir = dir, ._pad = 0 };
+	u64 *cur = bpf_map_lookup_elem(&h2_seq, &k);
+	if (cur) {
+		u32 seq = (u32)*cur;
+		*cur = *cur + 1;
+		return seq;
 	}
-	u32 consumed = 1, m = 0;
-#pragma unroll
-	for (u32 k = 0; k < 4; k++) {
-		u32 p = pos + 1 + k;
-		if (p >= limit)
-			break;
-		u8 c = h2b(buf, p);
-		val += (u32)(c & 0x7f) << m;
-		m += 7;
-		consumed++;
-		if (!(c & 0x80))
-			break;
-	}
-	*out = val;
-	return consumed;
-}
-
-struct h2_str {
-	u32 start;
-	u32 len;
-	u32 next;
-	u8 huff;
-};
-
-static __always_inline struct h2_str h2_str_hdr(const u8 *buf, u32 pos, u32 limit)
-{
-	struct h2_str r = {};
-	r.huff = (h2b(buf, pos) & 0x80) ? 1 : 0;
-	u32 len = 0;
-	u32 consumed = hpack_int(buf, pos, limit, 7, &len);
-	r.len = len;
-	r.start = pos + consumed;
-	r.next = r.start + len;
-	return r;
-}
-
-static __always_inline int h2_name_class(u32 name_idx)
-{
-	if (name_idx == 2 || name_idx == 3)
-		return 1;
-	if (name_idx == 4 || name_idx == 5)
-		return 2;
-	if (name_idx >= 8 && name_idx <= 14)
-		return 3;
+	u64 one = 1;
+	bpf_map_update_elem(&h2_seq, &k, &one, BPF_ANY);
 	return 0;
 }
 
-static const u8 TP_NAME_HUFF[8] = { 0x4d, 0x83, 0x21, 0x6b, 0x1d, 0x85, 0xa9, 0x3f };
-
-static __always_inline int h2_name_is_traceparent(const u8 *buf, struct h2_str ns)
+static __always_inline int h2_looks_like_frames(void *base, u64 avail)
 {
-	if (ns.huff) {
-		if (ns.len != 8)
-			return 0;
-#pragma unroll
-		for (u32 k = 0; k < 8; k++)
-			if (h2b(buf, ns.start + k) != TP_NAME_HUFF[k])
-				return 0;
-		return 1;
-	}
-	if (ns.len != 11)
+	if (avail < HTTP2_FRAME_HDR)
 		return 0;
-	static const char tp[11] = { 't', 'r', 'a', 'c', 'e', 'p', 'a', 'r', 'e', 'n', 't' };
-#pragma unroll
-	for (u32 k = 0; k < 11; k++)
-		if (h2b(buf, ns.start + k) != (u8)tp[k])
-			return 0;
-	return 1;
+	u8 fh[HTTP2_FRAME_HDR];
+	if (bpf_probe_read_user(fh, sizeof(fh), base) != 0)
+		return 0;
+	if (fh[0] == 'P' && fh[1] == 'R' && fh[2] == 'I' && fh[3] == ' ')
+		return 1;
+	return fh[3] <= HTTP2_CONTINUATION;
 }
 
-static __always_inline char *h2_out_for_class(struct h2_scratch *s, int cls)
-{
-	if (cls == 1)
-		return s->method;
-	if (cls == 2)
-		return s->path;
-	if (cls == 3)
-		return s->status;
-	if (cls == 4)
-		return s->tpval;
-	return NULL;
-}
-
-struct h2_valctx {
-	u32 in_start;
-	u32 in_len;
-	int cls;
-	u8 huff;
+struct h2_raw_ctx {
+	void *base;
+	u64 conn_id;
+	u64 cgroup_id;
+	u64 ts;
+	u32 avail;
+	u32 pid;
+	u32 dir;
+	u8  transport;
 };
 
-static long hpack_val_cb(u32 i, void *vctx)
+static long h2_raw_frame_cb(u32 idx, void *vctx)
 {
-	struct h2_valctx *v = vctx;
-	if (i >= v->in_len)
-		return 1;
-	struct h2_scratch *s = h2_scratch_lookup();
+	struct h2_raw_ctx *c = vctx;
+	struct h2_hdr_scratch *s = h2_hdr_scratch_lookup();
 	if (!s)
 		return 1;
-	char *out = h2_out_for_class(s, v->cls);
-	if (!out)
+
+	u32 off = s->off;
+	if (off + HTTP2_FRAME_HDR > c->avail)
 		return 1;
 
-	u32 op = s->hop;
-	u8 ib = h2b(s->buf, v->in_start + i);
-	if (!v->huff) {
-		if (op < H2_VAL_MAX - 1) {
-			h2w(out, op, ib);
-			s->hop = op + 1;
-		}
-		return 0;
-	}
+	u8 fh[HTTP2_FRAME_HDR];
+	if (bpf_probe_read_user(fh, sizeof(fh), (u8 *)c->base + off) != 0)
+		return 1;
 
-	u8 state = s->hstate;
-	u8 nibs[2] = { (u8)(ib >> 4), (u8)(ib & 0xf) };
-#pragma unroll
-	for (u32 n = 0; n < 2; n++) {
-		struct huff_entry e =
-			huff_table[state & HUFF_STATE_MASK][nibs[n & 1] & 0xf];
-		if (e.flags & (HUFF_FLAG_FAIL | HUFF_FLAG_EOS)) {
-			s->hstate = state;
-			s->hop = op;
-			return 1;
-		}
-		if (e.flags & HUFF_FLAG_SYM) {
-			if (op < H2_VAL_MAX - 1) {
-				h2w(out, op, (char)e.sym);
-				op++;
+	u32 flen = ((u32)fh[0] << 16) | ((u32)fh[1] << 8) | (u32)fh[2];
+	u8  ftype = fh[3];
+	u8  fflags = fh[4];
+	u32 sid = (((u32)fh[5] << 24) | ((u32)fh[6] << 16) |
+		   ((u32)fh[7] << 8) | (u32)fh[8]) & 0x7fffffff;
+
+	if (ftype == HTTP2_HEADERS || ftype == HTTP2_CONTINUATION) {
+		u32 payload_off = off + HTTP2_FRAME_HDR;
+		u32 payload_len = flen;
+		u32 pad_len = 0;
+
+		if (ftype == HTTP2_HEADERS) {
+			if (fflags & HTTP2_FLAG_PADDED) {
+				u8 pb = 0;
+				if (bpf_probe_read_user(&pb, 1,
+							(u8 *)c->base + payload_off) == 0)
+					pad_len = pb;
+				payload_off += 1;
+				payload_len = payload_len >= 1 ? payload_len - 1 : 0;
+			}
+			if (fflags & HTTP2_FLAG_PRIORITY) {
+				payload_off += 5;
+				payload_len = payload_len >= 5 ? payload_len - 5 : 0;
 			}
 		}
-		state = e.next;
+		payload_len = payload_len >= pad_len ? payload_len - pad_len : 0;
+
+		u32 frag_len = payload_len > H2_HDR_FRAG_MAX ? H2_HDR_FRAG_MAX
+							     : payload_len;
+		if (frag_len > 0 &&
+		    bpf_probe_read_user(s->frag, frag_len,
+					(u8 *)c->base + payload_off) == 0) {
+			s->rec.conn_id = c->conn_id;
+			s->rec.timestamp = c->ts;
+			s->rec.cgroup_id = c->cgroup_id;
+			s->rec.pid = c->pid;
+			s->rec.seq = h2_next_seq(c->conn_id, c->dir);
+			s->rec.stream_id = sid;
+			s->rec.frag_len = (u16)frag_len;
+			s->rec.direction = (u8)c->dir;
+			s->rec.transport = c->transport;
+			s->rec.flags =
+				((fflags & HTTP2_FLAG_END_HEADERS) ? H2_HDR_FLAG_END_HEADERS : 0) |
+				((ftype == HTTP2_CONTINUATION) ? H2_HDR_FLAG_CONTINUATION : 0);
+			bpf_ringbuf_output(&h2_hdr_events, &s->rec,
+					   sizeof(s->rec) + frag_len, 0);
+			u8 one = 1;
+			bpf_map_update_elem(&h2_conns, &c->conn_id, &one, BPF_ANY);
+		}
 	}
-	s->hstate = state;
-	s->hop = op;
+
+	u32 next = off + HTTP2_FRAME_HDR + flen;
+	if (next <= off)
+		return 1;
+	s->off = next;
 	return 0;
 }
 
-static __always_inline void h2_decode_loc(struct h2_scratch *s, int cls)
+#define H2_MAX_FRAMES 16
+
+static __always_inline void h2_emit_raw(void *base, u64 avail, u64 conn_id,
+					u32 dir, u8 transport)
 {
-	struct h2_loc *loc = &s->wloc[cls & 7];
-	if (!loc->present)
+	if (!base || !h2_looks_like_frames(base, avail))
 		return;
-	struct h2_valctx v = {
-		.in_start = loc->start,
-		.in_len = loc->len,
-		.huff = loc->huff,
-		.cls = cls,
+
+	struct h2_hdr_scratch *s = h2_hdr_scratch_lookup();
+	if (!s)
+		return;
+
+	u32 start = 0;
+	if (avail >= HTTP2_PREFACE_LEN) {
+		u8 pf[4];
+		if (bpf_probe_read_user(pf, sizeof(pf), base) == 0 &&
+		    pf[0] == 'P' && pf[1] == 'R' && pf[2] == 'I' && pf[3] == ' ')
+			start = HTTP2_PREFACE_LEN;
+	}
+	s->off = start;
+
+	struct h2_raw_ctx c = {
+		.base = base,
+		.conn_id = conn_id,
+		.cgroup_id = bpf_get_current_cgroup_id(),
+		.ts = bpf_ktime_get_ns(),
+		.avail = avail < 0xffffffffULL ? (u32)avail : 0xffffffffU,
+		.pid = bpf_get_current_pid_tgid() >> 32,
+		.dir = dir,
+		.transport = transport,
 	};
-	s->hop = 0;
-	s->hstate = 0;
-	u32 cap = loc->len > H2_VAL_MAX ? H2_VAL_MAX : loc->len;
-	bpf_loop(cap, hpack_val_cb, &v, 0);
-	char *out = h2_out_for_class(s, cls);
-	if (out)
-		h2w(out, s->hop, '\0');
+	bpf_loop(H2_MAX_FRAMES, h2_raw_frame_cb, &c, 0);
 }
 
-static __always_inline void h2_set(char *out, const char *v, u32 n)
+static __always_inline int h2_start_looks_h2(void *base, u64 avail)
 {
-#pragma unroll
-	for (u32 k = 0; k < 12; k++) {
-		if (k >= n)
-			break;
-		h2w(out, k, v[k]);
-	}
-	h2w(out, n, '\0');
+	if (avail < HTTP2_FRAME_HDR)
+		return 0;
+	u8 fh[HTTP2_FRAME_HDR];
+	if (bpf_probe_read_user(fh, sizeof(fh), base) != 0)
+		return 0;
+	if (fh[0] == 'P' && fh[1] == 'R' && fh[2] == 'I' && fh[3] == ' ')
+		return 1;
+	return fh[3] <= HTTP2_CONTINUATION;
 }
 
-static __always_inline void h2_apply_indexed(struct h2_scratch *s,
-					     u8 want_status, u32 idx)
+static long h2_frames_cb(u32 idx, void *vctx)
 {
-	if (!want_status) {
-		if (idx == 2)
-			h2_set(s->method, "GET", 3);
-		else if (idx == 3)
-			h2_set(s->method, "POST", 4);
-		else if (idx == 4)
-			h2_set(s->path, "/", 1);
-		else if (idx == 5)
-			h2_set(s->path, "/index.html", 11);
-		return;
-	}
-	switch (idx) {
-	case 8:
-		h2_set(s->status, "200", 3);
-		break;
-	case 9:
-		h2_set(s->status, "204", 3);
-		break;
-	case 10:
-		h2_set(s->status, "206", 3);
-		break;
-	case 11:
-		h2_set(s->status, "304", 3);
-		break;
-	case 12:
-		h2_set(s->status, "400", 3);
-		break;
-	case 13:
-		h2_set(s->status, "404", 3);
-		break;
-	case 14:
-		h2_set(s->status, "500", 3);
-		break;
-	}
-}
-
-struct h2_walk_ctx {
-	u32 limit;
-	u8 want_status;
-};
-
-static __always_inline void h2_record_loc(struct h2_scratch *s, int cls,
-					  struct h2_str vs)
-{
-	struct h2_loc *loc = &s->wloc[cls & 7];
-	if (loc->present)
-		return;
-	loc->start = vs.start;
-	loc->len = vs.len;
-	loc->huff = vs.huff;
-	loc->present = 1;
-}
-
-static long h2_field_cb(u32 idx, void *vctx)
-{
-	struct h2_walk_ctx *c = vctx;
-	struct h2_scratch *s = h2_scratch_lookup();
+	struct h2_raw_ctx *c = vctx;
+	struct h2_hdr_scratch *s = h2_hdr_scratch_lookup();
 	if (!s)
 		return 1;
-
-	u32 pos = s->wpos;
-	if (pos + 1 > c->limit || pos + 1 > H2_READ_LEN)
+	struct h2_seq_key fk = { .conn_id = c->conn_id, .dir = c->dir };
+	struct h2_frame_state *fs = bpf_map_lookup_elem(&h2_frame_state, &fk);
+	if (!fs)
 		return 1;
 
-	u8 b = h2b(s->buf, pos);
+	u32 off = s->off;
+	if (off >= c->avail)
+		return 1;
 
-	if (b & 0x80) {
-		u32 val = 0;
-		pos += hpack_int(s->buf, pos, c->limit, 7, &val);
-		h2_apply_indexed(s, c->want_status, val);
-		s->wpos = pos;
+	if (fs->remaining > 0) {
+		u32 avail_here = c->avail - off;
+		u32 take = avail_here < fs->remaining ? avail_here : fs->remaining;
+		u8 type = fs->type;
+		if (type == HTTP2_HEADERS || type == HTTP2_CONTINUATION) {
+			u32 frag = take > H2_HDR_FRAG_MAX ? H2_HDR_FRAG_MAX : take;
+			if (frag > 0 &&
+			    bpf_probe_read_user(s->frag, frag, (u8 *)c->base + off) == 0) {
+				u8 completes = (fs->remaining - frag) == 0;
+				s->rec.conn_id = c->conn_id;
+				s->rec.timestamp = c->ts;
+				s->rec.cgroup_id = c->cgroup_id;
+				s->rec.pid = c->pid;
+				s->rec.seq = h2_next_seq(c->conn_id, c->dir);
+				s->rec.stream_id = fs->stream_id;
+				s->rec.frag_len = (u16)frag;
+				s->rec.direction = (u8)c->dir;
+				s->rec.transport = c->transport;
+				s->rec.flags =
+					((completes && (fs->flags & HTTP2_FLAG_END_HEADERS)) ? H2_HDR_FLAG_END_HEADERS : 0) |
+					((type == HTTP2_CONTINUATION) ? H2_HDR_FLAG_CONTINUATION : 0);
+				bpf_ringbuf_output(&h2_hdr_events, &s->rec,
+						   sizeof(s->rec) + frag, 0);
+			}
+			off += frag;
+			fs->remaining -= frag;
+		} else {
+			off += take;
+			fs->remaining -= take;
+		}
+		s->off = off;
 		return 0;
 	}
 
-	u32 prefix;
-	if (b & 0x40) {
-		prefix = 6;
-	} else if (b & 0x20) {
-		u32 val = 0;
-		pos += hpack_int(s->buf, pos, c->limit, 5, &val);
-		s->wpos = pos;
-		return 0;
-	} else {
-		prefix = 4;
-	}
+	if (off + HTTP2_FRAME_HDR > c->avail)
+		return 1;
+	u8 fh[HTTP2_FRAME_HDR];
+	if (bpf_probe_read_user(fh, sizeof(fh), (u8 *)c->base + off) != 0)
+		return 1;
+	u32 flen = ((u32)fh[0] << 16) | ((u32)fh[1] << 8) | (u32)fh[2];
+	u8 type = fh[3];
+	u8 flags = fh[4];
+	u32 sid = (((u32)fh[5] << 24) | ((u32)fh[6] << 16) |
+		   ((u32)fh[7] << 8) | (u32)fh[8]) & 0x7fffffff;
+	off += HTTP2_FRAME_HDR;
 
-	u32 name_idx = 0;
-	pos += hpack_int(s->buf, pos, c->limit, prefix, &name_idx);
-
-	int cls;
-	if (name_idx == 0) {
-		struct h2_str ns = h2_str_hdr(s->buf, pos, c->limit);
-		pos = ns.next;
-		cls = h2_name_is_traceparent(s->buf, ns) ? 4 : 0;
-	} else {
-		cls = h2_name_class(name_idx);
+	if (type == HTTP2_HEADERS) {
+		if ((flags & HTTP2_FLAG_PADDED) && off < c->avail) {
+			u8 pb = 0;
+			if (bpf_probe_read_user(&pb, 1, (u8 *)c->base + off) == 0) {
+				off += 1;
+				flen = flen >= 1 ? flen - 1 : 0;
+				flen = flen >= pb ? flen - pb : 0;
+			}
+		}
+		if (flags & HTTP2_FLAG_PRIORITY) {
+			off += 5;
+			flen = flen >= 5 ? flen - 5 : 0;
+		}
 	}
-
-	struct h2_str vs = h2_str_hdr(s->buf, pos, c->limit);
-	if (c->want_status) {
-		if (cls == 3)
-			h2_record_loc(s, cls, vs);
-	} else if (cls == 1 || cls == 2 || cls == 4) {
-		h2_record_loc(s, cls, vs);
-	}
-	s->wpos = vs.next;
+	fs->type = type;
+	fs->flags = flags;
+	fs->stream_id = sid;
+	fs->remaining = flen;
+	s->off = off;
 	return 0;
 }
 
-static __always_inline int h2_frame_at(const u8 *buf, u32 buflen, u32 o,
-				       u32 *plen, u8 *type, u8 *flags)
+#define H2_MAX_FRAME_STEPS 48
+
+static __always_inline void h2_emit_frames(void *base, u64 avail, u64 conn,
+					   u32 dir, u8 transport)
 {
-	if (o + HTTP2_FRAME_HDR > buflen || o + 4 > H2_READ_LEN)
-		return 0;
-	*plen = ((u32)h2b(buf, o) << 16) | ((u32)h2b(buf, o + 1) << 8) |
-		(u32)h2b(buf, o + 2);
-	*type = h2b(buf, o + 3);
-	*flags = h2b(buf, o + 4);
-	return 1;
-}
-
-static __always_inline int h2_find_headers(const u8 *buf, u32 buflen,
-					   u32 *poff, u32 *plen)
-{
-	u32 len = 0, hdr_off = 0, flags = 0;
-	u8 ty = 0, fl = 0;
-
-	if (h2_frame_at(buf, buflen, 0, &len, &ty, &fl) && ty == HTTP2_HEADERS) {
-		hdr_off = HTTP2_FRAME_HDR;
-		flags = fl;
-	} else if (buflen >= 4 && buf[0] == 'P' && buf[1] == 'R' &&
-		   buf[2] == 'I' && buf[3] == ' ' &&
-		   h2_frame_at(buf, buflen, HTTP2_PREFACE_LEN, &len, &ty, &fl) &&
-		   ty == HTTP2_HEADERS) {
-		hdr_off = HTTP2_PREFACE_LEN + HTTP2_FRAME_HDR;
-		flags = fl;
-	} else {
-		return 0;
-	}
-
-	if (flags & 0x08)
-		hdr_off += 1;
-	if (flags & 0x20)
-		hdr_off += 5;
-
-	*poff = hdr_off;
-	*plen = len;
-	return 1;
-}
-
-static __always_inline int h2_parse(struct h2_scratch *s, u32 rlen,
-				    u8 want_status)
-{
-	u32 poff = 0, plen = 0;
-	if (!h2_find_headers(s->buf, rlen, &poff, &plen))
-		return 0;
-
-	s->method[0] = '\0';
-	s->path[0] = '\0';
-	s->status[0] = '\0';
-	s->tpval[0] = '\0';
-	__builtin_memset(s->wloc, 0, sizeof(s->wloc));
-	s->wpos = poff;
-
-	u32 limit = poff + plen;
-	if (limit > rlen)
-		limit = rlen;
-	if (limit > H2_READ_LEN)
-		limit = H2_READ_LEN;
-
-	struct h2_walk_ctx c = {
-		.limit = limit,
-		.want_status = want_status,
-	};
-	bpf_loop(MAX_H2_FIELDS, h2_field_cb, &c, 0);
-
-	if (want_status) {
-		h2_decode_loc(s, 3);
-	} else {
-		h2_decode_loc(s, 1);
-		h2_decode_loc(s, 2);
-		h2_decode_loc(s, 4);
-	}
-	return 1;
-}
-
-static __always_inline void h2_target_write(struct event *e, u32 i, char v)
-{
-	e->target[i & (MAX_STRING_LEN - 1)] = v;
-}
-
-static __always_inline void h2_emit_request_user(void *ctx, void *base,
-						 u64 avail, u8 transport)
-{
-	if (!base || avail < HTTP2_FRAME_HDR)
+	if (!base || avail == 0)
 		return;
 
-	struct h2_scratch *s = h2_scratch_lookup();
+	u8 *known = bpf_map_lookup_elem(&h2_conns, &conn);
+	if (!known) {
+		if (!h2_start_looks_h2(base, avail))
+			return;
+		u8 one = 1;
+		bpf_map_update_elem(&h2_conns, &conn, &one, BPF_ANY);
+	}
+
+	struct h2_seq_key fk = { .conn_id = conn, .dir = dir };
+	struct h2_frame_state *fs = bpf_map_lookup_elem(&h2_frame_state, &fk);
+	if (!fs) {
+		struct h2_frame_state init = {};
+		bpf_map_update_elem(&h2_frame_state, &fk, &init, BPF_ANY);
+		fs = bpf_map_lookup_elem(&h2_frame_state, &fk);
+		if (!fs)
+			return;
+	}
+
+	struct h2_hdr_scratch *s = h2_hdr_scratch_lookup();
 	if (!s)
 		return;
 
-	u32 rlen = avail < H2_READ_LEN ? (u32)avail : H2_READ_LEN;
-	if (bpf_probe_read_user(s->buf, rlen, base) != 0)
-		return;
-
-	if (!h2_parse(s, rlen, 0))
-		return;
-	if (h2vr(s->path, 0) != '/')
-		return;
-
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
-	u64 now = bpf_ktime_get_ns();
-
-	struct event *e = get_event_buf();
-	if (!e)
-		return;
-
-	u32 ti = 0;
-#pragma unroll
-	for (u32 k = 0; k < 8; k++) {
-		char mc = h2vr(s->method, k);
-		if (!mc)
-			break;
-		h2_target_write(e, ti, mc);
-		ti++;
+	u32 start = 0;
+	if (!fs->preface_seen && fs->remaining == 0 && avail >= HTTP2_PREFACE_LEN) {
+		u8 pf[4];
+		if (bpf_probe_read_user(pf, sizeof(pf), base) == 0 &&
+		    pf[0] == 'P' && pf[1] == 'R' && pf[2] == 'I' && pf[3] == ' ')
+			start = HTTP2_PREFACE_LEN;
 	}
-	if (ti == 0) {
-		h2_target_write(e, 0, 'G');
-		h2_target_write(e, 1, 'E');
-		h2_target_write(e, 2, 'T');
-		ti = 3;
-	}
-	h2_target_write(e, ti, ' ');
-	ti++;
-	for (u32 k = 0; k < H2_VAL_MAX; k++) {
-		char pc = h2vr(s->path, k);
-		if (!pc || ti >= MAX_STRING_LEN - 1)
-			break;
-		h2_target_write(e, ti, pc);
-		ti++;
-	}
-	h2_target_write(e, ti, '\0');
+	fs->preface_seen = 1;
+	s->off = start;
 
-	struct http_req req = {};
-	req.start_ns = now;
-	bpf_probe_read_kernel_str(req.endpoint, sizeof(req.endpoint), e->target);
-	bpf_map_update_elem(&h2_reqs, &key, &req, BPF_ANY);
-
-	e->timestamp = now;
-	e->pid = pid;
-	e->type = EVENT_HTTP_REQ;
-	e->latency_ns = 0;
-	e->error = 0;
-	e->bytes = 0;
-	e->tcp_state = transport;
-
-	if (h2vr(s->tpval, 0) != '\0') {
-		static const char pfx[13] = { 't', 'r', 'a', 'c', 'e', 'p', 'a',
-					      'r', 'e', 'n', 't', ':', ' ' };
-		u32 di = 0;
-#pragma unroll
-		for (u32 k = 0; k < 13; k++) {
-			e->details[di & (MAX_STRING_LEN - 1)] = pfx[k];
-			di++;
-		}
-		for (u32 k = 0; k < H2_VAL_MAX; k++) {
-			char tc = h2vr(s->tpval, k);
-			if (!tc || di >= MAX_STRING_LEN - 1)
-				break;
-			e->details[di & (MAX_STRING_LEN - 1)] = tc;
-			di++;
-		}
-		e->details[di & (MAX_STRING_LEN - 1)] = '\0';
-	} else {
-		e->details[0] = '\0';
-	}
-	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	struct h2_raw_ctx c = {
+		.base = base,
+		.conn_id = conn,
+		.cgroup_id = bpf_get_current_cgroup_id(),
+		.ts = bpf_ktime_get_ns(),
+		.avail = avail < 0xffffffffULL ? (u32)avail : 0xffffffffU,
+		.pid = bpf_get_current_pid_tgid() >> 32,
+		.dir = dir,
+		.transport = transport,
+	};
+	bpf_loop(H2_MAX_FRAME_STEPS, h2_frames_cb, &c, 0);
 }
 
 SEC("kprobe/tcp_sendmsg")
@@ -501,10 +312,11 @@ int kprobe_h2_tcp_sendmsg(struct pt_regs *ctx)
 	if (!http_should_trace())
 		return 0;
 
+	u64 conn = (u64)PT_REGS_PARM1(ctx);
 	struct msghdr *msg = (struct msghdr *)PT_REGS_PARM2(ctx);
 	u64 avail = 0;
 	void *base = msghdr_user_base(msg, &avail);
-	h2_emit_request_user(ctx, base, avail, HTTP_TRANSPORT_H2C);
+	h2_emit_raw(base, avail, conn, H2_DIR_EGRESS, HTTP_TRANSPORT_H2C);
 	return 0;
 }
 
@@ -514,21 +326,21 @@ int kprobe_h2_tcp_recvmsg(struct pt_regs *ctx)
 	if (!http_should_trace())
 		return 0;
 
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
-
-	if (!bpf_map_lookup_elem(&h2_reqs, &key))
-		return 0;
-
 	struct msghdr *msg = (struct msghdr *)PT_REGS_PARM2(ctx);
 	u64 avail = 0;
 	void *base = msghdr_user_base(msg, &avail);
 	if (!base)
 		return 0;
 
-	u64 base_val = (u64)base;
-	bpf_map_update_elem(&h2_recv_base, &key, &base_val, BPF_ANY);
+	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 tid = (u32)bpf_get_current_pid_tgid();
+	u64 key = get_key(pid, tid);
+
+	struct h2_recv_info info = {
+		.base = (u64)base,
+		.conn_id = (u64)PT_REGS_PARM1(ctx),
+	};
+	bpf_map_update_elem(&h2_recv_base, &key, &info, BPF_ANY);
 	return 0;
 }
 
@@ -539,56 +351,45 @@ int kretprobe_h2_tcp_recvmsg(struct pt_regs *ctx)
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_key(pid, tid);
 
-	u64 *base_ptr = bpf_map_lookup_elem(&h2_recv_base, &key);
-	if (!base_ptr)
+	struct h2_recv_info *info = bpf_map_lookup_elem(&h2_recv_base, &key);
+	if (!info)
 		return 0;
-	void *base = (void *)*base_ptr;
+	void *base = (void *)info->base;
+	u64 conn = info->conn_id;
 	bpf_map_delete_elem(&h2_recv_base, &key);
 
 	s64 ret = PT_REGS_RC(ctx);
 	if (ret <= 0)
 		return 0;
 
-	struct http_req *req = bpf_map_lookup_elem(&h2_reqs, &key);
-	if (!req)
+	h2_emit_frames(base, (u64)ret, conn, H2_DIR_INGRESS, HTTP_TRANSPORT_H2C);
+	return 0;
+}
+
+SEC("kprobe/tcp_close")
+int kprobe_h2_tcp_close(struct pt_regs *ctx)
+{
+	if (!http_should_trace())
 		return 0;
 
-	struct h2_scratch *s = h2_scratch_lookup();
+	u64 conn = (u64)PT_REGS_PARM1(ctx);
+
+	struct h2_seq_key ke = { .conn_id = conn, .dir = H2_DIR_EGRESS };
+	struct h2_seq_key ki = { .conn_id = conn, .dir = H2_DIR_INGRESS };
+	bpf_map_delete_elem(&h2_seq, &ke);
+	bpf_map_delete_elem(&h2_seq, &ki);
+	bpf_map_delete_elem(&h2_frame_state, &ke);
+	bpf_map_delete_elem(&h2_frame_state, &ki);
+	bpf_map_delete_elem(&h2_conns, &conn);
+
+	struct h2_hdr_scratch *s = h2_hdr_scratch_lookup();
 	if (!s)
 		return 0;
-
-	u32 rlen = (u64)ret < H2_READ_LEN ? (u32)ret : H2_READ_LEN;
-	if (bpf_probe_read_user(s->buf, rlen, base) != 0)
-		return 0;
-
-	if (!h2_parse(s, rlen, 1) || h2vr(s->status, 0) == '\0')
-		return 0;
-
-	u64 latency_ns = calc_latency(req->start_ns);
-	s32 status_num = 0;
-#pragma unroll
-	for (u32 k = 0; k < 3; k++) {
-		char d = h2vr(s->status, k);
-		if (d < '0' || d > '9')
-			break;
-		status_num = status_num * 10 + (d - '0');
-	}
-
-	struct event *e = get_event_buf();
-	if (e) {
-		e->timestamp = bpf_ktime_get_ns();
-		e->pid = pid;
-		e->type = EVENT_HTTP_RESP;
-		e->latency_ns = latency_ns;
-		e->error = status_num >= 500 ? status_num : 0;
-		e->bytes = (u64)ret;
-		e->tcp_state = HTTP_TRANSPORT_H2C;
-		bpf_probe_read_kernel_str(e->target, sizeof(e->target), req->endpoint);
-		bpf_probe_read_kernel_str(e->details, sizeof(e->details), s->status);
-		capture_user_stack(ctx, pid, tid, e);
-		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
-	}
-	bpf_map_delete_elem(&h2_reqs, &key);
+	__builtin_memset(&s->rec, 0, sizeof(s->rec));
+	s->rec.conn_id = conn;
+	s->rec.timestamp = bpf_ktime_get_ns();
+	s->rec.flags = H2_HDR_FLAG_CLOSE;
+	bpf_ringbuf_output(&h2_hdr_events, &s->rec, sizeof(s->rec), 0);
 	return 0;
 }
 
@@ -602,5 +403,8 @@ int kprobe_h2_tcp_recvmsg(struct pt_regs *ctx) { return 0; }
 
 SEC("kretprobe/tcp_recvmsg")
 int kretprobe_h2_tcp_recvmsg(struct pt_regs *ctx) { return 0; }
+
+SEC("kprobe/tcp_close")
+int kprobe_h2_tcp_close(struct pt_regs *ctx) { return 0; }
 
 #endif
