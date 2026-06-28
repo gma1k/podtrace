@@ -424,7 +424,7 @@ struct {
 
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
-	__uint(max_entries, 512 * 1024);
+	__uint(max_entries, 2 * 1024 * 1024);
 } h2_hdr_events SEC(".maps");
 
 struct h2_hdr_scratch {
