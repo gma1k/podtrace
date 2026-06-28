@@ -87,6 +87,7 @@ static long h2_frames_cb(u32 idx, void *vctx)
 				s->rec.flags =
 					((completes && (fs->flags & HTTP2_FLAG_END_HEADERS)) ? H2_HDR_FLAG_END_HEADERS : 0) |
 					((type == HTTP2_CONTINUATION) ? H2_HDR_FLAG_CONTINUATION : 0);
+				fill_h2_record_peer(&s->rec, c->dir);
 				bpf_ringbuf_output(&h2_hdr_events, &s->rec,
 						   sizeof(s->rec) + frag, 0);
 			}

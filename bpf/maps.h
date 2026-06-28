@@ -161,6 +161,23 @@ struct {
 	__type(value, char[MAX_STRING_LEN]);
 } tcp_target SEC(".maps");
 
+struct tcp_peer {
+	u32 saddr;
+	u32 daddr;
+	u16 sport;
+	u16 dport;
+	u16 family;
+	u16 _pad;
+	u8  saddr6[16];
+	u8  daddr6[16];
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 1024);
+	__type(key, struct pair_key);
+	__type(value, struct tcp_peer);
+} tcp_peer_stash SEC(".maps");
+
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 1024);

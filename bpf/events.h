@@ -67,6 +67,14 @@ struct event {
 	u8  dns_transport;
 	u8  _pad3[3];
 	u8  dns_server_ip6[16];
+	u32 peer_saddr;
+	u32 peer_daddr;
+	u16 peer_sport;
+	u16 peer_dport;
+	u8  peer_family;
+	u8  _pad4[3];
+	u8  peer_saddr6[16];
+	u8  peer_daddr6[16];
 };
 
 #define H2_HDR_FRAG_MAX 1024
@@ -89,6 +97,14 @@ struct h2_hdr_record {
 	u8  transport;
 	u8  flags;
 	u8  _pad[7];
+	u32 peer_saddr;
+	u32 peer_daddr;
+	u16 peer_sport;
+	u16 peer_dport;
+	u8  peer_family;
+	u8  _pad5[3];
+	u8  peer_saddr6[16];
+	u8  peer_daddr6[16];
 };
 
 #endif
