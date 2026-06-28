@@ -358,6 +358,34 @@ func buildPeerMap(httpEvents []*events.Event) map[string]int {
 	return m
 }
 
+// GenerateHTTP3Section reports observed HTTP/3 (QUIC) connections by peer.
+func GenerateHTTP3Section(d Diagnostician, duration time.Duration) string {
+	h3 := d.FilterEvents(events.EventHTTP3)
+	if len(h3) == 0 {
+		return ""
+	}
+	report := "HTTP/3 (QUIC) Connections:\n"
+	report += fmt.Sprintf("  Connections: %d (%.1f/sec)\n", len(h3), d.CalculateRate(len(h3), duration))
+	peerMap := make(map[string]int, len(h3))
+	sniMap := make(map[string]int)
+	for _, e := range h3 {
+		if e.Target != "" {
+			peerMap[e.Target]++
+		}
+		if name, ok := strings.CutPrefix(e.Details, "sni: "); ok && name != "" {
+			sniMap[name]++
+		}
+	}
+	if len(peerMap) > 0 {
+		report += formatter.TopItemsWithRate(peerMap, config.TopURLsLimit, "h3 peers", "connections", duration)
+	}
+	if len(sniMap) > 0 {
+		report += formatter.TopItemsWithRate(sniMap, config.TopURLsLimit, "h3 server names (SNI)", "connections", duration)
+	}
+	report += "\n"
+	return report
+}
+
 func analyzeHTTPEvents(allHTTP []*events.Event) ([]float64, float64, uint64) {
 	var latencies []float64
 	var totalLatency float64

@@ -217,6 +217,7 @@ func (d *Diagnostician) GenerateReportWithContext(ctx context.Context) string {
 	result += report.GenerateFileSystemSection(d, duration)
 	result += report.GenerateUDPSection(d, duration)
 	result += report.GenerateHTTPSection(d, duration)
+	result += report.GenerateHTTP3Section(d, duration)
 	result += report.GenerateCPUSection(d, duration)
 	result += report.GenerateTCPStateSection(d, duration)
 	result += report.GenerateMemorySection(d, duration)

@@ -46,7 +46,7 @@ func GenerateCPUUsageReport(allEvents []*events.Event, duration time.Duration) s
 	}
 
 	if len(pidCPUTimes) == 0 && len(pidActivity) > 0 {
-		report += "  Process Activity Ranking (event count — CPU samples unavailable for short-lived processes):\n"
+		report += "  Process Activity Ranking:\n"
 		limit := config.TopProcessesLimit
 		if limit > len(pidActivity) {
 			limit = len(pidActivity)

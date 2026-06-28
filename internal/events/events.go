@@ -80,17 +80,18 @@ const (
 	EventPoolAcquire
 	EventPoolRelease
 	EventPoolExhausted
-	EventUnlink       // 29
-	EventRename       // 30
-	EventRedisCmd     // 31: Redis command (hiredis)
-	EventMemcachedCmd // 32: Memcached operation (libmemcached)
-	EventFastCGIReq   // 33: FastCGI request begin (BTF-only)
-	EventFastCGIResp  // 34: FastCGI request complete (BTF-only)
-	EventGRPCMethod   // 35: gRPC method call (BTF-only h2c)
-	EventKafkaProduce // 36: Kafka produce (librdkafka)
-	EventKafkaFetch   // 37: Kafka consumer_poll result (librdkafka)
-	EventDNSQuery     // 38: DNS query seen on egress
-	EventAFALG        // 39: AF_ALG crypto socket bind
+	EventUnlink
+	EventRename
+	EventRedisCmd
+	EventMemcachedCmd
+	EventFastCGIReq
+	EventFastCGIResp
+	EventGRPCMethod
+	EventKafkaProduce
+	EventKafkaFetch
+	EventDNSQuery
+	EventAFALG
+	EventHTTP3
 )
 
 type Event struct {
@@ -128,11 +129,7 @@ func (e *Event) Latency() time.Duration {
 	return time.Duration(safeconv.Uint64ToInt64(e.LatencyNS)) * time.Nanosecond
 }
 
-// TimestampTime returns the event's timestamp as wall-clock time. Timestamp
-// holds a raw bpf_ktime_get_ns() value (nanoseconds since boot,
-// CLOCK_MONOTONIC), so it must be anchored to the wall clock before being
-// formatted or compared against time.Now(). Deltas between two events can use
-// Timestamp directly; absolute times must go through this method.
+// TimestampTime returns the event's timestamp as wall-clock time.
 func (e *Event) TimestampTime() time.Time {
 	return clock.BPFTimestampToWall(e.Timestamp)
 }
@@ -217,6 +214,8 @@ func (e *Event) TypeString() string {
 		return "KAFKA"
 	case EventAFALG:
 		return "CRYPTO"
+	case EventHTTP3:
+		return "HTTP/3"
 	default:
 		return "UNKNOWN"
 	}

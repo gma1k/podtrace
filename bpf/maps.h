@@ -178,6 +178,38 @@ struct {
 	__type(value, struct tcp_peer);
 } tcp_peer_stash SEC(".maps");
 
+struct quic_flow_key {
+	u64 cgroup_id;
+	u8  daddr6[16];
+	u16 dport;
+	u16 _pad;
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 4096);
+	__type(key, struct quic_flow_key);
+	__type(value, u8);
+} quic_seen SEC(".maps");
+
+#define QUIC_PKT_CAP 1500
+struct quic_initial_record {
+	u64 timestamp;
+	u64 cgroup_id;
+	u32 pid;
+	u8  family;
+	u8  _pad;
+	u16 dport;
+	u8  daddr6[16];
+	u16 pktlen;
+	u16 _pad2;
+	char comm[COMM_LEN];
+	u8  pkt[QUIC_PKT_CAP];
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_RINGBUF);
+	__uint(max_entries, 512 * 1024);
+} quic_initial_events SEC(".maps");
+
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 1024);
