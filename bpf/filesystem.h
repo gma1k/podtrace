@@ -6,15 +6,6 @@
 #include "common.h"
 #include "maps.h"
 
-/*
- * get_path_str_from_file — extract the filename from a kernel struct file *.
- *
- * When built with full kernel BTF (PODTRACE_VMLINUX_FROM_BTF), uses BPF CO-RE
- * to read file->f_path.dentry->d_name.name — gives at minimum the basename.
- * Full path traversal is not verifier-safe from kprobe context without BTF.
- *
- * Without BTF (minimal vmlinux.h fallback): returns 0 / empty string.
- */
 static inline int get_path_str_from_file(struct file *file, char *out_buf, u32 buf_size)
 {
     if (!file || !out_buf || buf_size < 2) {

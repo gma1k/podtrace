@@ -2403,3 +2403,29 @@ func TestFindLibcPathWithPID_NonZeroPID(t *testing.T) {
 	got := FindLibcPathWithPID("", 99999)
 	_ = got
 }
+
+// TestExecutableExportsSSL covers the negative paths of the static-OpenSSL
+// detection used to attach SSL_* uprobes to executables (e.g. the Node.js
+// binary). The positive path is exercised end-to-end against a real Node
+// workload in the chainsaw suite.
+func TestExecutableExportsSSL(t *testing.T) {
+	if executableExportsSSL("/nonexistent/binary") {
+		t.Error("expected false for a nonexistent path")
+	}
+	// The test binary itself is Go-only and does not export SSL_write.
+	self, err := os.Executable()
+	if err == nil && executableExportsSSL(self) {
+		t.Error("expected false for the Go test binary (no SSL_write export)")
+	}
+}
+
+func TestTLSExecutableForPID(t *testing.T) {
+	if got := tlsExecutableForPID(0); got != "" {
+		t.Errorf("tlsExecutableForPID(0) = %q, want empty", got)
+	}
+	// A live process whose executable does not bundle OpenSSL (this test
+	// binary) must not be offered as a TLS target.
+	if got := tlsExecutableForPID(uint32(os.Getpid())); got != "" {
+		t.Errorf("tlsExecutableForPID(self) = %q, want empty for a non-SSL binary", got)
+	}
+}

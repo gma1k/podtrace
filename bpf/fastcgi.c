@@ -1,27 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0
-/*
- * FastCGI / PHP-FPM tracing via unix domain socket kprobes.
- *
- * Requires PODTRACE_VMLINUX_FROM_BTF for iov_iter access.
- * Without BTF, all probes are no-ops (return 0 immediately).
- *
- * FastCGI protocol overview (per spec):
- *   Record header (8 bytes):
- *     [0] version   (always 1)
- *     [1] type      (1=BEGIN_REQUEST, 3=END_REQUEST, 4=PARAMS, 5=STDIN, 6=STDOUT)
- *     [2-3] requestId (big-endian u16)
- *     [4-5] contentLength (big-endian u16)
- *     [6]   paddingLength
- *     [7]   reserved
- *
- * From the php-fpm worker's perspective:
- *   - kretprobe/unix_stream_recvmsg: php-fpm receives PARAMS from nginx → extract URI/method
- *   - kprobe/unix_stream_sendmsg: php-fpm sends END_REQUEST back → emit response event
- *
- * Field mapping:
- *   EVENT_FASTCGI_REQUEST: target=REQUEST_URI, details=REQUEST_METHOD
- *   EVENT_FASTCGI_RESPONSE: target=REQUEST_URI, error=appStatus, latency_ns=request latency
- */
 
 #include "common.h"
 #include "maps.h"
@@ -31,17 +8,6 @@
 
 #ifdef PODTRACE_VMLINUX_FROM_BTF
 
-/* msghdr_user_base / read_msghdr_data now live in protocols.h, shared with
- * the gRPC inspector. */
-
-/* -----------------------------------------------------------------------
- * kprobe/unix_stream_recvmsg — save msghdr* for kretprobe use
- * -----------------------------------------------------------------------
- * Called when a unix socket read is initiated.
- * Signature: int unix_stream_recvmsg(struct socket *sock, struct msghdr *msg,
- *                                     size_t size, int flags)
- * PARM2 = struct msghdr *
- */
 SEC("kprobe/unix_stream_recvmsg")
 int kprobe_unix_stream_recvmsg(struct pt_regs *ctx)
 {
@@ -69,27 +35,6 @@ int kprobe_unix_stream_recvmsg(struct pt_regs *ctx)
 	return 0;
 }
 
-/* -----------------------------------------------------------------------
- * kretprobe/unix_stream_recvmsg -- parse FastCGI PARAMS record
- * -----------------------------------------------------------------------
- * Three layouts, all handled below:
- *
- *   A. PARAMS header + body in one recvmsg buffer.
- *      Detected by hdr[1]=FCGI_PARAMS at buffer[0] AND rc_bytes > 8.
- *      Scan params at offset 8.
- *
- *   B. BEGIN_REQUEST(16) + PARAMS header + body in one recvmsg.
- *      Detected by hdr[1]=FCGI_BEGIN_REQUEST AND hdr[17]=FCGI_PARAMS
- *      AND rc_bytes >= 24+content. Scan params at offset 24.
- *
- *   C. PHP-FPM / libfcgi split reads:
- *        recvmsg #1 = 8 bytes:  PARAMS header alone -- stash state.
- *        recvmsg #2 = N bytes:  PARAMS body -- replay state, scan
- *                               buffer at offset 0, emit, drop state.
- *      Stale state is bounded by the LRU cap on `fastcgi_pending`
- *      (1024 entries) so an aborted request can't pin memory; a
- *      stray non-matching second read just drops the entry.
- */
 SEC("kretprobe/unix_stream_recvmsg")
 int kretprobe_unix_stream_recvmsg(struct pt_regs *ctx)
 {
@@ -168,10 +113,6 @@ emit_params: ;
 	u8 params[FCGI_PARAMS_SCAN_LEN] = {};
 	u32 scan_len = content_len < FCGI_PARAMS_SCAN_LEN ? content_len : FCGI_PARAMS_SCAN_LEN;
 
-	/* params_buf_offset already accounts for whichever layout fired:
-	 *   A (PARAMS at 0)         -> offset = 8
-	 *   B (BEGIN+PARAMS at 16)  -> offset = 24
-	 *   C (body alone)          -> offset = 0  */
 	u8 *params_base = (u8 *)user_ptr + params_buf_offset;
 	if (bpf_probe_read_user(params, scan_len & 0xFF, params_base) != 0)
 		return 0;
@@ -183,15 +124,11 @@ emit_params: ;
 		if (found_uri && found_method)
 			break;
 
-		/* REQUEST_URI (11 bytes) */
 		if (!found_uri && params[i] == 'R' && i + 11 < FCGI_PARAMS_SCAN_LEN) {
 			if (params[i+1] == 'E' && params[i+2] == 'Q' && params[i+3] == 'U' &&
 			    params[i+4] == 'E' && params[i+5] == 'S' && params[i+6] == 'T' &&
 			    params[i+7] == '_' && params[i+8] == 'U' && params[i+9] == 'R' &&
 			    params[i+10] == 'I') {
-				/* Indices are masked to keep every params[] offset provably
-				 * in-bounds for the verifier (the guards already bound them
-				 * logically; 128 is a power of two so the mask is free). */
 				u32 vstart = (i + 11) & (FCGI_PARAMS_SCAN_LEN - 1);
 				if (params[vstart] == '/') {
 					u32 copy = FCGI_PARAMS_SCAN_LEN - vstart;
@@ -210,7 +147,6 @@ emit_params: ;
 			}
 		}
 
-		/* REQUEST_METHOD (14 bytes) */
 		if (!found_method && params[i] == 'R' && i + 14 < FCGI_PARAMS_SCAN_LEN) {
 			if (params[i+1] == 'E' && params[i+2] == 'Q' && params[i+3] == 'U' &&
 			    params[i+4] == 'E' && params[i+5] == 'S' && params[i+6] == 'T' &&
@@ -243,14 +179,12 @@ emit_params: ;
 	if (!found_uri) e->target[0] = '\0';
 	if (!found_method) e->details[0] = '\0';
 
-	/* Store request state for END_REQUEST correlation */
 	struct fastcgi_req req = {};
 	req.start_ns = bpf_ktime_get_ns();
 	bpf_probe_read_kernel_str(req.uri, sizeof(req.uri), e->target);
 	bpf_probe_read_kernel_str(req.method, sizeof(req.method), e->details);
 	bpf_map_update_elem(&fastcgi_reqs, &req_key, &req, BPF_ANY);
 
-	/* Emit EVENT_FASTCGI_REQUEST */
 	e->timestamp  = req.start_ns;
 	e->pid        = pid;
 	e->type       = EVENT_FASTCGI_REQUEST;
@@ -332,9 +266,8 @@ int kprobe_unix_stream_sendmsg(struct pt_regs *ctx)
 	return 0;
 }
 
-#else /* !PODTRACE_VMLINUX_FROM_BTF */
+#else
 
-/* Non-BTF build: FastCGI probes are no-ops */
 SEC("kprobe/unix_stream_recvmsg")
 int kprobe_unix_stream_recvmsg(struct pt_regs *ctx) { return 0; }
 
@@ -344,4 +277,4 @@ int kretprobe_unix_stream_recvmsg(struct pt_regs *ctx) { return 0; }
 SEC("kprobe/unix_stream_sendmsg")
 int kprobe_unix_stream_sendmsg(struct pt_regs *ctx) { return 0; }
 
-#endif /* PODTRACE_VMLINUX_FROM_BTF */
+#endif
