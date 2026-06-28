@@ -1871,6 +1871,20 @@ func AttachTLSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint3
 		}
 	}
 
+	if pid > 0 {
+		exePath := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "exe")
+		if !executableExportsSSL(exePath) {
+			if off, ok := resolveSSLOffsets(exePath, pid); ok {
+				if l := attachSSLByOffset(coll, exePath, off); len(l) > 0 {
+					links = append(links, l...)
+					logger.Info("TLS probes attached by offset (stripped binary)",
+						zap.String("exe", exePath), zap.String("source", off.source),
+						zap.Int("links", len(l)))
+				}
+			}
+		}
+	}
+
 	logger.Debug("TLS probe attach complete", zap.Int("links", len(links)))
 	return links
 }
