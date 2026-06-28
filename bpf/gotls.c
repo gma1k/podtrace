@@ -9,14 +9,16 @@
 #ifdef PODTRACE_VMLINUX_FROM_BTF
 
 #if defined(__TARGET_ARCH_x86) || defined(__x86_64__)
-#define GO_ARG_PTR(ctx)  ((void *)(ctx)->bx)
-#define GO_ARG_LEN(ctx)  ((u64)(ctx)->cx)
-#define GO_ARG_RECV(ctx) ((u64)(ctx)->ax)
+#define GO_ARG_PTR(ctx)   ((void *)(ctx)->bx)
+#define GO_ARG_LEN(ctx)   ((u64)(ctx)->cx)
+#define GO_ARG_RECV(ctx)  ((u64)(ctx)->ax)
+#define GO_GOROUTINE(ctx) ((u64)(ctx)->r14)
 #define GO_TLS_SUPPORTED 1
 #elif defined(__TARGET_ARCH_arm64) || defined(__aarch64__)
-#define GO_ARG_PTR(ctx)  ((void *)PT_REGS_PARM2(ctx))
-#define GO_ARG_LEN(ctx)  ((u64)PT_REGS_PARM3(ctx))
-#define GO_ARG_RECV(ctx) ((u64)PT_REGS_PARM1(ctx))
+#define GO_ARG_PTR(ctx)   ((void *)PT_REGS_PARM2(ctx))
+#define GO_ARG_LEN(ctx)   ((u64)PT_REGS_PARM3(ctx))
+#define GO_ARG_RECV(ctx)  ((u64)PT_REGS_PARM1(ctx))
+#define GO_GOROUTINE(ctx) ((u64)(ctx)->regs[28])
 #define GO_TLS_SUPPORTED 1
 #endif
 
@@ -45,8 +47,8 @@ int uprobe_go_tls_write(struct pt_regs *ctx)
 	if (http_method_len(peek) > 0) {
 		http_emit_request(ctx, base, avail, HTTP_TRANSPORT_TLS);
 	} else {
-		h2_emit_raw(base, avail, GO_ARG_RECV(ctx), H2_DIR_EGRESS,
-			    HTTP_TRANSPORT_H2_TLS);
+		h2_emit_frames(base, avail, GO_ARG_RECV(ctx), H2_DIR_EGRESS,
+			       HTTP_TRANSPORT_H2_TLS);
 	}
 	return 0;
 }
@@ -61,7 +63,7 @@ int uprobe_go_tls_read(struct pt_regs *ctx)
 	if (!buf)
 		return 0;
 
-	u64 key = bpf_get_current_pid_tgid();
+	u64 key = GO_GOROUTINE(ctx);
 	struct go_tls_read_state st = {
 		.buf = (u64)buf,
 		.conn = GO_ARG_RECV(ctx),
@@ -73,7 +75,7 @@ int uprobe_go_tls_read(struct pt_regs *ctx)
 SEC("uprobe/go_tls_read_ret")
 int uprobe_go_tls_read_ret(struct pt_regs *ctx)
 {
-	u64 key = bpf_get_current_pid_tgid();
+	u64 key = GO_GOROUTINE(ctx);
 	struct go_tls_read_state *st = bpf_map_lookup_elem(&go_tls_read_args, &key);
 	if (!st)
 		return 0;

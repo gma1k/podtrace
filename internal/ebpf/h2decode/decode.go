@@ -35,7 +35,7 @@ const (
 // tolerating realistic cross-CPU reordering.
 const (
 	defaultMaxConns         = 4096
-	defaultMaxPendingPerDir = 64
+	defaultMaxPendingPerDir = 256
 	defaultMaxAssembly      = 64 * 1024
 	defaultMaxStreams       = 8192
 	defaultTTL              = 60 * time.Second
