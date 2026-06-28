@@ -346,6 +346,58 @@ func AttachDNSPacketProbes(coll *ebpf.Collection, cgroupPaths []string) []link.L
 	return links
 }
 
+// AttachHTTP3Probes attaches the cgroup_skb HTTP/3 (QUIC) detector to each
+// target pod cgroup, emitting one HTTP/3 connection event per (cgroup, peer,
+// port).
+func AttachHTTP3Probes(coll *ebpf.Collection, cgroupPaths []string) []link.Link {
+	egress := coll.Programs["http3_egress"]
+	ingress := coll.Programs["http3_ingress"]
+	if egress == nil && ingress == nil {
+		return nil
+	}
+	attach := []struct {
+		prog *ebpf.Program
+		typ  ebpf.AttachType
+		name string
+	}{
+		{egress, ebpf.AttachCGroupInetEgress, "egress"},
+		{ingress, ebpf.AttachCGroupInetIngress, "ingress"},
+	}
+
+	var links []link.Link
+	seen := make(map[string]struct{}, len(cgroupPaths))
+	for _, path := range cgroupPaths {
+		if path == "" {
+			continue
+		}
+		if _, dup := seen[path]; dup {
+			continue
+		}
+		seen[path] = struct{}{}
+		for _, a := range attach {
+			if a.prog == nil {
+				continue
+			}
+			l, err := link.AttachCgroup(link.CgroupOptions{
+				Path:    path,
+				Attach:  a.typ,
+				Program: a.prog,
+			})
+			if err != nil {
+				logger.Info("HTTP/3 detection unavailable for cgroup",
+					zap.String("cgroup", path), zap.String("direction", a.name), zap.Error(err))
+				continue
+			}
+			links = append(links, l)
+		}
+	}
+	if len(links) > 0 {
+		logger.Info("HTTP/3 (QUIC) detection attached",
+			zap.Int("cgroups", len(seen)), zap.Int("links", len(links)))
+	}
+	return links
+}
+
 func AttachDNSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint32) []link.Link {
 	var links []link.Link
 	libcPath := FindLibcPathWithPID(containerID, pid)

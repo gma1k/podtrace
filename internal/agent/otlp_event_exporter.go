@@ -131,5 +131,6 @@ var eventTypeNames = map[events.EventType]string{
 	events.EventFork:           "proc.fork",
 	events.EventHTTPReq:        "http.req",
 	events.EventHTTPResp:       "http.resp",
+	events.EventHTTP3:          "http3.conn",
 	events.EventDBQuery:        "db.query",
 }

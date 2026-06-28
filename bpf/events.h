@@ -46,6 +46,7 @@ enum event_type {
 	EVENT_KAFKA_FETCH,
 	EVENT_DNS_QUERY,
 	EVENT_AF_ALG,
+	EVENT_HTTP3,
 };
 
 struct event {

@@ -5,10 +5,10 @@
 #include "events.h"
 #include "helpers.h"
 #include "protocols.h"
-
 #include "resources.c"
 #include "network.c"
 #include "dns.c"
+#include "http3.c"
 #include "filesystem.c"
 #include "cpu.c"
 #include "memory.c"

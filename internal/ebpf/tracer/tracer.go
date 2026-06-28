@@ -1,7 +1,9 @@
 package tracer
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +33,7 @@ import (
 	"github.com/podtrace/podtrace/internal/ebpf/cache"
 	"github.com/podtrace/podtrace/internal/ebpf/filter"
 	"github.com/podtrace/podtrace/internal/ebpf/h2decode"
+	"github.com/podtrace/podtrace/internal/ebpf/quicinitial"
 	"github.com/podtrace/podtrace/internal/ebpf/loader"
 	"github.com/podtrace/podtrace/internal/ebpf/parser"
 	"github.com/podtrace/podtrace/internal/ebpf/probes"
@@ -69,6 +72,7 @@ type Tracer struct {
 	probeGroupsMu  sync.Mutex
 	probeGroups    map[probes.ProbeGroup][]link.Link
 	dnsPacketLinks map[string][]link.Link
+	http3Links     map[string][]link.Link
 
 	intentionallyDisabled map[probes.ProbeGroup]struct{}
 	detachWarned          map[probes.ProbeGroup]struct{}
@@ -78,6 +82,7 @@ type Tracer struct {
 	reader                   *ringbuf.Reader
 	h2Reader                 *ringbuf.Reader
 	h2Decoder                *h2decode.Decoder
+	quicReader               *ringbuf.Reader
 	filter                   *filter.CgroupFilter
 	containerID              string
 	containerPID             uint32
@@ -314,6 +319,48 @@ func (t *Tracer) syncDNSPacketProbes(paths []string) {
 	}
 }
 
+// syncHTTP3Probes reconciles the per-cgroup http3_egress/http3_ingress QUIC
+// detector attachments with the current target set.
+func (t *Tracer) syncHTTP3Probes(paths []string) {
+	if t.collection == nil {
+		return
+	}
+	want := make(map[string]struct{}, len(paths))
+	for _, p := range paths {
+		if p != "" {
+			want[p] = struct{}{}
+		}
+	}
+
+	t.probeGroupsMu.Lock()
+	if t.http3Links == nil {
+		t.http3Links = map[string][]link.Link{}
+	}
+	for p, ls := range t.http3Links {
+		if _, ok := want[p]; ok {
+			continue
+		}
+		for _, l := range ls {
+			_ = l.Close()
+		}
+		delete(t.http3Links, p)
+	}
+	var missing []string
+	for p := range want {
+		if _, ok := t.http3Links[p]; !ok {
+			missing = append(missing, p)
+		}
+	}
+	t.probeGroupsMu.Unlock()
+
+	for _, p := range missing {
+		ls := probes.AttachHTTP3Probes(t.collection, []string{p})
+		t.probeGroupsMu.Lock()
+		t.http3Links[p] = ls
+		t.probeGroupsMu.Unlock()
+	}
+}
+
 // SetProfilingController wires an optional profiling controller into the
 // management API server.
 func (t *Tracer) SetProfilingController(ctrl ProfilingController) {
@@ -463,6 +510,15 @@ func NewTracer() (*Tracer, error) {
 		}
 	}
 
+	var quicrd *ringbuf.Reader
+	if m := coll.Maps["quic_initial_events"]; m != nil {
+		if r, qerr := ringbuf.NewReader(m); qerr == nil {
+			quicrd = r
+		} else {
+			logger.Warn("HTTP/3 SNI extraction disabled: ringbuf reader unavailable", zap.Error(qerr))
+		}
+	}
+
 	ttl := time.Duration(config.CacheTTLSeconds) * time.Second
 	processCache := cache.NewLRUCache(config.CacheMaxSize, ttl)
 
@@ -474,6 +530,7 @@ func NewTracer() (*Tracer, error) {
 		reader:                rd,
 		h2Reader:              h2rd,
 		h2Decoder:             h2dec,
+		quicReader:            quicrd,
 		filter:                filter.NewCgroupFilter(),
 		processNameCache:      processCache,
 		pathCache:             cache.NewPathCache(),
@@ -520,6 +577,7 @@ func (t *Tracer) SetCgroups(cgroupPaths []string) error {
 		}
 		t.cgroupWriteMu.Unlock()
 		t.syncDNSPacketProbes(nil)
+		t.syncHTTP3Probes(nil)
 		logger.Debug("Detached all cgroups")
 		return nil
 	}
@@ -646,6 +704,7 @@ func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 	}
 	currentPaths := append([]string(nil), t.cgroupPaths...)
 	t.syncDNSPacketProbes(currentPaths)
+	t.syncHTTP3Probes(currentPaths)
 
 	if t.resourceMgr != nil {
 		t.resourceMgr.reconcile(currentPaths)
@@ -815,6 +874,7 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 	dnsCgroups := append([]string(nil), t.cgroupPaths...)
 	t.cgroupWriteMu.Unlock()
 	t.syncDNSPacketProbes(dnsCgroups)
+	t.syncHTTP3Probes(dnsCgroups)
 
 	t.resourceMgr.activate(ctx, eventChan,
 		t.collection.Maps["cgroup_limits"],
@@ -994,6 +1054,10 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 
 	if t.h2Reader != nil && t.h2Decoder != nil {
 		go t.runH2DecodeReader(ctx, eventChan, stackMap, ec)
+	}
+
+	if t.quicReader != nil {
+		go t.runQUICInitialReader(ctx, eventChan, stackMap, ec)
 	}
 
 	return nil
@@ -1177,12 +1241,78 @@ func (t *Tracer) runH2DecodeReader(ctx context.Context, eventChan chan<- *events
 	}
 }
 
+// runQUICInitialReader drains the QUIC Initial packet ringbuf, extracts the SNI
+// (server name) from the client's ClientHello via the quicinitial package, and
+// emits an EVENT_HTTP3 connection event with the peer and SNI.
+func (t *Tracer) runQUICInitialReader(ctx context.Context, eventChan chan<- *events.Event,
+	stackMap *ebpf.Map, ec *eventCounters) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("Panic in HTTP/3 reader",
+				zap.Any("panic", r), zap.ByteString("stack", debug.Stack()))
+		}
+	}()
+	const hdr = 60
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		record, err := t.quicReader.Read()
+		if err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, ringbuf.ErrClosed) ||
+				strings.Contains(err.Error(), "closed") {
+				return
+			}
+			continue
+		}
+		data := record.RawSample
+		if len(data) <= hdr {
+			continue
+		}
+		family := data[20]
+		dport := binary.LittleEndian.Uint16(data[22:24])
+		var v6 [16]byte
+		copy(v6[:], data[24:40])
+		var ip string
+		if family == 10 {
+			ip = events.PeerIP(10, 0, v6)
+		} else {
+			ip = events.PeerIP(2, binary.BigEndian.Uint32(data[24:28]), v6)
+		}
+
+		ev := &events.Event{}
+		ev.Timestamp = binary.LittleEndian.Uint64(data[0:8])
+		ev.CgroupID = binary.LittleEndian.Uint64(data[8:16])
+		ev.PID = binary.LittleEndian.Uint32(data[16:20])
+		ev.ProcessName = string(bytes.TrimRight(data[44:60], "\x00"))
+		ev.Type = events.EventHTTP3
+		ev.Target = fmt.Sprintf("%s:%d", ip, dport)
+		ev.PeerDstIP = ip
+		ev.PeerDstPort = dport
+		pktEnd := hdr + int(binary.LittleEndian.Uint16(data[40:42]))
+		if pktEnd > len(data) {
+			pktEnd = len(data)
+		}
+		if sni, ok := quicinitial.ExtractSNI(data[hdr:pktEnd]); ok {
+			ev.Details = "sni: " + sni
+		} else {
+			ev.Details = "HTTP/3 (QUIC)"
+		}
+		t.processAndDispatch(ctx, ev, eventChan, stackMap, ec, time.Now())
+	}
+}
+
 func (t *Tracer) Stop() error {
 	if t.reader != nil {
 		_ = t.reader.Close()
 	}
 	if t.h2Reader != nil {
 		_ = t.h2Reader.Close()
+	}
+	if t.quicReader != nil {
+		_ = t.quicReader.Close()
 	}
 
 	t.probeGroupsMu.Lock()
@@ -1193,6 +1323,10 @@ func (t *Tracer) Stop() error {
 		closing = append(closing, ls...)
 	}
 	t.dnsPacketLinks = nil
+	for _, ls := range t.http3Links {
+		closing = append(closing, ls...)
+	}
+	t.http3Links = nil
 	for _, set := range t.containerUprobes {
 		closing = append(closing, set.links...)
 	}
