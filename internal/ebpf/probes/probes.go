@@ -1669,6 +1669,20 @@ func findTLSLibs(containerID string) []string {
 	return paths
 }
 
+// tlsExecutableForPID returns the target process's executable path
+// (/proc/<pid>/exe) when it statically bundles an attachable OpenSSL (i.e. it
+// exports SSL_write), else "".
+func tlsExecutableForPID(pid uint32) string {
+	if pid == 0 {
+		return ""
+	}
+	exePath := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "exe")
+	if executableExportsSSL(exePath) {
+		return exePath
+	}
+	return ""
+}
+
 func findTLSLibsWithPID(containerID string, pid uint32) []string {
 	var paths []string
 	seen := make(map[string]bool)
@@ -1682,6 +1696,14 @@ func findTLSLibsWithPID(containerID string, pid uint32) []string {
 				paths = append(paths, path)
 				seen[path] = true
 			}
+		}
+	}
+
+	if exe := tlsExecutableForPID(pid); exe != "" {
+		if !seen[exe] {
+			paths = append(paths, exe)
+			seen[exe] = true
+			logger.Debug("TLS probe: target executable bundles OpenSSL", zap.String("exe", exe))
 		}
 	}
 

@@ -5,7 +5,6 @@
 #include "events.h"
 #include "helpers.h"
 
-/* Prefix constants for op strings */
 #define MC_OP_GET "get "
 #define MC_OP_SET "set "
 #define MC_OP_DEL "del "
@@ -96,7 +95,6 @@ int uretprobe_memcached_get(struct pt_regs *ctx)
 	return mc_emit(ctx, pid, tid, 1);
 }
 
-/* uprobe/memcached_set — PARM2=key, PARM3=klen, PARM4=val, PARM5=vlen */
 SEC("uprobe/memcached_set")
 int uprobe_memcached_set(struct pt_regs *ctx)
 {
@@ -118,7 +116,6 @@ int uretprobe_memcached_set(struct pt_regs *ctx)
 	return mc_emit(ctx, pid, tid, 0);
 }
 
-/* uprobe/memcached_delete — PARM2=key, PARM3=klen */
 SEC("uprobe/memcached_delete")
 int uprobe_memcached_delete(struct pt_regs *ctx)
 {

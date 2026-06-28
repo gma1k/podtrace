@@ -6,8 +6,8 @@
 #include "helpers.h"
 #include "protocols.h"
 
-#define GRPC_INSPECT_LEN 50   /* bytes to read from send buffer */
-#define HTTP2_FRAME_HDR  9    /* HTTP/2 frame header size */
+#define GRPC_INSPECT_LEN 50
+#define HTTP2_FRAME_HDR  9
 
 #ifdef PODTRACE_VMLINUX_FROM_BTF
 

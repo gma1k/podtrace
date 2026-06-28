@@ -404,11 +404,15 @@ struct {
 	__type(value, char[HTTP_SCAN_BUF_SIZE]);
 } http_scan_buf SEC(".maps");
 
+struct ssl_read_state {
+	u64 buf;
+	u64 conn;
+};
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 1024);
 	__type(key, u64);
-	__type(value, u64);
+	__type(value, struct ssl_read_state);
 } ssl_read_args SEC(".maps");
 
 struct h2_recv_info {

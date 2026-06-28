@@ -52,6 +52,26 @@ func goSymbolFileOffset(exePath, symbol string) (offset uint64, ok bool) {
 	return 0, false
 }
 
+// executableExportsSSL reports whether the ELF at path exposes the OpenSSL
+// SSL_write symbol in its dynamic symbol table.
+func executableExportsSSL(path string) bool {
+	f, err := elf.Open(path)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	syms, err := f.DynamicSymbols()
+	if err != nil {
+		return false
+	}
+	for i := range syms {
+		if syms[i].Name == "SSL_write" {
+			return true
+		}
+	}
+	return false
+}
+
 // vaddrToFileOffset maps a virtual address to its executable file offset using
 // the PT_LOAD segments.
 func vaddrToFileOffset(f *elf.File, vaddr uint64) (uint64, bool) {

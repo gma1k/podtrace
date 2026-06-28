@@ -5,19 +5,12 @@
 #include "events.h"
 #include "helpers.h"
 
-/* exec events come from the stable sched:sched_process_exec tracepoint.
- * The previous kprobe pair targeted do_execveat_common, which (a) was never
- * registered in the Go attach tables, so the programs were dead weight, and
- * (b) is a static function that compilers routinely emit as
- * do_execveat_common.isra.0, so a plain kprobe cannot attach reliably; it
- * also read PARM2 — a kernel `struct filename *` — with
- * bpf_probe_read_user_str, which always failed, leaving the target empty. */
 struct sched_process_exec_args {
 	unsigned short common_type;
 	unsigned char common_flags;
 	unsigned char common_preempt_count;
 	int common_pid;
-	unsigned int filename_loc; /* __data_loc char[] */
+	unsigned int filename_loc;
 	int pid;
 	int old_pid;
 };
@@ -31,8 +24,6 @@ int tracepoint_sched_process_exec(void *ctx) {
 		return 0;
 	}
 
-	/* Fires in the exec'ing task's own context, so the cgroup prefilter
-	 * applies cleanly. */
 	struct event *e = get_event_buf();
 	if (!e) {
 		return 0;
@@ -85,9 +76,6 @@ int tracepoint_sched_process_fork(void *ctx) {
 	e->error = 0;
 	e->bytes = 0;
 	e->tcp_state = 0;
-	/* e->pid is the child's; get_event_buf() set e->comm to the parent's name
-	 * via bpf_get_current_comm(). Overwrite with the child's comm from the
-	 * tracepoint so the pair refers to the same task. */
 	__builtin_memcpy(e->comm, args_local.child_comm, sizeof(e->comm));
 
 	bpf_probe_read_kernel_str(e->target, sizeof(e->target), args_local.child_comm);
@@ -163,13 +151,6 @@ int kprobe_vfs_unlink(struct pt_regs *ctx) {
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 
 #ifdef PODTRACE_VMLINUX_FROM_BTF
-	/* 5.12 added a mnt_userns/mnt_idmap first argument, moving the dentry
-	 * from PARM2 to PARM3. struct renamedata (also introduced in 5.12) is
-	 * the CO-RE probe for which side of that boundary the running kernel
-	 * is on. */
-	/* Read both candidate registers up front: selecting the register first
-	 * and dereferencing afterwards makes clang emit ctx+variable_offset,
-	 * which the verifier rejects ("dereference of modified ctx ptr"). */
 	struct dentry *de_parm2 = (struct dentry *)PT_REGS_PARM2(ctx);
 	barrier_var(de_parm2);
 	struct dentry *de_parm3 = (struct dentry *)PT_REGS_PARM3(ctx);
@@ -226,13 +207,6 @@ int kretprobe_vfs_unlink(struct pt_regs *ctx) {
 	return 0;
 }
 
-/*
- * vfs_rename kprobe: signature varies across kernel versions.
- * Pre-5.12: vfs_rename(old_dir, old_dentry, new_dir, new_dentry, ...) — PARM2 and PARM4.
- * 5.12+:    vfs_rename(struct renamedata *) — single struct pointer (PARM1).
- * (The boundary is 5.12, commit 9fe61450972d, not 6.3 as previously noted.)
- * bpf_core_type_exists(struct renamedata) selects the layout at load time.
- */
 SEC("kprobe/vfs_rename")
 int kprobe_vfs_rename(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
@@ -242,12 +216,6 @@ int kprobe_vfs_rename(struct pt_regs *ctx) {
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 
 #ifdef PODTRACE_VMLINUX_FROM_BTF
-	/* Works with both old and new BTF-generated layouts via CO-RE.
-	 * Use fixed compile-time offsets so the BPF verifier can bound stack
-	 * writes — variable-offset writes (buf[idx]) are often rejected on 6.x.
-	 * Layout: [0 .. HALF-2] old name, [HALF-1] '>', [HALF .. END] new name. */
-	/* Same modified-ctx-pointer consideration as vfs_unlink: pull all
-	 * candidate registers out of ctx first, then select. */
 	struct renamedata *rd = (struct renamedata *)PT_REGS_PARM1(ctx);
 	barrier_var(rd);
 	struct dentry *old_parm2 = (struct dentry *)PT_REGS_PARM2(ctx);
@@ -317,10 +285,6 @@ int kretprobe_vfs_rename(struct pt_regs *ctx) {
 	return 0;
 }
 
-/* __close_fd(files, fd) was removed in kernel 5.11 and replaced by
- * close_fd(fd) — the fd moves from PARM2 to PARM1. The old probe targeted
- * the removed symbol (and was never registered for attach), so EVENT_CLOSE
- * never fired. */
 SEC("kprobe/close_fd")
 int kprobe_close_fd(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;

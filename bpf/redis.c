@@ -1,35 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0
-/*
- * Redis tracing via hiredis library uprobes.
- *
- * Hooks:
- *   uprobe/redisCommand       — int redisCommand(redisContext *c, const char *format, ...)
- *   uretprobe/redisCommand
- *   uprobe/redisCommandArgv   — void *redisCommandArgv(redisContext *c, int argc,
- *                                   const char **argv, const size_t *argvlen)
- *   uretprobe/redisCommandArgv
- *
- * Field mapping (event struct):
- *   target  = server IP:port (from socket_conns if available, else empty)
- *   details = command name (e.g. "SET", "GET", "HGET")
- *   bytes   = 0 (response size not available without reading reply object)
- *   error   = return value (NULL pointer = error in hiredis)
- *   latency_ns = time from entry to return
- */
 
 #include "common.h"
 #include "maps.h"
 #include "events.h"
 #include "helpers.h"
 
-/* Store the command name from the format string PARM2.
- * Truncates at the first space or '%' (format verbs follow the command). */
 static __always_inline void redis_store_cmd(const struct pair_key *key, const char *format_ptr, u64 ts)
 {
 	char buf[MAX_STRING_LEN] = {};
 	bpf_probe_read_user_str(buf, sizeof(buf), format_ptr);
 
-	/* Truncate at first space or '%' — format is "CMD arg1 %s ..." */
 	u32 i;
 	for (i = 0; i < MAX_STRING_LEN; i++) {
 		if (buf[i] == ' ' || buf[i] == '%' || buf[i] == '\0') {
@@ -42,7 +22,6 @@ static __always_inline void redis_store_cmd(const struct pair_key *key, const ch
 	bpf_map_update_elem(&start_times, key, &ts, BPF_ANY);
 }
 
-/* Emit the EVENT_REDIS_CMD event from a uretprobe context. */
 static __always_inline int redis_emit(struct pt_regs *ctx, u32 pair, u32 pid, u32 tid)
 {
 	struct pair_key key = make_pair_key(pair);
@@ -63,7 +42,6 @@ static __always_inline int redis_emit(struct pt_regs *ctx, u32 pair, u32 pid, u3
 	e->pid        = pid;
 	e->type       = EVENT_REDIS_CMD;
 	e->latency_ns = latency;
-	/* NULL return = error (hiredis returns NULL on failure) */
 	e->error      = PT_REGS_RC(ctx) == 0 ? -1 : 0;
 	e->bytes      = 0;
 	e->tcp_state  = 0;
@@ -84,7 +62,6 @@ static __always_inline int redis_emit(struct pt_regs *ctx, u32 pair, u32 pid, u3
 	return 0;
 }
 
-/* uprobe/redisCommand — PARM2 = const char *format */
 SEC("uprobe/redisCommand")
 int uprobe_redisCommand(struct pt_regs *ctx)
 {
@@ -107,7 +84,6 @@ int uretprobe_redisCommand(struct pt_regs *ctx)
 	return redis_emit(ctx, PAIR_REDIS_COMMAND, pid, tid);
 }
 
-/* uprobe/redisCommandArgv — PARM3 = const char **argv, argv[0] = command */
 SEC("uprobe/redisCommandArgv")
 int uprobe_redisCommandArgv(struct pt_regs *ctx)
 {
@@ -116,12 +92,10 @@ int uprobe_redisCommandArgv(struct pt_regs *ctx)
 	struct pair_key key = make_pair_key(PAIR_REDIS_COMMAND_ARGV);
 	u64 ts  = bpf_ktime_get_ns();
 
-	/* PARM3 = const char **argv; argv[0] is the command name */
 	const char **argv = (const char **)PT_REGS_PARM3(ctx);
 	if (!argv)
 		return 0;
 
-	/* First dereference: read the argv[0] pointer from user space */
 	const char *cmd_ptr = NULL;
 	if (bpf_probe_read_user(&cmd_ptr, sizeof(cmd_ptr), argv) != 0 || !cmd_ptr)
 		return 0;
