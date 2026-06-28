@@ -53,20 +53,25 @@ func goSymbolFileOffset(exePath, symbol string) (offset uint64, ok bool) {
 }
 
 // executableExportsSSL reports whether the ELF at path exposes the OpenSSL
-// SSL_write symbol in its dynamic symbol table.
+// SSL_write symbol so the SSL_* uprobes can attach to the executable itself.
 func executableExportsSSL(path string) bool {
 	f, err := elf.Open(path)
 	if err != nil {
 		return false
 	}
 	defer func() { _ = f.Close() }()
-	syms, err := f.DynamicSymbols()
-	if err != nil {
-		return false
+	if dyn, err := f.DynamicSymbols(); err == nil {
+		for i := range dyn {
+			if dyn[i].Name == "SSL_write" {
+				return true
+			}
+		}
 	}
-	for i := range syms {
-		if syms[i].Name == "SSL_write" {
-			return true
+	if sym, err := f.Symbols(); err == nil {
+		for i := range sym {
+			if sym[i].Name == "SSL_write" {
+				return true
+			}
 		}
 	}
 	return false
