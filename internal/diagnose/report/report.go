@@ -334,9 +334,28 @@ func GenerateHTTPSection(d Diagnostician, duration time.Duration) string {
 				report += formatter.TopItemsWithRate(statusMap, config.TopURLsLimit, "response status codes", "responses", duration)
 			}
 		}
+		peerEvents := make([]*events.Event, 0, len(httpReqEvents)+len(httpRespEvents))
+		peerEvents = append(peerEvents, httpReqEvents...)
+		peerEvents = append(peerEvents, httpRespEvents...)
+		peerMap := buildPeerMap(peerEvents)
+		if len(peerMap) > 0 {
+			report += formatter.TopItemsWithRate(peerMap, config.TopURLsLimit, "L7 peers", "events", duration)
+		}
 	}
 	report += "\n"
 	return report
+}
+
+// buildPeerMap counts L7 events by their fused L4 remote peer (ip:port).
+func buildPeerMap(httpEvents []*events.Event) map[string]int {
+	m := make(map[string]int)
+	for _, e := range httpEvents {
+		if e.PeerDstIP == "" {
+			continue
+		}
+		m[fmt.Sprintf("%s:%d", e.PeerDstIP, e.PeerDstPort)]++
+	}
+	return m
 }
 
 func analyzeHTTPEvents(allHTTP []*events.Event) ([]float64, float64, uint64) {

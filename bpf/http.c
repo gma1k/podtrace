@@ -160,6 +160,7 @@ static __noinline void http_emit_request(void *ctx, void *base, u64 avail,
 		e->tcp_state = transport;
 		bpf_probe_read_kernel_str(e->target, sizeof(e->target), endpoint);
 		http_capture_traceparent(base, avail, e->details);
+		fill_event_peer(e);
 		capture_user_stack(ctx, pid, tid, e);
 		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	}
@@ -225,6 +226,7 @@ static __noinline void http_emit_response(void *ctx, void *base, u64 len,
 		e->tcp_state = transport;
 		bpf_probe_read_kernel_str(e->target, sizeof(e->target), req->endpoint);
 		bpf_probe_read_kernel_str(e->details, sizeof(e->details), status);
+		fill_event_peer(e);
 		capture_user_stack(ctx, pid, tid, e);
 		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	}

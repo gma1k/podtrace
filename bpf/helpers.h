@@ -17,6 +17,48 @@ static inline struct pair_key make_pair_key(u32 pair) {
 	return k;
 }
 
+// fill_event_peer fuses an L7 event with its L4 peer 4-tuple, read from the
+// per-thread stash that the tcp_sendmsg/tcp_recvmsg kprobes maintain.
+static inline struct tcp_peer *lookup_tcp_peer(u32 prefer_pair) {
+	struct pair_key k = {};
+	k.pid_tgid = bpf_get_current_pid_tgid();
+	k.pair = prefer_pair;
+	struct tcp_peer *p = bpf_map_lookup_elem(&tcp_peer_stash, &k);
+	if (p)
+		return p;
+	k.pair = (prefer_pair == PAIR_TCP_SENDMSG) ? PAIR_TCP_RECVMSG : PAIR_TCP_SENDMSG;
+	return bpf_map_lookup_elem(&tcp_peer_stash, &k);
+}
+
+static inline void fill_event_peer(struct event *e) {
+	struct tcp_peer *p = lookup_tcp_peer(PAIR_TCP_SENDMSG);
+	if (!p)
+		return;
+	e->peer_family = (u8)p->family;
+	e->peer_sport = p->sport;
+	e->peer_dport = p->dport;
+	e->peer_saddr = p->saddr;
+	e->peer_daddr = p->daddr;
+	__builtin_memcpy(e->peer_saddr6, p->saddr6, 16);
+	__builtin_memcpy(e->peer_daddr6, p->daddr6, 16);
+}
+
+// fill_h2_record_peer fuses an h2 header record with its L4 peer, preferring the
+// stash matching the record's direction (egress->send, ingress->recv).
+static inline void fill_h2_record_peer(struct h2_hdr_record *rec, u32 dir) {
+	u32 prefer = (dir == H2_DIR_EGRESS) ? PAIR_TCP_SENDMSG : PAIR_TCP_RECVMSG;
+	struct tcp_peer *p = lookup_tcp_peer(prefer);
+	if (!p)
+		return;
+	rec->peer_family = (u8)p->family;
+	rec->peer_sport = p->sport;
+	rec->peer_dport = p->dport;
+	rec->peer_saddr = p->saddr;
+	rec->peer_daddr = p->daddr;
+	__builtin_memcpy(rec->peer_saddr6, p->saddr6, 16);
+	__builtin_memcpy(rec->peer_daddr6, p->daddr6, 16);
+}
+
 static inline void record_start_time(const struct pair_key *key) {
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, key, &ts, BPF_ANY);

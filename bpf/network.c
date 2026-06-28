@@ -16,20 +16,27 @@ static __noinline void stash_tcp_peer(struct pt_regs *ctx, u32 pair)
 		return;
 	u16 family = BPF_CORE_READ(sk, __sk_common.skc_family);
 	char buf[MAX_STRING_LEN] = {};
+	struct tcp_peer peer = {};
+	peer.family = family;
+	peer.dport = __builtin_bswap16(dport_be);
+	peer.sport = BPF_CORE_READ(sk, __sk_common.skc_num); /* host order already */
 	if (family == AF_INET) {
 		u32 daddr_be = BPF_CORE_READ(sk, __sk_common.skc_daddr);
 		if (daddr_be == 0)
 			return;
-		format_ip_port(__builtin_bswap32(daddr_be), __builtin_bswap16(dport_be), buf);
+		peer.daddr = __builtin_bswap32(daddr_be);
+		peer.saddr = __builtin_bswap32(BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr));
+		format_ip_port(peer.daddr, peer.dport, buf);
 	} else if (family == AF_INET6) {
-		u8 d6[16] = {};
-		BPF_CORE_READ_INTO(&d6, sk, __sk_common.skc_v6_daddr.in6_u.u6_addr8);
-		format_ipv6_port(d6, __builtin_bswap16(dport_be), buf);
+		BPF_CORE_READ_INTO(&peer.daddr6, sk, __sk_common.skc_v6_daddr.in6_u.u6_addr8);
+		BPF_CORE_READ_INTO(&peer.saddr6, sk, __sk_common.skc_v6_rcv_saddr.in6_u.u6_addr8);
+		format_ipv6_port(peer.daddr6, peer.dport, buf);
 	} else {
 		return;
 	}
 	struct pair_key key = make_pair_key(pair);
 	bpf_map_update_elem(&tcp_target, &key, buf, BPF_ANY);
+	bpf_map_update_elem(&tcp_peer_stash, &key, &peer, BPF_ANY);
 }
 #else
 static __always_inline void stash_tcp_peer(struct pt_regs *ctx, u32 pair)

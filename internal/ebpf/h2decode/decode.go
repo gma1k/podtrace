@@ -15,8 +15,9 @@ import (
 	"github.com/podtrace/podtrace/internal/safeconv"
 )
 
-// recordHeaderSize is the fixed prefix of struct h2_hdr_record.
-const recordHeaderSize = 48
+// recordHeaderSize is the fixed prefix of struct h2_hdr_record incl. the
+// L7<->L4 peer 4-tuple appended after _pad.
+const recordHeaderSize = 96
 
 // Flag bits mirror H2_HDR_FLAG_* in bpf/events.h.
 const (
@@ -56,6 +57,11 @@ type RawRecord struct {
 	Transport uint8
 	Flags     uint8
 	Frag      []byte
+
+	PeerSrcIP   string
+	PeerDstIP   string
+	PeerSrcPort uint16
+	PeerDstPort uint16
 }
 
 func (r *RawRecord) endHeaders() bool { return r.Flags&flagEndHeaders != 0 }
@@ -83,6 +89,14 @@ func ParseRecord(data []byte) (*RawRecord, bool) {
 		Transport: data[39],
 		Flags:     data[40],
 	}
+	var sa6, da6 [16]byte
+	copy(sa6[:], data[64:80])
+	copy(da6[:], data[80:96])
+	family := data[60]
+	r.PeerSrcIP = events.PeerIP(family, binary.LittleEndian.Uint32(data[48:52]), sa6)
+	r.PeerDstIP = events.PeerIP(family, binary.LittleEndian.Uint32(data[52:56]), da6)
+	r.PeerSrcPort = binary.LittleEndian.Uint16(data[56:58])
+	r.PeerDstPort = binary.LittleEndian.Uint16(data[58:60])
 	if fragLen > 0 {
 		r.Frag = make([]byte, fragLen)
 		copy(r.Frag, data[recordHeaderSize:recordHeaderSize+int(fragLen)])
@@ -274,7 +288,16 @@ func (d *Decoder) buildRequestLocked(rec *RawRecord, method, path, traceparent s
 	if traceparent != "" {
 		ev.Details = "traceparent: " + traceparent
 	}
+	setEventPeer(ev, rec)
 	return ev
+}
+
+// setEventPeer copies the L7<->L4 fused peer 4-tuple onto a decoded event.
+func setEventPeer(ev *events.Event, rec *RawRecord) {
+	ev.PeerSrcIP = rec.PeerSrcIP
+	ev.PeerDstIP = rec.PeerDstIP
+	ev.PeerSrcPort = rec.PeerSrcPort
+	ev.PeerDstPort = rec.PeerDstPort
 }
 
 func (d *Decoder) buildResponseLocked(rec *RawRecord, status, traceparent string) *events.Event {
@@ -302,6 +325,7 @@ func (d *Decoder) buildResponseLocked(rec *RawRecord, status, traceparent string
 	if traceparent != "" && ev.Details == status {
 		ev.Details = "traceparent: " + traceparent
 	}
+	setEventPeer(ev, rec)
 	return ev
 }
 

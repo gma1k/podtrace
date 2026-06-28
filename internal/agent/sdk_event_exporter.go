@@ -184,6 +184,18 @@ func (e *sdkEventExporter) Export(ctx context.Context, batch []*events.Event) er
 				attribute.String("podtrace.http.transport", ev.HTTPProtoLabel()),
 			)
 		}
+		if ev.PeerDstIP != "" {
+			attrs = append(attrs,
+				attribute.String("network.peer.address", ev.PeerDstIP),
+				attribute.Int("network.peer.port", int(ev.PeerDstPort)),
+			)
+		}
+		if ev.PeerSrcIP != "" {
+			attrs = append(attrs,
+				attribute.String("network.local.address", ev.PeerSrcIP),
+				attribute.Int("network.local.port", int(ev.PeerSrcPort)),
+			)
+		}
 		attrs = appendK8sAttributes(attrs, ev.K8s)
 		attrs = e.appendThresholdAttributes(attrs, ev)
 		span.SetAttributes(attrs...)

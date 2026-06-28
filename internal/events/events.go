@@ -1,7 +1,9 @@
 package events
 
 import (
+	"encoding/binary"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -9,6 +11,28 @@ import (
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/safeconv"
 )
+
+// PeerIP formats a fused L7<->L4 peer address. v4 is host byte order; family is
+// the AF_* value (2=AF_INET, 10=AF_INET6). Returns "" if unknown/unspecified.
+func PeerIP(family uint8, v4 uint32, v6 [16]byte) string {
+	switch family {
+	case 2:
+		if v4 == 0 {
+			return ""
+		}
+		ip := make(net.IP, net.IPv4len)
+		binary.BigEndian.PutUint32(ip, v4)
+		return ip.String()
+	case 10:
+		ip := net.IP(v6[:])
+		if ip.IsUnspecified() {
+			return ""
+		}
+		return ip.String()
+	default:
+		return ""
+	}
+}
 
 func sanitizeString(s string) string {
 	return strings.ReplaceAll(s, "%", "%%")
@@ -77,6 +101,10 @@ type Event struct {
 	DNSServerIP  uint32   // V5: upstream resolver IPv4 for DNS events (0 otherwise)
 	DNSTransport uint8    // V5: 0=UDP, 1=TCP for DNS events
 	DNSServerIP6 [16]byte // V6: upstream resolver IPv6 for DNS events
+	PeerSrcIP    string   // V7: L7<->L4 fused local address ("" if unknown)
+	PeerDstIP    string   // V7: L7<->L4 fused remote/peer address
+	PeerSrcPort  uint16   // V7: local port
+	PeerDstPort  uint16   // V7: remote/peer port
 	ProcessName  string
 	Type         EventType
 	LatencyNS    uint64
