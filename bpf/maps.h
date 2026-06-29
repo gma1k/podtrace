@@ -516,6 +516,39 @@ struct {
 } go_tls_read_args SEC(".maps");
 
 struct {
+	__uint(type, BPF_MAP_TYPE_RINGBUF);
+	__uint(max_entries, 2 * 1024 * 1024);
+} h3_txn_events SEC(".maps");
+
+struct h3_txn_scratch {
+	struct h3_txn_record rec;
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, u32);
+	__type(value, struct h3_txn_scratch);
+} h3_txn_scratch_map SEC(".maps");
+
+/* h3_req_stash holds the in-flight request (method/path/start) between the
+ * request hook and the response hook on the same goroutine: client RoundTrip
+ * entry -> RoundTrip return; server requestFromHeaders return -> WriteHeader. */
+struct h3_req_inflight {
+	u64 start_ts;
+	u8  method_len;
+	u16 path_len;
+	u8  _pad[5];
+	char method[H3_TXN_METHOD_MAX];
+	char path[H3_TXN_PATH_MAX];
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 4096);
+	__type(key, u64);
+	__type(value, struct h3_req_inflight);
+} h3_req_stash SEC(".maps");
+
+struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 8192);
 	__type(key, u64);

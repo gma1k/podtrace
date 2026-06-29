@@ -454,9 +454,9 @@ func responseStatus(e *events.Event) string {
 }
 
 // httpTransportBreakdown tallies HTTP events by protocol label (HTTP, HTTPS,
-// HTTP/2) and renders a one-line summary. Returns "" when every event is plain
-// cleartext HTTP/1.x, so the line only appears when there is something to
-// distinguish (TLS or h2c traffic present).
+// HTTP/2, HTTP/3) and renders a one-line summary. Returns "" when every event is
+// plain cleartext HTTP/1.x, so the line only appears when there is something to
+// distinguish (TLS, h2c, or h3 traffic present).
 func httpTransportBreakdown(eventGroups ...[]*events.Event) string {
 	counts := make(map[string]int)
 	total := 0
@@ -470,7 +470,7 @@ func httpTransportBreakdown(eventGroups ...[]*events.Event) string {
 		return ""
 	}
 	parts := make([]string, 0, len(counts))
-	for _, label := range []string{"HTTP", "HTTPS", "HTTP/2"} {
+	for _, label := range []string{"HTTP", "HTTPS", "HTTP/2", "HTTP/3"} {
 		if n := counts[label]; n > 0 {
 			parts = append(parts, fmt.Sprintf("%d %s", n, label))
 		}

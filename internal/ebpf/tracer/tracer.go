@@ -33,6 +33,7 @@ import (
 	"github.com/podtrace/podtrace/internal/ebpf/cache"
 	"github.com/podtrace/podtrace/internal/ebpf/filter"
 	"github.com/podtrace/podtrace/internal/ebpf/h2decode"
+	"github.com/podtrace/podtrace/internal/ebpf/h3decode"
 	"github.com/podtrace/podtrace/internal/ebpf/quicinitial"
 	"github.com/podtrace/podtrace/internal/ebpf/loader"
 	"github.com/podtrace/podtrace/internal/ebpf/parser"
@@ -82,6 +83,7 @@ type Tracer struct {
 	reader                   *ringbuf.Reader
 	h2Reader                 *ringbuf.Reader
 	h2Decoder                *h2decode.Decoder
+	h3Reader                 *ringbuf.Reader
 	quicReader               *ringbuf.Reader
 	filter                   *filter.CgroupFilter
 	containerID              string
@@ -172,6 +174,7 @@ func (t *Tracer) attachContainerUprobes(id string, pid uint32) []link.Link {
 	ls = append(ls, probes.AttachPoolProbesWithPID(coll, id, pid)...)
 	ls = append(ls, probes.AttachTLSProbesWithPID(coll, id, pid)...)
 	ls = append(ls, probes.AttachGoTLSProbes(coll, pid)...)
+	ls = append(ls, probes.AttachGoHTTP3Probes(coll, pid)...)
 	ls = append(ls, probes.AttachRedisProbesWithPID(coll, id, pid)...)
 	ls = append(ls, probes.AttachMemcachedProbesWithPID(coll, id, pid)...)
 	ls = append(ls, probes.AttachKafkaProbesWithPID(coll, id, pid)...)
@@ -241,6 +244,7 @@ func (t *Tracer) attachGroupUprobes(g probes.ProbeGroup) []link.Link {
 		ls = append(ls, probes.AttachSyncProbesWithPID(coll, id, pid)...)
 		ls = append(ls, probes.AttachTLSProbesWithPID(coll, id, pid)...)
 		ls = append(ls, probes.AttachGoTLSProbes(coll, pid)...)
+		ls = append(ls, probes.AttachGoHTTP3Probes(coll, pid)...)
 		return ls
 	case probes.GroupDatabase:
 		if id == "" {
@@ -510,6 +514,15 @@ func NewTracer() (*Tracer, error) {
 		}
 	}
 
+	var h3rd *ringbuf.Reader
+	if m := coll.Maps["h3_txn_events"]; m != nil {
+		if r, herr := ringbuf.NewReader(m); herr == nil {
+			h3rd = r
+		} else {
+			logger.Warn("HTTP/3 L7 decode disabled: ringbuf reader unavailable", zap.Error(herr))
+		}
+	}
+
 	var quicrd *ringbuf.Reader
 	if m := coll.Maps["quic_initial_events"]; m != nil {
 		if r, qerr := ringbuf.NewReader(m); qerr == nil {
@@ -530,6 +543,7 @@ func NewTracer() (*Tracer, error) {
 		reader:                rd,
 		h2Reader:              h2rd,
 		h2Decoder:             h2dec,
+		h3Reader:              h3rd,
 		quicReader:            quicrd,
 		filter:                filter.NewCgroupFilter(),
 		processNameCache:      processCache,
@@ -854,6 +868,7 @@ func (t *Tracer) SetContainerIDs(containerIDs []string) error {
 	t.registerGroupLinks(probes.GroupPool, probes.AttachPoolProbesWithPID(t.collection, primary, t.containerPID))
 	t.registerGroupLinks(probes.GroupTLS, probes.AttachTLSProbesWithPID(t.collection, primary, t.containerPID))
 	t.registerGroupLinks(probes.GroupTLS, probes.AttachGoTLSProbes(t.collection, t.containerPID))
+	t.registerGroupLinks(probes.GroupTLS, probes.AttachGoHTTP3Probes(t.collection, t.containerPID))
 	t.registerGroupLinks(probes.GroupCache, probes.AttachRedisProbesWithPID(t.collection, primary, t.containerPID))
 	t.registerGroupLinks(probes.GroupCache, probes.AttachMemcachedProbesWithPID(t.collection, primary, t.containerPID))
 	t.registerGroupLinks(probes.GroupMessaging, probes.AttachKafkaProbesWithPID(t.collection, primary, t.containerPID))
@@ -1056,6 +1071,10 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 		go t.runH2DecodeReader(ctx, eventChan, stackMap, ec)
 	}
 
+	if t.h3Reader != nil {
+		go t.runH3DecodeReader(ctx, eventChan, stackMap, ec)
+	}
+
 	if t.quicReader != nil {
 		go t.runQUICInitialReader(ctx, eventChan, stackMap, ec)
 	}
@@ -1241,6 +1260,45 @@ func (t *Tracer) runH2DecodeReader(ctx context.Context, eventChan chan<- *events
 	}
 }
 
+// runH3DecodeReader drains the HTTP/3 transaction ringbuf (one record per
+// request/response captured at the net/http boundary) and dispatches the paired
+// EventHTTPReq/EventHTTPResp through the same enrichment + filtering path as
+// kernel events.
+func (t *Tracer) runH3DecodeReader(ctx context.Context, eventChan chan<- *events.Event,
+	stackMap *ebpf.Map, ec *eventCounters) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("Panic in HTTP/3 L7 decode reader",
+				zap.Any("panic", r), zap.ByteString("stack", debug.Stack()))
+		}
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		record, err := t.h3Reader.Read()
+		if err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, ringbuf.ErrClosed) ||
+				strings.Contains(err.Error(), "closed") {
+				return
+			}
+			continue
+		}
+
+		txn, ok := h3decode.ParseRecord(record.RawSample)
+		if !ok {
+			continue
+		}
+		for _, ev := range txn.Events() {
+			t.processAndDispatch(ctx, ev, eventChan, stackMap, ec, time.Now())
+		}
+	}
+}
+
 // runQUICInitialReader drains the QUIC Initial packet ringbuf, extracts the SNI
 // (server name) from the client's ClientHello via the quicinitial package, and
 // emits an EVENT_HTTP3 connection event with the peer and SNI.
@@ -1310,6 +1368,9 @@ func (t *Tracer) Stop() error {
 	}
 	if t.h2Reader != nil {
 		_ = t.h2Reader.Close()
+	}
+	if t.h3Reader != nil {
+		_ = t.h3Reader.Close()
 	}
 	if t.quicReader != nil {
 		_ = t.quicReader.Close()
