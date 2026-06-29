@@ -301,7 +301,9 @@ to CRs, see [docs/migration.md](docs/migration.md).
 - **OOM Kill Detection**: Tracks out-of-memory kills with memory usage details
 
 ### Application Layer
-- **HTTP Tracing**: HTTP request/response tracking via uprobes
+- **HTTP Tracing**: Captures request method and path with response status and latency across HTTP/1.x, HTTP/2, and HTTP/3 over QUIC, for both clients and servers
+- **HTTP-over-TLS L7**: Reads plaintext HTTP before encryption / after decryption via uprobes on OpenSSL, BoringSSL and GnuTLS, Go, and Node.js
+- **L7 ↔ L4 Peer Fusion**: Annotates HTTP/1.x and HTTP/2 request/response events with the underlying TCP 4-tuple
 - **DNS Tracking**: Monitors DNS lookups with latency and error tracking
 - **Database Query Tracing**: Tracks PostgreSQL and MySQL query execution with pattern extraction and latency analysis
 - **TLS/SSL Handshake Tracking**: Track TLS handshake latency, errors and failures

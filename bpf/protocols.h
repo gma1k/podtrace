@@ -50,11 +50,12 @@
 #define HTTP_MIN_REQUEST_LEN 16
 #define W3C_TRACEPARENT_LEN  55
 
-/* Bit 0 = TLS (encrypted), bit 1 = HTTP/2. */
+/* Bit 0 = TLS (encrypted), bit 1 = HTTP/2, bit 2 = HTTP/3. */
 #define HTTP_TRANSPORT_PLAINTEXT 0  /* HTTP/1.x cleartext */
 #define HTTP_TRANSPORT_TLS       1  /* HTTP/1.x over TLS (OpenSSL, GnuTLS, Go) */
 #define HTTP_TRANSPORT_H2C       2  /* HTTP/2 cleartext */
 #define HTTP_TRANSPORT_H2_TLS    3  /* HTTP/2 over TLS (Go crypto/tls) */
+#define HTTP_TRANSPORT_H3        5  /* HTTP/3 over QUIC (always encrypted): H3 bit | TLS bit */
 
 /* === FastCGI NV Pair Helpers === */
 #define FCGI_NV_LEN_4BYTE    0x80

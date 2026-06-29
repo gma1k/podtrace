@@ -289,6 +289,24 @@ func TestGenerateHTTPSection_H2CTransport(t *testing.T) {
 	}
 }
 
+func TestGenerateHTTPSection_H3Transport(t *testing.T) {
+	d := &mockDiagnostician{
+		events: []*events.Event{
+			{Type: events.EventHTTPReq, LatencyNS: 5000000, Target: "GET /hello", TCPState: events.HTTPTransportH3},
+			{Type: events.EventHTTPResp, LatencyNS: 6000000, Target: "200", Details: "200", TCPState: events.HTTPTransportH3},
+		},
+		startTime: time.Now(),
+		endTime:   time.Now().Add(1 * time.Second),
+	}
+	result := GenerateHTTPSection(d, d.endTime.Sub(d.startTime))
+	if !strings.Contains(result, "Transport: 2 HTTP/3") {
+		t.Errorf("expected HTTP/3 transport breakdown, got:\n%s", result)
+	}
+	if !strings.Contains(result, "GET /hello (https)") {
+		t.Errorf("expected https-scheme-tagged h3 URL, got:\n%s", result)
+	}
+}
+
 func TestGenerateHTTPSection_PlaintextOmitsBreakdown(t *testing.T) {
 	d := &mockDiagnostician{
 		events: []*events.Event{

@@ -132,6 +132,32 @@ func TestEvent_HTTPTransport(t *testing.T) {
 	}
 }
 
+func TestEvent_HTTPTransport_H2AndH3(t *testing.T) {
+	h2cReq := &Event{Type: EventHTTPReq, TCPState: HTTPTransportH2C}
+	h2tlsReq := &Event{Type: EventHTTPReq, TCPState: HTTPTransportH2TLS}
+	h3Req := &Event{Type: EventHTTPReq, TCPState: HTTPTransportH3}
+
+	if got := h2cReq.HTTPProtoLabel(); got != "HTTP/2" {
+		t.Errorf("h2c HTTPProtoLabel() = %q, want HTTP/2", got)
+	}
+	if got := h2cReq.HTTPScheme(); got != "http" {
+		t.Errorf("h2c HTTPScheme() = %q, want http", got)
+	}
+	if got := h2tlsReq.HTTPProtoLabel(); got != "HTTP/2" {
+		t.Errorf("h2-tls HTTPProtoLabel() = %q, want HTTP/2", got)
+	}
+	if got := h3Req.HTTPProtoLabel(); got != "HTTP/3" {
+		t.Errorf("h3 HTTPProtoLabel() = %q, want HTTP/3", got)
+	}
+	// QUIC is always encrypted: H3 transport must imply the https scheme.
+	if got := h3Req.HTTPScheme(); got != "https" {
+		t.Errorf("h3 HTTPScheme() = %q, want https", got)
+	}
+	if got := h3Req.TypeString(); got != "HTTP/3" {
+		t.Errorf("h3 TypeString() = %q, want HTTP/3", got)
+	}
+}
+
 func TestEvent_FormatMessage_DNS(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -2018,6 +2018,113 @@ func attachGoTLSReadProbes(coll *ebpf.Collection, exe *link.Executable, exePath 
 	return links
 }
 
+// AttachGoHTTP3Probes attaches uprobes that read already-decoded HTTP/3 header
+// fields from a quic-go process: http3.parseHeaders for inbound headers and
+// qpack.(*Encoder).WriteField for outbound.
+func AttachGoHTTP3Probes(coll *ebpf.Collection, pid uint32) []link.Link {
+	var links []link.Link
+	if pid == 0 {
+		return links
+	}
+	exePath := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "exe")
+	exe, err := link.OpenExecutable(exePath)
+	if err != nil {
+		logger.Debug("Go HTTP/3 probe: cannot open executable",
+			zap.String("path", exePath), zap.Error(err))
+		return links
+	}
+
+	links = append(links, attachGoEntryReturnProbes(coll, exe, exePath, pid,
+		"github.com/quic-go/quic-go/http3.(*Transport).RoundTrip",
+		"uprobe_h3_roundtrip", "uprobe_h3_roundtrip_ret")...)
+
+	links = append(links, attachGoReturnProbes(coll, exe, exePath, pid,
+		"github.com/quic-go/quic-go/http3.requestFromHeaders",
+		"uprobe_h3_req_from_headers_ret")...)
+	if prog := coll.Programs["uprobe_h3_write_header"]; prog != nil {
+		const sym = "github.com/quic-go/quic-go/http3.(*responseWriter).WriteHeader"
+		if l, ok := attachGoUprobeBySymbol(exe, exePath, sym, prog); ok {
+			links = append(links, l)
+			logger.Debug("Go HTTP/3 WriteHeader uprobe attached", zap.Uint32("pid", pid))
+		}
+	}
+	return links
+}
+
+// attachGoUprobeBySymbol attaches an entry uprobe, falling back to a gopclntab
+// file-offset attach when the symbol is absent from the dynamic symbol table.
+func attachGoUprobeBySymbol(exe *link.Executable, exePath, sym string, prog *ebpf.Program) (link.Link, bool) {
+	l, err := exe.Uprobe(sym, prog, nil)
+	if err != nil {
+		off, ok := goSymbolFileOffset(exePath, sym)
+		if !ok {
+			return nil, false
+		}
+		l, err = exe.Uprobe("", prog, &link.UprobeOptions{Address: off})
+		if err != nil {
+			return nil, false
+		}
+	}
+	return l, true
+}
+
+// attachGoHTTP3ParseProbes attaches the http3.parseHeaders entry uprobe plus a
+// uprobe at each return site.
+func attachGoEntryReturnProbes(coll *ebpf.Collection, exe *link.Executable, exePath string, pid uint32,
+	sym, entryProgName, retProgName string) []link.Link {
+	var links []link.Link
+	entryProg := coll.Programs[entryProgName]
+	retProg := coll.Programs[retProgName]
+	if entryProg == nil || retProg == nil {
+		return links
+	}
+	entryOff, retOffs, ok := goFuncReturnOffsets(exePath, sym)
+	if !ok {
+		logger.Debug("Go HTTP/3: no return sites resolved (non-quic-go, non-x86, or symbol missing)",
+			zap.String("symbol", sym), zap.Uint32("pid", pid))
+		return links
+	}
+	el, err := exe.Uprobe("", entryProg, &link.UprobeOptions{Address: entryOff})
+	if err != nil {
+		logger.Debug("Go HTTP/3 entry uprobe not attached", zap.String("symbol", sym), zap.Error(err))
+		return links
+	}
+	links = append(links, el)
+	for _, ro := range retOffs {
+		if rl, err := exe.Uprobe("", retProg, &link.UprobeOptions{Address: ro}); err == nil {
+			links = append(links, rl)
+		}
+	}
+	logger.Debug("Go HTTP/3 entry+return uprobes attached",
+		zap.String("symbol", sym), zap.Uint32("pid", pid), zap.Int("ret_sites", len(links)-1))
+	return links
+}
+
+// attachGoReturnProbes attaches a uprobe at each return site of a Go function
+// (no entry probe). Used when only the function's result is needed.
+func attachGoReturnProbes(coll *ebpf.Collection, exe *link.Executable, exePath string, pid uint32,
+	sym, retProgName string) []link.Link {
+	var links []link.Link
+	retProg := coll.Programs[retProgName]
+	if retProg == nil {
+		return links
+	}
+	_, retOffs, ok := goFuncReturnOffsets(exePath, sym)
+	if !ok {
+		logger.Debug("Go HTTP/3: no return sites resolved",
+			zap.String("symbol", sym), zap.Uint32("pid", pid))
+		return links
+	}
+	for _, ro := range retOffs {
+		if rl, err := exe.Uprobe("", retProg, &link.UprobeOptions{Address: ro}); err == nil {
+			links = append(links, rl)
+		}
+	}
+	logger.Debug("Go HTTP/3 return uprobes attached",
+		zap.String("symbol", sym), zap.Uint32("pid", pid), zap.Int("ret_sites", len(links)))
+	return links
+}
+
 // kernelVersionString returns the running kernel version for use in error messages.
 func kernelVersionString() string {
 	data, err := os.ReadFile("/proc/version")

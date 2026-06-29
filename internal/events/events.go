@@ -142,9 +142,11 @@ const (
 	HTTPTransportTLS       uint32 = 1 // HTTP/1.x over TLS (OpenSSL/GnuTLS/Go)
 	HTTPTransportH2C       uint32 = 2 // HTTP/2 cleartext
 	HTTPTransportH2TLS     uint32 = 3 // HTTP/2 over TLS (Go crypto/tls)
+	HTTPTransportH3        uint32 = 5 // HTTP/3 over QUIC: H3 bit | TLS bit
 
 	httpTransportTLSBit uint32 = 1
 	httpTransportH2Bit  uint32 = 2
+	httpTransportH3Bit  uint32 = 4
 )
 
 // HTTPScheme returns the URL scheme implied by an HTTP event's transport:
@@ -157,8 +159,12 @@ func (e *Event) HTTPScheme() string {
 }
 
 // HTTPProtoLabel is the protocol label for an HTTP event, reflecting its
-// transport: "HTTP/2" for any h2 traffic, else "HTTPS" over TLS or "HTTP".
+// transport: "HTTP/3" for QUIC, "HTTP/2" for any h2 traffic, else "HTTPS" over
+// TLS or "HTTP".
 func (e *Event) HTTPProtoLabel() string {
+	if e.TCPState&httpTransportH3Bit != 0 {
+		return "HTTP/3"
+	}
 	if e.TCPState&httpTransportH2Bit != 0 {
 		return "HTTP/2"
 	}

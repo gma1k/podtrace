@@ -108,4 +108,21 @@ struct h2_hdr_record {
 	u8  peer_daddr6[16];
 };
 
+#define H3_TXN_METHOD_MAX 16
+#define H3_TXN_PATH_MAX   256
+
+struct h3_txn_record {
+	u64 timestamp;
+	u64 latency_ns;
+	u64 cgroup_id;
+	u32 pid;
+	u16 status;
+	u8  is_client;
+	u8  method_len;
+	u16 path_len;
+	u8  _pad[6];
+	char method[H3_TXN_METHOD_MAX];
+	char path[H3_TXN_PATH_MAX];
+};
+
 #endif
