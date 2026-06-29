@@ -9,6 +9,29 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.13.5](https://github.com/gma1k/podtrace/compare/v0.13.4...v0.13.5) (2026-06-29)
+
+
+### Features
+
+* attach TLS uprobes by offset via build-id debug info ([#261](https://github.com/gma1k/podtrace/issues/261)) ([9381c7d](https://github.com/gma1k/podtrace/commit/9381c7d77b97f1482e29b220d0249749acc8544b))
+* capture HTTP/3 (QUIC) connections and SNI from the Initial packet ([#263](https://github.com/gma1k/podtrace/issues/263)) ([a535199](https://github.com/gma1k/podtrace/commit/a535199a9cb87d5d4e3273c2d279b3cae1ab4b1f))
+* capture Node.js HTTPS h1 + h2 over TLS, client and server ([#259](https://github.com/gma1k/podtrace/issues/259)) ([90b03f1](https://github.com/gma1k/podtrace/commit/90b03f1d67756ae887d34150b34644e83e58979a))
+* capture TLS L7 by resolving SSL symbols from .symtab ([#260](https://github.com/gma1k/podtrace/issues/260)) ([cc43ec9](https://github.com/gma1k/podtrace/commit/cc43ec9a1f77fdba22d19d4dc80eb058bd481b4c))
+* decode HTTP/3 (QUIC) L7 requests and responses for quic-go ([#265](https://github.com/gma1k/podtrace/issues/265)) ([e801bc3](https://github.com/gma1k/podtrace/commit/e801bc34dd76bde0d0ce05782542d54a1d1f0cce))
+* fuse L4 peer 4-tuple onto L7 events ([#262](https://github.com/gma1k/podtrace/issues/262)) ([e715fa7](https://github.com/gma1k/podtrace/commit/e715fa7231898825f3cb692327fe913adaf83783))
+
+
+### Bug Fixes
+
+* harden HTTP/2 userspace decode egress chunking, Go reads, buffer ([#257](https://github.com/gma1k/podtrace/issues/257)) ([f99c3ce](https://github.com/gma1k/podtrace/commit/f99c3cec3510a16bd35d89c4d803d7fb7f4e1312))
+
+
+### Maintenance
+
+* **deps:** update go modules (non-major) ([#266](https://github.com/gma1k/podtrace/issues/266)) ([506fd95](https://github.com/gma1k/podtrace/commit/506fd95811ed26dd77b95f13b8212d9ddd69549d))
+* **deps:** update golangci/golangci-lint-action action to v9.3.0 ([#264](https://github.com/gma1k/podtrace/issues/264)) ([c2921d1](https://github.com/gma1k/podtrace/commit/c2921d1cedc814d684c89e17d845e77085fb1282))
+
 ## [0.13.4](https://github.com/gma1k/podtrace/compare/v0.13.3...v0.13.4) (2026-06-27)
 
 
