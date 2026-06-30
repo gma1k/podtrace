@@ -1127,3 +1127,19 @@ func TestGenerateIssuesSection_WarningKeyword(t *testing.T) {
 	result := GenerateIssuesSection(d)
 	_ = result
 }
+
+func TestGenerateHTTPSection_TraceContextCount(t *testing.T) {
+	d := &mockDiagnostician{
+		events: []*events.Event{
+			{Type: events.EventHTTPReq, Target: "GET /a", TCPState: events.HTTPTransportH3, Details: "traceparent: 00-abc-def-01"},
+			{Type: events.EventHTTPReq, Target: "GET /b", TCPState: events.HTTPTransportH3},
+			{Type: events.EventHTTPResp, Target: "GET /a", TCPState: events.HTTPTransportH3, Details: "200"},
+		},
+		startTime: time.Now(),
+		endTime:   time.Now().Add(1 * time.Second),
+	}
+	result := GenerateHTTPSection(d, d.endTime.Sub(d.startTime))
+	if !strings.Contains(result, "Trace context: 1/2 requests carried a W3C traceparent") {
+		t.Errorf("expected trace-context line, got:\n%s", result)
+	}
+}

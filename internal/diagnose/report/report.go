@@ -334,6 +334,10 @@ func GenerateHTTPSection(d Diagnostician, duration time.Duration) string {
 				report += formatter.TopItemsWithRate(statusMap, config.TopURLsLimit, "response status codes", "responses", duration)
 			}
 		}
+		if tp := traceContextCount(httpReqEvents); tp > 0 {
+			report += fmt.Sprintf("  Trace context: %d/%d requests carried a W3C traceparent\n",
+				tp, len(httpReqEvents))
+		}
 		peerEvents := make([]*events.Event, 0, len(httpReqEvents)+len(httpRespEvents))
 		peerEvents = append(peerEvents, httpReqEvents...)
 		peerEvents = append(peerEvents, httpRespEvents...)
@@ -344,6 +348,16 @@ func GenerateHTTPSection(d Diagnostician, duration time.Duration) string {
 	}
 	report += "\n"
 	return report
+}
+
+func traceContextCount(httpReqEvents []*events.Event) int {
+	n := 0
+	for _, e := range httpReqEvents {
+		if e.TraceID != "" || strings.HasPrefix(e.Details, "traceparent: ") {
+			n++
+		}
+	}
+	return n
 }
 
 // buildPeerMap counts L7 events by their fused L4 remote peer (ip:port).

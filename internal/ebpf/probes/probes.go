@@ -2034,6 +2034,19 @@ func AttachGoHTTP3Probes(coll *ebpf.Collection, pid uint32) []link.Link {
 		return links
 	}
 
+	if m := coll.Maps["h3_offsets"]; m != nil {
+		off, src := resolveH3FieldOffsets(exePath)
+		tgid := pid
+		if err := m.Update(&tgid, &off, ebpf.UpdateAny); err != nil {
+			logger.Debug("HTTP/3 offsets: map update failed", zap.Uint32("pid", pid), zap.Error(err))
+		} else {
+			logger.Debug("HTTP/3 field offsets resolved",
+				zap.Uint32("pid", pid), zap.String("source", src),
+				zap.Uint32("method", off.Method), zap.Uint32("url", off.URL),
+				zap.Uint32("path", off.Path), zap.Uint32("status", off.Status))
+		}
+	}
+
 	links = append(links, attachGoEntryReturnProbes(coll, exe, exePath, pid,
 		"github.com/quic-go/quic-go/http3.(*Transport).RoundTrip",
 		"uprobe_h3_roundtrip", "uprobe_h3_roundtrip_ret")...)
@@ -2048,6 +2061,18 @@ func AttachGoHTTP3Probes(coll *ebpf.Collection, pid uint32) []link.Link {
 			logger.Debug("Go HTTP/3 WriteHeader uprobe attached", zap.Uint32("pid", pid))
 		}
 	}
+
+	if prog := coll.Programs["uprobe_h3_qpack_write_field"]; prog != nil {
+		const sym = "github.com/quic-go/qpack.(*Encoder).WriteField"
+		if l, ok := attachGoUprobeBySymbol(exe, exePath, sym, prog); ok {
+			links = append(links, l)
+			logger.Debug("Go HTTP/3 WriteField (traceparent) uprobe attached", zap.Uint32("pid", pid))
+		}
+	}
+	links = append(links, attachGoEntryReturnProbes(coll, exe, exePath, pid,
+		"github.com/quic-go/quic-go/http3.parseHeaders",
+		"uprobe_h3_parse_headers", "uprobe_h3_parse_headers_ret")...)
+
 	return links
 }
 
