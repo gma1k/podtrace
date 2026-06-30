@@ -45,7 +45,7 @@ int uprobe_go_tls_write(struct pt_regs *ctx)
 		return 0;
 
 	if (http_method_len(peek) > 0) {
-		http_emit_request(ctx, base, avail, HTTP_TRANSPORT_TLS);
+		http_emit_request(ctx, base, avail, HTTP_TRANSPORT_TLS, GO_ARG_RECV(ctx));
 	} else {
 		h2_emit_frames(base, avail, GO_ARG_RECV(ctx), H2_DIR_EGRESS,
 			       HTTP_TRANSPORT_H2_TLS);
