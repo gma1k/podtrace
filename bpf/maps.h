@@ -549,6 +549,35 @@ struct {
 } h3_req_stash SEC(".maps");
 
 struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u32);
+	__type(value, struct h3_field_offsets);
+} h3_offsets SEC(".maps");
+
+struct h3_pending_tp {
+	u8   len;
+	u8   _pad[7];
+	char buf[H3_TXN_TP_MAX];
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 4096);
+	__type(key, u64);
+	__type(value, struct h3_pending_tp);
+} h3_pending_tp SEC(".maps");
+
+struct h3_parse_state {
+	u64 fields_ptr;
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u64);
+	__type(value, struct h3_parse_state);
+} h3_parse_args SEC(".maps");
+
+struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 8192);
 	__type(key, u64);

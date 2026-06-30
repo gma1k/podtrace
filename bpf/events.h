@@ -111,6 +111,15 @@ struct h2_hdr_record {
 #define H3_TXN_METHOD_MAX 16
 #define H3_TXN_PATH_MAX   256
 
+struct h3_field_offsets {
+	u32 method;
+	u32 url;
+	u32 path;
+	u32 status;
+};
+
+#define H3_TXN_TP_MAX 64
+
 struct h3_txn_record {
 	u64 timestamp;
 	u64 latency_ns;
@@ -120,9 +129,11 @@ struct h3_txn_record {
 	u8  is_client;
 	u8  method_len;
 	u16 path_len;
-	u8  _pad[6];
+	u8  tp_len;
+	u8  _pad[5];
 	char method[H3_TXN_METHOD_MAX];
 	char path[H3_TXN_PATH_MAX];
+	char traceparent[H3_TXN_TP_MAX];
 };
 
 #endif
