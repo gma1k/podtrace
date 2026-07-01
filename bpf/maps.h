@@ -492,6 +492,46 @@ struct {
 	__type(value, struct h2_hdr_scratch);
 } h2_hdr_scratch_map SEC(".maps");
 
+struct grpc_go_scratch {
+	char method[16];
+	char path[MAX_STRING_LEN];
+	char status[8];
+	u8 have_path;
+	u8 have_status;
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, u32);
+	__type(value, struct grpc_go_scratch);
+} grpc_go_scratch_map SEC(".maps");
+
+struct grpc_pair_key {
+	u32 saddr;
+	u32 daddr;
+	u16 sport;
+	u16 dport;
+	u32 stream;
+	u32 _pad;
+};
+struct grpc_pair_val {
+	u64 start_ns;
+	char path[MAX_STRING_LEN];
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 4096);
+	__type(key, struct grpc_pair_key);
+	__type(value, struct grpc_pair_val);
+} grpc_go_pairs SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, u32);
+	__type(value, struct grpc_pair_val);
+} grpc_go_pairval_map SEC(".maps");
+
 struct h2_seq_key {
 	u64 conn_id;
 	u32 dir;
@@ -530,9 +570,6 @@ struct {
 	__type(value, struct h3_txn_scratch);
 } h3_txn_scratch_map SEC(".maps");
 
-/* h3_req_stash holds the in-flight request (method/path/start) between the
- * request hook and the response hook on the same goroutine: client RoundTrip
- * entry -> RoundTrip return; server requestFromHeaders return -> WriteHeader. */
 struct h3_req_inflight {
 	u64 start_ts;
 	u8  method_len;

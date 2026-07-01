@@ -22,6 +22,7 @@
 #include "http.c"
 #include "h2.c"
 #include "gotls.c"
+#include "grpcgo.c"
 #include "http3l7.c"
 #include "crypto.c"
 

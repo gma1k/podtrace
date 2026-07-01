@@ -2429,3 +2429,47 @@ func TestTLSExecutableForPID(t *testing.T) {
 		t.Errorf("tlsExecutableForPID(self) = %q, want empty for a non-SSL binary", got)
 	}
 }
+
+// TestTLSLibPatternsMatchNativeProviders guards the TLS library discovery
+// pattern list. The matching semantics mirror the production walk callbacks:
+// a case-insensitive substring match of the pattern against the .so basename.
+// In particular "tcnative" must match netty-tcnative-boringssl-static (used by
+// gRPC-Java, Reactor Netty / Spring WebFlux, Kafka) including the random suffix
+// the JVM appends when it extracts the library, while unrelated libraries and
+// the non-attachable Conscrypt provider must not be matched by accident.
+func TestTLSLibPatternsMatchNativeProviders(t *testing.T) {
+	matches := func(baseName string) bool {
+		b := strings.ToLower(baseName)
+		for _, p := range tlsLibPatterns {
+			if strings.Contains(b, strings.ToLower(p)) {
+				return true
+			}
+		}
+		return false
+	}
+
+	shouldMatch := []string{
+		"libssl.so.3",
+		"libgnutls.so.30",
+		"libnetty_tcnative_linux_x86_64.so",
+		"libnetty_tcnative_linux_x86_646080899174755123456.so", // JVM temp-extraction suffix
+		"libnetty_tcnative_linux_aarch_64.so",
+	}
+	for _, name := range shouldMatch {
+		if !matches(name) {
+			t.Errorf("expected %q to match a TLS library pattern, but it did not", name)
+		}
+	}
+
+	shouldNotMatch := []string{
+		"libc.so.6",
+		"libpthread.so.0",
+		"libjvm.so",
+		"libconscrypt_openjdk_jni-linux-x86_64.so", // stripped, dynamic JNI registration: not uprobe-able
+	}
+	for _, name := range shouldNotMatch {
+		if matches(name) {
+			t.Errorf("expected %q not to match any TLS library pattern, but it did", name)
+		}
+	}
+}
