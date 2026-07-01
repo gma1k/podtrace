@@ -174,6 +174,7 @@ func (t *Tracer) attachContainerUprobes(id string, pid uint32) []link.Link {
 	ls = append(ls, probes.AttachPoolProbesWithPID(coll, id, pid)...)
 	ls = append(ls, probes.AttachTLSProbesWithPID(coll, id, pid)...)
 	ls = append(ls, probes.AttachGoTLSProbes(coll, pid)...)
+	ls = append(ls, probes.AttachGoGRPCProbes(coll, pid)...)
 	ls = append(ls, probes.AttachGoHTTP3Probes(coll, pid)...)
 	ls = append(ls, probes.AttachRedisProbesWithPID(coll, id, pid)...)
 	ls = append(ls, probes.AttachMemcachedProbesWithPID(coll, id, pid)...)
@@ -244,6 +245,7 @@ func (t *Tracer) attachGroupUprobes(g probes.ProbeGroup) []link.Link {
 		ls = append(ls, probes.AttachSyncProbesWithPID(coll, id, pid)...)
 		ls = append(ls, probes.AttachTLSProbesWithPID(coll, id, pid)...)
 		ls = append(ls, probes.AttachGoTLSProbes(coll, pid)...)
+		ls = append(ls, probes.AttachGoGRPCProbes(coll, pid)...)
 		ls = append(ls, probes.AttachGoHTTP3Probes(coll, pid)...)
 		return ls
 	case probes.GroupDatabase:
@@ -868,6 +870,7 @@ func (t *Tracer) SetContainerIDs(containerIDs []string) error {
 	t.registerGroupLinks(probes.GroupPool, probes.AttachPoolProbesWithPID(t.collection, primary, t.containerPID))
 	t.registerGroupLinks(probes.GroupTLS, probes.AttachTLSProbesWithPID(t.collection, primary, t.containerPID))
 	t.registerGroupLinks(probes.GroupTLS, probes.AttachGoTLSProbes(t.collection, t.containerPID))
+	t.registerGroupLinks(probes.GroupTLS, probes.AttachGoGRPCProbes(t.collection, t.containerPID))
 	t.registerGroupLinks(probes.GroupTLS, probes.AttachGoHTTP3Probes(t.collection, t.containerPID))
 	t.registerGroupLinks(probes.GroupCache, probes.AttachRedisProbesWithPID(t.collection, primary, t.containerPID))
 	t.registerGroupLinks(probes.GroupCache, probes.AttachMemcachedProbesWithPID(t.collection, primary, t.containerPID))

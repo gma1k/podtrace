@@ -839,6 +839,20 @@ func fileInProcRoot(pid uint32, containerPath string) string {
 	return ""
 }
 
+// fileInProcMapFiles resolves a memory-mapped file through
+// /proc/<pid>/map_files/<start>-<end> using the address range from a
+// /proc/<pid>/maps line.
+func fileInProcMapFiles(pid uint32, addrRange string) string {
+	if addrRange == "" || !strings.Contains(addrRange, "-") {
+		return ""
+	}
+	p := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "map_files", addrRange)
+	if info, err := os.Stat(p); err == nil && info.Mode().IsRegular() {
+		return p
+	}
+	return ""
+}
+
 func findContainerProcess(containerID string) uint32 {
 	entries, err := os.ReadDir(config.ProcBasePath)
 	if err != nil {
@@ -1241,9 +1255,16 @@ func findDBLibsViaProcessMapsProcRoot(pid uint32, libNames []string) []string {
 				parts := strings.Fields(line)
 				if len(parts) >= 6 {
 					containerPath := parts[5]
-					if hostPath := fileInProcRoot(pid, containerPath); hostPath != "" && !seen[hostPath] {
-						paths = append(paths, hostPath)
-						seen[hostPath] = true
+					if hostPath := fileInProcRoot(pid, containerPath); hostPath != "" {
+						if !seen[hostPath] {
+							paths = append(paths, hostPath)
+							seen[hostPath] = true
+						}
+					} else if strings.Contains(parts[1], "x") && !seen[containerPath] {
+						if mf := fileInProcMapFiles(pid, parts[0]); mf != "" {
+							paths = append(paths, mf)
+							seen[containerPath] = true
+						}
 					}
 				}
 			}
@@ -1412,6 +1433,7 @@ func findTLSLibsViaProcessMaps(pid uint32, libPatterns []string) []string {
 		return paths
 	}
 
+	seen := make(map[string]bool)
 	for _, line := range strings.Split(string(data), "\n") {
 		for _, pattern := range libPatterns {
 			if strings.Contains(line, pattern) {
@@ -1420,6 +1442,11 @@ func findTLSLibsViaProcessMaps(pid uint32, libPatterns []string) []string {
 					path := parts[5]
 					if hostfs.IsRegularFile(path) {
 						paths = append(paths, path)
+					} else if strings.Contains(parts[1], "x") && !seen[path] {
+						if mf := fileInProcMapFiles(pid, parts[0]); mf != "" {
+							paths = append(paths, mf)
+							seen[path] = true
+						}
 					}
 				}
 			}
@@ -1442,9 +1469,21 @@ func findTLSLibsViaProcessMapsProcRoot(pid uint32, libPatterns []string) []strin
 				parts := strings.Fields(line)
 				if len(parts) >= 6 {
 					containerPath := parts[5]
-					if hostPath := fileInProcRoot(pid, containerPath); hostPath != "" && !seen[hostPath] {
-						paths = append(paths, hostPath)
-						seen[hostPath] = true
+					if hostPath := fileInProcRoot(pid, containerPath); hostPath != "" {
+						if !seen[hostPath] {
+							paths = append(paths, hostPath)
+							seen[hostPath] = true
+						}
+					} else if strings.Contains(parts[1], "x") && !seen[containerPath] {
+						// Backing file may be unlinked (e.g. netty-tcnative
+						// extracted to /tmp then deleted after dlopen); reach the
+						// live inode via map_files. All VMAs of the library share
+						// one inode, so restrict to the executable segment and
+						// dedup by path to attach the code mapping exactly once.
+						if mf := fileInProcMapFiles(pid, parts[0]); mf != "" {
+							paths = append(paths, mf)
+							seen[containerPath] = true
+						}
 					}
 				}
 			}
@@ -1532,9 +1571,7 @@ func findTLSLibsInContainerWithPID(containerID string, pid uint32, libPatterns [
 
 // findTLSLibsViaProcRootScan walks the container rootfs (via /proc/<pid>/root)
 // looking for shared-library files whose name matches one of libPatterns,
-// independent of whether the resolved process has them mapped. Symlinks are
-// resolved and de-duplicated so a uprobe is not attached twice to the same
-// underlying file.
+// independent of whether the resolved process has them mapped.
 func findTLSLibsViaProcRootScan(pid uint32, libPatterns []string) []string {
 	root := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "root")
 	dirs := append(config.GetDefaultLibSearchPaths(),
@@ -1643,11 +1680,15 @@ func findTLSLibsViaLdSoConf(libPatterns []string) []string {
 	return paths
 }
 
+// tlsLibPatterns are the shared library basename substrings we scan for when
+// attaching TLS uprobes.
+var tlsLibPatterns = []string{"libssl", "libgnutls", "libnss", "libmbedtls", "libmbedx509", "ssl", "tcnative"}
+
 func findTLSLibs(containerID string) []string {
 	var paths []string
 	seen := make(map[string]bool)
 
-	libPatterns := []string{"libssl", "libgnutls", "libnss", "libmbedtls", "libmbedx509", "ssl"}
+	libPatterns := tlsLibPatterns
 
 	if containerID != "" {
 		containerPaths := findTLSLibsInContainer(containerID, libPatterns)
@@ -1722,8 +1763,7 @@ func findTLSLibs(containerID string) []string {
 }
 
 // tlsExecutableForPID returns the target process's executable path
-// (/proc/<pid>/exe) when it statically bundles an attachable OpenSSL (i.e. it
-// exports SSL_write), else "".
+// (/proc/<pid>/exe) when it statically bundles an attachable OpenSSL.
 func tlsExecutableForPID(pid uint32) string {
 	if pid == 0 {
 		return ""
@@ -1739,7 +1779,7 @@ func findTLSLibsWithPID(containerID string, pid uint32) []string {
 	var paths []string
 	seen := make(map[string]bool)
 
-	libPatterns := []string{"libssl", "libgnutls", "libnss", "libmbedtls", "libmbedx509", "ssl"}
+	libPatterns := tlsLibPatterns
 
 	if containerID != "" || pid > 0 {
 		containerPaths := findTLSLibsInContainerWithPID(containerID, pid, libPatterns)
@@ -1978,6 +2018,46 @@ func AttachGoTLSProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 	logger.Debug("Go TLS uprobe attached", zap.Uint32("pid", pid))
 
 	links = append(links, attachGoTLSReadProbes(coll, exe, exePath, pid)...)
+	return links
+}
+
+// AttachGoGRPCProbes attaches entry uprobes on grpc-go's internal/transport
+// header functions in a statically-linked Go binary, capturing gRPC
+// :method/:path/:status from the plaintext []hpack.HeaderField slice.
+func AttachGoGRPCProbes(coll *ebpf.Collection, pid uint32) []link.Link {
+	var links []link.Link
+	if pid == 0 {
+		return links
+	}
+	exePath := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "exe")
+	exe, err := link.OpenExecutable(exePath)
+	if err != nil {
+		return links
+	}
+	targets := []struct{ prog, sym string }{
+		{"uprobe_grpc_go_write_header", "google.golang.org/grpc/internal/transport.(*loopyWriter).writeHeader"},
+		{"uprobe_grpc_go_server_headers", "google.golang.org/grpc/internal/transport.(*http2Server).operateHeaders"},
+		{"uprobe_grpc_go_client_headers", "google.golang.org/grpc/internal/transport.(*http2Client).operateHeaders"},
+	}
+	for _, t := range targets {
+		prog := coll.Programs[t.prog]
+		if prog == nil {
+			continue
+		}
+		l, err := exe.Uprobe(t.sym, prog, nil)
+		if err != nil {
+			if off, ok := goSymbolFileOffset(exePath, t.sym); ok {
+				l, err = exe.Uprobe("", prog, &link.UprobeOptions{Address: off})
+			}
+		}
+		if err != nil {
+			logger.Debug("Go gRPC uprobe not attached",
+				zap.String("symbol", t.sym), zap.Uint32("pid", pid), zap.Error(err))
+			continue
+		}
+		links = append(links, l)
+		logger.Debug("Go gRPC uprobe attached", zap.String("symbol", t.sym), zap.Uint32("pid", pid))
+	}
 	return links
 }
 
