@@ -464,6 +464,13 @@ struct {
 	__type(value, struct ssl_read_state);
 } ssl_read_args SEC(".maps");
 
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u64);
+	__type(value, struct ssl_read_state);
+} rustls_read_args SEC(".maps");
+
 struct h2_recv_info {
 	u64 base;
 	u64 conn_id;
