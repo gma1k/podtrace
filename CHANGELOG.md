@@ -9,6 +9,36 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.13.6](https://github.com/gma1k/podtrace/compare/v0.13.5...v0.13.6) (2026-07-02)
+
+
+### Features
+
+* capture grpc-go and netty-tcnative HTTP/2 L7 over TLS ([#272](https://github.com/gma1k/podtrace/issues/272)) ([9a4db41](https://github.com/gma1k/podtrace/commit/9a4db411a14dce4266234ae68e11f049b068147e))
+* capture inbound HTTP/1.x server-side via connection keying ([#269](https://github.com/gma1k/podtrace/issues/269)) ([4d908d5](https://github.com/gma1k/podtrace/commit/4d908d5cfe063db70f9f5f8a1fa2effcbb28a867))
+* capture rustls (Rust) TLS L7 via plaintext uprobes ([#276](https://github.com/gma1k/podtrace/issues/276)) ([40eeb1c](https://github.com/gma1k/podtrace/commit/40eeb1c51197442d26c12d0144f0d3ff7e2cf779))
+* harden HTTP/3 L7 with DWARF offsets and traceparent capture ([#267](https://github.com/gma1k/podtrace/issues/267)) ([7b982d8](https://github.com/gma1k/podtrace/commit/7b982d85a37ebb42be58ee6490841db28d413555))
+* resolve rustls symbols under v0 mangling and via debug files ([#278](https://github.com/gma1k/podtrace/issues/278)) ([bde6ae8](https://github.com/gma1k/podtrace/commit/bde6ae82339e745ac57159e98929e27c1645d1bd))
+
+
+### Bug Fixes
+
+* reject TLS records in h2c frame detection to drop ciphertext noise ([#277](https://github.com/gma1k/podtrace/issues/277)) ([93c58de](https://github.com/gma1k/podtrace/commit/93c58de370ef2351202c6332776811c009f58170))
+
+
+### Tests
+
+* cover quicinitial QUIC Initial parsing and agent copy-fail alert ([#279](https://github.com/gma1k/podtrace/issues/279)) ([f573d16](https://github.com/gma1k/podtrace/commit/f573d163dd1bb6f5e19a5843dfd6aad0cf622ad5))
+
+
+### Maintenance
+
+* **deps:** update github actions ([#273](https://github.com/gma1k/podtrace/issues/273)) ([864585c](https://github.com/gma1k/podtrace/commit/864585cdbf4ba6ace0a70eee79b55bde985d2383))
+* **deps:** update github actions ([#275](https://github.com/gma1k/podtrace/issues/275)) ([025479f](https://github.com/gma1k/podtrace/commit/025479fe3e507a4cf807111cd2d94f9c144c70f4))
+* **deps:** update go modules (non-major) ([#274](https://github.com/gma1k/podtrace/issues/274)) ([58f6785](https://github.com/gma1k/podtrace/commit/58f6785a43215f32de9e0a60d106823d9690801c))
+* **deps:** update module google.golang.org/api to v0.287.0 ([#271](https://github.com/gma1k/podtrace/issues/271)) ([4966153](https://github.com/gma1k/podtrace/commit/4966153dc50f3a09b07082048e8a0a12c5388ffb))
+* **deps:** update module google.golang.org/grpc to v1.82.0 ([#270](https://github.com/gma1k/podtrace/issues/270)) ([2383ea3](https://github.com/gma1k/podtrace/commit/2383ea34a1d24825c8b4e675d334323af0252030))
+
 ## [0.13.5](https://github.com/gma1k/podtrace/compare/v0.13.4...v0.13.5) (2026-06-29)
 
 
