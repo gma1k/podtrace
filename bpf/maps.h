@@ -178,6 +178,8 @@ struct {
 	__type(value, struct tcp_peer);
 } tcp_peer_stash SEC(".maps");
 
+#define QUIC_INITIAL_MAX_PKTS 3
+
 struct quic_flow_key {
 	u64 cgroup_id;
 	u8  daddr6[16];
@@ -581,9 +583,12 @@ struct h3_req_inflight {
 	u64 start_ts;
 	u8  method_len;
 	u16 path_len;
-	u8  _pad[5];
+	u8  peer_family;
+	u16 peer_dport;
+	u8  _pad[2];
 	char method[H3_TXN_METHOD_MAX];
 	char path[H3_TXN_PATH_MAX];
+	u8  peer_daddr6[16];
 };
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
@@ -598,6 +603,80 @@ struct {
 	__type(key, u32);
 	__type(value, struct h3_field_offsets);
 } h3_offsets SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u32);
+	__type(value, struct h3_peer_paths);
+} h3_peer_paths_map SEC(".maps");
+
+struct h3_pidns_info {
+	u64 dev;
+	u64 ino;
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, u32);
+	__type(value, struct h3_pidns_info);
+} h3_pidns SEC(".maps");
+
+struct h3_hdr_name {
+	u8   len;
+	char name[H3_HDR_NAME_MAX];
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, H3_HDR_SLOTS);
+	__type(key, u32);
+	__type(value, struct h3_hdr_name);
+} h3_hdr_names SEC(".maps");
+
+struct h3_pending_hdrs {
+	u8   vlen[H3_HDR_SLOTS];
+	u8   _pad[4];
+	char val[H3_HDR_SLOTS][H3_HDR_VAL_MAX];
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 4096);
+	__type(key, u64);
+	__type(value, struct h3_pending_hdrs);
+} h3_pending_hdrs SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, u32);
+	__type(value, struct h3_pending_hdrs);
+} h3_hdr_scratch SEC(".maps");
+
+#define H3_ADAPTER_KIND_REQUEST 1
+#define H3_ADAPTER_KIND_ARRIVAL 2
+
+struct h3_adapter_stream_key {
+	u64 tgid;
+	u64 conn;
+	u64 stream_id;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 4096);
+	__type(key, struct h3_adapter_stream_key);
+	__type(value, struct h3_txn_record);
+} h3_adapter_streams SEC(".maps");
+
+struct h3_adapter_call {
+	u64 conn;
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u64);
+	__type(value, struct h3_adapter_call);
+} h3_adapter_calls SEC(".maps");
 
 struct h3_pending_tp {
 	u8   len;

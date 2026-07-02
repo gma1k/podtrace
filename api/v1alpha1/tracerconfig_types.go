@@ -68,6 +68,15 @@ type RedactionSpec struct {
 	CustomRules []RedactionRule `json:"customRules,omitempty"`
 }
 
+// CaptureSpec selects additional L7 request/response data to capture.
+type CaptureSpec struct {
+	// +optional
+	// +kubebuilder:validation:MaxItems=4
+	// +kubebuilder:validation:items:MaxLength=32
+	// +kubebuilder:validation:items:Pattern=`^[A-Za-z0-9!#$%&'*+.^_|~-]+$`
+	Headers []string `json:"headers,omitempty"`
+}
+
 // RedactionRule is a single user-supplied redaction pattern.
 type RedactionRule struct {
 	// +kubebuilder:validation:Required
@@ -125,6 +134,9 @@ type TracerConfigSpec struct {
 
 	// +optional
 	Redaction *RedactionSpec `json:"redaction,omitempty"`
+
+	// +optional
+	Capture *CaptureSpec `json:"capture,omitempty"`
 
 	// +optional
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`

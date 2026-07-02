@@ -3,7 +3,7 @@ package probes
 import (
 	"debug/elf"
 	"debug/gosym"
-	"runtime"
+	"encoding/binary"
 
 	"golang.org/x/arch/x86/x86asm"
 )
@@ -92,17 +92,18 @@ func vaddrToFileOffset(f *elf.File, vaddr uint64) (uint64, bool) {
 }
 
 // goFuncReturnOffsets resolves the entry file offset of a Go function and the
-// file offsets of every RET instruction within it, by disassembling the
-// function's machine code (x86-64).
+// file offsets of every RET instruction within it, by scanning the function's
+// machine code.
 func goFuncReturnOffsets(exePath, symbol string) (entryOff uint64, retOffs []uint64, ok bool) {
-	if runtime.GOARCH != "amd64" {
-		return 0, nil, false
-	}
 	f, err := elf.Open(exePath)
 	if err != nil {
 		return 0, nil, false
 	}
 	defer func() { _ = f.Close() }()
+
+	if f.Machine != elf.EM_X86_64 && f.Machine != elf.EM_AARCH64 {
+		return 0, nil, false
+	}
 
 	pcln := f.Section(".gopclntab")
 	text := f.Section(".text")
@@ -142,6 +143,25 @@ func goFuncReturnOffsets(exePath, symbol string) (entryOff uint64, retOffs []uin
 	}
 	code := textData[start:end]
 
+	var retPositions []uint64
+	switch f.Machine {
+	case elf.EM_X86_64:
+		retPositions = x86ReturnPositions(code)
+	case elf.EM_AARCH64:
+		retPositions = arm64ReturnPositions(code)
+	}
+	for _, pos := range retPositions {
+		if off, ok2 := vaddrToFileOffset(f, fn.Entry+pos); ok2 {
+			retOffs = append(retOffs, off)
+		}
+	}
+	return entryOff, retOffs, len(retOffs) > 0
+}
+
+// x86ReturnPositions decodes x86-64 code and returns the byte position of
+// every RET instruction.
+func x86ReturnPositions(code []byte) []uint64 {
+	var out []uint64
 	for pos := 0; pos < len(code); {
 		inst, derr := x86asm.Decode(code[pos:], 64)
 		if derr != nil || inst.Len == 0 {
@@ -149,11 +169,25 @@ func goFuncReturnOffsets(exePath, symbol string) (entryOff uint64, retOffs []uin
 			continue
 		}
 		if inst.Op == x86asm.RET {
-			if off, ok2 := vaddrToFileOffset(f, fn.Entry+uint64(pos)); ok2 {
-				retOffs = append(retOffs, off)
-			}
+			out = append(out, uint64(pos))
 		}
 		pos += inst.Len
 	}
-	return entryOff, retOffs, len(retOffs) > 0
+	return out
+}
+
+// arm64RetInstruction is the sole encoding Go emits for a function return on
+// arm64: RET (via x30).
+const arm64RetInstruction = 0xd65f03c0
+
+// arm64ReturnPositions scans fixed-width arm64 code and returns the byte
+// position of every RET instruction.
+func arm64ReturnPositions(code []byte) []uint64 {
+	var out []uint64
+	for pos := 0; pos+4 <= len(code); pos += 4 {
+		if binary.LittleEndian.Uint32(code[pos:pos+4]) == arm64RetInstruction {
+			out = append(out, uint64(pos))
+		}
+	}
+	return out
 }

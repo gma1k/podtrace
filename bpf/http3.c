@@ -13,12 +13,17 @@ static __always_inline int quic_is_initial(struct __sk_buff *skb, int l4) {
 	u8 first = 0;
 	if (bpf_skb_load_bytes(skb, l4 + 8, &first, 1) < 0)
 		return 0;
-	if ((first & 0xC0) != 0xC0 || (first & 0x30) != 0x00)
+	if ((first & 0xC0) != 0xC0)
 		return 0;
 	u32 version = 0;
 	if (bpf_skb_load_bytes(skb, l4 + 9, &version, sizeof(version)) < 0)
 		return 0;
-	return bpf_ntohl(version) == 0x00000001;
+	u32 v = bpf_ntohl(version);
+	if (v == 0x00000001)
+		return (first & 0x30) == 0x00;
+	if (v == 0x6b3343cf)
+		return (first & 0x30) == 0x10;
+	return 0;
 }
 
 static __always_inline void quic_ship(struct __sk_buff *skb, u8 is_v6,
@@ -36,10 +41,15 @@ static __always_inline void quic_ship(struct __sk_buff *skb, u8 is_v6,
 		if (bpf_skb_load_bytes(skb, addr_off, k.daddr6, 4) < 0)
 			return;
 	}
-	if (bpf_map_lookup_elem(&quic_seen, &k))
-		return;
-	u8 one = 1;
-	bpf_map_update_elem(&quic_seen, &k, &one, BPF_ANY);
+	u8 *cnt = bpf_map_lookup_elem(&quic_seen, &k);
+	if (cnt) {
+		if (*cnt >= QUIC_INITIAL_MAX_PKTS)
+			return;
+		*cnt += 1;
+	} else {
+		u8 one = 1;
+		bpf_map_update_elem(&quic_seen, &k, &one, BPF_ANY);
+	}
 
 	struct quic_initial_record *rec =
 		bpf_ringbuf_reserve(&quic_initial_events, sizeof(*rec), 0);

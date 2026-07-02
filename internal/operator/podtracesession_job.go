@@ -58,15 +58,8 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 		{Name: "btf", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/kernel/btf"}}},
 		{Name: "proc", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/proc"}}},
 		{Name: "cgroup", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/fs/cgroup"}}},
-		// debugfs/tracefs are required to attach tracepoints (sched_switch,
-		// inet_sock_set_state, ...). Without them every tracepoint silently
-		// failed to attach in session Jobs, so cpu-filtered sessions
-		// collected nothing; the agent DaemonSet has carried these mounts
-		// all along.
 		{Name: "debugfs", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/kernel/debug"}}},
 		{Name: "tracefs", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/kernel/tracing"}}},
-		// Exporter bundle: the CLI reads bundle.yaml to resolve the
-		// exporter endpoint/credentials the session should push to.
 		{
 			Name: "exporter",
 			VolumeSource: corev1.VolumeSource{
@@ -76,9 +69,6 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 				},
 			},
 		},
-		// Companion credential Secret, mounted only when present. The
-		// volume's Optional flag keeps credential-less bundles working
-		// without apiserver errors.
 		{
 			Name: "exporter-credential",
 			VolumeSource: corev1.VolumeSource{
@@ -88,9 +78,6 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 				},
 			},
 		},
-		// Shared run dir for CLI artifacts (summary.json, report.txt)
-		// and the termination-message file. EmptyDir because the
-		// lifetime matches the Pod.
 		{
 			Name:         "rundir",
 			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
@@ -109,9 +96,6 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 		{Name: "rundir", MountPath: "/var/run/podtrace"},
 	}
 
-	// --exporter-from-file is always wired because every session has a
-	// bundle ConfigMap. Credential file path is an env var the CLI
-	// picks up only when set.
 	sessionArgs := append([]string{}, args...)
 	sessionArgs = append(sessionArgs,
 		"--exporter-from-file", "/etc/podtrace/exporter/bundle.yaml",
@@ -133,16 +117,15 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 			Name:  "PODTRACE_EXPORTER_CREDENTIAL_FILE",
 			Value: "/etc/podtrace/exporter-credential/credential",
 		},
-		// Critical-path windowing fires every 500ms; for short bounded
-		// sessions it just floods logs. Operators wanting it can override.
 		{Name: "PODTRACE_CRITICAL_PATH", Value: "false"},
-		// Sessions typically point at internal cluster collectors that
-		// don't terminate TLS. Skip the cleartext-http guard so a
-		// missing/unreachable OTLP endpoint isn't a noisy startup warn.
 		{Name: "PODTRACE_OTLP_INSECURE", Value: "1"},
 	}
 	if tc != nil {
 		mainEnv = append(mainEnv, redactionEnv(tc.Spec.Redaction)...)
+		mainEnv = append(mainEnv, captureEnv(tc.Spec.Capture)...)
+		if lvl := tc.Spec.Agent.LogLevel; lvl != "" {
+			mainEnv = append(mainEnv, corev1.EnvVar{Name: "PODTRACE_LOG_LEVEL", Value: lvl})
+		}
 	}
 
 	mainContainer := corev1.Container{
@@ -207,7 +190,6 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 // buildSessionSidecar returns the native sidecar (init container with
 // restartPolicy=Always) that re-uploads the session report when the
 // operator's TracerConfig.spec.session.sidecarUploader flag is set.
-// Returns nil when the flag is off or no report sink is configured.
 func buildSessionSidecar(enabled bool, reportTo, image string, pullPolicy corev1.PullPolicy, s *podtracev1alpha1.PodTraceSession) []corev1.Container {
 	if !enabled || reportTo == "" {
 		return nil
