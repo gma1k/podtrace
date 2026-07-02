@@ -124,3 +124,151 @@ func TestEventsDefaultMethod(t *testing.T) {
 		t.Fatalf("expected empty method to default to GET, got %q", got)
 	}
 }
+
+// buildRecordFull extends buildRecordTP with peer, capture-header slots, and
+// flags, mirroring the full struct h3_txn_record.
+func buildRecordFull(latencyNS uint64, status uint16, isClient bool, method, path, tp string,
+	flags uint8, peerFamily uint8, peerPort uint16, peerAddr []byte, hdrVals []string) []byte {
+	buf := buildRecordTP(latencyNS, status, isClient, method, path, tp)
+	buf[35] = flags
+	buf[36] = peerFamily
+	binary.LittleEndian.PutUint16(buf[38:40], peerPort)
+	copy(buf[peerOffset:peerOffset+16], peerAddr)
+	for i, v := range hdrVals {
+		if i >= hdrSlots {
+			break
+		}
+		if len(v) > hdrValMax {
+			v = v[:hdrValMax]
+		}
+		buf[hdrLenOffset+i] = uint8(len(v))
+		copy(buf[hdrValOffset+i*hdrValMax:], v)
+	}
+	return buf
+}
+
+func TestParseRecordPeerV4(t *testing.T) {
+	rec := buildRecordFull(1, 200, true, "GET", "/x", "", 0, 2, 8443,
+		[]byte{10, 1, 2, 3}, nil)
+	tx, ok := ParseRecord(rec)
+	if !ok {
+		t.Fatal("ParseRecord returned false")
+	}
+	if tx.PeerIP != "10.1.2.3" || tx.PeerPort != 8443 {
+		t.Fatalf("peer = %q:%d, want 10.1.2.3:8443", tx.PeerIP, tx.PeerPort)
+	}
+	for _, ev := range tx.Events() {
+		if ev.PeerDstIP != "10.1.2.3" || ev.PeerDstPort != 8443 {
+			t.Fatalf("event peer = %q:%d", ev.PeerDstIP, ev.PeerDstPort)
+		}
+	}
+}
+
+func TestParseRecordPeerV4MappedV6(t *testing.T) {
+	addr := make([]byte, 16)
+	copy(addr[10:], []byte{0xff, 0xff, 192, 168, 0, 7})
+	tx, _ := ParseRecord(buildRecordFull(1, 200, false, "GET", "/x", "", 0, 10, 443, addr, nil))
+	if tx.PeerIP != "192.168.0.7" {
+		t.Fatalf("expected v4-mapped normalization, got %q", tx.PeerIP)
+	}
+}
+
+func TestParseRecordNoPeer(t *testing.T) {
+	tx, _ := ParseRecord(buildRecord(1, 200, true, "GET", "/x"))
+	if tx.PeerIP != "" || tx.PeerPort != 0 {
+		t.Fatalf("expected empty peer, got %q:%d", tx.PeerIP, tx.PeerPort)
+	}
+	if ev := tx.Events()[0]; ev.PeerDstIP != "" {
+		t.Fatalf("expected event without peer, got %q", ev.PeerDstIP)
+	}
+}
+
+func TestDecoderCaptureHeaders(t *testing.T) {
+	d := NewDecoder([]string{"content-type", "x-request-id"})
+	rec := buildRecordFull(1, 200, true, "GET", "/x", "", 0, 0, 0, nil,
+		[]string{"application/json", "req-42"})
+	tx, ok := d.ParseRecord(rec)
+	if !ok {
+		t.Fatal("ParseRecord returned false")
+	}
+	if len(tx.Headers) != 2 || tx.Headers[0].Value != "application/json" ||
+		tx.Headers[1].Name != "x-request-id" {
+		t.Fatalf("unexpected headers: %+v", tx.Headers)
+	}
+	req := tx.Events()[0]
+	want := "content-type: application/json\nx-request-id: req-42"
+	if req.Details != want {
+		t.Fatalf("request Details = %q, want %q", req.Details, want)
+	}
+	resp := tx.Events()[1]
+	if resp.Details != "200\ncontent-type: application/json\nx-request-id: req-42" {
+		t.Fatalf("response Details = %q", resp.Details)
+	}
+}
+
+func TestDecoderEmptySlotSkipped(t *testing.T) {
+	d := NewDecoder([]string{"content-type", "x-request-id"})
+	rec := buildRecordFull(1, 200, true, "GET", "/x", "", 0, 0, 0, nil,
+		[]string{"", "req-9"})
+	tx, _ := d.ParseRecord(rec)
+	if len(tx.Headers) != 1 || tx.Headers[0].Name != "x-request-id" {
+		t.Fatalf("unexpected headers: %+v", tx.Headers)
+	}
+}
+
+func TestRequestOnlyFlagEmitsSingleEvent(t *testing.T) {
+	rec := buildRecordFull(0, 0, true, "GET", "/curl", "", FlagRequestOnly, 0, 0, nil, nil)
+	tx, _ := ParseRecord(rec)
+	evs := tx.Events()
+	if len(evs) != 1 || evs[0].Type != events.EventHTTPReq {
+		t.Fatalf("expected single request event, got %+v", evs)
+	}
+}
+
+func TestResponseOnlyFlagEmitsSingleEvent(t *testing.T) {
+	rec := buildRecordFull(0, 404, false, "", "", "", FlagResponseOnly, 0, 0, nil, nil)
+	tx, _ := ParseRecord(rec)
+	evs := tx.Events()
+	if len(evs) != 1 || evs[0].Type != events.EventHTTPResp {
+		t.Fatalf("expected single response event, got %+v", evs)
+	}
+	if evs[0].Target != "HTTP/3" {
+		t.Fatalf("expected generic target for response-only event, got %q", evs[0].Target)
+	}
+	if evs[0].Details != "404" {
+		t.Fatalf("unexpected details %q", evs[0].Details)
+	}
+}
+
+func TestAbortedFlagMarksResponse(t *testing.T) {
+	rec := buildRecordFull(3_000_000, 0, false, "GET", "/panics", "", FlagAborted, 0, 0, nil, nil)
+	tx, _ := ParseRecord(rec)
+	evs := tx.Events()
+	if len(evs) != 2 {
+		t.Fatalf("expected paired events for aborted txn, got %d", len(evs))
+	}
+	resp := evs[1]
+	if resp.Details != "aborted" {
+		t.Fatalf("aborted response Details = %q", resp.Details)
+	}
+	if resp.Target != "GET /panics" || resp.LatencyNS != 3_000_000 {
+		t.Fatalf("unexpected aborted response: %+v", resp)
+	}
+}
+
+func TestAdapterPairedTTFB(t *testing.T) {
+	// C-library adapter pair: request + first-inbound-byte, no readable status.
+	rec := buildRecordFull(4_000_000, 0, true, "GET", "/curl", "", 0, 0, 0, nil, nil)
+	tx, _ := ParseRecord(rec)
+	evs := tx.Events()
+	if len(evs) != 2 {
+		t.Fatalf("expected paired events, got %d", len(evs))
+	}
+	resp := evs[1]
+	if resp.LatencyNS != 4_000_000 {
+		t.Fatalf("latency = %d", resp.LatencyNS)
+	}
+	if resp.Details != "" {
+		t.Fatalf("status-0 pair must not render a status line, got %q", resp.Details)
+	}
+}

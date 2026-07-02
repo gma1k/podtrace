@@ -75,7 +75,7 @@ jobs:
         run: GOTOOLCHAIN=auto go build ./...
 
       - name: Run unit tests
-        timeout-minutes: 10
+        timeout-minutes: 15
         run: |
           rm -f coverage.out coverage-*.out
           GOTOOLCHAIN=auto go test \

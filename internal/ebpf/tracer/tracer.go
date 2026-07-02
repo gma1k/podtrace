@@ -34,10 +34,10 @@ import (
 	"github.com/podtrace/podtrace/internal/ebpf/filter"
 	"github.com/podtrace/podtrace/internal/ebpf/h2decode"
 	"github.com/podtrace/podtrace/internal/ebpf/h3decode"
-	"github.com/podtrace/podtrace/internal/ebpf/quicinitial"
 	"github.com/podtrace/podtrace/internal/ebpf/loader"
 	"github.com/podtrace/podtrace/internal/ebpf/parser"
 	"github.com/podtrace/podtrace/internal/ebpf/probes"
+	"github.com/podtrace/podtrace/internal/ebpf/quicinitial"
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/internal/logger"
 	"github.com/podtrace/podtrace/internal/metricsexporter"
@@ -84,6 +84,7 @@ type Tracer struct {
 	h2Reader                 *ringbuf.Reader
 	h2Decoder                *h2decode.Decoder
 	h3Reader                 *ringbuf.Reader
+	h3Decoder                *h3decode.Decoder
 	quicReader               *ringbuf.Reader
 	filter                   *filter.CgroupFilter
 	containerID              string
@@ -177,6 +178,8 @@ func (t *Tracer) attachContainerUprobes(id string, pid uint32) []link.Link {
 	ls = append(ls, probes.AttachGoGRPCProbes(coll, pid)...)
 	ls = append(ls, probes.AttachRustlsProbes(coll, pid)...)
 	ls = append(ls, probes.AttachGoHTTP3Probes(coll, pid)...)
+	ls = append(ls, probes.AttachNghttp3Probes(coll, pid)...)
+	ls = append(ls, probes.AttachQuicheProbes(coll, pid)...)
 	ls = append(ls, probes.AttachRedisProbesWithPID(coll, id, pid)...)
 	ls = append(ls, probes.AttachMemcachedProbesWithPID(coll, id, pid)...)
 	ls = append(ls, probes.AttachKafkaProbesWithPID(coll, id, pid)...)
@@ -249,6 +252,8 @@ func (t *Tracer) attachGroupUprobes(g probes.ProbeGroup) []link.Link {
 		ls = append(ls, probes.AttachGoGRPCProbes(coll, pid)...)
 		ls = append(ls, probes.AttachRustlsProbes(coll, pid)...)
 		ls = append(ls, probes.AttachGoHTTP3Probes(coll, pid)...)
+		ls = append(ls, probes.AttachNghttp3Probes(coll, pid)...)
+		ls = append(ls, probes.AttachQuicheProbes(coll, pid)...)
 		return ls
 	case probes.GroupDatabase:
 		if id == "" {
@@ -507,12 +512,15 @@ func NewTracer() (*Tracer, error) {
 		return nil, NewRingBufferError(err)
 	}
 
+	captureHeaders := config.CaptureHeaderList()
+
 	var h2rd *ringbuf.Reader
 	var h2dec *h2decode.Decoder
 	if m := coll.Maps["h2_hdr_events"]; m != nil {
 		if r, herr := ringbuf.NewReader(m); herr == nil {
 			h2rd = r
 			h2dec = h2decode.New()
+			h2dec.SetCaptureHeaders(captureHeaders)
 		} else {
 			logger.Warn("HTTP/2 userspace decode disabled: ringbuf reader unavailable", zap.Error(herr))
 		}
@@ -526,6 +534,8 @@ func NewTracer() (*Tracer, error) {
 			logger.Warn("HTTP/3 L7 decode disabled: ringbuf reader unavailable", zap.Error(herr))
 		}
 	}
+	populateCaptureHeaderNames(coll, captureHeaders)
+	populatePidNamespace(coll)
 
 	var quicrd *ringbuf.Reader
 	if m := coll.Maps["quic_initial_events"]; m != nil {
@@ -548,6 +558,7 @@ func NewTracer() (*Tracer, error) {
 		h2Reader:              h2rd,
 		h2Decoder:             h2dec,
 		h3Reader:              h3rd,
+		h3Decoder:             h3decode.NewDecoder(captureHeaders),
 		quicReader:            quicrd,
 		filter:                filter.NewCgroupFilter(),
 		processNameCache:      processCache,
@@ -875,6 +886,8 @@ func (t *Tracer) SetContainerIDs(containerIDs []string) error {
 	t.registerGroupLinks(probes.GroupTLS, probes.AttachGoGRPCProbes(t.collection, t.containerPID))
 	t.registerGroupLinks(probes.GroupTLS, probes.AttachRustlsProbes(t.collection, t.containerPID))
 	t.registerGroupLinks(probes.GroupTLS, probes.AttachGoHTTP3Probes(t.collection, t.containerPID))
+	t.registerGroupLinks(probes.GroupTLS, probes.AttachNghttp3Probes(t.collection, t.containerPID))
+	t.registerGroupLinks(probes.GroupTLS, probes.AttachQuicheProbes(t.collection, t.containerPID))
 	t.registerGroupLinks(probes.GroupCache, probes.AttachRedisProbesWithPID(t.collection, primary, t.containerPID))
 	t.registerGroupLinks(probes.GroupCache, probes.AttachMemcachedProbesWithPID(t.collection, primary, t.containerPID))
 	t.registerGroupLinks(probes.GroupMessaging, probes.AttachKafkaProbesWithPID(t.collection, primary, t.containerPID))
@@ -1295,9 +1308,16 @@ func (t *Tracer) runH3DecodeReader(ctx context.Context, eventChan chan<- *events
 			continue
 		}
 
-		txn, ok := h3decode.ParseRecord(record.RawSample)
+		txn, ok := t.h3Decoder.ParseRecord(record.RawSample)
 		if !ok {
 			continue
+		}
+		if h3Logged := h3TxnLogCount.Add(1); h3Logged <= 20 {
+			logger.Debug("h3 txn decoded",
+				zap.String("method", txn.Method), zap.String("path", txn.Path),
+				zap.Uint16("status", txn.Status), zap.Bool("client", txn.IsClient),
+				zap.Uint8("flags", txn.Flags), zap.String("peer_ip", txn.PeerIP),
+				zap.Uint16("peer_port", txn.PeerPort), zap.Int("headers", len(txn.Headers)))
 		}
 		for _, ev := range txn.Events() {
 			t.processAndDispatch(ctx, ev, eventChan, stackMap, ec, time.Now())
@@ -1305,9 +1325,101 @@ func (t *Tracer) runH3DecodeReader(ctx context.Context, eventChan chan<- *events
 	}
 }
 
+var h3TxnLogCount atomic.Int64
+
+// pidNamespaceInfo mirrors struct h3_pidns_info in bpf/maps.h.
+type pidNamespaceInfo struct {
+	Dev uint64
+	Ino uint64
+}
+
+// populatePidNamespace records this process's pid namespace so BPF programs
+// can translate tgids into the namespace the agent keys its per-pid maps
+// with. On nested nodes (kind, container-in-container runtimes) the
+// init-namespace tgid from bpf_get_current_pid_tgid() differs from the pid
+// the agent sees.
+func populatePidNamespace(coll *ebpf.Collection) {
+	m := coll.Maps["h3_pidns"]
+	if m == nil {
+		return
+	}
+	nsPath := filepath.Join(config.ProcBasePath, "1", "ns", "pid")
+	var st syscall.Stat_t
+	if err := syscall.Stat(nsPath, &st); err != nil {
+		if err = syscall.Stat("/proc/self/ns/pid", &st); err != nil {
+			logger.Debug("pid namespace stat failed", zap.Error(err))
+			return
+		}
+	}
+	k := uint32(0)
+	v := pidNamespaceInfo{Dev: uint64(st.Dev), Ino: st.Ino}
+	if err := m.Update(&k, &v, ebpf.UpdateAny); err != nil {
+		logger.Debug("pid namespace map update failed", zap.Error(err))
+	} else {
+		logger.Debug("pid namespace reference recorded",
+			zap.String("path", nsPath), zap.Uint64("ino", st.Ino))
+	}
+}
+
+// captureHeaderName mirrors struct h3_hdr_name in bpf/maps.h.
+type captureHeaderName struct {
+	Len  uint8
+	Name [32]byte
+}
+
+// populateCaptureHeaderNames pushes the header-capture allowlist into the
+// h3_hdr_names array map; slot order matches the userspace decoder's.
+func populateCaptureHeaderNames(coll *ebpf.Collection, names []string) {
+	if len(names) == 0 {
+		return
+	}
+	m := coll.Maps["h3_hdr_names"]
+	if m == nil {
+		return
+	}
+	for i, name := range names {
+		if i >= config.MaxCaptureHeaders {
+			break
+		}
+		var v captureHeaderName
+		n := copy(v.Name[:], name)
+		if n < 0 || n > math.MaxUint8 {
+			continue
+		}
+		v.Len = uint8(n)
+		k := uint32(i)
+		if err := m.Update(&k, &v, ebpf.UpdateAny); err != nil {
+			logger.Debug("capture headers: map update failed",
+				zap.String("name", name), zap.Error(err))
+		}
+	}
+	logger.Debug("capture headers configured", zap.Strings("names", names))
+}
+
+// quicFlowKey identifies one QUIC flow, mirroring the BPF quic_seen key.
+type quicFlowKey struct {
+	cgroup uint64
+	addr   [16]byte
+	port   uint16
+}
+
+// quicFlowState accumulates the Initial packets of one flow until the SNI is
+// extracted (quic-go splits the ClientHello across two Initials) or the BPF
+// per-flow packet cap is reached.
+type quicFlowState struct {
+	pkts [][]byte
+	done bool
+}
+
+const (
+	quicInitialMaxPackets = 3
+	quicMaxTrackedFlows   = 2048
+)
+
 // runQUICInitialReader drains the QUIC Initial packet ringbuf, extracts the SNI
-// (server name) from the client's ClientHello via the quicinitial package, and
-// emits an EVENT_HTTP3 connection event with the peer and SNI.
+// (server name) and ALPN from the client's ClientHello via the quicinitial
+// package (reassembling across a flow's Initial packets), and emits one
+// EVENT_HTTP3 connection event per flow.
 func (t *Tracer) runQUICInitialReader(ctx context.Context, eventChan chan<- *events.Event,
 	stackMap *ebpf.Map, ec *eventCounters) {
 	defer func() {
@@ -1317,6 +1429,7 @@ func (t *Tracer) runQUICInitialReader(ctx context.Context, eventChan chan<- *eve
 		}
 	}()
 	const hdr = 60
+	flows := make(map[quicFlowKey]*quicFlowState)
 	for {
 		select {
 		case <-ctx.Done():
@@ -1346,6 +1459,33 @@ func (t *Tracer) runQUICInitialReader(ctx context.Context, eventChan chan<- *eve
 			ip = events.PeerIP(2, binary.BigEndian.Uint32(data[24:28]), v6)
 		}
 
+		key := quicFlowKey{cgroup: binary.LittleEndian.Uint64(data[8:16]), addr: v6, port: dport}
+		st := flows[key]
+		if st == nil {
+			if len(flows) >= quicMaxTrackedFlows {
+				flows = make(map[quicFlowKey]*quicFlowState)
+			}
+			st = &quicFlowState{}
+			flows[key] = st
+		}
+		if st.done {
+			continue
+		}
+		pktEnd := hdr + int(binary.LittleEndian.Uint16(data[40:42]))
+		if pktEnd > len(data) {
+			pktEnd = len(data)
+		}
+		pkt := make([]byte, pktEnd-hdr)
+		copy(pkt, data[hdr:pktEnd])
+		st.pkts = append(st.pkts, pkt)
+
+		info, xerr := quicinitial.ExtractPackets(st.pkts)
+		if xerr != nil && len(st.pkts) < quicInitialMaxPackets {
+			continue // wait for the flow's next Initial packet
+		}
+		st.done = true
+		st.pkts = nil
+
 		ev := &events.Event{}
 		ev.Timestamp = binary.LittleEndian.Uint64(data[0:8])
 		ev.CgroupID = binary.LittleEndian.Uint64(data[8:16])
@@ -1355,12 +1495,11 @@ func (t *Tracer) runQUICInitialReader(ctx context.Context, eventChan chan<- *eve
 		ev.Target = fmt.Sprintf("%s:%d", ip, dport)
 		ev.PeerDstIP = ip
 		ev.PeerDstPort = dport
-		pktEnd := hdr + int(binary.LittleEndian.Uint16(data[40:42]))
-		if pktEnd > len(data) {
-			pktEnd = len(data)
-		}
-		if sni, ok := quicinitial.ExtractSNI(data[hdr:pktEnd]); ok {
-			ev.Details = "sni: " + sni
+		if xerr == nil && info.SNI != "" {
+			ev.Details = "sni: " + info.SNI
+			if len(info.ALPN) > 0 {
+				ev.Details += " alpn: " + strings.Join(info.ALPN, ",")
+			}
 		} else {
 			ev.Details = "HTTP/3 (QUIC)"
 		}

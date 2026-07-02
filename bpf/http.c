@@ -202,6 +202,9 @@ static __noinline void http_emit_response(void *ctx, void *base, u64 len,
 		return;
 	status[si] = '\0';
 
+	if (si == 3 && status[0] == '1')
+		return;
+
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 
@@ -412,7 +415,6 @@ int uretprobe_gnutls_record_recv(struct pt_regs *ctx)
 	s64 ret = PT_REGS_RC(ctx);
 	if (ret <= 0)
 		return 0;
-	// A recv is a client's inbound response or a server's inbound request.
 	http_emit_response(ctx, base, (u64)ret, HTTP_TRANSPORT_TLS, conn);
 	http_emit_request(ctx, base, (u64)ret, HTTP_TRANSPORT_TLS, conn);
 	return 0;
