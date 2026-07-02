@@ -57,8 +57,8 @@ func findSymbolContaining(f *elf.File, subs ...string) (uint64, bool) {
 }
 
 var (
-	rustlsWriteSymbolPattern = []string{"rustls", "Writer", "io..Write$GT$5write"}
-	rustlsReadSymbolPattern  = []string{"rustls", "Reader", "io..Read$GT$4read"}
+	rustlsWriteSymbolPattern = []string{"rustls", "Writer", "5write"}
+	rustlsReadSymbolPattern  = []string{"rustls", "Reader", "4read"}
 )
 
 // AttachRustlsProbes attaches uprobes on rustls' plaintext boundary in a
@@ -90,6 +90,17 @@ func AttachRustlsProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 
 	writeVaddr, okW := findSymbolContaining(f, rustlsWriteSymbolPattern...)
 	readVaddr, okR := findSymbolContaining(f, rustlsReadSymbolPattern...)
+	if !okW && !okR {
+		if dbg, src := openDebugInfo(f, exePath, pid); dbg != nil {
+			defer func() { _ = dbg.Close() }()
+			writeVaddr, okW = findSymbolContaining(dbg, rustlsWriteSymbolPattern...)
+			readVaddr, okR = findSymbolContaining(dbg, rustlsReadSymbolPattern...)
+			if okW || okR {
+				logger.Debug("rustls symbols resolved via debug file",
+					zap.Uint32("pid", pid), zap.String("source", src))
+			}
+		}
+	}
 	if !okW && !okR {
 		return links
 	}
