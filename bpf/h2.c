@@ -48,6 +48,8 @@ static __always_inline int h2_start_looks_h2(void *base, u64 avail)
 		return 0;
 	if (fh[0] == 'P' && fh[1] == 'R' && fh[2] == 'I' && fh[3] == ' ')
 		return 1;
+	if (fh[0] >= 0x14 && fh[0] <= 0x17 && fh[1] == 0x03 && fh[2] <= 0x04)
+		return 0;
 	return fh[3] <= HTTP2_CONTINUATION;
 }
 
