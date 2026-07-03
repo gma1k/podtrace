@@ -139,6 +139,8 @@ type Decoder struct {
 	dirs    map[connKey]*dirState
 	streams map[streamKey]*pendingReq
 
+	captureHeaders []string
+
 	maxConns         int
 	maxPendingPerDir int
 	maxAssembly      int
@@ -169,6 +171,20 @@ func New() *Decoder {
 }
 
 func (d *Decoder) now() time.Time { return d.nowFn() }
+
+// SetCaptureHeaders configures the allowlist of extra header names (matched
+// case-insensitively) whose values are appended to event Details.
+func (d *Decoder) SetCaptureHeaders(names []string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.captureHeaders = d.captureHeaders[:0]
+	for _, n := range names {
+		n = strings.ToLower(strings.TrimSpace(n))
+		if n != "" {
+			d.captureHeaders = append(d.captureHeaders, n)
+		}
+	}
+}
 
 // Ingest feeds one raw record and returns any events whose header blocks
 // completed and decoded as a result.
@@ -248,7 +264,8 @@ func (d *Decoder) decodeBlockLocked(st *dirState, rec *RawRecord, block []byte) 
 		return nil
 	}
 
-	var method, path, status, traceparent string
+	var method, path, status, traceparent, grpcStatus string
+	var extra []string
 	for _, f := range fields {
 		switch {
 		case f.Name == ":method":
@@ -257,22 +274,46 @@ func (d *Decoder) decodeBlockLocked(st *dirState, rec *RawRecord, block []byte) 
 			path = f.Value
 		case f.Name == ":status":
 			status = f.Value
+		case f.Name == "grpc-status":
+			grpcStatus = f.Value
 		case strings.EqualFold(f.Name, "traceparent"):
 			traceparent = f.Value
+		default:
+			for _, want := range d.captureHeaders {
+				if strings.EqualFold(f.Name, want) {
+					extra = append(extra, want+": "+f.Value)
+					break
+				}
+			}
 		}
 	}
 
 	switch {
 	case path != "":
-		return d.buildRequestLocked(rec, method, path, traceparent)
+		return d.buildRequestLocked(rec, method, path, traceparent, extra)
 	case status != "":
-		return d.buildResponseLocked(rec, status, traceparent)
+		if len(status) == 3 && status[0] == '1' {
+			return nil
+		}
+		if grpcStatus != "" {
+			extra = append(extra, "grpc-status: "+grpcStatus)
+		}
+		ev := d.buildResponseLocked(rec, status, traceparent, extra)
+		if ev != nil && ev.Error == 0 {
+			if code, err := strconv.Atoi(grpcStatus); err == nil && code > 0 {
+				ev.Error = safeconv.IntToInt32(code)
+			}
+		}
+		return ev
+	case grpcStatus != "":
+		return d.buildGrpcTrailerLocked(rec, grpcStatus)
 	default:
 		return nil
 	}
 }
 
-func (d *Decoder) buildRequestLocked(rec *RawRecord, method, path, traceparent string) *events.Event {
+func (d *Decoder) buildRequestLocked(rec *RawRecord, method, path, traceparent string,
+	extra []string) *events.Event {
 	if method == "" {
 		method = "GET"
 	}
@@ -285,9 +326,12 @@ func (d *Decoder) buildRequestLocked(rec *RawRecord, method, path, traceparent s
 	ev.Type = events.EventHTTPReq
 	ev.TCPState = uint32(rec.Transport)
 	ev.Target = method + " " + path
+	var lines []string
 	if traceparent != "" {
-		ev.Details = "traceparent: " + traceparent
+		lines = append(lines, "traceparent: "+traceparent)
 	}
+	lines = append(lines, extra...)
+	ev.Details = strings.Join(lines, "\n")
 	setEventPeer(ev, rec)
 	return ev
 }
@@ -300,7 +344,8 @@ func setEventPeer(ev *events.Event, rec *RawRecord) {
 	ev.PeerDstPort = rec.PeerDstPort
 }
 
-func (d *Decoder) buildResponseLocked(rec *RawRecord, status, traceparent string) *events.Event {
+func (d *Decoder) buildResponseLocked(rec *RawRecord, status, traceparent string,
+	extra []string) *events.Event {
 	ev := &events.Event{}
 	ev.Timestamp = rec.Timestamp
 	ev.PID = rec.PID
@@ -324,6 +369,38 @@ func (d *Decoder) buildResponseLocked(rec *RawRecord, status, traceparent string
 	}
 	if traceparent != "" && ev.Details == status {
 		ev.Details = "traceparent: " + traceparent
+	}
+	if len(extra) > 0 {
+		ev.Details = strings.Join(append([]string{ev.Details}, extra...), "\n")
+	}
+	setEventPeer(ev, rec)
+	return ev
+}
+
+// buildGrpcTrailerLocked turns a trailers-only / trailing HEADERS block carrying
+// grpc-status into a response event, so gRPC outcomes from non-Go servers are
+// visible even though the response HEADERS block held no :status.
+func (d *Decoder) buildGrpcTrailerLocked(rec *RawRecord, grpcStatus string) *events.Event {
+	ev := &events.Event{}
+	ev.Timestamp = rec.Timestamp
+	ev.PID = rec.PID
+	ev.CgroupID = rec.CgroupID
+	ev.Type = events.EventHTTPResp
+	ev.TCPState = uint32(rec.Transport)
+	ev.Details = "grpc-status: " + grpcStatus
+	if code, err := strconv.Atoi(grpcStatus); err == nil && code > 0 {
+		ev.Error = safeconv.IntToInt32(code)
+	}
+
+	sk := streamKey{conn: rec.ConnID, stream: rec.StreamID}
+	if req, ok := d.streams[sk]; ok {
+		ev.Target = req.method + " " + req.path
+		if rec.Timestamp > req.startTS {
+			ev.LatencyNS = rec.Timestamp - req.startTS
+		}
+		delete(d.streams, sk)
+	} else {
+		ev.Target = "grpc-status " + grpcStatus
 	}
 	setEventPeer(ev, rec)
 	return ev

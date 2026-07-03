@@ -456,3 +456,96 @@ func TestSweepEvictsIdle(t *testing.T) {
 		t.Fatalf("idle connection not swept: %+v", s)
 	}
 }
+
+func TestInterimResponseKeepsCorrelation(t *testing.T) {
+	d := New()
+	be := newBlockEncoder()
+	d.Ingest(rec(7, DirEgress, 0, 1, be.encode(reqFields("GET", "/early-hints")...)))
+
+	ibe := newBlockEncoder()
+	if evs := d.Ingest(rec(7, DirIngress, 0, 1, ibe.encode(hf(":status", "103")))); len(evs) != 0 {
+		t.Fatalf("1xx interim response must not emit events, got %d", len(evs))
+	}
+	ev := singleEvent(t, d.Ingest(rec(7, DirIngress, 1, 1, ibe.encode(hf(":status", "200")))))
+	if ev.Type != events.EventHTTPResp || ev.Details != "200" {
+		t.Fatalf("unexpected final response: %+v", ev)
+	}
+	if ev.Target != "GET /early-hints" {
+		t.Fatalf("final response lost its request correlation: %q", ev.Target)
+	}
+}
+
+func TestGrpcTrailerBlock(t *testing.T) {
+	d := New()
+	be := newBlockEncoder()
+	d.Ingest(rec(8, DirEgress, 0, 1, be.encode(reqFields("POST", "/pkg.Svc/Do")...)))
+
+	ibe := newBlockEncoder()
+	resp := singleEvent(t, d.Ingest(rec(8, DirIngress, 0, 1, ibe.encode(hf(":status", "200")))))
+	if resp.Target != "POST /pkg.Svc/Do" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	trailer := singleEvent(t, d.Ingest(rec(8, DirIngress, 1, 1, ibe.encode(hf("grpc-status", "13")))))
+	if trailer.Type != events.EventHTTPResp || trailer.Details != "grpc-status: 13" {
+		t.Fatalf("unexpected trailer event: %+v", trailer)
+	}
+	if trailer.Error != 13 {
+		t.Fatalf("non-zero grpc-status should set Error, got %d", trailer.Error)
+	}
+}
+
+func TestGrpcTrailersOnlyResponse(t *testing.T) {
+	d := New()
+	be := newBlockEncoder()
+	d.Ingest(rec(9, DirEgress, 0, 1, be.encode(reqFields("POST", "/pkg.Svc/Do")...)))
+
+	ibe := newBlockEncoder()
+	ev := singleEvent(t, d.Ingest(rec(9, DirIngress, 0, 1,
+		ibe.encode(hf(":status", "200"), hf("grpc-status", "5")))))
+	if ev.Error != 5 {
+		t.Fatalf("Trailers-Only grpc-status should set Error, got %d", ev.Error)
+	}
+	if want := "200\ngrpc-status: 5"; ev.Details != want {
+		t.Fatalf("Details = %q, want %q", ev.Details, want)
+	}
+}
+
+func TestGrpcStatusZeroIsNotError(t *testing.T) {
+	d := New()
+	ibe := newBlockEncoder()
+	ev := singleEvent(t, d.Ingest(rec(10, DirIngress, 0, 1, ibe.encode(hf("grpc-status", "0")))))
+	if ev.Error != 0 {
+		t.Fatalf("grpc-status 0 (OK) must not set Error, got %d", ev.Error)
+	}
+}
+
+func TestCaptureHeadersOnRequestAndResponse(t *testing.T) {
+	d := New()
+	d.SetCaptureHeaders([]string{"Content-Type", "x-request-id"})
+	be := newBlockEncoder()
+	req := singleEvent(t, d.Ingest(rec(11, DirEgress, 0, 1,
+		be.encode(reqFields("POST", "/x", hf("content-type", "application/json"),
+			hf("x-request-id", "r-1"), hf("authorization", "secret"))...))))
+	if want := "content-type: application/json\nx-request-id: r-1"; req.Details != want {
+		t.Fatalf("request Details = %q, want %q", req.Details, want)
+	}
+	ibe := newBlockEncoder()
+	resp := singleEvent(t, d.Ingest(rec(11, DirIngress, 0, 1,
+		ibe.encode(hf(":status", "201"), hf("content-type", "text/plain")))))
+	if want := "201\ncontent-type: text/plain"; resp.Details != want {
+		t.Fatalf("response Details = %q, want %q", resp.Details, want)
+	}
+	if resp.Error != 0 {
+		t.Fatalf("unexpected Error: %d", resp.Error)
+	}
+}
+
+func TestCaptureHeadersDisabledByDefault(t *testing.T) {
+	d := New()
+	be := newBlockEncoder()
+	req := singleEvent(t, d.Ingest(rec(12, DirEgress, 0, 1,
+		be.encode(reqFields("GET", "/x", hf("content-type", "application/json"))...))))
+	if req.Details != "" {
+		t.Fatalf("expected no captured headers by default, got %q", req.Details)
+	}
+}

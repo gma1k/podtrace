@@ -2074,7 +2074,7 @@ func attachGoTLSReadProbes(coll *ebpf.Collection, exe *link.Executable, exePath 
 	const sym = "crypto/tls.(*Conn).Read"
 	entryOff, retOffs, ok := goFuncReturnOffsets(exePath, sym)
 	if !ok {
-		logger.Debug("Go TLS Read probe: no return sites resolved (non-x86 or symbol missing)",
+		logger.Debug("Go TLS Read probe: no return sites resolved (unsupported arch or symbol missing)",
 			zap.Uint32("pid", pid))
 		return links
 	}
@@ -2127,13 +2127,56 @@ func AttachGoHTTP3Probes(coll *ebpf.Collection, pid uint32) []link.Link {
 		}
 	}
 
-	links = append(links, attachGoEntryReturnProbes(coll, exe, exePath, pid,
-		"github.com/quic-go/quic-go/http3.(*Transport).RoundTrip",
-		"uprobe_h3_roundtrip", "uprobe_h3_roundtrip_ret")...)
+	clientRootType := ""
+	for _, cand := range []struct{ sym, rootType string }{
+		{"github.com/quic-go/quic-go/http3.(*ClientConn).RoundTrip",
+			"github.com/quic-go/quic-go/http3.ClientConn"},
+		{"github.com/quic-go/quic-go/http3.(*SingleDestinationRoundTripper).RoundTrip",
+			"github.com/quic-go/quic-go/http3.SingleDestinationRoundTripper"},
+		{"github.com/quic-go/quic-go/http3.(*Transport).RoundTrip", ""},
+	} {
+		ls := attachGoEntryReturnProbes(coll, exe, exePath, pid, cand.sym,
+			"uprobe_h3_roundtrip", "uprobe_h3_roundtrip_ret")
+		if len(ls) > 0 {
+			links = append(links, ls...)
+			clientRootType = cand.rootType
+			break
+		}
+	}
+
+	if m := coll.Maps["h3_peer_paths_map"]; m != nil {
+		if paths, ok := resolveH3PeerPaths(exePath, clientRootType); ok {
+			tgid := pid
+			if err := m.Update(&tgid, &paths, ebpf.UpdateAny); err != nil {
+				logger.Debug("HTTP/3 peer paths: map update failed",
+					zap.Uint32("pid", pid), zap.Error(err))
+			} else {
+				logger.Debug("HTTP/3 peer paths resolved",
+					zap.Uint32("pid", pid),
+					zap.Uint8("client_steps", paths.Client.NSteps),
+					zap.Uint8("server_steps", paths.Server.NSteps))
+			}
+		} else {
+			logger.Debug("HTTP/3 peer paths unresolved (no DWARF or unsupported quic-go layout)",
+				zap.Uint32("pid", pid))
+		}
+	}
 
 	links = append(links, attachGoReturnProbes(coll, exe, exePath, pid,
 		"github.com/quic-go/quic-go/http3.requestFromHeaders",
 		"uprobe_h3_req_from_headers_ret")...)
+
+	for _, sym := range []string{
+		"github.com/quic-go/quic-go/http3.(*RawServerConn).handleRequestStream",
+		"github.com/quic-go/quic-go/http3.(*ServerConn).handleRequestStream",
+		"github.com/quic-go/quic-go/http3.(*connection).handleRequestStream",
+	} {
+		if ls := attachGoReturnProbes(coll, exe, exePath, pid, sym,
+			"uprobe_h3_handle_request_ret"); len(ls) > 0 {
+			links = append(links, ls...)
+			break
+		}
+	}
 	if prog := coll.Programs["uprobe_h3_write_header"]; prog != nil {
 		const sym = "github.com/quic-go/quic-go/http3.(*responseWriter).WriteHeader"
 		if l, ok := attachGoUprobeBySymbol(exe, exePath, sym, prog); ok {
@@ -2153,6 +2196,106 @@ func AttachGoHTTP3Probes(coll *ebpf.Collection, pid uint32) []link.Link {
 		"github.com/quic-go/quic-go/http3.parseHeaders",
 		"uprobe_h3_parse_headers", "uprobe_h3_parse_headers_ret")...)
 
+	return links
+}
+
+// AttachNghttp3Probes attaches uprobes on nghttp3's public C ABI
+// (nghttp3_conn_submit_request / nghttp3_conn_submit_response) in libraries
+// mapped by the target process.
+func AttachNghttp3Probes(coll *ebpf.Collection, pid uint32) []link.Link {
+	return attachCLibraryH3Probes(coll, pid, "nghttp3",
+		[]string{"libnghttp3"},
+		map[string][2]string{
+			"nghttp3_conn_submit_request":  {"uprobe_nghttp3_submit_request", ""},
+			"nghttp3_conn_submit_response": {"uprobe_nghttp3_submit_response", ""},
+			"nghttp3_conn_read_stream":     {"uprobe_nghttp3_read_stream", ""},
+		})
+}
+
+// AttachQuicheProbes attaches uprobes on Cloudflare quiche's C FFI
+// (quiche_h3_send_request / quiche_h3_send_response); see bpf/quiche.c.
+func AttachQuicheProbes(coll *ebpf.Collection, pid uint32) []link.Link {
+	return attachCLibraryH3Probes(coll, pid, "quiche",
+		[]string{"libquiche"},
+		map[string][2]string{
+			"quiche_h3_send_request":  {"uprobe_quiche_h3_send_request", "uretprobe_quiche_h3_send_request"},
+			"quiche_h3_send_response": {"uprobe_quiche_h3_send_response", ""},
+			"quiche_h3_conn_poll":     {"uprobe_quiche_h3_conn_poll", "uretprobe_quiche_h3_conn_poll"},
+		})
+}
+
+// attachCLibraryH3Probes discovers libraries matching the patterns in the
+// target process's memory maps (including dlopen'd-then-deleted files via
+// map_files) and attaches the given symbol->program uprobes.
+func attachCLibraryH3Probes(coll *ebpf.Collection, pid uint32, adapter string,
+	libPatterns []string, symbolProgs map[string][2]string) []link.Link {
+	var links []link.Link
+	if pid == 0 {
+		return links
+	}
+	anyProg := false
+	for _, progNames := range symbolProgs {
+		if coll.Programs[progNames[0]] != nil || coll.Programs[progNames[1]] != nil {
+			anyProg = true
+			break
+		}
+	}
+	if !anyProg {
+		return links
+	}
+
+	seen := make(map[string]bool)
+	var libPaths []string
+	for _, p := range findTLSLibsViaProcessMapsProcRoot(pid, libPatterns) {
+		if !seen[p] {
+			libPaths = append(libPaths, p)
+			seen[p] = true
+		}
+	}
+	for _, p := range findTLSLibsViaProcessMaps(pid, libPatterns) {
+		if !seen[p] {
+			libPaths = append(libPaths, p)
+			seen[p] = true
+		}
+	}
+	for _, p := range findTLSLibsViaProcRootScan(pid, libPatterns) {
+		if !seen[p] {
+			libPaths = append(libPaths, p)
+			seen[p] = true
+		}
+	}
+
+	for _, libPath := range libPaths {
+		exe, err := link.OpenExecutable(libPath)
+		if err != nil {
+			logger.Debug("HTTP/3 adapter: cannot open library",
+				zap.String("adapter", adapter), zap.String("lib", libPath), zap.Error(err))
+			continue
+		}
+		attached := 0
+		for symbol, progNames := range symbolProgs {
+			if prog := coll.Programs[progNames[0]]; prog != nil {
+				if l, err := exe.Uprobe(symbol, prog, nil); err == nil {
+					links = append(links, l)
+					attached++
+				}
+			}
+			if progNames[1] == "" {
+				continue
+			}
+			if prog := coll.Programs[progNames[1]]; prog != nil {
+				if l, err := exe.Uretprobe(symbol, prog, nil); err == nil {
+					links = append(links, l)
+					attached++
+				}
+			}
+		}
+		if attached > 0 {
+			logger.Debug("HTTP/3 adapter uprobes attached",
+				zap.String("adapter", adapter), zap.String("lib", libPath),
+				zap.Uint32("pid", pid), zap.Int("links", attached))
+		}
+	}
 	return links
 }
 
@@ -2185,7 +2328,7 @@ func attachGoEntryReturnProbes(coll *ebpf.Collection, exe *link.Executable, exeP
 	}
 	entryOff, retOffs, ok := goFuncReturnOffsets(exePath, sym)
 	if !ok {
-		logger.Debug("Go HTTP/3: no return sites resolved (non-quic-go, non-x86, or symbol missing)",
+		logger.Debug("Go HTTP/3: no return sites resolved (non-quic-go, unsupported arch, or symbol missing)",
 			zap.String("symbol", sym), zap.Uint32("pid", pid))
 		return links
 	}

@@ -119,6 +119,11 @@ data:
           {{- toYaml . | nindent 10 }}
         {{- end }}
       {{- end }}
+      {{- with (.Values.tracerConfig.capture).headers }}
+      capture:
+        headers:
+          {{- toYaml . | nindent 10 }}
+      {{- end }}
   {{- end }}
   {{- if $ecEnabled }}
   exporterconfig.yaml: |

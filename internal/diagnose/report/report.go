@@ -382,12 +382,25 @@ func GenerateHTTP3Section(d Diagnostician, duration time.Duration) string {
 	report += fmt.Sprintf("  Connections: %d (%.1f/sec)\n", len(h3), d.CalculateRate(len(h3), duration))
 	peerMap := make(map[string]int, len(h3))
 	sniMap := make(map[string]int)
+	alpnMap := make(map[string]int)
 	for _, e := range h3 {
 		if e.Target != "" {
 			peerMap[e.Target]++
 		}
 		if name, ok := strings.CutPrefix(e.Details, "sni: "); ok && name != "" {
-			sniMap[name]++
+			var alpn string
+			if i := strings.Index(name, " alpn: "); i >= 0 {
+				alpn = name[i+len(" alpn: "):]
+				name = name[:i]
+			}
+			if name != "" {
+				sniMap[name]++
+			}
+			for _, proto := range strings.Split(alpn, ",") {
+				if proto != "" {
+					alpnMap[proto]++
+				}
+			}
 		}
 	}
 	if len(peerMap) > 0 {
@@ -395,6 +408,9 @@ func GenerateHTTP3Section(d Diagnostician, duration time.Duration) string {
 	}
 	if len(sniMap) > 0 {
 		report += formatter.TopItemsWithRate(sniMap, config.TopURLsLimit, "h3 server names (SNI)", "connections", duration)
+	}
+	if len(alpnMap) > 0 {
+		report += formatter.TopItemsWithRate(alpnMap, config.TopURLsLimit, "h3 ALPN protocols", "connections", duration)
 	}
 	report += "\n"
 	return report
@@ -456,9 +472,13 @@ func buildStatusMap(httpRespEvents []*events.Event) map[string]int {
 }
 
 // responseStatus extracts the 3-digit status code from a response event. The
-// code is carried in Details.
+// code is carried on the first line of Details.
 func responseStatus(e *events.Event) string {
-	if n, err := strconv.Atoi(strings.TrimSpace(e.Details)); err == nil && n >= 100 && n <= 599 {
+	first := e.Details
+	if i := strings.IndexByte(first, '\n'); i >= 0 {
+		first = first[:i]
+	}
+	if n, err := strconv.Atoi(strings.TrimSpace(first)); err == nil && n >= 100 && n <= 599 {
 		return strconv.Itoa(n)
 	}
 	if e.Error >= 100 && e.Error <= 599 {

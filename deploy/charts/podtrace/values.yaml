@@ -121,6 +121,9 @@ tracerConfig:
     redactDNSNames: false
     customRules: []
 
+  capture:
+    headers: []
+
 examples:
   exporterconfig:
     enabled: false

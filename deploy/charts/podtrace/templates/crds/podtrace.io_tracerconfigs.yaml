@@ -1077,6 +1077,18 @@ spec:
                 - host
                 - embedded
                 type: string
+              capture:
+                description: CaptureSpec selects additional L7 request/response data
+                  to capture.
+                properties:
+                  headers:
+                    items:
+                      maxLength: 32
+                      pattern: ^[A-Za-z0-9!#$%&'*+.^_|~-]+$
+                      type: string
+                    maxItems: 4
+                    type: array
+                type: object
               image:
                 type: string
               imagePullPolicy:

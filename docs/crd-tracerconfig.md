@@ -95,6 +95,11 @@ spec:
   `customRules` adds regex rules (`name`, `pattern`, `replace`). Applies
   to both the agent DaemonSet and session Jobs. Off by default. See
   [language-runtime-adapters.md](language-runtime-adapters.md#pii-redaction).
+- **`capture.headers`** — allowlist of up to 4 HTTP header names whose
+  values are captured onto HTTP/2 and HTTP/3 events (appended to event
+  `Details`, one `name: value` line each, values truncated at 64 bytes).
+  Captured values pass through the redaction engine when `redaction` is
+  enabled. See [http3.md](http3.md#header-allowlist-capture).
 
 ## Status reference
 

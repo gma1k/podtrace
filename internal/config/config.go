@@ -121,6 +121,7 @@ var (
 	USDTEnabled          = getBoolEnvOrDefault("PODTRACE_USDT_ENABLED", false)
 	RedactPII            = getBoolEnvOrDefault("PODTRACE_REDACT_PII", false)
 	RedactCustomRules    = getEnvOrDefault("PODTRACE_REDACT_CUSTOM_RULES", "")
+	CaptureHeaders       = getEnvOrDefault("PODTRACE_CAPTURE_HEADERS", "")
 	CriticalPathEnabled  = getBoolEnvOrDefault("PODTRACE_CRITICAL_PATH", true)
 	CriticalPathWindowMS = getIntEnvOrDefault("PODTRACE_CRITICAL_PATH_WINDOW_MS", 500)
 
@@ -264,7 +265,7 @@ func SetProcBasePath(path string) {
 }
 
 func GetDefaultLibSearchPaths() []string {
-	return []string{"/lib", "/usr/lib", "/lib64", "/usr/lib64"}
+	return []string{"/lib", "/usr/lib", "/lib64", "/usr/lib64", "/usr/local/lib"}
 }
 
 func GetCommonBinarySearchPaths() []string {
@@ -512,4 +513,54 @@ func WebhookAllowHTTP() bool {
 
 func AllowCgroupFilterAutoDisable() bool {
 	return getBoolEnvOrDefault("PODTRACE_ALLOW_CGROUP_FILTER_DISABLE", false)
+}
+
+// MaxCaptureHeaders bounds the header-capture allowlist; mirrors H3_HDR_SLOTS
+// in bpf/events.h.
+const MaxCaptureHeaders = 4
+
+// MaxCaptureHeaderNameLen bounds a captured header name; mirrors
+// H3_HDR_NAME_MAX in bpf/events.h.
+const MaxCaptureHeaderNameLen = 32
+
+// CaptureHeaderList parses PODTRACE_CAPTURE_HEADERS (comma-separated HTTP
+// header names) into the normalized lowercase allowlist applied to HTTP/2 and
+// HTTP/3 events.
+func CaptureHeaderList() []string {
+	return ParseCaptureHeaders(CaptureHeaders)
+}
+
+// ParseCaptureHeaders normalizes a comma-separated header allowlist: names are
+// lowercased, invalid tokens dropped, and the list capped at
+// MaxCaptureHeaders entries.
+func ParseCaptureHeaders(raw string) []string {
+	var out []string
+	for _, n := range strings.Split(raw, ",") {
+		n = strings.ToLower(strings.TrimSpace(n))
+		if n == "" || len(n) > MaxCaptureHeaderNameLen || !isHeaderToken(n) {
+			continue
+		}
+		out = append(out, n)
+		if len(out) == MaxCaptureHeaders {
+			break
+		}
+	}
+	return out
+}
+
+// isHeaderToken reports whether s is a valid HTTP header field name
+// (RFC 9110 token).
+func isHeaderToken(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= '0' && c <= '9':
+		case c == '-' || c == '_' || c == '.' || c == '!' || c == '#' ||
+			c == '$' || c == '%' || c == '&' || c == '\'' || c == '*' ||
+			c == '+' || c == '^' || c == '`' || c == '|' || c == '~':
+		default:
+			return false
+		}
+	}
+	return len(s) > 0
 }

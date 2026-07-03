@@ -95,6 +95,7 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 		}
 	}
 	env = append(env, redactionEnv(tc.Spec.Redaction)...)
+	env = append(env, captureEnv(tc.Spec.Capture)...)
 
 	args := []string{
 		"agent",

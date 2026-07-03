@@ -25,6 +25,8 @@
 #include "grpcgo.c"
 #include "rustls.c"
 #include "http3l7.c"
+#include "nghttp3.c"
+#include "quiche.c"
 #include "crypto.c"
 
 char LICENSE[] SEC("license") = "GPL";

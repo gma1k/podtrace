@@ -118,7 +118,36 @@ struct h3_field_offsets {
 	u32 status;
 };
 
+#define H3_PEER_MAX_STEPS 6
+
+struct h3_peer_step {
+	u32 off;
+	u8  iface;
+	u8  _pad[3];
+};
+
+struct h3_peer_path {
+	u8  nsteps;
+	u8  _pad[3];
+	u32 ip_off;
+	u32 port_off;
+	struct h3_peer_step steps[H3_PEER_MAX_STEPS];
+};
+
+struct h3_peer_paths {
+	struct h3_peer_path client;
+	struct h3_peer_path server;
+};
+
 #define H3_TXN_TP_MAX 64
+
+#define H3_HDR_SLOTS    4
+#define H3_HDR_NAME_MAX 32
+#define H3_HDR_VAL_MAX  64
+
+#define H3_TXN_F_REQ_ONLY  0x1
+#define H3_TXN_F_RESP_ONLY 0x2
+#define H3_TXN_F_ABORTED   0x4
 
 struct h3_txn_record {
 	u64 timestamp;
@@ -130,10 +159,17 @@ struct h3_txn_record {
 	u8  method_len;
 	u16 path_len;
 	u8  tp_len;
-	u8  _pad[5];
+	u8  flags;
+	u8  peer_family;
+	u8  _pad;
+	u16 peer_dport;
 	char method[H3_TXN_METHOD_MAX];
 	char path[H3_TXN_PATH_MAX];
 	char traceparent[H3_TXN_TP_MAX];
+	u8  peer_daddr6[16];
+	u8  hdr_vlen[H3_HDR_SLOTS];
+	char hdr_val[H3_HDR_SLOTS][H3_HDR_VAL_MAX];
+	u8  _pad_tail[4];
 };
 
 #endif

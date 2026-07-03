@@ -35,6 +35,7 @@ Welcome to the `Podtrace` documentation. This directory contains comprehensive g
 
 ### Application Tracing
 - **[Language-Runtime Adapters](language-runtime-adapters.md)** - Redis, Memcached, FastCGI, gRPC, Kafka uprobes; PII redaction; USDT auto-detection
+- **[HTTP/3 (QUIC) Tracing](http3.md)** - Connection-layer SNI/ALPN for every stack, quic-go and nghttp3 L7 adapters, header capture, coverage matrix
 - **[Multi-Pod Tracing](multi-pod-tracing.md)** - Multi-pod and cross-namespace tracing with selector patterns
 
 ### Platform Guides
