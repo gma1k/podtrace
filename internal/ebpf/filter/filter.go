@@ -76,6 +76,21 @@ func (f *CgroupFilter) snapshotTargets() []string {
 	return targets
 }
 
+// HasTargets reports whether any cgroup target is configured.
+func (f *CgroupFilter) HasTargets() bool {
+	f.pathsMu.RLock()
+	defer f.pathsMu.RUnlock()
+	if f.cgroupPath != "" {
+		return true
+	}
+	for p := range f.cgroupPaths {
+		if p != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func (f *CgroupFilter) IsPIDInCgroup(pid uint32) bool {
 	configuredTargets := f.snapshotTargets()
 	if len(configuredTargets) == 0 {

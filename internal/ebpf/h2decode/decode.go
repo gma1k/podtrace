@@ -9,8 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/net/http2/hpack"
-
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/internal/safeconv"
 )
@@ -41,7 +39,17 @@ const (
 	defaultMaxStreams       = 8192
 	defaultTTL              = 60 * time.Second
 	defaultGapTimeout       = 2 * time.Second
-	hpackMaxDynTableSize    = 4096
+)
+
+// unknownPathPlaceholder stands in for a request :path that was HPACK-indexed
+// into the connection's dynamic table before capture attached, so its literal
+// was never observed.
+const unknownPathPlaceholder = "<unknown-path>"
+
+const (
+	roleUnknown uint8 = iota
+	roleRequest
+	roleResponse
 )
 
 // RawRecord is a parsed struct h2_hdr_record plus its raw HPACK fragment.
@@ -116,7 +124,8 @@ type streamKey struct {
 
 // dirState is the ordered decode state for one (connection, direction).
 type dirState struct {
-	dec      *hpack.Decoder
+	dec      *lateJoinDecoder
+	role     uint8
 	nextSeq  uint32
 	pending  map[uint32]*RawRecord
 	asm      []byte
@@ -150,9 +159,11 @@ type Decoder struct {
 
 	nowFn func() time.Time
 
-	decodeErrors uint64
-	gapsSkipped  uint64
-	evictions    uint64
+	decodeErrors      uint64
+	gapsSkipped       uint64
+	evictions         uint64
+	partialBlocks     uint64
+	anonymousRequests uint64
 }
 
 // New returns a Decoder with default tunables.
@@ -200,7 +211,7 @@ func (d *Decoder) Ingest(rec *RawRecord) []*events.Event {
 	if st == nil {
 		d.evictIfFullLocked()
 		st = &dirState{
-			dec:     hpack.NewDecoder(hpackMaxDynTableSize, nil),
+			dec:     &lateJoinDecoder{},
 			nextSeq: 0,
 			pending: make(map[uint32]*RawRecord),
 		}
@@ -257,11 +268,14 @@ func (d *Decoder) drainLocked(st *dirState) []*events.Event {
 
 // decodeBlockLocked decodes one complete header block and builds an event.
 func (d *Decoder) decodeBlockLocked(st *dirState, rec *RawRecord, block []byte) *events.Event {
-	fields, err := st.dec.DecodeFull(block)
+	fields, complete, err := st.dec.decodeBlock(block)
 	if err != nil {
 		d.decodeErrors++
-		st.dec = hpack.NewDecoder(hpackMaxDynTableSize, nil)
+		st.dec.resetEpoch()
 		return nil
+	}
+	if !complete {
+		d.partialBlocks++
 	}
 
 	var method, path, status, traceparent, grpcStatus string
@@ -290,8 +304,10 @@ func (d *Decoder) decodeBlockLocked(st *dirState, rec *RawRecord, block []byte) 
 
 	switch {
 	case path != "":
+		st.role = roleRequest
 		return d.buildRequestLocked(rec, method, path, traceparent, extra)
 	case status != "":
+		st.role = roleResponse
 		if len(status) == 3 && status[0] == '1' {
 			return nil
 		}
@@ -306,10 +322,44 @@ func (d *Decoder) decodeBlockLocked(st *dirState, rec *RawRecord, block []byte) 
 		}
 		return ev
 	case grpcStatus != "":
+		st.role = roleResponse
 		return d.buildGrpcTrailerLocked(rec, grpcStatus)
+	case !complete:
+		return d.buildAnonymousRequestLocked(st, rec, method, traceparent, extra)
 	default:
 		return nil
 	}
+}
+
+// buildAnonymousRequestLocked handles a partially-decoded block carrying no
+// recognizable pseudo-header: on a late-joined connection this is the
+// steady-state shape of a request whose :path was indexed before capture
+// attached.
+func (d *Decoder) buildAnonymousRequestLocked(st *dirState, rec *RawRecord, method,
+	traceparent string, extra []string) *events.Event {
+	requestDir := st.role == roleRequest
+	if !requestDir && st.role == roleUnknown {
+		other := d.dirs[connKey{conn: rec.ConnID, dir: otherDirection(rec.Direction)}]
+		requestDir = other != nil && other.role == roleResponse
+	}
+	if !requestDir {
+		return nil
+	}
+	if _, exists := d.streams[streamKey{conn: rec.ConnID, stream: rec.StreamID}]; exists {
+		return nil
+	}
+	if method == "" {
+		method = "?"
+	}
+	d.anonymousRequests++
+	return d.buildRequestLocked(rec, method, unknownPathPlaceholder, traceparent, extra)
+}
+
+func otherDirection(dir uint8) uint8 {
+	if dir == DirEgress {
+		return DirIngress
+	}
+	return DirEgress
 }
 
 func (d *Decoder) buildRequestLocked(rec *RawRecord, method, path, traceparent string,
@@ -423,7 +473,8 @@ func (d *Decoder) rememberStreamLocked(rec *RawRecord, method, path string) {
 }
 
 // skipGapLocked advances past the lowest missing seq so a lost fragment cannot
-// stall the connection.
+// stall the connection. Dynamic-table insertions may have happened inside the
+// gap, so the observed-insertion window restarts.
 func (d *Decoder) skipGapLocked(st *dirState) {
 	lowest, ok := lowestSeq(st.pending)
 	if !ok {
@@ -432,7 +483,7 @@ func (d *Decoder) skipGapLocked(st *dirState) {
 	st.nextSeq = lowest
 	st.asm = nil
 	st.stalled = time.Time{}
-	st.dec = hpack.NewDecoder(hpackMaxDynTableSize, nil)
+	st.dec.resetEpoch()
 	d.gapsSkipped++
 }
 
@@ -514,22 +565,26 @@ func (d *Decoder) evictOldestStreamLocked() {
 
 // Stats reports diagnostic counters.
 type Stats struct {
-	Conns        int
-	Streams      int
-	DecodeErrors uint64
-	GapsSkipped  uint64
-	Evictions    uint64
+	Conns             int
+	Streams           int
+	DecodeErrors      uint64
+	GapsSkipped       uint64
+	Evictions         uint64
+	PartialBlocks     uint64
+	AnonymousRequests uint64
 }
 
 func (d *Decoder) Stats() Stats {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return Stats{
-		Conns:        len(d.dirs),
-		Streams:      len(d.streams),
-		DecodeErrors: d.decodeErrors,
-		GapsSkipped:  d.gapsSkipped,
-		Evictions:    d.evictions,
+		Conns:             len(d.dirs),
+		Streams:           len(d.streams),
+		DecodeErrors:      d.decodeErrors,
+		GapsSkipped:       d.gapsSkipped,
+		Evictions:         d.evictions,
+		PartialBlocks:     d.partialBlocks,
+		AnonymousRequests: d.anonymousRequests,
 	}
 }
 

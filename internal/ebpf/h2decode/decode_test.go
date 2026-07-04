@@ -540,6 +540,105 @@ func TestCaptureHeadersOnRequestAndResponse(t *testing.T) {
 	}
 }
 
+func TestLateJoinNewRouteRecoversPath(t *testing.T) {
+	d := New()
+	enc := newBlockEncoder()
+	_ = enc.encode(reqFields("POST", "/pkg.Svc/Old")...)
+
+	const conn = 90
+	first := singleEvent(t, d.Ingest(rec(conn, DirEgress, 0, 1,
+		enc.encode(reqFields("POST", "/pkg.Svc/New")...))))
+	if first.Target != "POST /pkg.Svc/New" {
+		t.Fatalf("post-attach literal route: target = %q", first.Target)
+	}
+	repeat := singleEvent(t, d.Ingest(rec(conn, DirEgress, 1, 3,
+		enc.encode(reqFields("POST", "/pkg.Svc/New")...))))
+	if repeat.Target != "POST /pkg.Svc/New" {
+		t.Fatalf("indexed repeat of post-attach route: target = %q", repeat.Target)
+	}
+	if d.Stats().DecodeErrors != 0 {
+		t.Fatalf("late join must not count decode errors: %+v", d.Stats())
+	}
+	if d.Stats().PartialBlocks == 0 {
+		t.Fatal("blocks referencing pre-attach state should count as partial")
+	}
+}
+
+func TestLateJoinAnonymousRequestPairsWithResponse(t *testing.T) {
+	d := New()
+	reqEnc := newBlockEncoder()
+	_ = reqEnc.encode(reqFields("POST", "/pkg.Svc/Do")...) // pre-attach literal
+	steadyState := reqEnc.encode(reqFields("POST", "/pkg.Svc/Do")...)
+
+	const conn = 91
+	respEnc := newBlockEncoder()
+	singleEvent(t, d.Ingest(rec(conn, DirIngress, 0, 99, respEnc.encode(hf(":status", "200")))))
+
+	reqEv := singleEvent(t, d.Ingest(rec(conn, DirEgress, 0, 1, steadyState)))
+	if reqEv.Type != events.EventHTTPReq {
+		t.Fatalf("expected request event, got %v", reqEv.Type)
+	}
+	if reqEv.Target != "POST "+unknownPathPlaceholder {
+		t.Fatalf("anonymous request target = %q", reqEv.Target)
+	}
+
+	respEv := singleEvent(t, d.Ingest(rec(conn, DirIngress, 1, 1, respEnc.encode(hf(":status", "200")))))
+	if respEv.Target != "POST "+unknownPathPlaceholder {
+		t.Fatalf("response lost anonymous-request correlation: %q", respEv.Target)
+	}
+	if respEv.LatencyNS == 0 {
+		t.Fatal("anonymous request must still yield latency")
+	}
+	if d.Stats().AnonymousRequests != 1 {
+		t.Fatalf("AnonymousRequests = %d, want 1", d.Stats().AnonymousRequests)
+	}
+}
+
+func TestLateJoinAnonymousRequestNeedsRoleEvidence(t *testing.T) {
+	d := New()
+	enc := newBlockEncoder()
+	_ = enc.encode(reqFields("POST", "/pkg.Svc/Do")...)
+	steadyState := enc.encode(reqFields("POST", "/pkg.Svc/Do")...)
+
+	if evs := d.Ingest(rec(92, DirEgress, 0, 1, steadyState)); len(evs) != 0 {
+		t.Fatalf("unclassifiable partial block emitted %d events, want 0", len(evs))
+	}
+	if d.Stats().AnonymousRequests != 0 {
+		t.Fatalf("AnonymousRequests = %d, want 0", d.Stats().AnonymousRequests)
+	}
+}
+
+func TestLateJoinAnonymousRequestFromOwnRole(t *testing.T) {
+	d := New()
+	enc := newBlockEncoder()
+	_ = enc.encode(reqFields("POST", "/pkg.Svc/Old")...)
+
+	const conn = 93
+	singleEvent(t, d.Ingest(rec(conn, DirEgress, 0, 1,
+		enc.encode(reqFields("POST", "/pkg.Svc/New")...))))
+
+	ev := singleEvent(t, d.Ingest(rec(conn, DirEgress, 1, 3,
+		enc.encode(reqFields("POST", "/pkg.Svc/Old")...))))
+	if ev.Type != events.EventHTTPReq || ev.Target != "POST "+unknownPathPlaceholder {
+		t.Fatalf("anonymous request on request-role direction: type=%v target=%q", ev.Type, ev.Target)
+	}
+}
+
+func TestIndexedResponseTrailerNotMisreported(t *testing.T) {
+	d := New()
+	respEnc := newBlockEncoder()
+	_ = respEnc.encode(hf("grpc-status", "0"))
+
+	const conn = 94
+	singleEvent(t, d.Ingest(rec(conn, DirIngress, 0, 1, respEnc.encode(hf(":status", "200")))))
+	if evs := d.Ingest(rec(conn, DirIngress, 1, 1, respEnc.encode(hf("grpc-status", "0")))); len(evs) != 0 {
+		t.Fatalf("indexed trailer on response direction emitted %d events, want 0", len(evs))
+	}
+	if d.Stats().AnonymousRequests != 0 {
+		t.Fatalf("trailer misreported as request: %+v", d.Stats())
+	}
+}
+
 func TestCaptureHeadersDisabledByDefault(t *testing.T) {
 	d := New()
 	be := newBlockEncoder()

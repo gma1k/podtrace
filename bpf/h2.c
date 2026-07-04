@@ -39,6 +39,28 @@ struct h2_raw_ctx {
 	u8  transport;
 };
 
+static __always_inline int h2_preface_signal(void *base, u64 avail)
+{
+	u8 b[16];
+	if (avail >= 16) {
+		if (bpf_probe_read_user(b, 16, base) != 0)
+			return 0;
+		if (b[0] == 'P' && b[1] == 'R' && b[2] == 'I' && b[3] == ' ' &&
+		    b[4] == '*' && b[5] == ' ' && b[6] == 'H' && b[7] == 'T' &&
+		    b[8] == 'T' && b[9] == 'P' && b[10] == '/' && b[11] == '2' &&
+		    b[12] == '.' && b[13] == '0' && b[14] == '\r' && b[15] == '\n')
+			return 2;
+		return 0;
+	}
+	if (avail >= 4) {
+		if (bpf_probe_read_user(b, 4, base) != 0)
+			return 0;
+		if (b[0] == 'P' && b[1] == 'R' && b[2] == 'I' && b[3] == ' ')
+			return 1;
+	}
+	return 0;
+}
+
 static __always_inline int h2_start_looks_h2(void *base, u64 avail)
 {
 	if (avail < HTTP2_FRAME_HDR)
@@ -168,11 +190,34 @@ static __always_inline void h2_emit_frames(void *base, u64 avail, u64 conn,
 		return;
 
 	u32 start = 0;
-	if (!fs->preface_seen && fs->remaining == 0 && avail >= HTTP2_PREFACE_LEN) {
-		u8 pf[4];
-		if (bpf_probe_read_user(pf, sizeof(pf), base) == 0 &&
-		    pf[0] == 'P' && pf[1] == 'R' && pf[2] == 'I' && pf[3] == ' ')
-			start = HTTP2_PREFACE_LEN;
+	int pfx = h2_preface_signal(base, avail);
+	if (pfx == 2 || (pfx == 1 && fs->remaining == 0)) {
+		struct h2_seq_key ke = { .conn_id = conn, .dir = H2_DIR_EGRESS };
+		struct h2_seq_key ki = { .conn_id = conn, .dir = H2_DIR_INGRESS };
+		bpf_map_delete_elem(&h2_seq, &ke);
+		bpf_map_delete_elem(&h2_seq, &ki);
+		bpf_map_delete_elem(&h2_frame_state, &ke);
+		bpf_map_delete_elem(&h2_frame_state, &ki);
+
+		__builtin_memset(&s->rec, 0, sizeof(s->rec));
+		s->rec.conn_id = conn;
+		s->rec.timestamp = bpf_ktime_get_ns();
+		s->rec.flags = H2_HDR_FLAG_CLOSE;
+		bpf_ringbuf_output(&h2_hdr_events, &s->rec, sizeof(s->rec), 0);
+
+		struct h2_frame_state fresh = {};
+		bpf_map_update_elem(&h2_frame_state, &fk, &fresh, BPF_ANY);
+		fs = bpf_map_lookup_elem(&h2_frame_state, &fk);
+		if (!fs)
+			return;
+
+		if (avail < HTTP2_PREFACE_LEN) {
+			fs->preface_seen = 1;
+			fs->type = HTTP2_SETTINGS;
+			fs->remaining = HTTP2_PREFACE_LEN - (u32)avail;
+			return;
+		}
+		start = HTTP2_PREFACE_LEN;
 	}
 	fs->preface_seen = 1;
 	s->off = start;

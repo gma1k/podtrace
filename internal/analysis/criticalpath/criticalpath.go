@@ -83,6 +83,8 @@ func isBoundary(t events.EventType) bool {
 	return t == events.EventHTTPResp || t == events.EventFastCGIResp || t == events.EventGRPCMethod
 }
 
+const maxWindows = 8192
+
 // Feed processes one event. It is safe to call from multiple goroutines.
 // The emit callback runs after the analyzer's lock is released, so a slow
 // (or re-entrant) callback can neither stall the event hot path nor
@@ -96,6 +98,10 @@ func (a *Analyzer) Feed(e *events.Event) {
 	pid := e.PID
 	w, ok := a.windows[pid]
 	if !ok {
+		if !isBoundary(e.Type) && len(a.windows) >= maxWindows {
+			a.mu.Unlock()
+			return
+		}
 		w = &requestWindow{}
 		a.windows[pid] = w
 	}
