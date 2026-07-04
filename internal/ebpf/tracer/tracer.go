@@ -96,6 +96,7 @@ type Tracer struct {
 	lastDNSDrops             uint64
 	cgroupPaths              []string
 	useUserspaceCgroupFilter atomic.Bool
+	denyWhenNoTargets        atomic.Bool
 	targetCgroupID           atomic.Uint64
 	targetCgroupIDs          atomic.Pointer[map[uint64]struct{}]
 	cgroupWriteMu            sync.Mutex
@@ -591,6 +592,19 @@ func NewTracer() (*Tracer, error) {
 	return t, nil
 }
 
+// SetDenyWhenNoTargets makes an empty target set mean "capture nothing"
+// instead of "capture everything".
+func (t *Tracer) SetDenyWhenNoTargets(deny bool) {
+	t.denyWhenNoTargets.Store(deny)
+}
+
+// idleDeny reports whether the tracer is in deny-when-no-targets mode with
+// no targets configured on either filter layer.
+func (t *Tracer) idleDeny() bool {
+	return t.denyWhenNoTargets.Load() &&
+		len(t.loadCgroupIDs()) == 0 && !t.filter.HasTargets()
+}
+
 // SetCgroups replaces the tracer's entire cgroup filter set with the
 // given paths.
 func (t *Tracer) SetCgroups(cgroupPaths []string) error {
@@ -760,7 +774,8 @@ func (t *Tracer) syncTargetCgroupMap() error {
 	ids := t.loadCgroupIDs()
 
 	if len(ids) == 0 {
-		if err := t.setCgroupFilterEnabled(false); err != nil {
+		deny := t.denyWhenNoTargets.Load() && len(t.cgroupPaths) == 0
+		if err := t.setCgroupFilterEnabled(deny); err != nil {
 			return err
 		}
 	}
@@ -906,6 +921,9 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 
 	t.cgroupWriteMu.Lock()
 	dnsCgroups := append([]string(nil), t.cgroupPaths...)
+	if err := t.syncTargetCgroupMap(); err != nil {
+		logger.Warn("Failed initial target cgroup map sync", zap.Error(err))
+	}
 	t.cgroupWriteMu.Unlock()
 	t.syncDNSPacketProbes(dnsCgroups)
 	t.syncHTTP3Probes(dnsCgroups)
@@ -925,6 +943,9 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 			case <-ticker.C:
 				if t.pathCache != nil {
 					t.pathCache.CleanupExpired()
+				}
+				if t.cpAnalyzer != nil {
+					t.cpAnalyzer.Evict()
 				}
 				t.pollBPFMapUtilization()
 			}
@@ -965,6 +986,9 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 			case <-ctx.Done():
 				return
 			case <-eventCollectionTicker.C:
+				if t.idleDeny() {
+					continue
+				}
 				elapsed := time.Since(startTime)
 				if !filteringDisabled.Load() && eventsParsed.Load() > 10 && eventsCollected.Load() == 0 && elapsed > 10*time.Second {
 					if config.AllowCgroupFilterAutoDisable() {
@@ -1179,6 +1203,9 @@ func (t *Tracer) processAndDispatch(ctx context.Context, event *events.Event,
 					zap.String("process", event.ProcessName))
 			}
 		}
+	} else if t.idleDeny() {
+		allowed = false
+		ec.filtered.Add(1)
 	} else if t.useUserspaceCgroupFilter.Load() {
 		allowed = t.filter.IsPIDInCgroup(event.PID)
 		if !allowed {

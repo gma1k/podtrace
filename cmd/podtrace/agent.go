@@ -115,6 +115,9 @@ func agentBackendFactory() (tracer.TracerBackend, error) {
 	if err != nil {
 		return nil, err
 	}
+	if deny, ok := tr.(interface{ SetDenyWhenNoTargets(bool) }); ok {
+		deny.SetDenyWhenNoTargets(true)
+	}
 	return &ebpfBackendAdapter{tr: tr}, nil
 }
 
