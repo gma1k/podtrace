@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: h3-curl-report
+  labels:
+    podtrace.io/kind: session-report
+(contains(data."report.txt", 'HTTP/3')): true
+(contains(data."report.txt", '-> 200')): true

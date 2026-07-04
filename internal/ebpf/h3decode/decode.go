@@ -15,18 +15,20 @@ import (
 
 // Offsets mirror struct h3_txn_record in bpf/events.h.
 const (
-	methodMax    = 16  // H3_TXN_METHOD_MAX
-	pathMax      = 256 // H3_TXN_PATH_MAX
-	tpMax        = 64  // H3_TXN_TP_MAX
-	hdrSlots     = 4   // H3_HDR_SLOTS
-	hdrValMax    = 64  // H3_HDR_VAL_MAX
-	methodOffset = 40  // start of method[]
-	pathOffset   = methodOffset + methodMax
-	tpOffset     = pathOffset + pathMax
-	peerOffset   = tpOffset + tpMax // peer_daddr6[16]
-	hdrLenOffset = peerOffset + 16  // hdr_vlen[hdrSlots]
-	hdrValOffset = hdrLenOffset + hdrSlots
-	recordSize   = hdrValOffset + hdrSlots*hdrValMax
+	methodMax         = 16  // H3_TXN_METHOD_MAX
+	pathMax           = 256 // H3_TXN_PATH_MAX
+	tpMax             = 64  // H3_TXN_TP_MAX
+	hdrSlots          = 4   // H3_HDR_SLOTS
+	hdrValMax         = 64  // H3_HDR_VAL_MAX
+	methodOffset      = 40  // start of method[]
+	pathOffset        = methodOffset + methodMax
+	tpOffset          = pathOffset + pathMax
+	peerOffset        = tpOffset + tpMax // peer_daddr6[16]
+	hdrLenOffset      = peerOffset + 16  // hdr_vlen[hdrSlots]
+	hdrValOffset      = hdrLenOffset + hdrSlots
+	recordSize        = hdrValOffset + hdrSlots*hdrValMax
+	adapterConnOffset = recordSize + 4
+	adapterExtSize    = adapterConnOffset + 16
 )
 
 // Flags mirror H3_TXN_F_* in bpf/events.h: unpaired events from stacks with no
@@ -44,19 +46,21 @@ type Header struct {
 
 // Txn is one decoded HTTP/3 transaction.
 type Txn struct {
-	Timestamp   uint64
-	LatencyNS   uint64
-	CgroupID    uint64
-	PID         uint32
-	Status      uint16
-	IsClient    bool
-	Flags       uint8
-	Method      string
-	Path        string
-	Traceparent string
-	PeerIP      string
-	PeerPort    uint16
-	Headers     []Header
+	Timestamp     uint64
+	LatencyNS     uint64
+	CgroupID      uint64
+	PID           uint32
+	Status        uint16
+	IsClient      bool
+	Flags         uint8
+	Method        string
+	Path          string
+	Traceparent   string
+	PeerIP        string
+	PeerPort      uint16
+	Headers       []Header
+	AdapterConn   uint64
+	AdapterStream uint64
 }
 
 // Decoder decodes h3 transaction records; headerNames is the configured
@@ -125,6 +129,10 @@ func ParseRecord(data []byte) (*Txn, bool) {
 	}
 	t.PeerIP, t.PeerPort = decodePeer(data[36], binary.LittleEndian.Uint16(data[38:40]),
 		data[peerOffset:peerOffset+16])
+	if len(data) >= adapterExtSize {
+		t.AdapterConn = binary.LittleEndian.Uint64(data[adapterConnOffset:])
+		t.AdapterStream = binary.LittleEndian.Uint64(data[adapterConnOffset+8:])
+	}
 	return t, true
 }
 

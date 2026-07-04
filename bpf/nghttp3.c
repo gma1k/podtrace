@@ -181,6 +181,8 @@ static __always_inline void h3_adapter_first_inbound(u64 conn, u64 stream_id)
 		__builtin_memset(rec, 0, sizeof(*rec));
 		rec->timestamp = bpf_ktime_get_ns();
 		rec->flags = H3_ADAPTER_KIND_ARRIVAL;
+		rec->adapter_conn = conn;
+		rec->adapter_stream = stream_id;
 		bpf_map_update_elem(&h3_adapter_streams, &k, rec, BPF_ANY);
 		return;
 	}
@@ -199,6 +201,8 @@ static __always_inline void h3_adapter_stash_request(struct h3_txn_record *rec,
 	struct h3_adapter_stream_key k = h3_adapter_key(conn, stream_id);
 	rec->timestamp = bpf_ktime_get_ns();
 	rec->flags = H3_ADAPTER_KIND_REQUEST;
+	rec->adapter_conn = conn;
+	rec->adapter_stream = stream_id;
 	bpf_map_update_elem(&h3_adapter_streams, &k, rec, BPF_ANY);
 }
 
@@ -207,6 +211,8 @@ static __always_inline void h3_adapter_respond(struct h3_txn_record *rec,
 {
 	u64 now = bpf_ktime_get_ns();
 	rec->timestamp = now;
+	rec->adapter_conn = conn;
+	rec->adapter_stream = stream_id;
 	struct h3_adapter_stream_key k = h3_adapter_key(conn, stream_id);
 	struct h3_txn_record *st = bpf_map_lookup_elem(&h3_adapter_streams, &k);
 	if (st && st->flags == H3_ADAPTER_KIND_ARRIVAL) {
@@ -243,12 +249,48 @@ int uprobe_nghttp3_submit_response(struct pt_regs *ctx)
 	return 0;
 }
 
+static __always_inline void h3_capture_stream_bytes(u64 conn, u64 stream_id,
+						    u64 src, u64 srclen)
+{
+	if (!src || srclen == 0)
+		return;
+	struct h3_adapter_stream_key k = h3_adapter_key(conn, stream_id);
+	u32 captured = 0;
+	u32 *cp = bpf_map_lookup_elem(&h3_stream_captured, &k);
+	if (cp)
+		captured = *cp;
+	if (captured >= H3_STREAM_CAPTURE_MAX)
+		return;
+	u32 zero = 0;
+	struct h3_stream_chunk *c = bpf_map_lookup_elem(&h3_chunk_scratch, &zero);
+	if (!c)
+		return;
+	u32 n = nghttp3_clamp_len(srclen, H3_CHUNK_DATA_MAX);
+	if (n == 0)
+		return;
+	c->tgid = bpf_get_current_pid_tgid() >> 32;
+	c->conn = conn;
+	c->stream_id = stream_id;
+	c->stream_len = (u32)srclen;
+	c->copied_len = n;
+	c->offset = captured;
+	if (bpf_probe_read_user(c->data, n, (void *)src) != 0)
+		return;
+	bpf_ringbuf_output(&h3_stream_chunks, c, sizeof(*c), 0);
+	captured += n;
+	bpf_map_update_elem(&h3_stream_captured, &k, &captured, BPF_ANY);
+}
+
 SEC("uprobe/nghttp3_read_stream")
 int uprobe_nghttp3_read_stream(struct pt_regs *ctx)
 {
 	if (!http_should_trace())
 		return 0;
-	h3_adapter_first_inbound((u64)PT_REGS_PARM1(ctx), (u64)PT_REGS_PARM2(ctx));
+	u64 conn = (u64)PT_REGS_PARM1(ctx);
+	u64 stream_id = (u64)PT_REGS_PARM2(ctx);
+	h3_adapter_first_inbound(conn, stream_id);
+	h3_capture_stream_bytes(conn, stream_id,
+				(u64)PT_REGS_PARM3(ctx), (u64)PT_REGS_PARM4(ctx));
 	return 0;
 }
 
