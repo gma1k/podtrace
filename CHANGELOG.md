@@ -9,6 +9,20 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.13.7](https://github.com/gma1k/podtrace/compare/v0.13.6...v0.13.7) (2026-07-05)
+
+
+### Features
+
+* decode HTTP/2 :path mid-stream and stop idle-agent whole-node OOM ([#283](https://github.com/gma1k/podtrace/issues/283)) ([1f9e190](https://github.com/gma1k/podtrace/commit/1f9e190894101d46b4978edf96f5fad48f03e2ca))
+* decode inbound HTTP/3 adapter headers and probe quiche crate ([#284](https://github.com/gma1k/podtrace/issues/284)) ([0ba9a08](https://github.com/gma1k/podtrace/commit/0ba9a08ffc375f61819a061c15b8c58eaf6c4885))
+* harden HTTP/3 tracing with peer fusion, QUIC v2, and adapters ([#280](https://github.com/gma1k/podtrace/issues/280)) ([d5190bc](https://github.com/gma1k/podtrace/commit/d5190bc16847f3a3166149a448de29f1eea9c232))
+
+
+### Maintenance
+
+* **deps:** update docker/login-action action to v4.4.0 ([#282](https://github.com/gma1k/podtrace/issues/282)) ([b85af11](https://github.com/gma1k/podtrace/commit/b85af113108e98b0543ef68551d685b9fcf8f53e))
+
 ## [0.13.6](https://github.com/gma1k/podtrace/compare/v0.13.5...v0.13.6) (2026-07-02)
 
 
