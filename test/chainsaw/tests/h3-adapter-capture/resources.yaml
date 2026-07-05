@@ -1,0 +1,141 @@
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: h3-otlp
+spec:
+  type: otlp
+  otlp:
+    endpoint: otel-collector:4318
+    protocol: http
+    insecure: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: h3nginx-conf
+data:
+  nginx.conf: |
+    worker_processes 1;
+    events {}
+    http {
+      access_log off;
+      ssl_certificate /certs/tls.crt;
+      ssl_certificate_key /certs/tls.key;
+      server {
+        listen 443 quic reuseport;
+        listen 443 ssl;
+        http2 on;
+        ssl_protocols TLSv1.3;
+        add_header alt-svc 'h3=":443"; ma=86400' always;
+        location /hello {
+          return 200 "hello over h3\n";
+        }
+        location /slow/ {
+          limit_rate 500;
+          alias /slow/;
+        }
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: h3demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: h3demo
+  template:
+    metadata:
+      labels:
+        app: h3demo
+    spec:
+      initContainers:
+        - name: gen-cert
+          image: nginx:1.29
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              openssl req -x509 -newkey rsa:2048 -keyout /certs/tls.key \
+                -out /certs/tls.crt -days 2 -nodes -subj "/CN=h3demo"
+              head -c 2000000 /dev/zero > /slow/big
+          volumeMounts:
+            - { name: certs, mountPath: /certs }
+            - { name: slow, mountPath: /slow }
+      containers:
+        - name: nginx
+          image: nginx:1.29
+          imagePullPolicy: Never
+          volumeMounts:
+            - { name: conf, mountPath: /etc/nginx/nginx.conf, subPath: nginx.conf }
+            - { name: certs, mountPath: /certs }
+            - { name: slow, mountPath: /slow }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+      volumes:
+        - name: conf
+          configMap: { name: h3nginx-conf }
+        - name: certs
+          emptyDir: {}
+        - name: slow
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: h3demo
+spec:
+  selector:
+    app: h3demo
+  ports:
+    - name: quic
+      protocol: UDP
+      port: 443
+      targetPort: 443
+---
+# curl built against dynamic libnghttp3 — the traced subject for the nghttp3
+# adapter's inbound (response) header decode. A long-running slow download
+# keeps one curl process alive so the tracer's pid scan always finds
+# libnghttp3 mapped (probes on the library inode then fire for every
+# short-lived curl too); the per-second loop generates fresh transactions.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: h3curl
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: h3curl
+  template:
+    metadata:
+      labels:
+        app: h3curl
+        group: h3e2e
+    spec:
+      containers:
+        - name: curl
+          image: podtrace-h3curl:ci
+          imagePullPolicy: Never
+          command:
+            - sh
+            - -c
+            - |
+              (
+                sleep 5
+                while true; do
+                  curl --http3-only -sk https://h3demo/hello -o /dev/null \
+                    -w "curl h3 status=%{http_code}\n"
+                  sleep 1
+                done
+              ) &
+              sleep 5
+              exec curl --http3-only -sk https://h3demo/slow/big -o /dev/null \
+                --max-time 3500 --limit-rate 300
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 200m, memory: 64Mi }

@@ -1,0 +1,68 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: h3-adapter-capture
+spec:
+  description: |
+    Verifies HTTP/3 C-library adapter capture end-to-end, including the
+    inbound QPACK header decode:
+      1. Apply an nginx HTTP/3 server pod with a curl client (dynamic
+         libnghttp3) looping requests against it.
+      2. Apply a PodTraceSession with filters=[net] targeting the curl pod.
+      3. Session reaches Completed with summary.totalEvents > 0: nghttp3
+         requests captured on nghttp3_conn_submit_request, response status
+         decoded in userspace from captured stream bytes
+         (bpf/nghttp3.c h3_capture_stream_bytes -> internal/ebpf/h3stream ->
+         internal/ebpf/qpackdecode).
+      4. The report shows endpoints with decoded "-> 200" statuses, proving
+         the inbound QPACK pipeline.
+    BTF-only: the kind node kernel must expose /sys/kernel/btf/vmlinux, else
+    the HTTP/3 adapter probes are no-ops.
+  timeouts:
+    apply: 30s
+    assert: 150s
+    delete: 60s
+    cleanup: 120s
+  steps:
+    - name: setup-workloads
+      try:
+        - apply:
+            file: ./resources.yaml
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: h3curl
+              status:
+                readyReplicas: 1
+        - sleep:
+            duration: 15s
+    - name: apply-session
+      try:
+        - apply:
+            file: ./session.yaml
+        - assert:
+            file: ./assert-completed.yaml
+      catch:
+        - events: {}
+        - describe:
+            apiVersion: v1
+            kind: Pod
+        - podLogs:
+            selector: app=h3curl
+            tail: 20
+        - script:
+            content: |
+              kubectl -n podtrace-system get pods -o wide
+              for p in $(kubectl -n podtrace-system get pods -o name | grep pts-); do
+                echo "== $p (session summary)"
+                kubectl -n podtrace-system logs "$p" 2>/dev/null | grep -E \
+                  "Resolved target|Starting event|No events" | head -20 || true
+                echo "== $p (log tail)"
+                kubectl -n podtrace-system logs "$p" --tail=40 2>/dev/null || true
+              done
+    - name: report-artifact
+      try:
+        - assert:
+            file: ./assert-report.yaml

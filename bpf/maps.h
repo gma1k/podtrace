@@ -678,6 +678,25 @@ struct {
 	__type(value, struct h3_adapter_call);
 } h3_adapter_calls SEC(".maps");
 
+struct {
+	__uint(type, BPF_MAP_TYPE_RINGBUF);
+	__uint(max_entries, 2 * 1024 * 1024);
+} h3_stream_chunks SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, u32);
+	__type(value, struct h3_stream_chunk);
+} h3_chunk_scratch SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 4096);
+	__type(key, struct h3_adapter_stream_key);
+	__type(value, u32);
+} h3_stream_captured SEC(".maps");
+
 struct h3_pending_tp {
 	u8   len;
 	u8   _pad[7];

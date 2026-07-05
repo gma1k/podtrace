@@ -336,10 +336,7 @@ func AttachDNSPacketProbes(coll *ebpf.Collection, cgroupPaths []string) []link.L
 			links = append(links, l)
 		}
 	}
-	if len(links) > 0 {
-		logger.Info("Packet-based DNS capture attached",
-			zap.Int("cgroups", len(seen)), zap.Int("links", len(links)))
-	} else {
+	if len(links) == 0 {
 		logger.Info("Packet-based DNS capture attached to no cgroups",
 			zap.Int("cgroup_paths_given", len(cgroupPaths)))
 	}
@@ -390,10 +387,6 @@ func AttachHTTP3Probes(coll *ebpf.Collection, cgroupPaths []string) []link.Link 
 			}
 			links = append(links, l)
 		}
-	}
-	if len(links) > 0 {
-		logger.Info("HTTP/3 (QUIC) detection attached",
-			zap.Int("cgroups", len(seen)), zap.Int("links", len(links)))
 	}
 	return links
 }

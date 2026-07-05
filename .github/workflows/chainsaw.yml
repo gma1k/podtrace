@@ -83,6 +83,19 @@ jobs:
             test/chainsaw/tests/h2-capture/workload
           kind load docker-image podtrace-h2demo:ci --name podtrace-chainsaw
 
+      - name: Build HTTP/3 workload images
+        run: |
+          docker build --provenance=false \
+            -t podtrace-h3curl:ci \
+            test/chainsaw/tests/h3-adapter-capture/workload-curl
+          for i in 1 2 3; do
+            docker pull nginx:1.29 && break
+            echo "pull attempt $i failed; retrying in 15s" >&2
+            sleep 15
+          done
+          kind load docker-image podtrace-h3curl:ci --name podtrace-chainsaw
+          kind load docker-image nginx:1.29 --name podtrace-chainsaw
+
       - name: Preload hook-job image into kind
         run: |
           for i in 1 2 3; do

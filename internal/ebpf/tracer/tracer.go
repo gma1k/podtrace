@@ -34,6 +34,7 @@ import (
 	"github.com/podtrace/podtrace/internal/ebpf/filter"
 	"github.com/podtrace/podtrace/internal/ebpf/h2decode"
 	"github.com/podtrace/podtrace/internal/ebpf/h3decode"
+	"github.com/podtrace/podtrace/internal/ebpf/h3stream"
 	"github.com/podtrace/podtrace/internal/ebpf/loader"
 	"github.com/podtrace/podtrace/internal/ebpf/parser"
 	"github.com/podtrace/podtrace/internal/ebpf/probes"
@@ -85,6 +86,11 @@ type Tracer struct {
 	h2Decoder                *h2decode.Decoder
 	h3Reader                 *ringbuf.Reader
 	h3Decoder                *h3decode.Decoder
+	h3ChunkReader            *ringbuf.Reader
+	h3Assembler              *h3stream.Assembler
+	h3SectionStash           *h3stream.SectionStash
+	h3ParkedMu               sync.Mutex
+	h3Parked                 []h3ParkedTxn
 	quicReader               *ringbuf.Reader
 	filter                   *filter.CgroupFilter
 	containerID              string
@@ -181,6 +187,7 @@ func (t *Tracer) attachContainerUprobes(id string, pid uint32) []link.Link {
 	ls = append(ls, probes.AttachGoHTTP3Probes(coll, pid)...)
 	ls = append(ls, probes.AttachNghttp3Probes(coll, pid)...)
 	ls = append(ls, probes.AttachQuicheProbes(coll, pid)...)
+	ls = append(ls, probes.AttachQuicheRustProbes(coll, pid)...)
 	ls = append(ls, probes.AttachRedisProbesWithPID(coll, id, pid)...)
 	ls = append(ls, probes.AttachMemcachedProbesWithPID(coll, id, pid)...)
 	ls = append(ls, probes.AttachKafkaProbesWithPID(coll, id, pid)...)
@@ -255,6 +262,7 @@ func (t *Tracer) attachGroupUprobes(g probes.ProbeGroup) []link.Link {
 		ls = append(ls, probes.AttachGoHTTP3Probes(coll, pid)...)
 		ls = append(ls, probes.AttachNghttp3Probes(coll, pid)...)
 		ls = append(ls, probes.AttachQuicheProbes(coll, pid)...)
+		ls = append(ls, probes.AttachQuicheRustProbes(coll, pid)...)
 		return ls
 	case probes.GroupDatabase:
 		if id == "" {
@@ -535,6 +543,28 @@ func NewTracer() (*Tracer, error) {
 			logger.Warn("HTTP/3 L7 decode disabled: ringbuf reader unavailable", zap.Error(herr))
 		}
 	}
+
+	var h3chunkrd *ringbuf.Reader
+	var h3stash *h3stream.SectionStash
+	var h3asm *h3stream.Assembler
+	if m := coll.Maps["h3_stream_chunks"]; m != nil {
+		if r, herr := ringbuf.NewReader(m); herr == nil {
+			h3chunkrd = r
+			h3stash = h3stream.NewSectionStash(h3SectionTTL, h3SectionStashCap)
+			stash := h3stash
+			h3asm = h3stream.NewAssembler(func(k h3stream.ConnKey, sec h3stream.Section) {
+				if n := h3SectionLogCount.Add(1); n <= 20 {
+					logger.Debug("h3 inbound section decoded",
+						zap.Uint32("tgid", k.TGID), zap.Uint64("conn", k.Conn),
+						zap.Uint64("stream", sec.StreamID), zap.Uint16("status", sec.Status),
+						zap.String("method", sec.Method))
+				}
+				stash.Put(h3stream.SectionKey{TGID: k.TGID, Conn: k.Conn, Stream: sec.StreamID}, sec)
+			})
+		} else {
+			logger.Warn("HTTP/3 inbound header decode disabled: ringbuf reader unavailable", zap.Error(herr))
+		}
+	}
 	populateCaptureHeaderNames(coll, captureHeaders)
 	populatePidNamespace(coll)
 
@@ -560,6 +590,9 @@ func NewTracer() (*Tracer, error) {
 		h2Decoder:             h2dec,
 		h3Reader:              h3rd,
 		h3Decoder:             h3decode.NewDecoder(captureHeaders),
+		h3ChunkReader:         h3chunkrd,
+		h3Assembler:           h3asm,
+		h3SectionStash:        h3stash,
 		quicReader:            quicrd,
 		filter:                filter.NewCgroupFilter(),
 		processNameCache:      processCache,
@@ -903,6 +936,7 @@ func (t *Tracer) SetContainerIDs(containerIDs []string) error {
 	t.registerGroupLinks(probes.GroupTLS, probes.AttachGoHTTP3Probes(t.collection, t.containerPID))
 	t.registerGroupLinks(probes.GroupTLS, probes.AttachNghttp3Probes(t.collection, t.containerPID))
 	t.registerGroupLinks(probes.GroupTLS, probes.AttachQuicheProbes(t.collection, t.containerPID))
+	t.registerGroupLinks(probes.GroupTLS, probes.AttachQuicheRustProbes(t.collection, t.containerPID))
 	t.registerGroupLinks(probes.GroupCache, probes.AttachRedisProbesWithPID(t.collection, primary, t.containerPID))
 	t.registerGroupLinks(probes.GroupCache, probes.AttachMemcachedProbesWithPID(t.collection, primary, t.containerPID))
 	t.registerGroupLinks(probes.GroupMessaging, probes.AttachKafkaProbesWithPID(t.collection, primary, t.containerPID))
@@ -1116,6 +1150,14 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 
 	if t.h3Reader != nil {
 		go t.runH3DecodeReader(ctx, eventChan, stackMap, ec)
+	}
+
+	if t.h3ChunkReader != nil && t.h3Assembler != nil {
+		go t.runH3ChunkReader(ctx)
+	}
+
+	if t.h3Reader != nil && t.h3SectionStash != nil {
+		go t.runH3ParkedFlusher(ctx, eventChan, stackMap, ec)
 	}
 
 	if t.quicReader != nil {
@@ -1346,6 +1388,9 @@ func (t *Tracer) runH3DecodeReader(ctx context.Context, eventChan chan<- *events
 				zap.Uint8("flags", txn.Flags), zap.String("peer_ip", txn.PeerIP),
 				zap.Uint16("peer_port", txn.PeerPort), zap.Int("headers", len(txn.Headers)))
 		}
+		if t.h3EnrichOrPark(txn) {
+			continue
+		}
 		for _, ev := range txn.Events() {
 			t.processAndDispatch(ctx, ev, eventChan, stackMap, ec, time.Now())
 		}
@@ -1353,6 +1398,132 @@ func (t *Tracer) runH3DecodeReader(ctx context.Context, eventChan chan<- *events
 }
 
 var h3TxnLogCount atomic.Int64
+
+// Inbound-section enrichment tuning: how long decoded sections wait for
+// their transaction, how many are held, how long a transaction is parked
+// waiting for its section, and how many may be parked at once.
+const (
+	h3SectionTTL      = 5 * time.Second
+	h3SectionStashCap = 2048
+	h3ParkWindow      = 200 * time.Millisecond
+	h3MaxParked       = 512
+)
+
+// h3ParkedTxn is a transaction briefly held back because the decoded
+// inbound section that completes it.
+type h3ParkedTxn struct {
+	txn      *h3decode.Txn
+	deadline time.Time
+}
+
+// h3EnrichOrPark completes txn from its stream's decoded inbound section.
+func (t *Tracer) h3EnrichOrPark(txn *h3decode.Txn) bool {
+	if t.h3SectionStash == nil || txn.AdapterConn == 0 {
+		return false
+	}
+	key := h3stream.SectionKey{TGID: txn.PID, Conn: txn.AdapterConn, Stream: txn.AdapterStream}
+	if sec, ok := t.h3SectionStash.Take(key); ok {
+		h3stream.EnrichTxn(txn, sec)
+		if n := h3EnrichLogCount.Add(1); n <= 20 {
+			logger.Debug("h3 txn enriched inline",
+				zap.Uint16("status", txn.Status), zap.String("method", txn.Method))
+		}
+		return false
+	}
+	needsStatus := txn.IsClient && txn.Status == 0 &&
+		txn.Flags&(h3decode.FlagAborted|h3decode.FlagRequestOnly) == 0
+	needsRequest := txn.Flags&h3decode.FlagResponseOnly != 0 && txn.Method == ""
+	if !needsStatus && !needsRequest {
+		return false
+	}
+	t.h3ParkedMu.Lock()
+	defer t.h3ParkedMu.Unlock()
+	if len(t.h3Parked) >= h3MaxParked {
+		return false
+	}
+	t.h3Parked = append(t.h3Parked, h3ParkedTxn{txn: txn, deadline: time.Now().Add(h3ParkWindow)})
+	return true
+}
+
+var (
+	h3EnrichLogCount  atomic.Int64
+	h3ChunkLogCount   atomic.Int64
+	h3SectionLogCount atomic.Int64
+)
+
+// runH3ChunkReader drains the captured inbound stream bytes and feeds the
+// reassembler, which decodes QPACK field sections into the section stash.
+func (t *Tracer) runH3ChunkReader(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("Panic in HTTP/3 stream chunk reader",
+				zap.Any("panic", r), zap.ByteString("stack", debug.Stack()))
+		}
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		record, err := t.h3ChunkReader.Read()
+		if err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, ringbuf.ErrClosed) ||
+				strings.Contains(err.Error(), "closed") {
+				return
+			}
+			continue
+		}
+		if c, ok := h3stream.ParseChunk(record.RawSample); ok {
+			if n := h3ChunkLogCount.Add(1); n <= 20 {
+				logger.Debug("h3 stream chunk",
+					zap.Uint32("tgid", c.TGID), zap.Uint64("conn", c.Conn),
+					zap.Uint64("stream", c.StreamID), zap.Uint32("len", c.CopiedLen),
+					zap.Uint32("offset", c.Offset))
+			}
+			t.h3Assembler.Feed(c)
+		}
+	}
+}
+
+// runH3ParkedFlusher dispatches parked transactions: enriched as soon as
+// their section decodes, unenriched once the park window expires.
+func (t *Tracer) runH3ParkedFlusher(ctx context.Context, eventChan chan<- *events.Event,
+	stackMap *ebpf.Map, ec *eventCounters) {
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		now := time.Now()
+		var ready []*h3decode.Txn
+		t.h3ParkedMu.Lock()
+		kept := t.h3Parked[:0]
+		for _, p := range t.h3Parked {
+			key := h3stream.SectionKey{TGID: p.txn.PID, Conn: p.txn.AdapterConn, Stream: p.txn.AdapterStream}
+			if sec, ok := t.h3SectionStash.Take(key); ok {
+				h3stream.EnrichTxn(p.txn, sec)
+				ready = append(ready, p.txn)
+			} else if now.After(p.deadline) {
+				ready = append(ready, p.txn)
+			} else {
+				kept = append(kept, p)
+			}
+		}
+		t.h3Parked = kept
+		t.h3ParkedMu.Unlock()
+		for _, txn := range ready {
+			for _, ev := range txn.Events() {
+				t.processAndDispatch(ctx, ev, eventChan, stackMap, ec, time.Now())
+			}
+		}
+	}
+}
 
 // pidNamespaceInfo mirrors struct h3_pidns_info in bpf/maps.h.
 type pidNamespaceInfo struct {
@@ -1543,6 +1714,9 @@ func (t *Tracer) Stop() error {
 	}
 	if t.h3Reader != nil {
 		_ = t.h3Reader.Close()
+	}
+	if t.h3ChunkReader != nil {
+		_ = t.h3ChunkReader.Close()
 	}
 	if t.quicReader != nil {
 		_ = t.quicReader.Close()

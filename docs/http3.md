@@ -107,29 +107,26 @@ spec:
 ## Aborted server transactions
 
 A return probe on quic-go's server request handler acts as a backstop: if the
-handler returns while its request is still stashed — it panicked, or the
-stream was taken over via `HTTPStream()` (WebTransport) — the transaction is
+handler returns while its request is still stashed, it panicked, or the
+stream was taken over via `HTTPStream()` (WebTransport), the transaction is
 emitted with `aborted` in place of a status code, and its latency is the
 handler's run time. Aborted transactions are excluded from the status-code
 report but appear in request/endpoint counts.
 
-## Known limitations
+## Inbound header decoding
 
-- The nghttp3/quiche adapters cannot decode headers of the inbound direction
-  (client response status, server request method/path): those only surface
-  through application callbacks, and the decoding-internal symbols are
-  hidden in release builds. Latency is paired via the public inbound entry
-  points instead; a client request whose stream never sees a response is not
-  emitted (stream state ages out of an LRU).
-- Rust applications using the quiche crate directly (no C FFI) would need
-  rustls-style mangled-symbol matching against an unstable Rust ABI — a
-  plausible follow-up spike, not yet attempted. nginx's own QUIC stack,
-  Envoy's vendored quiche, and Chrome have no stable hookable symbols, and
-  msquic has no HTTP/3 layer at all: all of these get connection-layer
-  visibility only, and that is unlikely to change.
-- A handler that both serves a request and makes an outbound HTTP/3 call on
-  the same goroutine keeps both transactions separate (direction-split
-  stash), but traceparent/header capture may attribute headers across the
-  two when they interleave on one goroutine. Fixing this would require
-  knowing the connection role at `qpack.WriteField` time, which the hook
-  cannot see; accepted as a rare proxy-pattern edge.
+The nghttp3 adapter decodes inbound headers — the direction its callbacks
+never expose (response status on clients, request method/path on servers),
+without touching any hidden library internals: the probe on the public
+`nghttp3_conn_read_stream` entry point ships each stream's first bytes to
+userspace, where a spec-complete QPACK decoder (RFC 9204: dynamic table,
+encoder stream, SETTINGS-anchored insert counts, blocked-section retry)
+reassembles the peer's field sections and fills them into the paired
+transaction: status codes for client requests, method/path/traceparent for
+server responses.
+
+Capture is bounded on purpose: the first 512 bytes of each stream segment
+and 4 KB per stream, so bodies are never copied. A field section beyond
+those caps, or a stream that loses a segment under ringbuf pressure,
+degrades to the previous behavior: latency pairing without inbound header
+contents, never a wrong decode.

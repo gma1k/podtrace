@@ -170,6 +170,22 @@ struct h3_txn_record {
 	u8  hdr_vlen[H3_HDR_SLOTS];
 	char hdr_val[H3_HDR_SLOTS][H3_HDR_VAL_MAX];
 	u8  _pad_tail[4];
+	u64 adapter_conn;
+	u64 adapter_stream;
+};
+
+#define H3_CHUNK_DATA_MAX      512
+#define H3_STREAM_CAPTURE_MAX  4096
+
+struct h3_stream_chunk {
+	u64 tgid;
+	u64 conn;
+	u64 stream_id;
+	u32 stream_len;
+	u32 copied_len;
+	u32 offset;
+	u32 _pad;
+	char data[H3_CHUNK_DATA_MAX];
 };
 
 #endif
