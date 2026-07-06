@@ -9,6 +9,7 @@ import (
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/diagnose/tracker"
 	"github.com/podtrace/podtrace/internal/events"
+	"github.com/podtrace/podtrace/internal/tracing/exporter"
 	"github.com/podtrace/podtrace/internal/tracing/extractor"
 	"github.com/podtrace/podtrace/internal/tracing/graph"
 )
@@ -155,6 +156,41 @@ func TestManager_Shutdown_Enabled(t *testing.T) {
 	err = manager.Shutdown(ctx)
 	if err != nil {
 		t.Errorf("Shutdown() error = %v", err)
+	}
+}
+
+// TestManager_Shutdown_BoundedWhenExporterUnreachable is a regression test
+// for the diagnose session Jobs that were SIGKILLed (session state Failed,
+// report lost) when their configured OTLP endpoint was unreachable.
+func TestManager_Shutdown_BoundedWhenExporterUnreachable(t *testing.T) {
+	t.Setenv("PODTRACE_OTLP_INSECURE", "1")
+	exp, err := exporter.NewOTLPExporter("http://192.0.2.1:4318", 1.0)
+	if err != nil {
+		t.Fatalf("NewOTLPExporter() error = %v", err)
+	}
+	m := &Manager{
+		enabled:        true,
+		extractor:      extractor.NewHTTPExtractor(),
+		traceTracker:   tracker.NewTraceTracker(),
+		otlpExporter:   exp,
+		exportInterval: 5 * time.Second,
+		stopCh:         make(chan struct{}),
+	}
+	m.traceTracker.ProcessEvent(&events.Event{
+		TraceID: "0af7651916cd43dd8448eb211c80319c",
+		SpanID:  "b7ad6b7169203331",
+		Type:    events.EventHTTPReq,
+	}, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	if err := m.Shutdown(ctx); err != nil {
+		t.Errorf("Shutdown() error = %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("Shutdown blocked for %v; it must be bounded by the context deadline, not the exporter", elapsed)
 	}
 }
 

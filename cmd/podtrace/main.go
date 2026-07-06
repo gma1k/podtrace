@@ -188,6 +188,35 @@ func main() {
 	}
 }
 
+// applyTracingFlags copies the --tracing-* flag values into the process-
+// global config knobs.
+func applyTracingFlags(cmd *cobra.Command) error {
+	if !enableTracing {
+		return nil
+	}
+	config.TracingEnabled = true
+	flags := cmd.Flags()
+	if flags.Changed("tracing-otlp-endpoint") && tracingOTLPEndpoint != "" {
+		config.OTLPEndpoint = tracingOTLPEndpoint
+	}
+	if flags.Changed("tracing-jaeger-endpoint") && tracingJaegerEndpoint != "" {
+		config.JaegerEndpoint = tracingJaegerEndpoint
+	}
+	if flags.Changed("tracing-splunk-endpoint") && tracingSplunkEndpoint != "" {
+		config.SplunkEndpoint = tracingSplunkEndpoint
+	}
+	if tracingSplunkToken != "" {
+		config.SplunkToken = tracingSplunkToken
+	}
+	if flags.Changed("tracing-sample-rate") {
+		if tracingSampleRate < 0.0 || tracingSampleRate > 1.0 {
+			return fmt.Errorf("--tracing-sample-rate must be between 0.0 and 1.0, got %v", tracingSampleRate)
+		}
+		config.TracingSampleRate = tracingSampleRate
+	}
+	return nil
+}
+
 func runPodtrace(cmd *cobra.Command, args []string) error {
 	if showVersion {
 		fmt.Println(config.GetVersion())
@@ -223,24 +252,8 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if enableTracing {
-		config.TracingEnabled = true
-		if tracingOTLPEndpoint != "" {
-			config.OTLPEndpoint = tracingOTLPEndpoint
-		}
-		if tracingJaegerEndpoint != "" {
-			config.JaegerEndpoint = tracingJaegerEndpoint
-		}
-		if tracingSplunkEndpoint != "" {
-			config.SplunkEndpoint = tracingSplunkEndpoint
-		}
-		if tracingSplunkToken != "" {
-			config.SplunkToken = tracingSplunkToken
-		}
-		if tracingSampleRate < 0.0 || tracingSampleRate > 1.0 {
-			return fmt.Errorf("--tracing-sample-rate must be between 0.0 and 1.0, got %v", tracingSampleRate)
-		}
-		config.TracingSampleRate = tracingSampleRate
+	if err := applyTracingFlags(cmd); err != nil {
+		return err
 	}
 
 	alertManager, err := alerting.NewManager()

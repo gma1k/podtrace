@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -110,28 +111,25 @@ func TestBuildSessionJobSpec_CoreInvariants(t *testing.T) {
 	if spec.TTLSecondsAfterFinished == nil || *spec.TTLSecondsAfterFinished != 600 {
 		t.Errorf("TTL: %v", spec.TTLSecondsAfterFinished)
 	}
-	// 5m + 45s = 345s
 	if spec.ActiveDeadlineSeconds == nil || *spec.ActiveDeadlineSeconds != 345 {
 		t.Errorf("activeDeadlineSeconds=%v want 345", spec.ActiveDeadlineSeconds)
 	}
-	// Pinned to the right node
 	if spec.Template.Spec.NodeSelector["kubernetes.io/hostname"] != "node-a" {
 		t.Errorf("nodeSelector wrong: %v", spec.Template.Spec.NodeSelector)
 	}
 	if spec.Template.Spec.RestartPolicy != corev1.RestartPolicyNever {
 		t.Errorf("restartPolicy=%v want Never", spec.Template.Spec.RestartPolicy)
 	}
-	// Image propagated
 	if spec.Template.Spec.Containers[0].Image != "ghcr.io/gma1k/podtrace:test" {
 		t.Errorf("image: %q", spec.Template.Spec.Containers[0].Image)
 	}
 	if spec.Template.Spec.ServiceAccountName != SessionServiceAccountName() {
 		t.Errorf("SA=%q want %q", spec.Template.Spec.ServiceAccountName, SessionServiceAccountName())
 	}
-	// Main container must carry the operator-supplied session flags so
-	// the CLI knows where to load the exporter bundle and emit
-	// artifacts.
 	args := strings.Join(spec.Template.Spec.Containers[0].Args, " ")
+	if !slices.Contains(spec.Template.Spec.Containers[0].Args, "--tracing") {
+		t.Errorf("missing --tracing: %v", spec.Template.Spec.Containers[0].Args)
+	}
 	if !strings.Contains(args, "--exporter-from-file /etc/podtrace/exporter/bundle.yaml") {
 		t.Errorf("missing --exporter-from-file: %v", spec.Template.Spec.Containers[0].Args)
 	}
@@ -141,14 +139,9 @@ func TestBuildSessionJobSpec_CoreInvariants(t *testing.T) {
 	if !strings.Contains(args, "--termination-message-path /dev/termination-log") {
 		t.Errorf("missing --termination-message-path: %v", spec.Template.Spec.Containers[0].Args)
 	}
-	// Mount count sanity: bpf, btf, proc, cgroup, debugfs, tracefs,
-	// exporter, exporter-credential, rundir = 9.
 	if n := len(spec.Template.Spec.Containers[0].VolumeMounts); n != 9 {
 		t.Errorf("main container mounts=%d want 9", n)
 	}
-	// Tracepoints (sched_switch, inet_sock_set_state, ...) attach via
-	// tracefs; without these mounts every tracepoint silently failed in
-	// session Jobs while the agent DaemonSet carried them.
 	mountPaths := make(map[string]bool)
 	for _, m := range spec.Template.Spec.Containers[0].VolumeMounts {
 		mountPaths[m.MountPath] = true
@@ -158,7 +151,6 @@ func TestBuildSessionJobSpec_CoreInvariants(t *testing.T) {
 			t.Errorf("session Job is missing the %s mount required for tracepoint attach", required)
 		}
 	}
-	// Sidecar must not be present when TracerConfig.Session.SidecarUploader is false.
 	if len(spec.Template.Spec.InitContainers) != 0 {
 		t.Errorf("sidecar should be disabled by default: %d init containers", len(spec.Template.Spec.InitContainers))
 	}
@@ -197,8 +189,6 @@ func TestBuildSessionJobSpec_SidecarOptedIn(t *testing.T) {
 }
 
 func TestBuildSessionJobSpec_SidecarSuppressedWithoutReportRef(t *testing.T) {
-	// Even when SidecarUploader is on, there is nothing to upload
-	// without a report sink — the sidecar must be suppressed.
 	tc := &podtracev1alpha1.TracerConfig{
 		Spec: podtracev1alpha1.TracerConfigSpec{
 			Image: "ghcr.io/gma1k/podtrace:test",

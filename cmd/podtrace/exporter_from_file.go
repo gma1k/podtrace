@@ -47,12 +47,12 @@ func applyExporterFromFile(path string) error {
 
 	applyPayloadToConfig(p)
 	config.TracingEnabled = true
+	enableTracing = true
 	return nil
 }
 
 // applyPayloadToConfig translates a bundle.Payload into the process-
 // global config.* knobs the existing tracing manager reads on startup.
-// Split out so tests can exercise it without touching the filesystem.
 func applyPayloadToConfig(p *bundle.Payload) {
 	if p == nil {
 		return
