@@ -1177,26 +1177,35 @@ type eventCounters struct {
 }
 
 // processAndDispatch enriches a parsed event (stack, process name, redaction,
+// resolveAndConsumeStack copies the captured user stack for event.StackKey
+// out of stackMap onto the event, then deletes the entry.
+func resolveAndConsumeStack(stackMap *ebpf.Map, event *events.Event) {
+	if stackMap == nil || event.StackKey == 0 {
+		return
+	}
+	var stack stackTraceValue
+	key := event.StackKey
+	if err := stackMap.Lookup(&key, &stack); err != nil {
+		return
+	}
+	n := int(stack.Nr)
+	if n > len(stack.IPs) {
+		n = len(stack.IPs)
+	}
+	if n > 0 {
+		frames := make([]uint64, n)
+		copy(frames, stack.IPs[:n])
+		event.Stack = frames
+	}
+	_ = stackMap.Delete(&key)
+}
+
 // critical-path), applies cgroup filtering, and forwards it to eventChan.
 func (t *Tracer) processAndDispatch(ctx context.Context, event *events.Event,
 	eventChan chan<- *events.Event, stackMap *ebpf.Map, ec *eventCounters,
 	processingStart time.Time) {
 	ec.parsed.Add(1)
-	if stackMap != nil && event.StackKey != 0 {
-		var stack stackTraceValue
-		key := event.StackKey
-		if err := stackMap.Lookup(&key, &stack); err == nil {
-			n := int(stack.Nr)
-			if n > len(stack.IPs) {
-				n = len(stack.IPs)
-			}
-			if n > 0 {
-				frames := make([]uint64, n)
-				copy(frames, stack.IPs[:n])
-				event.Stack = frames
-			}
-		}
-	}
+	resolveAndConsumeStack(stackMap, event)
 	if event.ProcessName == "" {
 		event.ProcessName = t.getProcessNameQuick(event.PID)
 	}

@@ -98,6 +98,7 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 
 	sessionArgs := append([]string{}, args...)
 	sessionArgs = append(sessionArgs,
+		"--tracing",
 		"--exporter-from-file", "/etc/podtrace/exporter/bundle.yaml",
 		"--summary-file", "/var/run/podtrace/summary.json",
 		"--termination-message-path", "/dev/termination-log",

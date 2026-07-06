@@ -134,7 +134,7 @@ struct {
 } tcp_sockets SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 2048);
 	__type(key, u64);
 	__type(value, struct stack_trace_t);

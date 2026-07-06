@@ -123,6 +123,26 @@ sample: 0.1
 	}
 }
 
+// Regression test: the export gates in runPodtrace check the enableTracing
+// flag var, not config.TracingEnabled.
+func TestApplyExporterFromFile_EnablesExportGate(t *testing.T) {
+	restoreTracingFlagGlobals(t)
+	defer resetTracingConfig()
+	enableTracing = false
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bundle.yaml")
+	if err := os.WriteFile(path, []byte("type: otlp\nendpoint: otel:4318\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyExporterFromFile(path); err != nil {
+		t.Fatalf("applyExporterFromFile: %v", err)
+	}
+	if !enableTracing {
+		t.Error("exporter bundle did not enable the export gate (enableTracing)")
+	}
+}
+
 func TestApplyExporterFromFile_MissingFileErrors(t *testing.T) {
 	defer resetTracingConfig()
 	if err := applyExporterFromFile("/no/such/path"); err == nil {
