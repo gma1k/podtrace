@@ -284,40 +284,50 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	}
 
 	m.stopOnce.Do(func() { close(m.stopCh) })
-	m.wg.Wait()
 
-	// Final flush: force-export spans of traces that are still settling.
-	m.exportTraces(true)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		m.wg.Wait()
+		// Final flush: force-export spans of traces still settling.
+		m.exportTraces(true)
+		m.shutdownExporters(ctx)
+	}()
 
+	select {
+	case <-done:
+	case <-ctx.Done():
+		logger.Warn("Tracing shutdown exceeded its deadline; abandoning in-flight export", zap.Error(ctx.Err()))
+	}
+	return nil
+}
+
+// shutdownExporters closes every configured exporter, logging but not
+// propagating individual failures.
+func (m *Manager) shutdownExporters(ctx context.Context) {
 	if m.otlpExporter != nil {
 		if err := m.otlpExporter.Shutdown(ctx); err != nil {
 			logger.Warn("Failed to shutdown OTLP exporter", zap.Error(err))
 		}
 	}
-
 	if m.jaegerExporter != nil {
 		if err := m.jaegerExporter.Shutdown(ctx); err != nil {
 			logger.Warn("Failed to shutdown Jaeger exporter", zap.Error(err))
 		}
 	}
-
 	if m.splunkExporter != nil {
 		if err := m.splunkExporter.Shutdown(ctx); err != nil {
 			logger.Warn("Failed to shutdown Splunk exporter", zap.Error(err))
 		}
 	}
-
 	if m.datadogExporter != nil {
 		if err := m.datadogExporter.Shutdown(ctx); err != nil {
 			logger.Warn("Failed to shutdown DataDog exporter", zap.Error(err))
 		}
 	}
-
 	if m.zipkinExporter != nil {
 		if err := m.zipkinExporter.Shutdown(ctx); err != nil {
 			logger.Warn("Failed to shutdown Zipkin exporter", zap.Error(err))
 		}
 	}
-
-	return nil
 }

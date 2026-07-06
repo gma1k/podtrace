@@ -75,6 +75,7 @@ func NewOTLPExporter(endpoint string, sampleRate float64) (*OTLPExporter, error)
 	opts := []otlptracehttp.Option{
 		otlptracehttp.WithEndpointURL(endpointURL),
 		otlptracehttp.WithTimeout(config.TracingExporterTimeout),
+		otlptracehttp.WithRetry(otlptracehttp.RetryConfig{Enabled: false}),
 	}
 	if useInsecure {
 		opts = append(opts, otlptracehttp.WithInsecure())
