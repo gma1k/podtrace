@@ -35,7 +35,7 @@ func TestResolveAndConsumeStack_DeletesEntry(t *testing.T) {
 	if err != nil {
 		t.Skipf("cannot create BPF map (requires CAP_BPF): %v", err)
 	}
-	defer m.Close()
+	defer func() { _ = m.Close() }()
 
 	key := uint64(0xdeadbeef)
 	value := stackTraceValue{Nr: 2}
@@ -69,7 +69,7 @@ func TestResolveAndConsumeStack_NilMapAndZeroKey(t *testing.T) {
 	if err != nil {
 		t.Skipf("cannot create BPF map (requires CAP_BPF): %v", err)
 	}
-	defer m.Close()
+	defer func() { _ = m.Close() }()
 
 	event := &events.Event{StackKey: 0}
 	resolveAndConsumeStack(m, event)
