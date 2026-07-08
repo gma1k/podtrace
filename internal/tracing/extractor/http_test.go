@@ -237,8 +237,8 @@ func TestExtractFromRawHeaders_BPFSingleLineContract(t *testing.T) {
 	raw := "traceparent: 00-" + traceID + "-" + appSpan + "-01"
 
 	tc := NewHTTPExtractor().ExtractFromRawHeaders(raw)
-	if tc == nil || !tc.IsValid() {
-		t.Fatalf("expected valid trace context from %q, got %+v", raw, tc)
+	if tc == nil || !tc.HasRemoteParent() {
+		t.Fatalf("expected a remote parent from %q, got %+v", raw, tc)
 	}
 	if tc.TraceID != traceID {
 		t.Errorf("TraceID = %s, want %s", tc.TraceID, traceID)
@@ -246,7 +246,7 @@ func TestExtractFromRawHeaders_BPFSingleLineContract(t *testing.T) {
 	if tc.ParentSpanID != appSpan {
 		t.Errorf("ParentSpanID = %s, want app span %s", tc.ParentSpanID, appSpan)
 	}
-	if tc.SpanID == "" || tc.SpanID == appSpan {
-		t.Errorf("SpanID = %q, want a freshly generated child span id distinct from the parent", tc.SpanID)
+	if tc.SpanID != "" {
+		t.Errorf("SpanID = %q, want empty after extraction (manager derives a stable id)", tc.SpanID)
 	}
 }

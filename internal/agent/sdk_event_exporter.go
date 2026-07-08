@@ -211,7 +211,7 @@ func (e *sdkEventExporter) remoteParent(ev *events.Event) (trace.SpanContext, bo
 	sampled := ev.TraceFlags&0x01 == 1
 	if traceIDHex == "" && (ev.Type == events.EventHTTPReq || ev.Type == events.EventHTTPResp) && ev.Details != "" && e.extractor != nil {
 		tc := e.extractor.ExtractFromRawHeaders(ev.Details)
-		if tc == nil || !tc.IsValid() {
+		if tc == nil || !tc.HasRemoteParent() {
 			return trace.SpanContext{}, false
 		}
 		traceIDHex, parentSpanHex, sampled = tc.TraceID, tc.ParentSpanID, tc.IsSampled()

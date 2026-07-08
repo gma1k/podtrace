@@ -31,6 +31,8 @@ import (
 func ForKind(kind schema.GroupVersionKind) interface{} {
 	switch kind {
 	// Group=podtrace.io, Version=v1alpha1
+	case v1alpha1.SchemeGroupVersion.WithKind("AgentAlertingSpec"):
+		return &apiv1alpha1.AgentAlertingSpecApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("AgentSpec"):
 		return &apiv1alpha1.AgentSpecApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("ApplicationTrace"):
@@ -41,6 +43,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1alpha1.ApplicationTraceStatusApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("AppSelector"):
 		return &apiv1alpha1.AppSelectorApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("CaptureSpec"):
+		return &apiv1alpha1.CaptureSpecApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("DataDogExporter"):
 		return &apiv1alpha1.DataDogExporterApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("ExporterConfig"):
@@ -87,6 +91,10 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1alpha1.PodTraceStatusApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("PolicyStatus"):
 		return &apiv1alpha1.PolicyStatusApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("RedactionRule"):
+		return &apiv1alpha1.RedactionRuleApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("RedactionSpec"):
+		return &apiv1alpha1.RedactionSpecApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("ReportReference"):
 		return &apiv1alpha1.ReportReferenceApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("SecretKeySelector"):

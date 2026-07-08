@@ -26,16 +26,11 @@ import (
 //
 // TracerConfigStatus reflects the observed state of a TracerConfig.
 type TracerConfigStatusApplyConfiguration struct {
-	// DesiredAgents is the number of nodes the agent DaemonSet targets.
-	DesiredAgents *int32 `json:"desiredAgents,omitempty"`
-	// ReadyAgents is the number of agent pods currently Ready.
-	ReadyAgents *int32 `json:"readyAgents,omitempty"`
-	// ActiveSessions is the number of PodTraceSession Jobs currently Running.
-	ActiveSessions *int32 `json:"activeSessions,omitempty"`
-	// Conditions is the latest available observations.
-	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
-	// ObservedGeneration is the most recent generation observed.
-	ObservedGeneration *int64 `json:"observedGeneration,omitempty"`
+	DesiredAgents      *int32                           `json:"desiredAgents,omitempty"`
+	ReadyAgents        *int32                           `json:"readyAgents,omitempty"`
+	ActiveSessions     *int32                           `json:"activeSessions,omitempty"`
+	Conditions         []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
+	ObservedGeneration *int64                           `json:"observedGeneration,omitempty"`
 }
 
 // TracerConfigStatusApplyConfiguration constructs a declarative configuration of the TracerConfigStatus type for use with

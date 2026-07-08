@@ -192,6 +192,8 @@ spec:
                 - endpoint
                 - tokenSecretRef
                 type: object
+              synthesizeSpans:
+                type: boolean
               type:
                 description: ExporterType enumerates supported trace exporters.
                 enum:

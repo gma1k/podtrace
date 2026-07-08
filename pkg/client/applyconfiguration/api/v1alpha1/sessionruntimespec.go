@@ -27,21 +27,12 @@ import (
 //
 // SessionRuntimeSpec tunes the per-session Job pods the operator creates.
 type SessionRuntimeSpecApplyConfiguration struct {
-	// Resources applied to each session Job pod.
-	Resources *v1.ResourceRequirements `json:"resources,omitempty"`
-	// TTLSecondsAfterFinished default applied to session Jobs when a session
-	// does not specify its own. Default 300.
-	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
-	// ActiveDeadlineSecondsOffset is added to spec.duration to compute the
-	// Job's activeDeadlineSeconds (giving the Job grace to finish reporting).
-	// Default 30.
-	ActiveDeadlineSecondsOffset *int32 `json:"activeDeadlineSecondsOffset,omitempty"`
-	// BackoffLimit for the Job. Default 0 (fail fast).
-	BackoffLimit *int32 `json:"backoffLimit,omitempty"`
-	// MaxDuration caps spec.duration on any PodTraceSession reconciled against
-	// this TracerConfig. If unset, no cap is enforced by the operator.
-	MaxDuration     *metav1.Duration `json:"maxDuration,omitempty"`
-	SidecarUploader *bool            `json:"sidecarUploader,omitempty"`
+	Resources                   *v1.ResourceRequirements `json:"resources,omitempty"`
+	TTLSecondsAfterFinished     *int32                   `json:"ttlSecondsAfterFinished,omitempty"`
+	ActiveDeadlineSecondsOffset *int32                   `json:"activeDeadlineSecondsOffset,omitempty"`
+	BackoffLimit                *int32                   `json:"backoffLimit,omitempty"`
+	MaxDuration                 *metav1.Duration         `json:"maxDuration,omitempty"`
+	SidecarUploader             *bool                    `json:"sidecarUploader,omitempty"`
 }
 
 // SessionRuntimeSpecApplyConfiguration constructs a declarative configuration of the SessionRuntimeSpec type for use with

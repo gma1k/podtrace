@@ -22,6 +22,7 @@ const (
 	DefaultRingBufferSizeKB      = 2048
 	DefaultLogLevel              = "info"
 	DefaultTracingEnabled        = false
+	DefaultSynthesizeSpans       = false
 	DefaultTracingSampleRate     = 1.0
 	DefaultOTLPEndpoint          = "http://localhost:4318"
 	DefaultJaegerEndpoint        = "http://localhost:14268/api/traces"
@@ -46,6 +47,7 @@ const (
 	MaxCgroupFilePathLength          = 64
 	MaxContainerIDLength             = 128
 	DefaultCacheEvictionThreshold    = 0.9
+	MaxTraceContextCacheSize = 100000
 )
 
 var (
@@ -56,6 +58,7 @@ var (
 	CircuitBreakerEnabled     = getBoolEnvOrDefault("PODTRACE_CIRCUIT_BREAKER_ENABLED", true)
 	TracingEnabled            = getBoolEnvOrDefault("PODTRACE_TRACING_ENABLED", false)
 	TracingSampleRate         = getFloatEnvOrDefault("PODTRACE_TRACING_SAMPLE_RATE", DefaultTracingSampleRate)
+	SynthesizeSpans = getBoolEnvOrDefault("PODTRACE_TRACING_SYNTHESIZE_SPANS", DefaultSynthesizeSpans)
 	OTLPEndpoint              = getEnvOrDefault("PODTRACE_OTLP_ENDPOINT", DefaultOTLPEndpoint)
 	JaegerEndpoint            = getEnvOrDefault("PODTRACE_JAEGER_ENDPOINT", DefaultJaegerEndpoint)
 	SplunkEndpoint            = getEnvOrDefault("PODTRACE_SPLUNK_ENDPOINT", DefaultSplunkEndpoint)

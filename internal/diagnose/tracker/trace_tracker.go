@@ -91,6 +91,7 @@ func (tt *TraceTracker) ProcessEvent(event *events.Event, k8sContext interface{}
 	}
 
 	span.Events = append(span.Events, event)
+	span.UpdateDuration()
 	if event.Error != 0 {
 		span.Error = true
 	}
@@ -122,10 +123,6 @@ func (tt *TraceTracker) findOrCreateSpan(trace *Trace, event *events.Event) *Spa
 		span.Attributes["process.name"] = event.ProcessName
 	}
 	if event.PID > 0 {
-		// Format the PID as its decimal text representation. The
-		// previous string(rune(...)) produced a single Unicode code
-		// point per PID, which was unreadable and silently broken
-		// for PIDs above 0x10FFFF.
 		span.Attributes["process.pid"] = strconv.FormatUint(uint64(event.PID), 10)
 	}
 	if event.Target != "" {
@@ -133,6 +130,9 @@ func (tt *TraceTracker) findOrCreateSpan(trace *Trace, event *events.Event) *Spa
 	}
 	if event.Details != "" {
 		span.Attributes["details"] = event.Details
+	}
+	if event.CorrelationID != 0 {
+		span.Attributes["podtrace.correlation_id"] = strconv.FormatUint(event.CorrelationID, 10)
 	}
 
 	trace.Spans = append(trace.Spans, span)
@@ -213,15 +213,7 @@ func (tt *TraceTracker) GetAllTraces() []*Trace {
 
 // SnapshotForExport returns deep copies of traces carrying only the spans
 // that have not been handed to an exporter yet, and advances each trace's
-// watermark. This gives every span exactly-once export semantics — the old
-// behavior re-sent EVERY accumulated trace on every export tick, duplicating
-// spans in all backends. Traces updated more recently than settle ago are
-// skipped (unless force, used by shutdown) so a request's spans are not cut
-// off mid-assembly.
-//
-// The returned traces and spans are copies: exporters and the graph builder
-// may sort, mutate, and call UpdateDuration on them without racing
-// ProcessEvent, which keeps appending to the live objects under their locks.
+// watermark.
 func (tt *TraceTracker) SnapshotForExport(settle time.Duration, force bool) []*Trace {
 	tt.mu.RLock()
 	live := make([]*Trace, 0, len(tt.traces))
@@ -333,21 +325,24 @@ func (tt *TraceTracker) GetTraceCount() int {
 	return len(tt.traces)
 }
 
+// UpdateDuration recomputes the span's start and duration from its events.
 func (s *Span) UpdateDuration() {
 	if len(s.Events) == 0 {
 		return
 	}
 
-	start := s.Events[0].TimestampTime()
-	end := start
+	first := s.Events[0]
+	start := first.TimestampTime().Add(-first.Latency())
+	end := first.TimestampTime()
 
 	for _, event := range s.Events {
-		eventTime := event.TimestampTime()
-		if eventTime.Before(start) {
-			start = eventTime
+		hi := event.TimestampTime()
+		lo := hi.Add(-event.Latency())
+		if lo.Before(start) {
+			start = lo
 		}
-		if eventTime.After(end) {
-			end = eventTime
+		if hi.After(end) {
+			end = hi
 		}
 	}
 

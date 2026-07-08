@@ -28,6 +28,9 @@ import (
 //
 // PodTraceSessionSpec defines a bounded diagnose-mode trace. The operator
 // reconciles this into one privileged Job per node hosting matched pods.
+// The CEL one-of mirrors PodTraceSpec: without it, installs that disable
+// the validating webhook (the chart default) accepted sessions with no
+// target selection at all, or with conflicting ones.
 type PodTraceSessionSpecApplyConfiguration struct {
 	Selector                *v1.LabelSelectorApplyConfiguration     `json:"selector,omitempty"`
 	PodRefs                 []PodRefApplyConfiguration              `json:"podRefs,omitempty"`

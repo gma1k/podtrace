@@ -130,24 +130,26 @@ static __always_inline void grpc_go_process(void *ctx, u64 fields, u64 n, u32 st
 	int have_key = grpc_pair_key_build(&pk, stream);
 
 	if (s->have_path) {
+		u64 start_ns = bpf_ktime_get_ns();
 		if (have_key) {
 			u32 pz = 0;
 			struct grpc_pair_val *pv = bpf_map_lookup_elem(&grpc_go_pairval_map, &pz);
 			if (pv) {
-				pv->start_ns = bpf_ktime_get_ns();
+				pv->start_ns = start_ns;
 				__builtin_memcpy(pv->path, s->path, sizeof(pv->path));
 				bpf_map_update_elem(&grpc_go_pairs, &pk, pv, BPF_ANY);
 			}
 		}
 		struct event *e = get_event_buf();
 		if (e) {
-			e->timestamp = bpf_ktime_get_ns();
+			e->timestamp = start_ns;
 			e->pid = pid;
 			e->type = EVENT_HTTP_REQ;
 			e->latency_ns = 0;
 			e->error = 0;
 			e->bytes = 0;
 			e->tcp_state = HTTP_TRANSPORT_H2_TLS;
+			e->correlation_id = start_ns;
 			bpf_probe_read_kernel_str(e->target, sizeof(e->target), s->path);
 			fill_event_peer(e);
 			capture_user_stack(ctx, pid, tid, e);
@@ -171,6 +173,7 @@ static __always_inline void grpc_go_process(void *ctx, u64 fields, u64 n, u32 st
 				if (v) {
 					bpf_probe_read_kernel_str(e->target, sizeof(e->target), v->path);
 					e->latency_ns = calc_latency(v->start_ns);
+					e->correlation_id = v->start_ns;
 					bpf_map_delete_elem(&grpc_go_pairs, &pk);
 				}
 			}

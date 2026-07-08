@@ -28,16 +28,14 @@ import (
 // Exactly one of the typed fields (OTLP, Jaeger, Zipkin, Splunk, DataDog)
 // must be populated, and it must match the Type field.
 type ExporterConfigSpecApplyConfiguration struct {
-	// Type selects the exporter implementation.
-	Type    *apiv1alpha1.ExporterType          `json:"type,omitempty"`
-	OTLP    *OTLPExporterApplyConfiguration    `json:"otlp,omitempty"`
-	Jaeger  *JaegerExporterApplyConfiguration  `json:"jaeger,omitempty"`
-	Zipkin  *ZipkinExporterApplyConfiguration  `json:"zipkin,omitempty"`
-	Splunk  *SplunkExporterApplyConfiguration  `json:"splunk,omitempty"`
-	DataDog *DataDogExporterApplyConfiguration `json:"datadog,omitempty"`
-	// SamplePercent sets an exporter-level sampling rate cap, 0-100.
-	// If both this and the referent trace's SamplePercent are set, the minimum applies.
-	SamplePercent *int32 `json:"samplePercent,omitempty"`
+	Type            *apiv1alpha1.ExporterType          `json:"type,omitempty"`
+	OTLP            *OTLPExporterApplyConfiguration    `json:"otlp,omitempty"`
+	Jaeger          *JaegerExporterApplyConfiguration  `json:"jaeger,omitempty"`
+	Zipkin          *ZipkinExporterApplyConfiguration  `json:"zipkin,omitempty"`
+	Splunk          *SplunkExporterApplyConfiguration  `json:"splunk,omitempty"`
+	DataDog         *DataDogExporterApplyConfiguration `json:"datadog,omitempty"`
+	SamplePercent   *int32                             `json:"samplePercent,omitempty"`
+	SynthesizeSpans *bool                              `json:"synthesizeSpans,omitempty"`
 }
 
 // ExporterConfigSpecApplyConfiguration constructs a declarative configuration of the ExporterConfigSpec type for use with
@@ -99,5 +97,13 @@ func (b *ExporterConfigSpecApplyConfiguration) WithDataDog(value *DataDogExporte
 // If called multiple times, the SamplePercent field is set to the value of the last call.
 func (b *ExporterConfigSpecApplyConfiguration) WithSamplePercent(value int32) *ExporterConfigSpecApplyConfiguration {
 	b.SamplePercent = &value
+	return b
+}
+
+// WithSynthesizeSpans sets the SynthesizeSpans field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the SynthesizeSpans field is set to the value of the last call.
+func (b *ExporterConfigSpecApplyConfiguration) WithSynthesizeSpans(value bool) *ExporterConfigSpecApplyConfiguration {
+	b.SynthesizeSpans = &value
 	return b
 }

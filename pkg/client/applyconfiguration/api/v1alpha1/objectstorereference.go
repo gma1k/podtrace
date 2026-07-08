@@ -49,9 +49,7 @@ type ObjectStoreReferenceApplyConfiguration struct {
 	// per-session filename (<pod-name>-<rfc3339>.txt) and an additional
 	// <key>.summary.json object. Without a trailing slash, the URI's
 	// path is used verbatim as the object key.
-	URI *string `json:"uri,omitempty"`
-	// CredentialsSecretRef names a Secret in the session's namespace
-	// whose keys the uploader reads.
+	URI                  *string                  `json:"uri,omitempty"`
 	CredentialsSecretRef *v1.LocalObjectReference `json:"credentialsSecretRef,omitempty"`
 }
 

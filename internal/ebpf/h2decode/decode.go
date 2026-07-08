@@ -375,6 +375,7 @@ func (d *Decoder) buildRequestLocked(rec *RawRecord, method, path, traceparent s
 	ev.CgroupID = rec.CgroupID
 	ev.Type = events.EventHTTPReq
 	ev.TCPState = uint32(rec.Transport)
+	ev.CorrelationID = rec.Timestamp
 	ev.Target = method + " " + path
 	var lines []string
 	if traceparent != "" {
@@ -410,6 +411,7 @@ func (d *Decoder) buildResponseLocked(rec *RawRecord, status, traceparent string
 	sk := streamKey{conn: rec.ConnID, stream: rec.StreamID}
 	if req, ok := d.streams[sk]; ok {
 		ev.Target = req.method + " " + req.path
+		ev.CorrelationID = req.startTS
 		if rec.Timestamp > req.startTS {
 			ev.LatencyNS = rec.Timestamp - req.startTS
 		}
@@ -445,6 +447,7 @@ func (d *Decoder) buildGrpcTrailerLocked(rec *RawRecord, grpcStatus string) *eve
 	sk := streamKey{conn: rec.ConnID, stream: rec.StreamID}
 	if req, ok := d.streams[sk]; ok {
 		ev.Target = req.method + " " + req.path
+		ev.CorrelationID = req.startTS
 		if rec.Timestamp > req.startTS {
 			ev.LatencyNS = rec.Timestamp - req.startTS
 		}

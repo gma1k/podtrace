@@ -76,6 +76,7 @@ struct event {
 	u8  _pad4[3];
 	u8  peer_saddr6[16];
 	u8  peer_daddr6[16];
+	u64 correlation_id;
 };
 
 #define H2_HDR_FRAG_MAX 1024

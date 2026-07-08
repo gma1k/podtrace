@@ -28,32 +28,19 @@ import (
 // TracerConfigSpec configures the tracer infrastructure. It is cluster-scoped
 // because it governs a fleet-wide DaemonSet and the Jobs the operator spawns.
 type TracerConfigSpecApplyConfiguration struct {
-	// Image for both the agent DaemonSet and session Job pods.
-	Image *string `json:"image,omitempty"`
-	// ImagePullPolicy. Defaults to IfNotPresent.
-	ImagePullPolicy *v1.PullPolicy `json:"imagePullPolicy,omitempty"`
-	// ImagePullSecrets referenced by agent and session pods.
-	ImagePullSecrets []v1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
-	// Agent configures the DaemonSet that provides realtime tracing.
-	Agent *AgentSpecApplyConfiguration `json:"agent,omitempty"`
-	// Session configures per-session Job pods spawned for PodTraceSession CRs.
-	Session *SessionRuntimeSpecApplyConfiguration `json:"session,omitempty"`
-	// NodeSelector applied to agent and session pods.
-	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
-	// Tolerations applied to agent and session pods.
-	Tolerations []v1.Toleration `json:"tolerations,omitempty"`
-	// Affinity applied to agent and session pods.
-	Affinity *v1.Affinity `json:"affinity,omitempty"`
-	// BTFMode controls how the agent resolves BTF.
-	BTFMode *apiv1alpha1.BTFMode `json:"btfMode,omitempty"`
-	// MaxConcurrentSessionsPerNode caps privileged Job pods per node.
-	// Defaults to 2.
-	MaxConcurrentSessionsPerNode *int32 `json:"maxConcurrentSessionsPerNode,omitempty"`
-	// SystemNamespace is the namespace in which the operator creates the
-	// agent DaemonSet, session Jobs, and resolved exporter bundles.
-	// Defaults to "podtrace-system". Must be a Pod-Security-Admission
-	// "privileged" namespace.
-	SystemNamespace *string `json:"systemNamespace,omitempty"`
+	Image                        *string                               `json:"image,omitempty"`
+	ImagePullPolicy              *v1.PullPolicy                        `json:"imagePullPolicy,omitempty"`
+	ImagePullSecrets             []v1.LocalObjectReference             `json:"imagePullSecrets,omitempty"`
+	Agent                        *AgentSpecApplyConfiguration          `json:"agent,omitempty"`
+	Session                      *SessionRuntimeSpecApplyConfiguration `json:"session,omitempty"`
+	Redaction                    *RedactionSpecApplyConfiguration      `json:"redaction,omitempty"`
+	Capture                      *CaptureSpecApplyConfiguration        `json:"capture,omitempty"`
+	NodeSelector                 map[string]string                     `json:"nodeSelector,omitempty"`
+	Tolerations                  []v1.Toleration                       `json:"tolerations,omitempty"`
+	Affinity                     *v1.Affinity                          `json:"affinity,omitempty"`
+	BTFMode                      *apiv1alpha1.BTFMode                  `json:"btfMode,omitempty"`
+	MaxConcurrentSessionsPerNode *int32                                `json:"maxConcurrentSessionsPerNode,omitempty"`
+	SystemNamespace              *string                               `json:"systemNamespace,omitempty"`
 }
 
 // TracerConfigSpecApplyConfiguration constructs a declarative configuration of the TracerConfigSpec type for use with
@@ -101,6 +88,22 @@ func (b *TracerConfigSpecApplyConfiguration) WithAgent(value *AgentSpecApplyConf
 // If called multiple times, the Session field is set to the value of the last call.
 func (b *TracerConfigSpecApplyConfiguration) WithSession(value *SessionRuntimeSpecApplyConfiguration) *TracerConfigSpecApplyConfiguration {
 	b.Session = value
+	return b
+}
+
+// WithRedaction sets the Redaction field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Redaction field is set to the value of the last call.
+func (b *TracerConfigSpecApplyConfiguration) WithRedaction(value *RedactionSpecApplyConfiguration) *TracerConfigSpecApplyConfiguration {
+	b.Redaction = value
+	return b
+}
+
+// WithCapture sets the Capture field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Capture field is set to the value of the last call.
+func (b *TracerConfigSpecApplyConfiguration) WithCapture(value *CaptureSpecApplyConfiguration) *TracerConfigSpecApplyConfiguration {
+	b.Capture = value
 	return b
 }
 
