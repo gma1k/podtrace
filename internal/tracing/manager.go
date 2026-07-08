@@ -31,6 +31,8 @@ type Manager struct {
 	graphBuilder    *graph.GraphBuilder
 	exportInterval  time.Duration
 	cleanupInterval time.Duration
+	synthesize      bool
+	corr            *correlationCache
 	stopCh          chan struct{}
 	stopOnce        sync.Once
 	wg              sync.WaitGroup
@@ -99,6 +101,8 @@ func NewManager() (*Manager, error) {
 		graphBuilder:    graphBuilder,
 		exportInterval:  5 * time.Second,
 		cleanupInterval: 1 * time.Minute,
+		synthesize:      config.SynthesizeSpans,
+		corr:            newCorrelationCache(config.MaxTraceContextCacheSize),
 		stopCh:          make(chan struct{}),
 	}, nil
 }
@@ -108,20 +112,61 @@ func (m *Manager) ProcessEvent(event *events.Event, k8sContext interface{}) {
 		return
 	}
 
+	haveContext := false
 	if event.Details != "" {
-		traceCtx := m.extractor.ExtractFromRawHeaders(event.Details)
-		if traceCtx != nil && traceCtx.IsValid() {
-			event.TraceID = traceCtx.TraceID
-			event.SpanID = traceCtx.SpanID
-			event.ParentSpanID = traceCtx.ParentSpanID
-			event.TraceFlags = traceCtx.Flags
-			event.TraceState = traceCtx.State
+		if tc := m.extractor.ExtractFromRawHeaders(event.Details); tc != nil && tc.HasRemoteParent() {
+			event.TraceID = tc.TraceID
+			event.ParentSpanID = tc.ParentSpanID
+			event.TraceFlags = tc.Flags
+			event.TraceState = tc.State
+			haveContext = true
 		}
 	}
 
-	if event.TraceID != "" {
+	if m.assignSpanIdentity(event, haveContext) {
 		m.traceTracker.ProcessEvent(event, k8sContext)
 	}
+}
+
+// assignSpanIdentity gives the event a stable per-request span id and, for the
+// response event (which carries no headers), joins it to the request's trace.
+func (m *Manager) assignSpanIdentity(event *events.Event, haveContext bool) bool {
+	if haveContext {
+		if isCorrelatableL7(event) {
+			key := correlationKey(event)
+			event.SpanID = deriveSpanID(key)
+			m.corr.store(key, correlationEntry{
+				traceID:      event.TraceID,
+				parentSpanID: event.ParentSpanID,
+				spanID:       event.SpanID,
+				flags:        event.TraceFlags,
+				state:        event.TraceState,
+			})
+		} else {
+			event.SpanID = deriveSpanID(event.TraceID + event.ParentSpanID)
+		}
+		return true
+	}
+
+	if isCorrelatableL7(event) {
+		key := correlationKey(event)
+		if e, ok := m.corr.loadDelete(key); ok {
+			event.TraceID = e.traceID
+			event.ParentSpanID = e.parentSpanID
+			event.SpanID = e.spanID
+			event.TraceFlags = e.flags
+			event.TraceState = e.state
+			return true
+		}
+		if m.synthesize {
+			event.TraceID = deriveTraceID(key)
+			event.SpanID = deriveSpanID(key)
+			return true
+		}
+		return false
+	}
+
+	return event.TraceID != ""
 }
 
 func (m *Manager) Start(ctx context.Context) error {
@@ -168,6 +213,7 @@ func (m *Manager) cleanupLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			m.traceTracker.CleanupOldTraces(10 * time.Minute)
+			m.corr.sweep(2 * time.Minute)
 		}
 	}
 }

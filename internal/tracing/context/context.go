@@ -27,6 +27,10 @@ func (tc *TraceContext) IsValid() bool {
 	return tc.TraceID != "" && tc.SpanID != ""
 }
 
+func (tc *TraceContext) HasRemoteParent() bool {
+	return tc.TraceID != "" && tc.ParentSpanID != ""
+}
+
 func (tc *TraceContext) IsSampled() bool {
 	return (tc.Flags & 0x01) == 0x01
 }
@@ -102,7 +106,6 @@ func ParseW3CTraceParent(traceParent string) (*TraceContext, error) {
 	return &TraceContext{
 		TraceID:      traceID,
 		ParentSpanID: parentID,
-		SpanID:       generateSpanID(),
 		Flags:        flagsByte,
 	}, nil
 }
@@ -130,10 +133,10 @@ func ParseB3TraceContext(headers map[string]string) *TraceContext {
 		return nil
 	}
 
+	_ = parentSpanID
 	tc := &TraceContext{
 		TraceID:      traceID,
-		SpanID:       spanID,
-		ParentSpanID: parentSpanID,
+		ParentSpanID: spanID,
 	}
 
 	if sampled == "1" || sampled == "true" || flags == "1" {

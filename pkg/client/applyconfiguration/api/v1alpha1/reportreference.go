@@ -27,17 +27,8 @@ import (
 // ReportReference describes where a session's diagnose report is persisted.
 // Exactly one sink should be set.
 type ReportReferenceApplyConfiguration struct {
-	// ConfigMap in the same namespace as the session. The operator will
-	// create/update it with the report payload. Use this sink for small
-	// reports; ConfigMaps are capped at 1MiB of data by etcd.
-	ConfigMap *v1.LocalObjectReference `json:"configMap,omitempty"`
-	// Secret in the same namespace as the session. Prefer this sink when the
-	// report may contain sensitive hostnames/paths/payloads.
-	Secret *v1.LocalObjectReference `json:"secret,omitempty"`
-	// ObjectStore uploads the report to a cloud bucket (s3, gs, azblob).
-	// Use this sink for reports that may exceed the 1MiB ConfigMap/Secret
-	// limit. Requires the session pod to be on a Kubernetes 1.29+ cluster
-	// so the native sidecar restartPolicy is honoured.
+	ConfigMap   *v1.LocalObjectReference                `json:"configMap,omitempty"`
+	Secret      *v1.LocalObjectReference                `json:"secret,omitempty"`
 	ObjectStore *ObjectStoreReferenceApplyConfiguration `json:"objectStore,omitempty"`
 }
 

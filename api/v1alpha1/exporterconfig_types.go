@@ -136,6 +136,9 @@ type ExporterConfigSpec struct {
 	// +kubebuilder:validation:Maximum=100
 	// +optional
 	SamplePercent *int32 `json:"samplePercent,omitempty"`
+
+	// +optional
+	SynthesizeSpans *bool `json:"synthesizeSpans,omitempty"`
 }
 
 // ExporterConfigStatus reports the observed state of an ExporterConfig.

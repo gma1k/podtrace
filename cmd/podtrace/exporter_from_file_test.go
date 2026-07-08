@@ -24,6 +24,32 @@ func TestApplyPayloadToConfig_OTLP(t *testing.T) {
 	}
 }
 
+// A bundle describes one exporter; applying it must leave only that exporter's
+// endpoint set so NewManager doesn't also build Jaeger/Zipkin/Splunk/DataDog
+// exporters against their non-empty localhost defaults (each failing with
+// connection-refused and firing failure alerts).
+func TestApplyPayloadToConfig_OTLP_ClearsOtherExporters(t *testing.T) {
+	defer resetTracingConfig()
+	config.JaegerEndpoint = "http://localhost:14268/api/traces"
+	config.ZipkinEndpoint = "http://localhost:9411/api/v2/spans"
+	config.SplunkEndpoint = "http://localhost:8088/services/collector"
+	config.DataDogEndpoint = "http://localhost:8126/v0.4/traces"
+
+	applyPayloadToConfig(&bundle.Payload{Type: bundle.TypeOTLP, Endpoint: "otel:4318"})
+
+	if config.OTLPEndpoint != "otel:4318" {
+		t.Errorf("OTLPEndpoint=%q, want otel:4318", config.OTLPEndpoint)
+	}
+	for name, got := range map[string]string{
+		"Jaeger": config.JaegerEndpoint, "Zipkin": config.ZipkinEndpoint,
+		"Splunk": config.SplunkEndpoint, "DataDog": config.DataDogEndpoint,
+	} {
+		if got != "" {
+			t.Errorf("%sEndpoint=%q, want cleared (single-exporter bundle)", name, got)
+		}
+	}
+}
+
 func TestApplyPayloadToConfig_DataDogCredentialSetsToken(t *testing.T) {
 	defer resetTracingConfig()
 	applyPayloadToConfig(&bundle.Payload{

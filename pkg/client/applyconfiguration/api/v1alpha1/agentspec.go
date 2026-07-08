@@ -27,21 +27,13 @@ import (
 //
 // AgentSpec tunes the per-node tracer DaemonSet.
 type AgentSpecApplyConfiguration struct {
-	// Resources applied to each agent pod.
-	Resources *v1.ResourceRequirements `json:"resources,omitempty"`
-	// PriorityClassName applied to agent pods. Defaults to system-node-critical
-	// when unset and the priority class exists on the cluster.
-	PriorityClassName *string `json:"priorityClassName,omitempty"`
-	// LogLevel applied to agent pods. One of: debug, info, warn, error.
-	LogLevel *string `json:"logLevel,omitempty"`
-	// EventBufferSize is the per-agent event channel capacity. Default 10000.
-	EventBufferSize *int32 `json:"eventBufferSize,omitempty"`
-	// StatusReportInterval controls how often each agent patches PodTrace
-	// status.nodeStatus. Default 30s.
-	StatusReportInterval *metav1.Duration `json:"statusReportInterval,omitempty"`
-	// DNSPacketCapture enables libc-independent DNS capture by parsing packets
-	// in the kernel.
-	DNSPacketCapture *bool `json:"dnsPacketCapture,omitempty"`
+	Resources            *v1.ResourceRequirements             `json:"resources,omitempty"`
+	PriorityClassName    *string                              `json:"priorityClassName,omitempty"`
+	LogLevel             *string                              `json:"logLevel,omitempty"`
+	EventBufferSize      *int32                               `json:"eventBufferSize,omitempty"`
+	StatusReportInterval *metav1.Duration                     `json:"statusReportInterval,omitempty"`
+	DNSPacketCapture     *bool                                `json:"dnsPacketCapture,omitempty"`
+	Alerting             *AgentAlertingSpecApplyConfiguration `json:"alerting,omitempty"`
 }
 
 // AgentSpecApplyConfiguration constructs a declarative configuration of the AgentSpec type for use with
@@ -95,5 +87,13 @@ func (b *AgentSpecApplyConfiguration) WithStatusReportInterval(value metav1.Dura
 // If called multiple times, the DNSPacketCapture field is set to the value of the last call.
 func (b *AgentSpecApplyConfiguration) WithDNSPacketCapture(value bool) *AgentSpecApplyConfiguration {
 	b.DNSPacketCapture = &value
+	return b
+}
+
+// WithAlerting sets the Alerting field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Alerting field is set to the value of the last call.
+func (b *AgentSpecApplyConfiguration) WithAlerting(value *AgentAlertingSpecApplyConfiguration) *AgentSpecApplyConfiguration {
+	b.Alerting = value
 	return b
 }

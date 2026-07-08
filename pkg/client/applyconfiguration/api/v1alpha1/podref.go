@@ -22,11 +22,8 @@ package v1alpha1
 //
 // PodRef references a specific pod by namespace/name.
 type PodRefApplyConfiguration struct {
-	// Namespace is the namespace of the pod. If empty, defaults to the
-	// namespace of the owning CR (for namespaced CRs).
 	Namespace *string `json:"namespace,omitempty"`
-	// Name is the name of the pod.
-	Name *string `json:"name,omitempty"`
+	Name      *string `json:"name,omitempty"`
 }
 
 // PodRefApplyConfiguration constructs a declarative configuration of the PodRef type for use with

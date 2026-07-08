@@ -48,6 +48,7 @@ var (
 	diagnoseDuration      string
 	enableMetrics         bool
 	enableTracing         bool
+	enableSynthesizeSpans bool
 	exportFormat          string
 	eventFilter           string
 	containerName         string
@@ -147,6 +148,7 @@ func main() {
 	rootCmd.Flags().StringVar(&tracingSplunkEndpoint, "tracing-splunk-endpoint", config.DefaultSplunkEndpoint, "Splunk HEC endpoint")
 	rootCmd.Flags().StringVar(&tracingSplunkToken, "tracing-splunk-token", "", "Splunk HEC token")
 	rootCmd.Flags().Float64Var(&tracingSampleRate, "tracing-sample-rate", config.DefaultTracingSampleRate, "Tracing sample rate (0.0-1.0)")
+	rootCmd.Flags().BoolVar(&enableSynthesizeSpans, "tracing-synthesize-spans", config.DefaultSynthesizeSpans, "Mint spans for correlated L7 traffic (HTTP/gRPC) that carries no inbound W3C/B3 trace context (per-pod root spans)")
 	rootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, "Print version information")
 	rootCmd.Flags().BoolVar(&enableProfiling, "profiling", false, "Enable performance profiling: pprof endpoint discovery on the target pod, auto-trigger on latency spikes, and CPU/memory correlation in reports")
 	rootCmd.Flags().BoolVar(&localMode, "local", false, "Run eBPF on this workstation instead of spawning a privileged pod on the target node. Use for kind/minikube/docker-desktop where the workstation IS the kubelet host.")
@@ -213,6 +215,9 @@ func applyTracingFlags(cmd *cobra.Command) error {
 			return fmt.Errorf("--tracing-sample-rate must be between 0.0 and 1.0, got %v", tracingSampleRate)
 		}
 		config.TracingSampleRate = tracingSampleRate
+	}
+	if flags.Changed("tracing-synthesize-spans") {
+		config.SynthesizeSpans = enableSynthesizeSpans
 	}
 	return nil
 }

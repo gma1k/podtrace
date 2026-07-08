@@ -12,6 +12,75 @@ import (
 	"github.com/podtrace/podtrace/internal/events"
 )
 
+// testRawV8 mirrors the on-wire struct event layout including the V8
+// correlation_id field.
+type testRawV8 struct {
+	Timestamp     uint64
+	PID           uint32
+	Type          uint32
+	LatencyNS     uint64
+	Error         int32
+	_             uint32
+	Bytes         uint64
+	TCPState      uint32
+	_             uint32
+	StackKey      uint64
+	CgroupID      uint64
+	Comm          [16]byte
+	Target        [128]byte
+	Details       [128]byte
+	NetNsID       uint32
+	_             uint32
+	DNSServerIP   uint32
+	DNSTransport  uint8
+	_             [3]uint8
+	DNSServerIP6  [16]byte
+	PeerSaddr     uint32
+	PeerDaddr     uint32
+	PeerSport     uint16
+	PeerDport     uint16
+	PeerFamily    uint8
+	_             [3]uint8
+	PeerSaddr6    [16]byte
+	PeerDaddr6    [16]byte
+	CorrelationID uint64
+}
+
+// TestParseEvent_V8_CorrelationID asserts the V8 record decodes correlation_id
+// and still fills the V7 peer 4-tuple.
+func TestParseEvent_V8_CorrelationID(t *testing.T) {
+	if got := int(unsafe.Sizeof(testRawV8{})); got != 424 {
+		t.Fatalf("testRawV8 size = %d, want 424 (must match C sizeof(struct event))", got)
+	}
+	var raw testRawV8
+	raw.Timestamp = 111
+	raw.PID = 42
+	raw.Type = uint32(events.EventHTTPResp)
+	raw.LatencyNS = 5_000_000
+	raw.PeerFamily = 2 // AF_INET
+	raw.PeerSport = 8080
+	raw.PeerDport = 54321
+	binary.LittleEndian.PutUint32(raw.PeerSaddr6[:4], 0) // v4 uses PeerSaddr
+	raw.PeerSaddr = 0x0100007f                           // 127.0.0.1
+	raw.PeerDaddr = 0x0100007f
+	raw.CorrelationID = 0xDEADBEEF12345678
+
+	var buf bytes.Buffer
+	if err := binary.Write(&buf, binary.LittleEndian, raw); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	event := ParseEvent(buf.Bytes())
+	if event == nil {
+		t.Fatal("ParseEvent returned nil for a V8 record")
+	}
+	if event.CorrelationID != raw.CorrelationID {
+		t.Errorf("CorrelationID = %#x, want %#x", event.CorrelationID, raw.CorrelationID)
+	}
+	if event.PeerDstPort != raw.PeerDport {
+		t.Errorf("PeerDstPort = %d, want %d (V8 path not taken?)", event.PeerDstPort, raw.PeerDport)
+	}
+}
+
 func TestParseEvent_ValidEvent(t *testing.T) {
 	var raw rawEvent
 	raw.Timestamp = 1234567890

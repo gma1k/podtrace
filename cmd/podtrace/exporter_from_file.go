@@ -57,6 +57,11 @@ func applyPayloadToConfig(p *bundle.Payload) {
 	if p == nil {
 		return
 	}
+	config.OTLPEndpoint = ""
+	config.JaegerEndpoint = ""
+	config.ZipkinEndpoint = ""
+	config.SplunkEndpoint = ""
+	config.DataDogEndpoint = ""
 	switch p.Type {
 	case bundle.TypeOTLP:
 		config.OTLPEndpoint = p.Endpoint
@@ -77,5 +82,8 @@ func applyPayloadToConfig(p *bundle.Payload) {
 	}
 	if p.Sample != nil {
 		config.TracingSampleRate = *p.Sample
+	}
+	if p.SynthesizeSpans {
+		config.SynthesizeSpans = true
 	}
 }

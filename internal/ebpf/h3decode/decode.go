@@ -189,12 +189,13 @@ func (t *Txn) Events() []*events.Event {
 	var out []*events.Event
 	if t.Flags&FlagResponseOnly == 0 {
 		req := &events.Event{
-			Timestamp: t.Timestamp,
-			PID:       t.PID,
-			CgroupID:  t.CgroupID,
-			Type:      events.EventHTTPReq,
-			TCPState:  events.HTTPTransportH3,
-			Target:    target,
+			Timestamp:     t.Timestamp,
+			PID:           t.PID,
+			CgroupID:      t.CgroupID,
+			Type:          events.EventHTTPReq,
+			TCPState:      events.HTTPTransportH3,
+			Target:        target,
+			CorrelationID: t.Timestamp,
 		}
 		var lines []string
 		if t.Traceparent != "" {
@@ -207,14 +208,15 @@ func (t *Txn) Events() []*events.Event {
 	}
 	if t.Flags&FlagRequestOnly == 0 {
 		resp := &events.Event{
-			Timestamp: t.Timestamp + t.LatencyNS,
-			PID:       t.PID,
-			CgroupID:  t.CgroupID,
-			Type:      events.EventHTTPResp,
-			TCPState:  events.HTTPTransportH3,
-			Target:    target,
-			Details:   joinNonEmpty(append([]string{status}, extra...)),
-			LatencyNS: t.LatencyNS,
+			Timestamp:     t.Timestamp + t.LatencyNS,
+			PID:           t.PID,
+			CgroupID:      t.CgroupID,
+			Type:          events.EventHTTPResp,
+			TCPState:      events.HTTPTransportH3,
+			Target:        target,
+			Details:       joinNonEmpty(append([]string{status}, extra...)),
+			LatencyNS:     t.LatencyNS,
+			CorrelationID: t.Timestamp,
 		}
 		if t.Status >= 500 && t.Status <= 599 {
 			resp.Error = safeconv.IntToInt32(int(t.Status))

@@ -122,6 +122,8 @@ type Event struct {
 	TraceFlags   uint8
 	TraceState   string
 
+	CorrelationID uint64
+
 	K8s *K8sMetadata
 }
 

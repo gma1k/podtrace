@@ -161,6 +161,39 @@ func ParseEvent(data []byte) *events.Event {
 		PeerDaddr6   [16]byte
 	}
 
+	type rawEventV8 struct {
+		Timestamp     uint64
+		PID           uint32
+		Type          uint32
+		LatencyNS     uint64
+		Error         int32
+		_             uint32
+		Bytes         uint64
+		TCPState      uint32
+		_             uint32
+		StackKey      uint64
+		CgroupID      uint64
+		Comm          [16]byte
+		Target        [128]byte
+		Details       [128]byte
+		NetNsID       uint32
+		_             uint32
+		DNSServerIP   uint32
+		DNSTransport  uint8
+		_             [3]uint8
+		DNSServerIP6  [16]byte
+		PeerSaddr     uint32
+		PeerDaddr     uint32
+		PeerSport     uint16
+		PeerDport     uint16
+		PeerFamily    uint8
+		_             [3]uint8
+		PeerSaddr6    [16]byte
+		PeerDaddr6    [16]byte
+		CorrelationID uint64
+	}
+
+	expectedV8 := int(unsafe.Sizeof(rawEventV8{}))
 	expectedV7 := int(unsafe.Sizeof(rawEventV7{}))
 	expectedV6 := int(unsafe.Sizeof(rawEventV6{}))
 	expectedV5 := int(unsafe.Sizeof(rawEventV5{}))
@@ -184,6 +217,36 @@ func ParseEvent(data []byte) *events.Event {
 	event.PeerDstIP = ""
 	event.PeerSrcPort = 0
 	event.PeerDstPort = 0
+	event.CorrelationID = 0
+
+	if len(data) >= expectedV8 {
+		var e rawEventV8
+		if err := binaryRead(bytes.NewReader(data[:expectedV8]), binary.LittleEndian, &e); err != nil {
+			return nil
+		}
+		event.Timestamp = e.Timestamp
+		event.PID = e.PID
+		event.Type = events.EventType(e.Type)
+		event.LatencyNS = e.LatencyNS
+		event.Error = e.Error
+		event.Bytes = e.Bytes
+		event.TCPState = e.TCPState
+		event.StackKey = e.StackKey
+		event.CgroupID = e.CgroupID
+		event.ProcessName = string(bytes.TrimRight(e.Comm[:], "\x00"))
+		event.Target = string(bytes.TrimRight(e.Target[:], "\x00"))
+		event.Details = string(bytes.TrimRight(e.Details[:], "\x00"))
+		event.NetNsID = e.NetNsID
+		event.DNSServerIP = e.DNSServerIP
+		event.DNSTransport = e.DNSTransport
+		event.DNSServerIP6 = e.DNSServerIP6
+		event.PeerSrcIP = events.PeerIP(e.PeerFamily, e.PeerSaddr, e.PeerSaddr6)
+		event.PeerDstIP = events.PeerIP(e.PeerFamily, e.PeerDaddr, e.PeerDaddr6)
+		event.PeerSrcPort = e.PeerSport
+		event.PeerDstPort = e.PeerDport
+		event.CorrelationID = e.CorrelationID
+		return event
+	}
 
 	if len(data) >= expectedV7 {
 		var e rawEventV7

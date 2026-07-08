@@ -26,14 +26,10 @@ import (
 //
 // ExporterConfigStatus reports the observed state of an ExporterConfig.
 type ExporterConfigStatusApplyConfiguration struct {
-	// Ready is true when referenced Secrets exist and credentials validate.
-	Ready *bool `json:"ready,omitempty"`
-	// Conditions is the latest available observations.
-	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
-	// ReferencedBy counts how many PodTraces and PodTraceSessions reference this exporter.
-	ReferencedBy *int32 `json:"referencedBy,omitempty"`
-	// ObservedGeneration is the most recent generation observed.
-	ObservedGeneration *int64 `json:"observedGeneration,omitempty"`
+	Ready              *bool                            `json:"ready,omitempty"`
+	Conditions         []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
+	ReferencedBy       *int32                           `json:"referencedBy,omitempty"`
+	ObservedGeneration *int64                           `json:"observedGeneration,omitempty"`
 }
 
 // ExporterConfigStatusApplyConfiguration constructs a declarative configuration of the ExporterConfigStatus type for use with

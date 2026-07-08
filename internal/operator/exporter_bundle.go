@@ -59,6 +59,9 @@ func renderBundlePayload(policy *bundlePolicyInputs, ec *podtracev1alpha1.Export
 	if pct := effectiveSamplePercentFromPolicy(policy, ec); pct != nil {
 		data["sample_percent"] = itoa(int(*pct))
 	}
+	if ec.Spec.SynthesizeSpans != nil && *ec.Spec.SynthesizeSpans {
+		data["synthesize_spans"] = "true"
+	}
 	if targetNamespaces != nil {
 		sorted := make([]string, len(targetNamespaces))
 		copy(sorted, targetNamespaces)

@@ -27,8 +27,7 @@ import (
 // with apply.
 //
 // TracerConfig is the cluster-wide infrastructure configuration for the
-// podtrace operator. A single TracerConfig named "default" governs the
-// fleet-wide DaemonSet and Session Jobs.
+// podtrace operator.
 type TracerConfigApplyConfiguration struct {
 	v1.TypeMetaApplyConfiguration    `json:",inline"`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`

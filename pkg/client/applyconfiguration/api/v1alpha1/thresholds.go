@@ -22,15 +22,9 @@ package v1alpha1
 //
 // Thresholds control anomaly detection on the agent side.
 type ThresholdsApplyConfiguration struct {
-	// ErrorRatePercent triggers issue detection when errors exceed this
-	// percentage over the rolling window. 0-100.
 	ErrorRatePercent *int32 `json:"errorRatePercent,omitempty"`
-	// RTTSpikeMs triggers issue detection when network RTT exceeds this
-	// value in milliseconds.
-	RTTSpikeMs *int32 `json:"rttSpikeMs,omitempty"`
-	// FSSlowMs triggers issue detection when a filesystem operation takes
-	// longer than this value in milliseconds.
-	FSSlowMs *int32 `json:"fsSlowMs,omitempty"`
+	RTTSpikeMs       *int32 `json:"rttSpikeMs,omitempty"`
+	FSSlowMs         *int32 `json:"fsSlowMs,omitempty"`
 }
 
 // ThresholdsApplyConfiguration constructs a declarative configuration of the Thresholds type for use with

@@ -157,6 +157,7 @@ static __noinline void http_emit_request(void *ctx, void *base, u64 avail,
 		e->error = 0;
 		e->bytes = 0;
 		e->tcp_state = transport;
+		e->correlation_id = now;
 		bpf_probe_read_kernel_str(e->target, sizeof(e->target), endpoint);
 		http_capture_traceparent(base, avail, e->details);
 		fill_event_peer(e);
@@ -225,6 +226,7 @@ static __noinline void http_emit_response(void *ctx, void *base, u64 len,
 		e->error = status_num >= 500 ? status_num : 0;
 		e->bytes = len;
 		e->tcp_state = transport;
+		e->correlation_id = req->start_ns;
 		bpf_probe_read_kernel_str(e->target, sizeof(e->target), req->endpoint);
 		bpf_probe_read_kernel_str(e->details, sizeof(e->details), status);
 		fill_event_peer(e);

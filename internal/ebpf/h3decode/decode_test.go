@@ -85,6 +85,27 @@ func TestEventsPairedWithLatency(t *testing.T) {
 	}
 }
 
+// The request and response events of one transaction must carry the same
+// non-zero CorrelationID so the tracing layer can join the context-bearing
+// request with the duration-bearing response into a single span.
+func TestEventsShareCorrelationID(t *testing.T) {
+	tx, _ := ParseRecord(buildRecord(2_000_000, 200, true, "GET", "/hello"))
+	evs := tx.Events()
+	if len(evs) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(evs))
+	}
+	req, resp := evs[0], evs[1]
+	if req.CorrelationID == 0 {
+		t.Fatal("request CorrelationID is 0")
+	}
+	if req.CorrelationID != resp.CorrelationID {
+		t.Errorf("correlation mismatch: req=%d resp=%d", req.CorrelationID, resp.CorrelationID)
+	}
+	if req.CorrelationID != req.Timestamp {
+		t.Errorf("CorrelationID %d should equal request start ts %d", req.CorrelationID, req.Timestamp)
+	}
+}
+
 func TestTraceparentSurfacedInDetails(t *testing.T) {
 	const tp = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
 	tx, ok := ParseRecord(buildRecordTP(1_000_000, 200, true, "GET", "/hello", tp))
