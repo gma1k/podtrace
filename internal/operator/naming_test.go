@@ -58,6 +58,30 @@ func TestSessionJobName_Properties(t *testing.T) {
 	}
 }
 
+// TestSessionJobName_LongSharedPrefixNoCollision is the HO1 regression: GKE/EKS
+// node names share a long common prefix that overflows the 63-char limit, so
+// plain truncation produced identical Job names and one node was never traced.
+func TestSessionJobName_LongSharedPrefixNoCollision(t *testing.T) {
+	const uid = types.UID("abcdef1234567890")
+	prefix := "gke-prod-cluster-default-pool-1a2b3c4d-node-group-us-central1-"
+	nodeA := prefix + "0aaa"
+	nodeB := prefix + "0bbb"
+
+	a := SessionJobName(uid, nodeA)
+	b := SessionJobName(uid, nodeB)
+	if a == b {
+		t.Fatalf("HO1 collision: nodes %q and %q both map to Job %q", nodeA, nodeB, a)
+	}
+	for _, n := range []string{a, b} {
+		if len(n) > 63 {
+			t.Errorf("%q exceeds 63 chars (%d)", n, len(n))
+		}
+		if !isDNS1123Label(n) {
+			t.Errorf("%q is not a valid DNS-1123 label", n)
+		}
+	}
+}
+
 func TestExporterBundleName_Properties(t *testing.T) {
 	n := ExporterBundleName("abcdef12345678")
 	if !strings.HasPrefix(n, "pt-bundle-") {

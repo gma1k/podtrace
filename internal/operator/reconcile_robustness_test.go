@@ -7,6 +7,7 @@ import (
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -51,6 +52,34 @@ func TestComputeSessionState_UndercountedJobsNotTerminal(t *testing.T) {
 	}
 	if state := computeSessionState([]batchv1.Job{succeeded}, 1); state != podtracev1alpha1.SessionStateCompleted {
 		t.Errorf("state = %s with all expected Jobs succeeded, want Completed", state)
+	}
+}
+
+// TestComputeSessionState_DeadlineExceededIsTerminal regression: a
+// Job killed by ActiveDeadlineSeconds carries a JobFailed condition (reason
+// DeadlineExceeded) but its .status.Failed count does not exceed backoffLimit.
+func TestComputeSessionState_DeadlineExceededIsTerminal(t *testing.T) {
+	backoff := int32(6)
+	deadlineKilled := batchv1.Job{
+		Spec: batchv1.JobSpec{BackoffLimit: &backoff},
+		Status: batchv1.JobStatus{
+			Failed: 1,
+			Conditions: []batchv1.JobCondition{{
+				Type:   batchv1.JobFailed,
+				Status: corev1.ConditionTrue,
+				Reason: "DeadlineExceeded",
+			}},
+		},
+	}
+	if state := computeSessionState([]batchv1.Job{deadlineKilled}, 1); state != podtracev1alpha1.SessionStateFailed {
+		t.Errorf("deadline-exceeded Job: state = %s, want Failed (else the session re-runs forever)", state)
+	}
+
+	complete := batchv1.Job{Status: batchv1.JobStatus{
+		Conditions: []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}},
+	}}
+	if state := computeSessionState([]batchv1.Job{complete}, 1); state != podtracev1alpha1.SessionStateCompleted {
+		t.Errorf("JobComplete condition: state = %s, want Completed", state)
 	}
 }
 

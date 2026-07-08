@@ -8,7 +8,8 @@
 package operator
 
 import (
-	"fmt"
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -78,13 +79,27 @@ func AgentBundleRoleBindingName() string { return "podtrace-agent-bundles" }
 
 func OperatorWebhookServiceName() string { return "podtrace-webhook" }
 
+// SessionJobName returns a per-(session,node) Job name that fits the
+// 63-character DNS limit AND is unique per node.
 func SessionJobName(sessionUID types.UID, nodeName string) string {
-	raw := fmt.Sprintf("pts-%s-%s", shortUID(sessionUID), sanitiseDNS(nodeName))
-	if len(raw) > 63 {
-		raw = raw[:63]
+	prefix := "pts-" + shortUID(sessionUID) + "-"
+	sum := sha256.Sum256([]byte(nodeName))
+	suffix := hex.EncodeToString(sum[:])[:8]
+
+	budget := 63 - len(prefix) - 1 - len(suffix)
+	if budget < 0 {
+		budget = 0
 	}
-	raw = strings.TrimRight(raw, "-.")
-	return raw
+	node := sanitiseDNS(nodeName)
+	if len(node) > budget {
+		node = node[:budget]
+	}
+	node = strings.TrimRight(node, "-.")
+
+	if node == "" {
+		return strings.TrimRight(prefix+suffix, "-.")
+	}
+	return strings.TrimRight(prefix+node+"-"+suffix, "-.")
 }
 
 func ExporterBundleName(exporterUID types.UID) string {
