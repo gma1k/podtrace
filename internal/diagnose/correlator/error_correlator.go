@@ -46,7 +46,7 @@ func NewErrorCorrelator(timeWindow time.Duration) *ErrorCorrelator {
 }
 
 func (ec *ErrorCorrelator) AddEvent(event *events.Event, k8sContext interface{}) {
-	if event == nil || event.Error == 0 {
+	if event == nil || !event.IsError() {
 		return
 	}
 

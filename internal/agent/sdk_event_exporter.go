@@ -246,7 +246,7 @@ func (e *sdkEventExporter) remoteParent(ev *events.Event) (trace.SpanContext, bo
 // Threshold semantics (per design):
 //   - fs_slow:    LatencyNS > FSSlowMs       for EventOpen/Read/Write/Fsync/Unlink/Rename/Close
 //   - rtt_spike:  LatencyNS > RTTSpikeMs     for EventTCPRecv/TCPSend/Connect
-//   - error_rate: ev.Error != 0              for any event (counts contribute to a future
+//   - error_rate: ev.IsError()              for any event (counts contribute to a future
 //     rolling-window detector; the per-event tag is
 //     stamped only when the threshold itself is set,
 //     so users can grep their backend for "errors
@@ -277,7 +277,7 @@ func (e *sdkEventExporter) appendThresholdAttributes(attrs []attribute.KeyValue,
 		}
 	}
 	if t.ErrorRatePercent != nil {
-		isErr := ev.Error != 0
+		isErr := ev.IsError()
 		if isErr {
 			attrs = append(attrs,
 				attribute.Bool("podtrace.threshold.error_rate.observed", true),
