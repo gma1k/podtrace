@@ -11,7 +11,8 @@ import (
 // goSymbolFileOffset resolves the executable file offset of a Go function
 // (e.g. "crypto/tls.(*Conn).Write") from the binary's .gopclntab.
 func goSymbolFileOffset(exePath, symbol string) (offset uint64, ok bool) {
-	f, err := elf.Open(exePath)
+	defer recoverParse("goSymbolFileOffset")
+	f, err := openELFCapped(exePath)
 	if err != nil {
 		return 0, false
 	}
@@ -22,15 +23,12 @@ func goSymbolFileOffset(exePath, symbol string) (offset uint64, ok bool) {
 	if pcln == nil || text == nil {
 		return 0, false
 	}
-	pclnData, err := pcln.Data()
+	pclnData, err := sectionDataCapped(pcln)
 	if err != nil {
 		return 0, false
 	}
 
-	var symtabData []byte
-	if s := f.Section(".gosymtab"); s != nil {
-		symtabData, _ = s.Data()
-	}
+	symtabData, _ := sectionDataCapped(f.Section(".gosymtab"))
 
 	tbl, err := gosym.NewTable(symtabData, gosym.NewLineTable(pclnData, text.Addr))
 	if err != nil {
@@ -54,23 +52,28 @@ func goSymbolFileOffset(exePath, symbol string) (offset uint64, ok bool) {
 
 // executableExportsSSL reports whether the ELF at path exposes the OpenSSL
 // SSL_write symbol so the SSL_* uprobes can attach to the executable itself.
-func executableExportsSSL(path string) bool {
-	f, err := elf.Open(path)
+func executableExportsSSL(path string) (exports bool) {
+	defer recoverParse("executableExportsSSL")
+	f, err := openELFCapped(path)
 	if err != nil {
 		return false
 	}
 	defer func() { _ = f.Close() }()
-	if dyn, err := f.DynamicSymbols(); err == nil {
-		for i := range dyn {
-			if dyn[i].Name == "SSL_write" {
-				return true
+	if symbolSectionWithinCap(f, ".dynsym") {
+		if dyn, err := f.DynamicSymbols(); err == nil {
+			for i := range dyn {
+				if dyn[i].Name == "SSL_write" {
+					return true
+				}
 			}
 		}
 	}
-	if sym, err := f.Symbols(); err == nil {
-		for i := range sym {
-			if sym[i].Name == "SSL_write" {
-				return true
+	if symbolSectionWithinCap(f, ".symtab") {
+		if sym, err := f.Symbols(); err == nil {
+			for i := range sym {
+				if sym[i].Name == "SSL_write" {
+					return true
+				}
 			}
 		}
 	}
@@ -95,7 +98,8 @@ func vaddrToFileOffset(f *elf.File, vaddr uint64) (uint64, bool) {
 // file offsets of every RET instruction within it, by scanning the function's
 // machine code.
 func goFuncReturnOffsets(exePath, symbol string) (entryOff uint64, retOffs []uint64, ok bool) {
-	f, err := elf.Open(exePath)
+	defer recoverParse("goFuncReturnOffsets")
+	f, err := openELFCapped(exePath)
 	if err != nil {
 		return 0, nil, false
 	}
@@ -110,14 +114,11 @@ func goFuncReturnOffsets(exePath, symbol string) (entryOff uint64, retOffs []uin
 	if pcln == nil || text == nil {
 		return 0, nil, false
 	}
-	pclnData, err := pcln.Data()
+	pclnData, err := sectionDataCapped(pcln)
 	if err != nil {
 		return 0, nil, false
 	}
-	var symtabData []byte
-	if s := f.Section(".gosymtab"); s != nil {
-		symtabData, _ = s.Data()
-	}
+	symtabData, _ := sectionDataCapped(f.Section(".gosymtab"))
 	tbl, err := gosym.NewTable(symtabData, gosym.NewLineTable(pclnData, text.Addr))
 	if err != nil {
 		return 0, nil, false
@@ -132,7 +133,7 @@ func goFuncReturnOffsets(exePath, symbol string) (entryOff uint64, retOffs []uin
 		return 0, nil, false
 	}
 
-	textData, err := text.Data()
+	textData, err := sectionDataCapped(text)
 	if err != nil || fn.Entry < text.Addr {
 		return 0, nil, false
 	}

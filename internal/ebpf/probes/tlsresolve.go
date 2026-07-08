@@ -27,8 +27,9 @@ type sslOffsets struct {
 // resolveSSLOffsets locates SSL_write/SSL_read in a statically-linked,
 // symbol-stripped executable that executableExportsSSL could not gate (no
 // SSL_write in .symtab/.dynsym).
-func resolveSSLOffsets(exePath string, pid uint32) (sslOffsets, bool) {
-	target, err := elf.Open(exePath)
+func resolveSSLOffsets(exePath string, pid uint32) (off sslOffsets, ok bool) {
+	defer recoverParse("resolveSSLOffsets")
+	target, err := openELFCapped(exePath)
 	if err != nil {
 		return sslOffsets{}, false
 	}
@@ -56,17 +57,21 @@ func resolveSSLOffsets(exePath string, pid uint32) (sslOffsets, bool) {
 // symbolVaddr returns the virtual address of a defined symbol from either the
 // static or dynamic symbol table.
 func symbolVaddr(f *elf.File, name string) (uint64, bool) {
-	if syms, err := f.Symbols(); err == nil {
-		for i := range syms {
-			if syms[i].Name == name && syms[i].Value != 0 {
-				return syms[i].Value, true
+	if symbolSectionWithinCap(f, ".symtab") {
+		if syms, err := f.Symbols(); err == nil {
+			for i := range syms {
+				if syms[i].Name == name && syms[i].Value != 0 {
+					return syms[i].Value, true
+				}
 			}
 		}
 	}
-	if syms, err := f.DynamicSymbols(); err == nil {
-		for i := range syms {
-			if syms[i].Name == name && syms[i].Value != 0 {
-				return syms[i].Value, true
+	if symbolSectionWithinCap(f, ".dynsym") {
+		if syms, err := f.DynamicSymbols(); err == nil {
+			for i := range syms {
+				if syms[i].Name == name && syms[i].Value != 0 {
+					return syms[i].Value, true
+				}
 			}
 		}
 	}
@@ -80,19 +85,20 @@ func openDebugInfo(target *elf.File, exePath string, pid uint32) (*elf.File, str
 	root := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "root")
 
 	if buildID := elfBuildID(target); len(buildID) > 2 {
-		p := filepath.Join(root, "usr/lib/debug/.build-id", buildID[:2], buildID[2:]+".debug")
-		if f, err := elf.Open(p); err == nil {
+		rel := filepath.Join("usr/lib/debug/.build-id", buildID[:2], buildID[2:]+".debug")
+		if f, err := openELFWithinRoot(root, rel); err == nil {
 			return f, "debug-buildid"
 		}
 	}
-	if name := debugLink(target); name != "" {
+	if name := debugLink(target); safeDebugName(name) {
 		dir := filepath.Dir(exePath)
-		for _, p := range []string{
-			filepath.Join(dir, name),
-			filepath.Join(dir, ".debug", name),
-			filepath.Join(root, "usr/lib/debug", name),
-		} {
-			if f, err := elf.Open(p); err == nil {
+		candidates := []struct{ root, rel string }{
+			{dir, name},
+			{dir, filepath.Join(".debug", name)},
+			{root, filepath.Join("usr/lib/debug", name)},
+		}
+		for _, c := range candidates {
+			if f, err := openELFWithinRoot(c.root, c.rel); err == nil {
 				return f, "debug-link"
 			}
 		}
@@ -103,11 +109,7 @@ func openDebugInfo(target *elf.File, exePath string, pid uint32) (*elf.File, str
 // elfBuildID parses the GNU build-id (.note.gnu.build-id) into a lowercase hex
 // string, or "" if absent.
 func elfBuildID(f *elf.File) string {
-	sec := f.Section(".note.gnu.build-id")
-	if sec == nil {
-		return ""
-	}
-	data, err := sec.Data()
+	data, err := sectionDataCapped(f.Section(".note.gnu.build-id"))
 	if err != nil || len(data) < 12 {
 		return ""
 	}
@@ -122,11 +124,7 @@ func elfBuildID(f *elf.File) string {
 
 // debugLink returns the filename recorded in .gnu_debuglink, or "".
 func debugLink(f *elf.File) string {
-	sec := f.Section(".gnu_debuglink")
-	if sec == nil {
-		return ""
-	}
-	data, err := sec.Data()
+	data, err := sectionDataCapped(f.Section(".gnu_debuglink"))
 	if err != nil {
 		return ""
 	}
