@@ -7,7 +7,7 @@
 # binary. The runtime stage is distroless and carries only the binary.
 #
 # The same image serves the CLI, the agent DaemonSet, the operator
-# Deployment, and per-session Jobs — one binary, multiple subcommands.
+# Deployment, and per-session Jobs, one binary, multiple subcommands.
 
 ARG GO_VERSION=1.26.4
 ARG DEBIAN_RELEASE=trixie
@@ -39,6 +39,7 @@ COPY . .
 
 ARG TARGETARCH=amd64
 ARG TARGETOS=linux
+ARG BUILDARCH
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG IMAGE_REPO=ghcr.io/gma1k/podtrace
@@ -67,6 +68,9 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     if [ -s internal/ebpf/embedded/podtrace.${BPF_GOARCH}.bpf.o ]; then \
         touch internal/ebpf/embedded/podtrace.${BPF_GOARCH}.bpf.o; \
         echo "Reusing prebuilt BPF object from build context"; \
+    elif [ -n "${BUILDARCH}" ] && [ "${BUILDARCH}" != "${TARGETARCH}" ]; then \
+        echo "Cross-arch build (${BUILDARCH} host -> ${TARGETARCH} target) with no prebuilt object: using arch-correct stub, not the build host's foreign BTF" >&2; \
+        make internal/ebpf/embedded/podtrace.${BPF_GOARCH}.bpf.o BPF_VMLINUX_MODE=stub; \
     else \
         make internal/ebpf/embedded/podtrace.${BPF_GOARCH}.bpf.o; \
     fi

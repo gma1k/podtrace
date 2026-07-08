@@ -1,7 +1,7 @@
 apiVersion: v2
 name: podtrace
 description: |
-  Podtrace — a lightweight yet powerful eBPF-driven diagnostic tool for
+  Podtrace: a lightweight yet powerful eBPF-driven diagnostic tool for
   Kubernetes applications. It delivers full-stack observability from
   kernel events to application-layer behavior, activated on demand with
   no prior configuration or instrumentation.

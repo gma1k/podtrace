@@ -1,4 +1,4 @@
-# podtrace
+# Podtrace
 
 eBPF-driven diagnostic tool for Kubernetes applications.
 
