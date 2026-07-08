@@ -331,7 +331,7 @@ func makeSessionJobRefs(jobs []batchv1.Job) []podtracev1alpha1.SessionJobRef {
 		ref := podtracev1alpha1.SessionJobRef{
 			Node:      node,
 			Name:      j.Name,
-			Completed: j.Status.Succeeded > 0 || j.Status.Failed >= jobBackoffLimit(&j)+1,
+			Completed: jobSucceeded(&j) || jobFailed(&j),
 		}
 		if j.Status.StartTime != nil {
 			ref.StartTime = j.Status.StartTime
@@ -339,7 +339,7 @@ func makeSessionJobRefs(jobs []batchv1.Job) []podtracev1alpha1.SessionJobRef {
 		if j.Status.CompletionTime != nil {
 			ref.CompletionTime = j.Status.CompletionTime
 		}
-		if j.Status.Failed > 0 && j.Status.Succeeded == 0 {
+		if jobFailed(&j) && !jobSucceeded(&j) {
 			ref.Message = "Job failed"
 		}
 		refs = append(refs, ref)
@@ -352,6 +352,27 @@ func jobBackoffLimit(j *batchv1.Job) int32 {
 		return *j.Spec.BackoffLimit
 	}
 	return 6
+}
+
+// jobConditionTrue reports whether the Job carries condition t with status
+// True.
+func jobConditionTrue(j *batchv1.Job, t batchv1.JobConditionType) bool {
+	for i := range j.Status.Conditions {
+		c := &j.Status.Conditions[i]
+		if c.Type == t && c.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
+// jobSucceeded / jobFailed classify a Job terminally via its conditions.
+func jobSucceeded(j *batchv1.Job) bool {
+	return jobConditionTrue(j, batchv1.JobComplete) || j.Status.Succeeded > 0
+}
+
+func jobFailed(j *batchv1.Job) bool {
+	return jobConditionTrue(j, batchv1.JobFailed) || j.Status.Failed > jobBackoffLimit(j)
 }
 
 // computeSessionState maps Job statuses to a SessionState.
@@ -384,8 +405,8 @@ func computeSessionState(jobs []batchv1.Job, expectedJobs int) podtracev1alpha1.
 	anyFailedFatal := false
 	for i := range jobs {
 		j := &jobs[i]
-		succeeded := j.Status.Succeeded > 0
-		failed := j.Status.Failed > jobBackoffLimit(j)
+		succeeded := jobSucceeded(j)
+		failed := jobFailed(j)
 		running := j.Status.Active > 0
 
 		if !succeeded {
