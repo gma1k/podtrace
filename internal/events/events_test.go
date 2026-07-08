@@ -17,6 +17,28 @@ func TestEvent_Latency(t *testing.T) {
 	}
 }
 
+func TestEvent_IsError(t *testing.T) {
+	cases := []struct {
+		name string
+		ev   Event
+		want bool
+	}{
+		{"http 500 is error", Event{Type: EventHTTPResp, Error: 500}, true},
+		{"http 200 not error", Event{Type: EventHTTPResp, Error: 0}, false},
+		{"negative errno is error", Event{Type: EventTCPRecv, Error: -11}, true},
+		{"grpc non-ok is error", Event{Type: EventHTTPResp, Error: 5}, true},
+		{"resource utilization 85 not error", Event{Type: EventResourceLimit, Error: 85}, false},
+		{"resource utilization 100 not error", Event{Type: EventResourceLimit, Error: 100}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.ev.IsError(); got != tc.want {
+				t.Errorf("IsError() = %v, want %v (Error=%d, Type=%v)", got, tc.want, tc.ev.Error, tc.ev.Type)
+			}
+		})
+	}
+}
+
 func TestEvent_TimestampTime(t *testing.T) {
 	ts := uint64(1_000_000_000) // 1s after boot
 	e := &Event{Timestamp: ts}

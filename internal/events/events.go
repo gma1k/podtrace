@@ -131,6 +131,16 @@ func (e *Event) Latency() time.Duration {
 	return time.Duration(safeconv.Uint64ToInt64(e.LatencyNS)) * time.Nanosecond
 }
 
+// IsError reports whether the event represents a failure.
+func (e *Event) IsError() bool {
+	switch e.Type {
+	case EventResourceLimit:
+		return false
+	default:
+		return e.Error != 0
+	}
+}
+
 // TimestampTime returns the event's timestamp as wall-clock time.
 func (e *Event) TimestampTime() time.Time {
 	return clock.BPFTimestampToWall(e.Timestamp)
