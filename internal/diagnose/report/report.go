@@ -302,11 +302,10 @@ func GenerateHTTPSection(d Diagnostician, duration time.Duration) string {
 		report += "  Transport: " + line + "\n"
 	}
 
-	allHTTP := append(httpReqEvents, httpRespEvents...)
-	if len(allHTTP) > 0 {
-		latencies, totalLatency, totalBytes := analyzeHTTPEvents(allHTTP)
-		avgLatency := totalLatency / float64(len(allHTTP))
-		avgBytes := totalBytes / uint64(len(allHTTP))
+	if len(httpRespEvents) > 0 {
+		latencies, totalLatency, totalBytes := analyzeHTTPEvents(httpRespEvents)
+		avgLatency := totalLatency / float64(len(httpRespEvents))
+		avgBytes := totalBytes / uint64(len(httpRespEvents))
 		sort.Float64s(latencies)
 		p50 := analyzer.Percentile(latencies, 50)
 		p95 := analyzer.Percentile(latencies, 95)
@@ -318,33 +317,33 @@ func GenerateHTTPSection(d Diagnostician, duration time.Duration) string {
 			bytesSection = strings.Replace(bytesSection, "Average bytes per operation", "Average bytes per response", 1)
 			report += bytesSection
 		}
-		if len(httpReqEvents) > 0 {
-			urlMap := buildURLMap(httpReqEvents)
-			if len(urlMap) > 0 {
-				report += formatter.TopItemsWithRate(urlMap, config.TopURLsLimit, "requested endpoints", "requests", duration)
-			}
+	}
+	if len(httpReqEvents) > 0 {
+		urlMap := buildURLMap(httpReqEvents)
+		if len(urlMap) > 0 {
+			report += formatter.TopItemsWithRate(urlMap, config.TopURLsLimit, "requested endpoints", "requests", duration)
 		}
-		if len(httpRespEvents) > 0 {
-			endpointMap := buildResponseEndpointMap(httpRespEvents)
-			if len(endpointMap) > 0 {
-				report += formatter.TopItemsWithRate(endpointMap, config.TopURLsLimit, "response endpoints", "responses", duration)
-			}
-			statusMap := buildStatusMap(httpRespEvents)
-			if len(statusMap) > 0 {
-				report += formatter.TopItemsWithRate(statusMap, config.TopURLsLimit, "response status codes", "responses", duration)
-			}
+	}
+	if len(httpRespEvents) > 0 {
+		endpointMap := buildResponseEndpointMap(httpRespEvents)
+		if len(endpointMap) > 0 {
+			report += formatter.TopItemsWithRate(endpointMap, config.TopURLsLimit, "response endpoints", "responses", duration)
 		}
-		if tp := traceContextCount(httpReqEvents); tp > 0 {
-			report += fmt.Sprintf("  Trace context: %d/%d requests carried a W3C traceparent\n",
-				tp, len(httpReqEvents))
+		statusMap := buildStatusMap(httpRespEvents)
+		if len(statusMap) > 0 {
+			report += formatter.TopItemsWithRate(statusMap, config.TopURLsLimit, "response status codes", "responses", duration)
 		}
-		peerEvents := make([]*events.Event, 0, len(httpReqEvents)+len(httpRespEvents))
-		peerEvents = append(peerEvents, httpReqEvents...)
-		peerEvents = append(peerEvents, httpRespEvents...)
-		peerMap := buildPeerMap(peerEvents)
-		if len(peerMap) > 0 {
-			report += formatter.TopItemsWithRate(peerMap, config.TopURLsLimit, "L7 peers", "events", duration)
-		}
+	}
+	if tp := traceContextCount(httpReqEvents); tp > 0 {
+		report += fmt.Sprintf("  Trace context: %d/%d requests carried a W3C traceparent\n",
+			tp, len(httpReqEvents))
+	}
+	peerEvents := make([]*events.Event, 0, len(httpReqEvents)+len(httpRespEvents))
+	peerEvents = append(peerEvents, httpReqEvents...)
+	peerEvents = append(peerEvents, httpRespEvents...)
+	peerMap := buildPeerMap(peerEvents)
+	if len(peerMap) > 0 {
+		report += formatter.TopItemsWithRate(peerMap, config.TopURLsLimit, "L7 peers", "events", duration)
 	}
 	report += "\n"
 	return report

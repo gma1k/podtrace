@@ -32,14 +32,18 @@ func GenerateCPUUsageReport(allEvents []*events.Event, duration time.Duration) s
 		if proc := getProcessCPUTime(info.Pid); proc.totalNS > 0 {
 			totalNS = proc.totalNS
 		}
-		if totalNS > 0 {
-			cpuPercent := (float64(totalNS) / 1e9) / durationSec * 100.0
+		deltaNS := totalNS
+		if base := cache.GetCPUTime(info.Pid).BaselineNS; base > 0 && totalNS >= base {
+			deltaNS = totalNS - base
+		}
+		if deltaNS > 0 {
+			cpuPercent := (float64(deltaNS) / 1e9) / durationSec * 100.0
 			if maxPercent := 100.0 * float64(runtime.NumCPU()); cpuPercent > maxPercent {
 				cpuPercent = maxPercent
 			}
 			pidCPUTimes[info.Pid] = cpuTimeInfo{
 				cpuPercent: cpuPercent,
-				cpuTimeSec: float64(totalNS) / 1e9,
+				cpuTimeSec: float64(deltaNS) / 1e9,
 				name:       info.Name,
 			}
 		}
@@ -126,10 +130,14 @@ func GenerateCPUUsageReport(allEvents []*events.Event, duration time.Duration) s
 		totalCPUPercent = podCPUPercent
 	}
 
+	idlePercent := 100.0 - totalCPUPercent
+	if idlePercent < 0 {
+		idlePercent = 0
+	}
 	report += fmt.Sprintf("\n  Total CPU usage: %.1f%% (%.2fs / %.2fs)\n",
 		totalCPUPercent, totalCPUPercent*durationSec/100.0, durationSec)
 	report += fmt.Sprintf("  Idle time: %.1f%% (%.2fs / %.2fs)\n\n",
-		100.0-totalCPUPercent, (100.0-totalCPUPercent)*durationSec/100.0, durationSec)
+		idlePercent, idlePercent*durationSec/100.0, durationSec)
 
 	return report
 }
