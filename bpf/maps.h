@@ -172,8 +172,8 @@ struct tcp_peer {
 	u8  daddr6[16];
 };
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, 1024);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 4096);
 	__type(key, struct pair_key);
 	__type(value, struct tcp_peer);
 } tcp_peer_stash SEC(".maps");

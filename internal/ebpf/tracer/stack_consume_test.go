@@ -25,6 +25,20 @@ func TestStackTracesMapDeclaredLRU(t *testing.T) {
 	}
 }
 
+func TestTCPPeerStashDeclaredLRU(t *testing.T) {
+	src, err := os.ReadFile("../../../bpf/maps.h")
+	if err != nil {
+		t.Fatalf("read bpf/maps.h: %v", err)
+	}
+	decl := regexp.MustCompile(`(?s)struct \{[^}]*\} tcp_peer_stash SEC`).Find(src)
+	if decl == nil {
+		t.Fatal("tcp_peer_stash map declaration not found in bpf/maps.h")
+	}
+	if !regexp.MustCompile(`BPF_MAP_TYPE_LRU_HASH`).Match(decl) {
+		t.Errorf("tcp_peer_stash must be BPF_MAP_TYPE_LRU_HASH, got declaration:\n%s", decl)
+	}
+}
+
 func TestResolveAndConsumeStack_DeletesEntry(t *testing.T) {
 	m, err := ebpf.NewMap(&ebpf.MapSpec{
 		Type:       ebpf.LRUHash,
