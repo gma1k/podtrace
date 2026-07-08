@@ -80,10 +80,8 @@ func safeDebugName(name string) bool {
 }
 
 
-// recoverParse converts a panic from an ELF/DWARF/gosym parser, a malformed
-// untrusted binary, into a logged warning so a hostile pod cannot crash the
-// agent. from an ELF/DWARF/gosym parser, a malformed
-// untrusted binary, into a logged warning so a hostile pod cannot crash the
+// recoverParse converts a panic from an ELF/DWARF/gosym parser on a malformed
+// untrusted binary into a logged warning so a hostile pod cannot crash the
 // agent.
 func recoverParse(where string) {
 	if r := recover(); r != nil {

@@ -43,7 +43,44 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  bpf-objects:
+    if: ${{ !inputs.olm_bundle_only }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            goarch: amd64
+          - runner: ubuntu-24.04-arm
+            goarch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install BPF toolchain
+        uses: ./.github/actions/setup-bpf-toolchain
+      - name: Build native BPF object (full kernel BTF)
+        run: make internal/ebpf/embedded/podtrace.${{ matrix.goarch }}.bpf.o BPF_GOARCH=${{ matrix.goarch }}
+      - name: Refuse a stub fallback on the native runner
+        run: |
+          lines=$(wc -l < bpf/.generated/vmlinux.h)
+          if [ "$lines" -lt 1000 ]; then
+            echo "ERROR: ${{ matrix.goarch }} object fell back to the stub (vmlinux.h=$lines lines); a native runner must have full BTF" >&2
+            exit 1
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: bpf-object-${{ matrix.goarch }}
+          path: internal/ebpf/embedded/podtrace.${{ matrix.goarch }}.bpf.o
+          if-no-files-found: error
+          retention-days: 1
+
   image:
+    needs: bpf-objects
     if: (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') && !inputs.olm_bundle_only
     runs-on: ubuntu-latest
     outputs:
@@ -61,6 +98,13 @@ jobs:
           sudo apt-get install -y "linux-tools-$(uname -r)" || sudo apt-get install -y linux-tools-generic
           make bpf-btf-header
           wc -l bpf/.generated/vmlinux.h
+
+      - name: Stage native BPF objects into the build context
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          pattern: bpf-object-*
+          path: internal/ebpf/embedded
+          merge-multiple: true
 
       - uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0  # v4.4.0
         with:
@@ -218,6 +262,7 @@ jobs:
           fail_on_unmatched_files: true
 
   cli:
+    needs: bpf-objects
     if: ${{ !inputs.olm_bundle_only }}
     runs-on: ubuntu-latest
     permissions:
@@ -244,6 +289,13 @@ jobs:
             echo "ERROR: vmlinux.h has only $lines lines — stub fallback; refusing to release stub-built binaries" >&2
             exit 1
           fi
+
+      - name: Stage native BPF objects (reused by make release)
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          pattern: bpf-object-*
+          path: internal/ebpf/embedded
+          merge-multiple: true
 
       - name: Build CLI tarballs (linux+darwin x amd64+arm64)
         run: make release VERSION=${{ github.ref_name }}
