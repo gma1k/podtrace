@@ -249,6 +249,28 @@ func TestGenerateHTTPSection_WithEvents(t *testing.T) {
 	}
 }
 
+func TestGenerateHTTPSection_LatencyFromResponsesOnly(t *testing.T) {
+	d := &mockDiagnostician{
+		events: []*events.Event{
+			{Type: events.EventHTTPReq, LatencyNS: 0, Target: "GET /a"},
+			{Type: events.EventHTTPReq, LatencyNS: 0, Target: "GET /b"},
+			{Type: events.EventHTTPResp, LatencyNS: 30000000, Target: "GET /a", Bytes: 2048},
+		},
+		startTime: time.Now(),
+		endTime:   time.Now().Add(1 * time.Second),
+	}
+	result := GenerateHTTPSection(d, d.endTime.Sub(d.startTime))
+	if !strings.Contains(result, "Average latency: 30.00ms") {
+		t.Errorf("expected responses-only average of 30.00ms, got:\n%s", result)
+	}
+	if strings.Contains(result, "Average latency: 10.00ms") {
+		t.Errorf("average latency diluted by zero-latency request events:\n%s", result)
+	}
+	if strings.Contains(result, "P50=0.00ms") {
+		t.Errorf("P50 collapsed to 0 by zero-latency request events:\n%s", result)
+	}
+}
+
 func TestGenerateHTTPSection_TLSTransport(t *testing.T) {
 	d := &mockDiagnostician{
 		events: []*events.Event{

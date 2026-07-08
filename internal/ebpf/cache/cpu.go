@@ -10,13 +10,10 @@ import (
 )
 
 // ProcessCPUTime is a snapshot of /proc/<pid>/stat's utime+stime, captured at
-// event-arrival time when the process is still alive. Short-lived processes
-// (runc helpers, exec'd commands) are gone by the time the diagnose report
-// renders, so reading /proc/<pid>/stat at report time always returns 0 —
-// this cache preserves the last-seen value so the report can attribute CPU
-// to terminated processes.
+// event-arrival time when the process is still alive.
 type ProcessCPUTime struct {
-	TotalNS uint64 // (utime + stime) converted to nanoseconds
+	TotalNS uint64 // latest (utime + stime) in nanoseconds
+	BaselineNS uint64
 }
 
 const maxCPUTimeEntries = 16384
@@ -36,10 +33,6 @@ func SnapshotCPUTime(pid uint32) {
 	if err != nil {
 		return
 	}
-	// /proc/<pid>/stat fields are space-separated except the (comm) field
-	// which is parenthesized and may contain spaces. utime/stime are fields
-	// 14 and 15 (1-indexed), which become 13/14 (0-indexed) AFTER the
-	// `(comm)` chunk. Find the last ')' to skip the comm safely.
 	s := string(data)
 	rp := strings.LastIndex(s, ")")
 	if rp < 0 || rp+2 >= len(s) {
@@ -47,9 +40,6 @@ func SnapshotCPUTime(pid uint32) {
 	}
 	after := s[rp+2:]
 	fields := strings.Fields(after)
-	// In `after`, field 0 is the state char; field 11 is utime, field 12 is
-	// stime. (Original 0-indexed positions were 13 and 14, but two were
-	// consumed by pid and comm before "after".)
 	if len(fields) < 13 {
 		return
 	}
@@ -65,8 +55,18 @@ func SnapshotCPUTime(pid uint32) {
 			cpuTimes = make(map[uint32]ProcessCPUTime, maxCPUTimeEntries)
 		}
 	}
-	cpuTimes[pid] = ProcessCPUTime{TotalNS: totalNS}
+	prev, seen := cpuTimes[pid]
+	cpuTimes[pid] = mergeCPUSample(prev, seen, totalNS)
 	cpuTimeMu.Unlock()
+}
+
+// mergeCPUSample folds a new cumulative CPU sample into the cached snapshot.
+func mergeCPUSample(prev ProcessCPUTime, seen bool, totalNS uint64) ProcessCPUTime {
+	baseline := totalNS
+	if seen {
+		baseline = prev.BaselineNS
+	}
+	return ProcessCPUTime{TotalNS: totalNS, BaselineNS: baseline}
 }
 
 // GetCPUTime returns the cached snapshot for pid, or zero when nothing has
@@ -98,8 +98,6 @@ func loadClockTicks() uint64 {
 	if clockTicksOK {
 		return clockTicks
 	}
-	// AT_CLKTCK (key 17) in /proc/self/auxv carries the clock ticks per
-	// second. Fallback to 100 (USER_HZ on most x86_64 kernels) when unavail.
 	if data, err := procfs.ReadFile("self/auxv"); err == nil {
 		for i := 0; i+16 <= len(data); i += 16 {
 			key := readUint64LE(data[i : i+8])
