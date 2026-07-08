@@ -18,11 +18,7 @@ import (
 // elfIsRust reports whether an ELF was produced by rustc, detected via the
 // ".comment" section.
 func elfIsRust(f *elf.File) bool {
-	sec := f.Section(".comment")
-	if sec == nil {
-		return false
-	}
-	data, err := sec.Data()
+	data, err := sectionDataCapped(f.Section(".comment"))
 	if err != nil {
 		return false
 	}
@@ -41,6 +37,9 @@ func nameContainsAll(name string, subs ...string) bool {
 }
 
 func findSymbolContaining(f *elf.File, subs ...string) (uint64, bool) {
+	if !symbolSectionWithinCap(f, ".symtab") {
+		return 0, false
+	}
 	syms, err := f.Symbols()
 	if err != nil {
 		return 0, false
@@ -66,8 +65,8 @@ var (
 // (outbound) and <rustls::conn::Reader as io::Read>::read (inbound), capturing
 // HTTP/1.x, HTTP/2 and gRPC L7 over rustls TLS before encryption / after
 // decryption.
-func AttachRustlsProbes(coll *ebpf.Collection, pid uint32) []link.Link {
-	var links []link.Link
+func AttachRustlsProbes(coll *ebpf.Collection, pid uint32) (links []link.Link) {
+	defer recoverParse("AttachRustlsProbes")
 	if pid == 0 {
 		return links
 	}
@@ -79,7 +78,7 @@ func AttachRustlsProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 	}
 
 	exePath := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "exe")
-	f, err := elf.Open(exePath)
+	f, err := openELFCapped(exePath)
 	if err != nil {
 		return links
 	}

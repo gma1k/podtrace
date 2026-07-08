@@ -3,7 +3,7 @@ package probes
 import (
 	"debug/buildinfo"
 	"debug/dwarf"
-	"debug/elf"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -45,20 +45,28 @@ func resolveH3FieldOffsets(exePath string) (h3FieldOffsets, string) {
 
 // h3OffsetsFromDWARF reads the four field offsets from the binary's DWARF (or a
 // build-id debug-info file).
-func h3OffsetsFromDWARF(exePath string) (h3FieldOffsets, bool) {
-	target, err := elf.Open(exePath)
+func h3OffsetsFromDWARF(exePath string) (result h3FieldOffsets, ok bool) {
+	defer recoverParse("h3OffsetsFromDWARF")
+	target, err := openELFCapped(exePath)
 	if err != nil {
 		return h3FieldOffsets{}, false
 	}
 	defer func() { _ = target.Close() }()
 
-	d, err := target.DWARF()
+	var d *dwarf.Data
+	if dwarfWithinCap(target) {
+		d, err = target.DWARF()
+	} else {
+		err = fmt.Errorf("dwarf sections exceed cap")
+	}
 	if err != nil {
 		if dbg, _ := openDebugInfo(target, exePath, 0); dbg != nil && dbg != target {
 			defer func() { _ = dbg.Close() }()
-			d, err = dbg.DWARF()
+			if dwarfWithinCap(dbg) {
+				d, err = dbg.DWARF()
+			}
 		}
-		if err != nil {
+		if err != nil || d == nil {
 			return h3FieldOffsets{}, false
 		}
 	}

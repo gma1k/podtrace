@@ -2,7 +2,6 @@ package probes
 
 import (
 	"debug/dwarf"
-	"debug/elf"
 	"strings"
 )
 
@@ -88,18 +87,22 @@ func resolveH3PeerPaths(exePath, clientRootType string) (h3PeerPaths, bool) {
 
 // openDWARF opens the binary's DWARF, falling back to a build-id /
 // .gnu_debuglink debug file.
-func openDWARF(exePath string) (*dwarf.Data, func(), bool) {
-	target, err := elf.Open(exePath)
+func openDWARF(exePath string) (data *dwarf.Data, cleanup func(), ok bool) {
+	defer recoverParse("openDWARF")
+	target, err := openELFCapped(exePath)
 	if err != nil {
 		return nil, nil, false
 	}
-	d, err := target.DWARF()
-	if err == nil {
-		return d, func() { _ = target.Close() }, true
+	if dwarfWithinCap(target) {
+		if d, err := target.DWARF(); err == nil {
+			return d, func() { _ = target.Close() }, true
+		}
 	}
 	if dbg, _ := openDebugInfo(target, exePath, 0); dbg != nil && dbg != target {
-		if d, err = dbg.DWARF(); err == nil {
-			return d, func() { _ = dbg.Close(); _ = target.Close() }, true
+		if dwarfWithinCap(dbg) {
+			if d, err := dbg.DWARF(); err == nil {
+				return d, func() { _ = dbg.Close(); _ = target.Close() }, true
+			}
 		}
 		_ = dbg.Close()
 	}
