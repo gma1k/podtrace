@@ -815,6 +815,19 @@ func TestEnqueueOnBundleChange(t *testing.T) {
 	if len(got) != 1 {
 		t.Errorf("bundle CM enqueued %d, want 1", len(got))
 	}
+
+	gotSecret := r.enqueueOnBundleChange(context.Background(), &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "x", Namespace: "ns",
+			Labels: map[string]string{
+				operator.LabelManagedBy: operator.ManagedByValue,
+				operator.LabelComponent: operator.ComponentBundle,
+			},
+		},
+	})
+	if len(gotSecret) != 1 {
+		t.Errorf("bundle Secret enqueued %d, want 1", len(gotSecret))
+	}
 }
 
 func TestObtainAndReleaseExporter(t *testing.T) {

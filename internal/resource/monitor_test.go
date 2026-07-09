@@ -51,6 +51,54 @@ func useCgroupBase(t *testing.T, base string) {
 	})
 }
 
+// writeCgroupV1Layout builds a realistic cgroup v1 layout under base: each
+// controller is its own hierarchy (<base>/<controller>/<subpath>/...), the way
+// a real node exposes it and the CLI's findCgroupPathV1 discovers it, NOT the
+// controller-as-subdirectory shape the old tests fabricated.
+func writeCgroupV1Layout(t *testing.T, base, subpath string, byController map[string]map[string]string) string {
+	t.Helper()
+	primary := filepath.Join(base, "cpu,cpuacct", subpath)
+	if err := os.MkdirAll(primary, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", primary, err)
+	}
+	for ctrl, files := range byController {
+		dir := filepath.Join(base, ctrl, subpath)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		for name, content := range files {
+			full := filepath.Join(dir, name)
+			if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+				t.Fatalf("write %s: %v", full, err)
+			}
+		}
+	}
+	return primary
+}
+
+func TestCgroupV1Subpath(t *testing.T) {
+	useCgroupBase(t, "/base")
+	cases := []struct {
+		name   string
+		path   string
+		want   string
+		wantOK bool
+	}{
+		{"combined controller", "/base/cpu,cpuacct/kubepods/pod123", "kubepods/pod123", true},
+		{"memory hierarchy nested", "/base/memory/kubepods/burstable/pod123/abc", "kubepods/burstable/pod123/abc", true},
+		{"controller root only", "/base/cpu", "", false},
+		{"not under base", "/somewhere/else/cpu/pod", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := cgroupV1Subpath(tc.path)
+			if ok != tc.wantOK || got != tc.want {
+				t.Errorf("cgroupV1Subpath(%q)=(%q,%v) want (%q,%v)", tc.path, got, ok, tc.want, tc.wantOK)
+			}
+		})
+	}
+}
+
 func TestNewResourceMonitor(t *testing.T) {
 	tmpDir := t.TempDir()
 	cgroupPath := filepath.Join(tmpDir, "test-cgroup")
@@ -156,73 +204,45 @@ func TestGetCgroupInode_NonExistent(t *testing.T) {
 
 func TestIsCgroupV2(t *testing.T) {
 	tests := []struct {
-		name        string
-		setup       func(string) error
-		expectedV2  bool
-		expectError bool
+		name       string
+		setup      func(base, cgroupPath string)
+		expectedV2 bool
 	}{
 		{
-			name: "cgroup v2 with controllers file",
-			setup: func(path string) error {
-				controllersFile := filepath.Join(path, "cgroup.controllers")
-				return os.WriteFile(controllersFile, []byte("cpu memory io"), 0644)
+			name: "v2 unified: cgroup.controllers at the mount root",
+			setup: func(base, _ string) {
+				_ = os.WriteFile(filepath.Join(base, "cgroup.controllers"), []byte("cpu memory io"), 0o644)
 			},
-			expectedV2:  true,
-			expectError: false,
+			expectedV2: true,
 		},
 		{
-			name: "cgroup v1 with cpu subdirectory",
-			setup: func(path string) error {
-				cpuDir := filepath.Join(path, "cpu")
-				return os.MkdirAll(cpuDir, 0755)
+			name: "v2 fallback: cgroup.controllers on the per-pod path only",
+			setup: func(_, cgroupPath string) {
+				_ = os.WriteFile(filepath.Join(cgroupPath, "cgroup.controllers"), []byte("cpu memory"), 0o644)
 			},
-			expectedV2:  false,
-			expectError: false,
+			expectedV2: true,
 		},
 		{
-			name: "cgroup v1 with memory subdirectory",
-			setup: func(path string) error {
-				memDir := filepath.Join(path, "memory")
-				return os.MkdirAll(memDir, 0755)
+			name: "v1: no cgroup.controllers anywhere (controllers are sibling hierarchies)",
+			setup: func(base, _ string) {
+				_ = os.MkdirAll(filepath.Join(base, "cpu,cpuacct"), 0o755)
+				_ = os.MkdirAll(filepath.Join(base, "memory"), 0o755)
 			},
-			expectedV2:  false,
-			expectError: false,
-		},
-		{
-			name: "neither v1 nor v2",
-			setup: func(path string) error {
-				return nil
-			},
-			expectedV2:  false,
-			expectError: true,
+			expectedV2: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			cgroupPath := filepath.Join(tmpDir, "test-cgroup")
-
-			if err := os.MkdirAll(cgroupPath, 0755); err != nil {
+			base := t.TempDir()
+			useCgroupBase(t, base)
+			cgroupPath := filepath.Join(base, "test-cgroup")
+			if err := os.MkdirAll(cgroupPath, 0o755); err != nil {
 				t.Fatalf("Failed to create test cgroup dir: %v", err)
 			}
-
-			if err := tt.setup(cgroupPath); err != nil {
-				t.Fatalf("Setup failed: %v", err)
-			}
-
-			isV2, err := isCgroupV2(cgroupPath)
-			if tt.expectError {
-				if err == nil {
-					t.Error("Expected error but got none")
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Unexpected error: %v", err)
-				}
-				if isV2 != tt.expectedV2 {
-					t.Errorf("Expected isV2=%v, got %v", tt.expectedV2, isV2)
-				}
+			tt.setup(base, cgroupPath)
+			if got := isCgroupV2(cgroupPath); got != tt.expectedV2 {
+				t.Errorf("isCgroupV2()=%v want %v", got, tt.expectedV2)
 			}
 		})
 	}
@@ -492,21 +512,16 @@ func TestResourceMonitor_ReadLimitsV2(t *testing.T) {
 }
 
 func TestResourceMonitor_ReadLimitsV1(t *testing.T) {
-	tmpDir := t.TempDir()
-	useCgroupBase(t, tmpDir)
-	cgroupPath := filepath.Join(tmpDir, "test-cgroup")
-	if err := os.MkdirAll(cgroupPath, 0755); err != nil {
-		t.Fatalf("Failed to create test cgroup dir: %v", err)
-	}
-
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "cpu"), 0755)
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "memory"), 0755)
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "blkio"), 0755)
-
-	_ = os.WriteFile(filepath.Join(cgroupPath, "cpu", "cpu.cfs_quota_us"), []byte("100000"), 0644)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "cpu", "cpu.cfs_period_us"), []byte("100000"), 0644)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "memory", "memory.limit_in_bytes"), []byte("1073741824"), 0644)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "blkio", "blkio.throttle.read_bps_device"), []byte("8:0 1048576"), 0644)
+	base := t.TempDir()
+	useCgroupBase(t, base)
+	cgroupPath := writeCgroupV1Layout(t, base, "kubepods/pod-test", map[string]map[string]string{
+		"cpu,cpuacct": {
+			"cpu.cfs_quota_us":  "100000",
+			"cpu.cfs_period_us": "100000",
+		},
+		"memory": {"memory.limit_in_bytes": "1073741824"},
+		"blkio":  {"blkio.throttle.read_bps_device": "8:0 1048576"},
+	})
 
 	eventChan := make(chan *events.Event, 10)
 	monitor, err := NewResourceMonitor(cgroupPath, nil, nil, eventChan, "test-ns")
@@ -589,20 +604,16 @@ func TestResourceMonitor_UpdateUsageV2(t *testing.T) {
 }
 
 func TestResourceMonitor_UpdateUsageV1(t *testing.T) {
-	tmpDir := t.TempDir()
-	cgroupPath := filepath.Join(tmpDir, "test-cgroup")
-	if err := os.MkdirAll(cgroupPath, 0755); err != nil {
-		t.Fatalf("Failed to create test cgroup dir: %v", err)
-	}
-
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "cpu"), 0755)
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "cpuacct"), 0755)
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "memory"), 0755)
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "blkio"), 0755)
-
-	_ = os.WriteFile(filepath.Join(cgroupPath, "cpu", "cpu.cfs_quota_us"), []byte("100000"), 0644)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "cpu", "cpu.cfs_period_us"), []byte("100000"), 0644)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "memory", "memory.limit_in_bytes"), []byte("1073741824"), 0644)
+	base := t.TempDir()
+	useCgroupBase(t, base)
+	const subpath = "kubepods/pod-test"
+	cgroupPath := writeCgroupV1Layout(t, base, subpath, map[string]map[string]string{
+		"cpu,cpuacct": {
+			"cpu.cfs_quota_us":  "100000",
+			"cpu.cfs_period_us": "100000",
+		},
+		"memory": {"memory.limit_in_bytes": "1073741824"},
+	})
 
 	eventChan := make(chan *events.Event, 10)
 	monitor, err := NewResourceMonitor(cgroupPath, nil, nil, eventChan, "test-ns")
@@ -610,12 +621,14 @@ func TestResourceMonitor_UpdateUsageV1(t *testing.T) {
 		t.Fatalf("NewResourceMonitor() error = %v", err)
 	}
 
-	_ = os.WriteFile(filepath.Join(cgroupPath, "cpuacct", "cpuacct.usage"), []byte("50000000000"), 0644)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "memory", "memory.usage_in_bytes"), []byte("536870912"), 0644)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "blkio", "blkio.io_service_bytes"), []byte("8:0 Read 524288"), 0644)
+	// Usage counters appear after the monitor is constructed.
+	writeCgroupV1Layout(t, base, subpath, map[string]map[string]string{
+		"cpu,cpuacct": {"cpuacct.usage": "50000000000"},
+		"memory":      {"memory.usage_in_bytes": "536870912"},
+		"blkio":       {"blkio.io_service_bytes": "8:0 Read 524288"},
+	})
 
-	err = monitor.updateUsageV1()
-	if err != nil {
+	if err := monitor.updateUsageV1(); err != nil {
 		t.Errorf("updateUsageV1() error = %v", err)
 	}
 
@@ -798,11 +811,16 @@ func TestResourceMonitor_MonitorLoop_StopChannel(t *testing.T) {
 	monitor.Stop()
 }
 
-func TestResourceMonitor_ReadLimits_ErrorPath(t *testing.T) {
-	tmpDir := t.TempDir()
-	cgroupPath := filepath.Join(tmpDir, "test-cgroup")
-	if err := os.MkdirAll(cgroupPath, 0755); err != nil {
-		t.Fatalf("Failed to create test cgroup dir: %v", err)
+func TestResourceMonitor_ReadLimits_GracefulWhenUnreadable(t *testing.T) {
+	base := t.TempDir()
+	useCgroupBase(t, base)
+	// A bare cgroup path with no readable controller files. The old code
+	// returned "cannot determine cgroup version" here, which is exactly how
+	// v1 monitoring silently disabled itself; the monitor must now degrade to
+	// a no-op instead of erroring.
+	cgroupPath := filepath.Join(base, "test-cgroup")
+	if err := os.MkdirAll(cgroupPath, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
 	}
 
 	eventChan := make(chan *events.Event, 10)
@@ -811,17 +829,20 @@ func TestResourceMonitor_ReadLimits_ErrorPath(t *testing.T) {
 		t.Fatalf("NewResourceMonitor() error = %v", err)
 	}
 
-	err = monitor.readLimits()
-	if err == nil {
-		t.Error("Expected error when cgroup version cannot be determined")
+	if err := monitor.readLimits(); err != nil {
+		t.Errorf("readLimits() should degrade gracefully, got error: %v", err)
+	}
+	if got := len(monitor.GetLimits()); got != 0 {
+		t.Errorf("expected no limits from an unreadable cgroup, got %d", got)
 	}
 }
 
-func TestResourceMonitor_UpdateResourceUsage_ErrorPath(t *testing.T) {
-	tmpDir := t.TempDir()
-	cgroupPath := filepath.Join(tmpDir, "test-cgroup")
-	if err := os.MkdirAll(cgroupPath, 0755); err != nil {
-		t.Fatalf("Failed to create test cgroup dir: %v", err)
+func TestResourceMonitor_UpdateResourceUsage_GracefulWhenUnreadable(t *testing.T) {
+	base := t.TempDir()
+	useCgroupBase(t, base)
+	cgroupPath := filepath.Join(base, "test-cgroup")
+	if err := os.MkdirAll(cgroupPath, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
 	}
 
 	eventChan := make(chan *events.Event, 10)
@@ -830,9 +851,8 @@ func TestResourceMonitor_UpdateResourceUsage_ErrorPath(t *testing.T) {
 		t.Fatalf("NewResourceMonitor() error = %v", err)
 	}
 
-	err = monitor.updateResourceUsage()
-	if err == nil {
-		t.Error("Expected error when cgroup version cannot be determined")
+	if err := monitor.updateResourceUsage(); err != nil {
+		t.Errorf("updateResourceUsage() should degrade gracefully, got error: %v", err)
 	}
 }
 
@@ -858,15 +878,14 @@ func TestResourceMonitor_ReadLimitsV2_ErrorReadingFiles(t *testing.T) {
 }
 
 func TestResourceMonitor_ReadLimitsV1_ErrorReadingFiles(t *testing.T) {
-	tmpDir := t.TempDir()
-	cgroupPath := filepath.Join(tmpDir, "test-cgroup")
-	if err := os.MkdirAll(cgroupPath, 0755); err != nil {
-		t.Fatalf("Failed to create test cgroup dir: %v", err)
-	}
-
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "cpu"), 0755)
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "memory"), 0755)
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "blkio"), 0755)
+	base := t.TempDir()
+	useCgroupBase(t, base)
+	// Controller hierarchies exist but hold no limit files.
+	cgroupPath := writeCgroupV1Layout(t, base, "kubepods/pod-test", map[string]map[string]string{
+		"cpu,cpuacct": {},
+		"memory":      {},
+		"blkio":       {},
+	})
 
 	eventChan := make(chan *events.Event, 10)
 	monitor, err := NewResourceMonitor(cgroupPath, nil, nil, eventChan, "test-ns")
@@ -874,8 +893,7 @@ func TestResourceMonitor_ReadLimitsV1_ErrorReadingFiles(t *testing.T) {
 		t.Fatalf("NewResourceMonitor() error = %v", err)
 	}
 
-	err = monitor.readLimitsV1()
-	if err != nil {
+	if err := monitor.readLimitsV1(); err != nil {
 		t.Logf("readLimitsV1() returned error (expected when files don't exist): %v", err)
 	}
 }
@@ -904,20 +922,15 @@ func TestResourceMonitor_UpdateUsageV2_ErrorReadingFiles(t *testing.T) {
 }
 
 func TestResourceMonitor_UpdateUsageV1_ErrorReadingFiles(t *testing.T) {
-	tmpDir := t.TempDir()
-	cgroupPath := filepath.Join(tmpDir, "test-cgroup")
-	if err := os.MkdirAll(cgroupPath, 0755); err != nil {
-		t.Fatalf("Failed to create test cgroup dir: %v", err)
-	}
-
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "cpu"), 0755)
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "cpuacct"), 0755)
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "memory"), 0755)
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "blkio"), 0755)
-
-	_ = os.WriteFile(filepath.Join(cgroupPath, "cpu", "cpu.cfs_quota_us"), []byte("100000"), 0644)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "cpu", "cpu.cfs_period_us"), []byte("100000"), 0644)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "memory", "memory.limit_in_bytes"), []byte("1073741824"), 0644)
+	base := t.TempDir()
+	useCgroupBase(t, base)
+	cgroupPath := writeCgroupV1Layout(t, base, "kubepods/pod-test", map[string]map[string]string{
+		"cpu,cpuacct": {
+			"cpu.cfs_quota_us":  "100000",
+			"cpu.cfs_period_us": "100000",
+		},
+		"memory": {"memory.limit_in_bytes": "1073741824"},
+	})
 
 	eventChan := make(chan *events.Event, 10)
 	monitor, err := NewResourceMonitor(cgroupPath, nil, nil, eventChan, "test-ns")
@@ -925,38 +938,33 @@ func TestResourceMonitor_UpdateUsageV1_ErrorReadingFiles(t *testing.T) {
 		t.Fatalf("NewResourceMonitor() error = %v", err)
 	}
 
-	err = monitor.updateUsageV1()
-	if err != nil {
+	// No usage counter files written → the reads fail but the call must not.
+	if err := monitor.updateUsageV1(); err != nil {
 		t.Logf("updateUsageV1() returned error (expected when stat files don't exist): %v", err)
 	}
 }
 
 func TestResourceMonitor_UpdateUsageV1_WithLimits(t *testing.T) {
-	tmpDir := t.TempDir()
-	useCgroupBase(t, tmpDir)
-	cgroupPath := filepath.Join(tmpDir, "test-cgroup")
-	if err := os.MkdirAll(cgroupPath, 0755); err != nil {
-		t.Fatalf("Failed to create test cgroup dir: %v", err)
-	}
-
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "cpu"), 0755)
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "cpuacct"), 0755)
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "memory"), 0755)
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "blkio"), 0755)
-
-	_ = os.WriteFile(filepath.Join(cgroupPath, "cpu", "cpu.cfs_quota_us"), []byte("100000"), 0644)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "cpu", "cpu.cfs_period_us"), []byte("100000"), 0644)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "memory", "memory.limit_in_bytes"), []byte("1073741824"), 0644)
+	base := t.TempDir()
+	useCgroupBase(t, base)
+	cgroupPath := writeCgroupV1Layout(t, base, "kubepods/pod-test", map[string]map[string]string{
+		"cpu,cpuacct": {
+			"cpu.cfs_quota_us":  "100000",
+			"cpu.cfs_period_us": "100000",
+			"cpuacct.usage":     "50000000000",
+		},
+		"memory": {
+			"memory.limit_in_bytes": "1073741824",
+			"memory.usage_in_bytes": "536870912",
+		},
+		"blkio": {"blkio.io_service_bytes": "8:0 Read 524288\n8:0 Write 262144"},
+	})
 
 	eventChan := make(chan *events.Event, 10)
 	monitor, err := NewResourceMonitor(cgroupPath, nil, nil, eventChan, "test-ns")
 	if err != nil {
 		t.Fatalf("NewResourceMonitor() error = %v", err)
 	}
-
-	_ = os.WriteFile(filepath.Join(cgroupPath, "cpuacct", "cpuacct.usage"), []byte("50000000000"), 0644)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "memory", "memory.usage_in_bytes"), []byte("536870912"), 0644)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "blkio", "blkio.io_service_bytes"), []byte("8:0 Read 524288\n8:0 Write 262144"), 0644)
 
 	monitor.mu.Lock()
 	monitor.limits[ResourceCPU] = &ResourceLimit{
@@ -1071,16 +1079,15 @@ func TestResourceMonitor_UpdateUsageV2_NoLimits(t *testing.T) {
 }
 
 func TestResourceMonitor_UpdateUsageV1_NoLimits(t *testing.T) {
-	tmpDir := t.TempDir()
-	cgroupPath := filepath.Join(tmpDir, "test-cgroup")
-	if err := os.MkdirAll(cgroupPath, 0755); err != nil {
-		t.Fatalf("Failed to create test cgroup dir: %v", err)
-	}
-
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "cpu"), 0755)
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "cpuacct"), 0755)
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "memory"), 0755)
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "blkio"), 0755)
+	base := t.TempDir()
+	useCgroupBase(t, base)
+	// Usage counters exist but no limits were read, so the updates are
+	// no-ops — the call must still succeed without panicking.
+	cgroupPath := writeCgroupV1Layout(t, base, "kubepods/pod-test", map[string]map[string]string{
+		"cpu,cpuacct": {"cpuacct.usage": "50000000000"},
+		"memory":      {"memory.usage_in_bytes": "536870912"},
+		"blkio":       {"blkio.io_service_bytes": "8:0 Read 524288"},
+	})
 
 	eventChan := make(chan *events.Event, 10)
 	monitor, err := NewResourceMonitor(cgroupPath, nil, nil, eventChan, "test-ns")
@@ -1088,12 +1095,7 @@ func TestResourceMonitor_UpdateUsageV1_NoLimits(t *testing.T) {
 		t.Fatalf("NewResourceMonitor() error = %v", err)
 	}
 
-	_ = os.WriteFile(filepath.Join(cgroupPath, "cpuacct", "cpuacct.usage"), []byte("50000000000"), 0644)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "memory", "memory.usage_in_bytes"), []byte("536870912"), 0644)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "blkio", "blkio.io_service_bytes"), []byte("8:0 Read 524288"), 0644)
-
-	err = monitor.updateUsageV1()
-	if err != nil {
+	if err := monitor.updateUsageV1(); err != nil {
 		t.Errorf("updateUsageV1() error = %v", err)
 	}
 }
@@ -1148,15 +1150,14 @@ func TestResourceMonitor_ReadLimitsV2_ZeroCPUQuota(t *testing.T) {
 }
 
 func TestResourceMonitor_ReadLimitsV1_ZeroQuota(t *testing.T) {
-	tmpDir := t.TempDir()
-	cgroupPath := filepath.Join(tmpDir, "test-cgroup")
-	if err := os.MkdirAll(cgroupPath, 0755); err != nil {
-		t.Fatalf("Failed to create test cgroup dir: %v", err)
-	}
-
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "cpu"), 0755)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "cpu", "cpu.cfs_quota_us"), []byte("0"), 0644)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "cpu", "cpu.cfs_period_us"), []byte("100000"), 0644)
+	base := t.TempDir()
+	useCgroupBase(t, base)
+	cgroupPath := writeCgroupV1Layout(t, base, "kubepods/pod-test", map[string]map[string]string{
+		"cpu,cpuacct": {
+			"cpu.cfs_quota_us":  "0",
+			"cpu.cfs_period_us": "100000",
+		},
+	})
 
 	eventChan := make(chan *events.Event, 10)
 	monitor, err := NewResourceMonitor(cgroupPath, nil, nil, eventChan, "test-ns")
@@ -1164,21 +1165,17 @@ func TestResourceMonitor_ReadLimitsV1_ZeroQuota(t *testing.T) {
 		t.Fatalf("NewResourceMonitor() error = %v", err)
 	}
 
-	limits := monitor.GetLimits()
-	if limits[ResourceCPU] != nil {
+	if monitor.GetLimits()[ResourceCPU] != nil {
 		t.Error("Expected no CPU limit for zero quota")
 	}
 }
 
 func TestResourceMonitor_ReadLimitsV1_MissingPeriod(t *testing.T) {
-	tmpDir := t.TempDir()
-	cgroupPath := filepath.Join(tmpDir, "test-cgroup")
-	if err := os.MkdirAll(cgroupPath, 0755); err != nil {
-		t.Fatalf("Failed to create test cgroup dir: %v", err)
-	}
-
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "cpu"), 0755)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "cpu", "cpu.cfs_quota_us"), []byte("100000"), 0644)
+	base := t.TempDir()
+	useCgroupBase(t, base)
+	cgroupPath := writeCgroupV1Layout(t, base, "kubepods/pod-test", map[string]map[string]string{
+		"cpu,cpuacct": {"cpu.cfs_quota_us": "100000"},
+	})
 
 	eventChan := make(chan *events.Event, 10)
 	monitor, err := NewResourceMonitor(cgroupPath, nil, nil, eventChan, "test-ns")
@@ -1186,22 +1183,20 @@ func TestResourceMonitor_ReadLimitsV1_MissingPeriod(t *testing.T) {
 		t.Fatalf("NewResourceMonitor() error = %v", err)
 	}
 
-	limits := monitor.GetLimits()
-	if limits[ResourceCPU] != nil {
+	if monitor.GetLimits()[ResourceCPU] != nil {
 		t.Error("Expected no CPU limit when period is missing")
 	}
 }
 
 func TestResourceMonitor_ReadLimitsV1_ZeroPeriod(t *testing.T) {
-	tmpDir := t.TempDir()
-	cgroupPath := filepath.Join(tmpDir, "test-cgroup")
-	if err := os.MkdirAll(cgroupPath, 0755); err != nil {
-		t.Fatalf("Failed to create test cgroup dir: %v", err)
-	}
-
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "cpu"), 0755)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "cpu", "cpu.cfs_quota_us"), []byte("100000"), 0644)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "cpu", "cpu.cfs_period_us"), []byte("0"), 0644)
+	base := t.TempDir()
+	useCgroupBase(t, base)
+	cgroupPath := writeCgroupV1Layout(t, base, "kubepods/pod-test", map[string]map[string]string{
+		"cpu,cpuacct": {
+			"cpu.cfs_quota_us":  "100000",
+			"cpu.cfs_period_us": "0",
+		},
+	})
 
 	eventChan := make(chan *events.Event, 10)
 	monitor, err := NewResourceMonitor(cgroupPath, nil, nil, eventChan, "test-ns")
@@ -1209,21 +1204,17 @@ func TestResourceMonitor_ReadLimitsV1_ZeroPeriod(t *testing.T) {
 		t.Fatalf("NewResourceMonitor() error = %v", err)
 	}
 
-	limits := monitor.GetLimits()
-	if limits[ResourceCPU] != nil {
+	if monitor.GetLimits()[ResourceCPU] != nil {
 		t.Error("Expected no CPU limit for zero period")
 	}
 }
 
 func TestResourceMonitor_ReadLimitsV1_ZeroMemoryLimit(t *testing.T) {
-	tmpDir := t.TempDir()
-	cgroupPath := filepath.Join(tmpDir, "test-cgroup")
-	if err := os.MkdirAll(cgroupPath, 0755); err != nil {
-		t.Fatalf("Failed to create test cgroup dir: %v", err)
-	}
-
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "memory"), 0755)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "memory", "memory.limit_in_bytes"), []byte("0"), 0644)
+	base := t.TempDir()
+	useCgroupBase(t, base)
+	cgroupPath := writeCgroupV1Layout(t, base, "kubepods/pod-test", map[string]map[string]string{
+		"memory": {"memory.limit_in_bytes": "0"},
+	})
 
 	eventChan := make(chan *events.Event, 10)
 	monitor, err := NewResourceMonitor(cgroupPath, nil, nil, eventChan, "test-ns")
@@ -1231,8 +1222,7 @@ func TestResourceMonitor_ReadLimitsV1_ZeroMemoryLimit(t *testing.T) {
 		t.Fatalf("NewResourceMonitor() error = %v", err)
 	}
 
-	limits := monitor.GetLimits()
-	if limits[ResourceMemory] != nil {
+	if monitor.GetLimits()[ResourceMemory] != nil {
 		t.Error("Expected no memory limit for zero limit")
 	}
 }
@@ -1304,14 +1294,11 @@ func TestResourceMonitor_ReadLimitsV2_ZeroIOMax(t *testing.T) {
 }
 
 func TestResourceMonitor_ReadLimitsV1_ZeroIO(t *testing.T) {
-	tmpDir := t.TempDir()
-	cgroupPath := filepath.Join(tmpDir, "test-cgroup")
-	if err := os.MkdirAll(cgroupPath, 0755); err != nil {
-		t.Fatalf("Failed to create test cgroup dir: %v", err)
-	}
-
-	_ = os.MkdirAll(filepath.Join(cgroupPath, "blkio"), 0755)
-	_ = os.WriteFile(filepath.Join(cgroupPath, "blkio", "blkio.throttle.read_bps_device"), []byte("8:0 0"), 0644)
+	base := t.TempDir()
+	useCgroupBase(t, base)
+	cgroupPath := writeCgroupV1Layout(t, base, "kubepods/pod-test", map[string]map[string]string{
+		"blkio": {"blkio.throttle.read_bps_device": "8:0 0"},
+	})
 
 	eventChan := make(chan *events.Event, 10)
 	monitor, err := NewResourceMonitor(cgroupPath, nil, nil, eventChan, "test-ns")
@@ -1319,8 +1306,7 @@ func TestResourceMonitor_ReadLimitsV1_ZeroIO(t *testing.T) {
 		t.Fatalf("NewResourceMonitor() error = %v", err)
 	}
 
-	limits := monitor.GetLimits()
-	if limits[ResourceIO] != nil {
+	if monitor.GetLimits()[ResourceIO] != nil {
 		t.Error("Expected no IO limit for zero value")
 	}
 }
