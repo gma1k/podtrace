@@ -301,7 +301,8 @@ int dns_egress(struct __sk_buff *skb) {
 	q.ts_ns = bpf_ktime_get_ns();
 	q.pid = bpf_get_current_pid_tgid() >> 32;
 	q.transport = transport;
-	bpf_get_current_comm(&q.comm, sizeof(q.comm));
+	/* bpf_get_current_comm is not available to cgroup_skb programs;
+	 * q.comm stays zeroed and userspace resolves the name from q.pid. */
 	if (!is_v6) {
 		__u32 daddr = 0;
 		if (bpf_skb_load_bytes(skb, 16, &daddr, sizeof(daddr)) == 0)
