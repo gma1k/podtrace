@@ -16,15 +16,12 @@ import (
 )
 
 // BundlePayload is an alias for bundle.Payload so existing agent callers
-// keep their familiar type name. New code should import
-// pkg/exporter/bundle directly.
+// keep their familiar type name.
 type BundlePayload = bundle.Payload
 
 // LoadBundle reads the ConfigMap+optional-Secret pair the operator
 // maintains in systemNamespace for the given PodTrace UID, and returns
-// the parsed payload. Returns a NotFound error when the ConfigMap is
-// missing so the caller can distinguish "not yet synced" from real
-// failures.
+// the parsed payload.
 func LoadBundle(ctx context.Context, c client.Client, systemNamespace string, podtraceUID types.UID) (*BundlePayload, error) {
 	name := operator.ExporterBundleName(podtraceUID)
 
@@ -41,8 +38,7 @@ func LoadBundle(ctx context.Context, c client.Client, systemNamespace string, po
 
 	// Credential Secret is only present when the exporter needed one
 	// (Splunk HEC token, DataDog API key, or an OTLP Secret-backed
-	// header). NotFound is non-fatal and returns a credential-less
-	// payload — valid for credential-less exporters like Jaeger/Zipkin.
+	// header).
 	var sec corev1.Secret
 	if err := c.Get(ctx, types.NamespacedName{Name: name, Namespace: systemNamespace}, &sec); err == nil {
 		payload.Credential = sec.Data[bundle.CredentialKey]
@@ -54,6 +50,7 @@ func LoadBundle(ctx context.Context, c client.Client, systemNamespace string, po
 				payload.SecretHeaders[rest] = string(v)
 			}
 		}
+		payload.ResourceVer = cm.ResourceVersion + "/" + sec.ResourceVersion
 	} else if !apierrors.IsNotFound(err) {
 		return nil, fmt.Errorf("get bundle Secret: %w", err)
 	}

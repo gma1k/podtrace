@@ -89,6 +89,52 @@ func TestLoadBundle_WithCredential(t *testing.T) {
 	}
 }
 
+// TestLoadBundle_CredentialRotationChangesRevision is the regression guard:
+// a credential-only rotation leaves the bundle ConfigMap untouched,
+// so the ConfigMap ResourceVersion alone cannot detect it.
+func TestLoadBundle_CredentialRotationChangesRevision(t *testing.T) {
+	const systemNS = "podtrace-system"
+	uid := types.UID("e8c32c91-0000-0000-0000-000000000003")
+	name := operator.ExporterBundleName(uid)
+
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+
+	load := func(cmRV, secRV, token string) *BundlePayload {
+		t.Helper()
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: systemNS, ResourceVersion: cmRV},
+			Data:       map[string]string{"type": "datadog", "site": "datadoghq.com"},
+		}
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: systemNS, ResourceVersion: secRV},
+			Data:       map[string][]byte{"credential": []byte(token)},
+		}
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cm, secret).Build()
+		p, err := LoadBundle(context.Background(), c, systemNS, uid)
+		if err != nil {
+			t.Fatalf("LoadBundle: %v", err)
+		}
+		return p
+	}
+
+	base := load("100", "7", "token-old")
+	if base.ResourceVer != "100/7" {
+		t.Fatalf("ResourceVer=%q want 100/7", base.ResourceVer)
+	}
+
+	rotated := load("100", "8", "token-new")
+	if rotated.ResourceVer == base.ResourceVer {
+		t.Fatalf("ResourceVer unchanged after credential rotation (%q): the cached exporter would keep exporting with the dead token", rotated.ResourceVer)
+	}
+	if rotated.ResourceVer != "100/8" {
+		t.Errorf("ResourceVer=%q want 100/8", rotated.ResourceVer)
+	}
+	if string(rotated.Credential) != "token-new" {
+		t.Errorf("credential=%q want token-new", rotated.Credential)
+	}
+}
+
 func TestLoadBundle_MissingConfigMap(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)

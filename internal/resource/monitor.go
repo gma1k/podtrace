@@ -174,12 +174,7 @@ func (rm *ResourceMonitor) readLimits() error {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
-	isV2, err := isCgroupV2(rm.cgroupPath)
-	if err != nil {
-		return err
-	}
-
-	if isV2 {
+	if isCgroupV2(rm.cgroupPath) {
 		return rm.readLimitsV2()
 	}
 	return rm.readLimitsV1()
@@ -239,9 +234,60 @@ func (rm *ResourceMonitor) readLimitsV2() error {
 	return rm.syncToBPF()
 }
 
+// cgroup v1 controller mount directory candidates, relative to
+// config.CgroupBasePath. Each controller is its own hierarchy; cpu and cpuacct
+// are usually co-mounted ("cpu,cpuacct") but may be split, so try both forms.
+var (
+	cgroupV1CPUDirs     = []string{"cpu,cpuacct", "cpuacct,cpu", "cpu"}
+	cgroupV1CPUAcctDirs = []string{"cpu,cpuacct", "cpuacct,cpu", "cpuacct"}
+	cgroupV1MemoryDirs  = []string{"memory"}
+	cgroupV1BlkioDirs   = []string{"blkio"}
+)
+
+// cgroupV1Subpath returns the pod's cgroup path relative to a v1 controller
+// root: the discovered path with the base and the leading controller segment
+// stripped. For "/sys/fs/cgroup/cpu,cpuacct/kubepods/pod123" it returns
+// "kubepods/pod123", which then reattaches under any controller hierarchy.
+func cgroupV1Subpath(cgroupPath string) (string, bool) {
+	rel, ok := sysfs.CgroupRelative(cgroupPath)
+	if !ok || rel == "." {
+		return "", false
+	}
+	slash := strings.IndexByte(rel, '/')
+	if slash < 0 {
+		return "", false
+	}
+	return rel[slash+1:], true
+}
+
+// readV1ControllerFile reads a cgroup v1 file from the first controller mount
+// that has it: <base>/<controller>/<subpath>/<file>. Unlike v2, the controller
+// is a path PREFIX (a separate hierarchy), not a subdirectory of the pod path.
+func readV1ControllerFile(controllers []string, subpath, file string) (string, error) {
+	var lastErr error
+	for _, ctrl := range controllers {
+		content, err := readCgroupFile(filepath.Join(config.CgroupBasePath, ctrl, subpath, file))
+		if err == nil {
+			return content, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no controller mount found for %s among %v", file, controllers)
+	}
+	return "", lastErr
+}
+
 func (rm *ResourceMonitor) readLimitsV1() error {
-	cpuQuota, _ := readCgroupFile(filepath.Join(rm.cgroupPath, "cpu", "cpu.cfs_quota_us"))
-	cpuPeriod, _ := readCgroupFile(filepath.Join(rm.cgroupPath, "cpu", "cpu.cfs_period_us"))
+	subpath, ok := cgroupV1Subpath(rm.cgroupPath)
+	if !ok {
+		logger.Debug("cgroup v1: cannot derive controller subpath from cgroup path",
+			zap.String("cgroup_path", rm.cgroupPath))
+		return rm.syncToBPF()
+	}
+
+	cpuQuota, _ := readV1ControllerFile(cgroupV1CPUDirs, subpath, "cpu.cfs_quota_us")
+	cpuPeriod, _ := readV1ControllerFile(cgroupV1CPUDirs, subpath, "cpu.cfs_period_us")
 	if cpuQuota != "" && cpuPeriod != "" {
 		quota, _ := strconv.ParseUint(strings.TrimSpace(cpuQuota), 10, 64)
 		period, _ := strconv.ParseUint(strings.TrimSpace(cpuPeriod), 10, 64)
@@ -255,7 +301,7 @@ func (rm *ResourceMonitor) readLimitsV1() error {
 		}
 	}
 
-	memLimit, err := readCgroupFile(filepath.Join(rm.cgroupPath, "memory", "memory.limit_in_bytes"))
+	memLimit, err := readV1ControllerFile(cgroupV1MemoryDirs, subpath, "memory.limit_in_bytes")
 	if err == nil {
 		limit := parseMemoryMax(memLimit)
 		if limit > 0 {
@@ -267,8 +313,8 @@ func (rm *ResourceMonitor) readLimitsV1() error {
 		}
 	}
 
-	ioRead, _ := readCgroupFile(filepath.Join(rm.cgroupPath, "blkio", "blkio.throttle.read_bps_device"))
-	ioWrite, _ := readCgroupFile(filepath.Join(rm.cgroupPath, "blkio", "blkio.throttle.write_bps_device"))
+	ioRead, _ := readV1ControllerFile(cgroupV1BlkioDirs, subpath, "blkio.throttle.read_bps_device")
+	ioWrite, _ := readV1ControllerFile(cgroupV1BlkioDirs, subpath, "blkio.throttle.write_bps_device")
 	limit := parseBlkioThrottleBps(ioRead)
 	if w := parseBlkioThrottleBps(ioWrite); w > limit {
 		limit = w
@@ -293,12 +339,7 @@ func (rm *ResourceMonitor) updateResourceUsage() error {
 	}
 	defer rm.mu.Unlock()
 
-	isV2, err := isCgroupV2(rm.cgroupPath)
-	if err != nil {
-		return err
-	}
-
-	if isV2 {
+	if isCgroupV2(rm.cgroupPath) {
 		return rm.updateUsageV2()
 	}
 	return rm.updateUsageV1()
@@ -336,7 +377,12 @@ func (rm *ResourceMonitor) updateUsageV2() error {
 }
 
 func (rm *ResourceMonitor) updateUsageV1() error {
-	cpuUsage, err := readCgroupFile(filepath.Join(rm.cgroupPath, "cpuacct", "cpuacct.usage"))
+	subpath, ok := cgroupV1Subpath(rm.cgroupPath)
+	if !ok {
+		return rm.syncToBPF()
+	}
+
+	cpuUsage, err := readV1ControllerFile(cgroupV1CPUAcctDirs, subpath, "cpuacct.usage")
 	if err == nil {
 		usage, _ := strconv.ParseUint(strings.TrimSpace(cpuUsage), 10, 64)
 		if limit, ok := rm.limits[ResourceCPU]; ok {
@@ -345,7 +391,7 @@ func (rm *ResourceMonitor) updateUsageV1() error {
 		}
 	}
 
-	memUsage, err := readCgroupFile(filepath.Join(rm.cgroupPath, "memory", "memory.usage_in_bytes"))
+	memUsage, err := readV1ControllerFile(cgroupV1MemoryDirs, subpath, "memory.usage_in_bytes")
 	if err == nil {
 		usage := parseMemoryMax(memUsage)
 		if limit, ok := rm.limits[ResourceMemory]; ok {
@@ -354,7 +400,7 @@ func (rm *ResourceMonitor) updateUsageV1() error {
 		}
 	}
 
-	ioBytes, err := readCgroupFile(filepath.Join(rm.cgroupPath, "blkio", "blkio.io_service_bytes"))
+	ioBytes, err := readV1ControllerFile(cgroupV1BlkioDirs, subpath, "blkio.io_service_bytes")
 	if err == nil {
 		usage := parseBlkioServiceBytes(ioBytes)
 		if limit, ok := rm.limits[ResourceIO]; ok {
@@ -598,19 +644,27 @@ func getCgroupInode(cgroupPath string) (uint64, error) {
 	return uint64(stat.Ino), nil
 }
 
-func isCgroupV2(cgroupPath string) (bool, error) {
-	controllersPath := filepath.Join(cgroupPath, "cgroup.controllers")
-	_, err := os.Stat(controllersPath)
-	if err == nil {
-		return true, nil
+// isCgroupV2 reports whether the cgroup hierarchy backing cgroupPath is the
+// unified v2 hierarchy. A cgroup.controllers file exists only under v2 — never
+// inside a v1 controller hierarchy — so its presence at the mount root
+// (config.CgroupBasePath) is the authoritative signal, matching the check the
+// tracer and CLI use. The per-path check is a fallback for callers whose base
+// is itself a unified-hierarchy node. When neither is present the node is v1.
+//
+// The previous implementation probed for cpu/ and memory/ SUBDIRECTORIES of
+// the pod path and returned an error otherwise. That never matched a real v1
+// node — there the controllers are separate sibling hierarchies ABOVE the pod
+// path (/sys/fs/cgroup/cpu,cpuacct/..., /sys/fs/cgroup/memory/...), not
+// subdirectories of it — so v1 always fell through to "cannot determine
+// version" and resource monitoring silently did nothing.
+func isCgroupV2(cgroupPath string) bool {
+	if _, err := os.Stat(filepath.Join(config.CgroupBasePath, "cgroup.controllers")); err == nil {
+		return true
 	}
-	if _, err := os.Stat(filepath.Join(cgroupPath, "cpu")); err == nil {
-		return false, nil
+	if _, err := os.Stat(filepath.Join(cgroupPath, "cgroup.controllers")); err == nil {
+		return true
 	}
-	if _, err := os.Stat(filepath.Join(cgroupPath, "memory")); err == nil {
-		return false, nil
-	}
-	return false, fmt.Errorf("cannot determine cgroup version")
+	return false
 }
 
 func readCgroupFile(path string) (string, error) {

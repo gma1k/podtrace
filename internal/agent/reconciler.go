@@ -69,7 +69,7 @@ type cachedExporter struct {
 }
 
 // SetupWithManager registers the reconciler onto the manager with all
-// three watched sources.
+// four watched sources.
 func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.ExporterBuilder == nil {
 		metrics := r.Metrics
@@ -93,6 +93,9 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			builder.WithPredicates(podChangePredicates()),
 		).
 		Watches(&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(r.enqueueOnBundleChange),
+		).
+		Watches(&corev1.Secret{},
 			handler.EnqueueRequestsFromMapFunc(r.enqueueOnBundleChange),
 		).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
@@ -278,9 +281,11 @@ func (r *AgentReconciler) enqueueAllPodTraces(ctx context.Context, _ client.Obje
 	return out
 }
 
-// enqueueOnBundleChange handles ConfigMap watches: only bundle
-// ConfigMaps (with our managed-by label) produce reconcile requests,
-// and each such event enqueues every PodTrace.
+// enqueueOnBundleChange handles the ConfigMap and Secret bundle watches:
+// only bundle objects (with our managed-by + exporter-bundle labels)
+// produce reconcile requests, and each such event enqueues every
+// PodTrace. Watching the Secret is what lets a credential-only rotation,
+// which never touches the bundle ConfigMap, trigger a reconcile.
 func (r *AgentReconciler) enqueueOnBundleChange(ctx context.Context, obj client.Object) []reconcile.Request {
 	if obj.GetLabels()[operator.LabelManagedBy] != operator.ManagedByValue {
 		return nil
