@@ -92,15 +92,14 @@ static __noinline void http_capture_traceparent(void *base, u64 avail, char *out
 	if (v < HTTP_SCAN_BUF_SIZE && buf[v & (HTTP_SCAN_BUF_SIZE - 1)] == ' ')
 		v++;
 
-	const char prefix[] = "traceparent: ";
-	u32 p;
-#pragma unroll
-	for (p = 0; p < 13; p++)
-		out[p] = prefix[p];
-	u32 k;
-#pragma unroll
-	for (k = 0; k < W3C_TRACEPARENT_LEN; k++)
-		out[13 + k] = buf[(v + k) & (HTTP_SCAN_BUF_SIZE - 1)];
+	if (v + W3C_TRACEPARENT_LEN > rlen)
+		return;
+
+	__builtin_memcpy(out, "traceparent: ", 13);
+	if (bpf_probe_read_user(out + 13, W3C_TRACEPARENT_LEN, (char *)base + v) != 0) {
+		out[0] = '\0';
+		return;
+	}
 	out[13 + W3C_TRACEPARENT_LEN] = '\0';
 }
 
@@ -110,22 +109,24 @@ static __noinline void http_emit_request(void *ctx, void *base, u64 avail,
 	if (!base || avail < HTTP_MIN_REQUEST_LEN)
 		return;
 
-	u8 buf[HTTP_INSPECT_LEN] = {};
-	u32 read_len = (u32)avail;
-	if (read_len > HTTP_INSPECT_LEN)
-		read_len = HTTP_INSPECT_LEN;
+	u32 zero = 0;
+	char *buf = bpf_map_lookup_elem(&http_scan_buf, &zero);
+	if (!buf)
+		return;
+	u32 read_len = (avail < HTTP_INSPECT_LEN) ? (u32)avail : HTTP_INSPECT_LEN;
 	if (bpf_probe_read_user(buf, read_len, base) != 0)
 		return;
 
-	if (http_method_len(buf) == 0)
+	if (http_method_len((const u8 *)buf) == 0)
 		return;
 
-	char endpoint[MAX_STRING_LEN] = {};
+	struct http_req req = {};
+	req.start_ns = bpf_ktime_get_ns();
 	u32 p = 0;
 	int spaces = 0;
 	u32 i;
-	for (i = 0; i < HTTP_INSPECT_LEN && p < MAX_STRING_LEN - 1; i++) {
-		u8 c = buf[i];
+	for (i = 0; i < HTTP_INSPECT_LEN && i < read_len && p < MAX_STRING_LEN - 1; i++) {
+		u8 c = (u8)buf[i & (HTTP_SCAN_BUF_SIZE - 1)];
 		if (c == '\r' || c == '\n' || c == 0)
 			break;
 		if (c == ' ') {
@@ -133,19 +134,16 @@ static __noinline void http_emit_request(void *ctx, void *base, u64 avail,
 			if (spaces == 2)
 				break;
 		}
-		endpoint[p++] = c;
+		req.endpoint[p++] = c;
 	}
 	if (p == 0)
 		return;
-	endpoint[p] = '\0';
+	req.endpoint[p & (MAX_STRING_LEN - 1)] = '\0';
 
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 now = bpf_ktime_get_ns();
+	u64 now = req.start_ns;
 
-	struct http_req req = {};
-	req.start_ns = now;
-	__builtin_memcpy(req.endpoint, endpoint, sizeof(endpoint));
 	bpf_map_update_elem(&http_reqs, &conn, &req, BPF_ANY);
 
 	struct event *e = get_event_buf();
@@ -158,7 +156,7 @@ static __noinline void http_emit_request(void *ctx, void *base, u64 avail,
 		e->bytes = 0;
 		e->tcp_state = transport;
 		e->correlation_id = now;
-		bpf_probe_read_kernel_str(e->target, sizeof(e->target), endpoint);
+		bpf_probe_read_kernel_str(e->target, sizeof(e->target), req.endpoint);
 		http_capture_traceparent(base, avail, e->details);
 		fill_event_peer(e);
 		capture_user_stack(ctx, pid, tid, e);
