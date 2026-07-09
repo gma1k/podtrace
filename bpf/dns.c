@@ -115,8 +115,10 @@ static __noinline int parse_qname(struct __sk_buff *skb, int off, char *out) {
 				break;
 			if (c > 63)
 				break;
-			if (j > 0 && j < MAX_STRING_LEN - 1)
-				out[j++] = '.';
+			if (j > 0 && j < MAX_STRING_LEN - 1) {
+				out[j & (MAX_STRING_LEN - 1)] = '.';
+				j++;
+			}
 			label_remaining = c;
 			need_len = 0;
 		} else {
@@ -155,8 +157,10 @@ static __noinline void parse_name_compressed(struct __sk_buff *skb, int dns_off,
 				break;
 			if (c > 63)
 				break;
-			if (j > 0 && j < MAX_STRING_LEN - 1)
-				out[j++] = '.';
+			if (j > 0 && j < MAX_STRING_LEN - 1) {
+				out[j & (MAX_STRING_LEN - 1)] = '.';
+				j++;
+			}
 			label_remaining = c;
 			need_len = 0;
 		} else {
