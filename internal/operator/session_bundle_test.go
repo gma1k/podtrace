@@ -96,8 +96,8 @@ func TestEnsureSessionExporterBundle_UpdatesExisting(t *testing.T) {
 	if cm.Labels["existing"] != "true" {
 		t.Errorf("lost existing label: %+v", cm.Labels)
 	}
-	if cm.Data["other"] != "preserved" {
-		t.Errorf("wiped unrelated data key: %+v", cm.Data)
+	if _, ok := cm.Data["other"]; ok {
+		t.Errorf("stale data key not pruned on update: %+v", cm.Data)
 	}
 	if cm.Data["type"] != "otlp" {
 		t.Errorf("bundle keys not applied: %+v", cm.Data)

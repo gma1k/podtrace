@@ -49,7 +49,7 @@ func hasFlag(args []string, flag string) bool {
 func TestBuildDiagnoseArgs_MultiNamespace(t *testing.T) {
 	s := newSession(nil)
 
-	multi := buildDiagnoseArgs(s, []string{"team-a", "team-b"})
+	multi := buildDiagnoseArgs(s, []string{"team-a", "team-b"}, s.Spec.Duration.Duration)
 	if !hasFlagValue(multi, "--namespaces", "team-a,team-b") {
 		t.Errorf("expected --namespaces team-a,team-b; got %v", multi)
 	}
@@ -57,7 +57,7 @@ func TestBuildDiagnoseArgs_MultiNamespace(t *testing.T) {
 		t.Errorf("must not pin to the session namespace when an allowlist is resolved; got %v", multi)
 	}
 
-	own := buildDiagnoseArgs(s, nil)
+	own := buildDiagnoseArgs(s, nil, s.Spec.Duration.Duration)
 	if !hasFlagValue(own, "--namespace", "default") {
 		t.Errorf("expected --namespace default for own-namespace scope; got %v", own)
 	}

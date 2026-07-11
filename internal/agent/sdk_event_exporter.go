@@ -82,11 +82,12 @@ func newSDKEventExporter(name string, cr CRKey, b *BundlePayload, spanExporter s
 		metrics: cfg.metrics,
 	}
 
+	bsp := sdktrace.NewBatchSpanProcessor(observed,
+		sdktrace.WithMaxExportBatchSize(128),
+		sdktrace.WithBatchTimeout(2*time.Second),
+	)
 	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(observed,
-			sdktrace.WithMaxExportBatchSize(128),
-			sdktrace.WithBatchTimeout(2*time.Second),
-		),
+		sdktrace.WithSpanProcessor(&countingSpanProcessor{inner: bsp, cr: cr, metrics: cfg.metrics}),
 		sdktrace.WithSampler(sampler),
 		sdktrace.WithResource(res),
 	)
@@ -108,9 +109,7 @@ func newSDKEventExporter(name string, cr CRKey, b *BundlePayload, spanExporter s
 }
 
 // policyThresholdsFromBundle deep-copies the bundle's Thresholds into
-// the agent-side struct. Decoupling the typed reference here means the
-// SDK exporter is never holding a pointer into a BundlePayload that may
-// be reused by a later reconcile.
+// the agent-side struct.
 func policyThresholdsFromBundle(in *bundleThresholds) *PolicyThresholds {
 	if in == nil {
 		return nil
@@ -141,7 +140,7 @@ func (e *sdkEventExporter) Name() string { return e.name }
 // Export creates one span per event. This is a lossy compression of
 // the semantic trace graph a full Tracker would assemble, but it
 // faithfully captures "this event happened at this time with these
-// attributes" — enough for the agent's routing guarantees to be
+// attributes", enough for the agent's routing guarantees to be
 // observable in any OTel-aware backend.
 func (e *sdkEventExporter) Export(ctx context.Context, batch []*events.Event) error {
 	if len(batch) == 0 {
@@ -353,8 +352,8 @@ type deliveryObservingExporter struct {
 
 func (e *deliveryObservingExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySpan) error {
 	err := e.inner.ExportSpans(ctx, spans)
+	e.metrics.ObserveExportDelivery(e.cr, len(spans), err)
 	if err != nil {
-		e.metrics.ObserveExportDelivery(e.cr, len(spans), err)
 		e.mu.Lock()
 		firstFailure := !e.failing
 		e.failing = true
@@ -383,5 +382,30 @@ func (e *deliveryObservingExporter) ExportSpans(ctx context.Context, spans []sdk
 func (e *deliveryObservingExporter) Shutdown(ctx context.Context) error {
 	return e.inner.Shutdown(ctx)
 }
+
+// countingSpanProcessor counts spans accepted into the wrapped processor's
+// queue (one per OnEnd, i.e. post-sampling) before the BatchSpanProcessor
+// makes its enqueue-or-drop decision, so queue-overflow drops are derivable.
+type countingSpanProcessor struct {
+	inner   sdktrace.SpanProcessor
+	cr      CRKey
+	metrics *Metrics
+}
+
+func (p *countingSpanProcessor) OnStart(parent context.Context, s sdktrace.ReadWriteSpan) {
+	p.inner.OnStart(parent, s)
+}
+
+func (p *countingSpanProcessor) OnEnd(s sdktrace.ReadOnlySpan) {
+	p.metrics.ObserveSpanBatched(p.cr, 1)
+	p.inner.OnEnd(s)
+}
+
+func (p *countingSpanProcessor) Shutdown(ctx context.Context) error { return p.inner.Shutdown(ctx) }
+func (p *countingSpanProcessor) ForceFlush(ctx context.Context) error {
+	return p.inner.ForceFlush(ctx)
+}
+
+var _ sdktrace.SpanProcessor = (*countingSpanProcessor)(nil)
 
 var _ sdktrace.SpanExporter = (*deliveryObservingExporter)(nil)

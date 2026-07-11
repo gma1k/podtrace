@@ -37,9 +37,16 @@ func newOTLPSpanExporter(b *BundlePayload) (*otlptrace.Exporter, error) {
 	}
 
 	opts := []otlptracehttp.Option{
-		otlptracehttp.WithEndpoint(endpoint),
+		otlptracehttp.WithEndpoint(endpoint.host),
 	}
-	if b.Insecure {
+	if endpoint.path != "" && endpoint.path != "/" {
+		opts = append(opts, otlptracehttp.WithURLPath(endpoint.path))
+	}
+	insecure := b.Insecure
+	if endpoint.insecure != nil {
+		insecure = *endpoint.insecure
+	}
+	if insecure {
 		opts = append(opts, otlptracehttp.WithInsecure())
 	}
 	if len(b.Headers) > 0 || len(b.SecretHeaders) > 0 || b.HeaderName != "" {
@@ -67,26 +74,41 @@ func newOTLPSpanExporter(b *BundlePayload) (*otlptrace.Exporter, error) {
 	return spanExporter, nil
 }
 
-// normalizeOTLPEndpoint strips any scheme because otlptracehttp takes
-// a host:port (it adds scheme based on WithInsecure). Accepts both
-// "collector:4318" and "http://collector:4318" forms for user convenience.
-func normalizeOTLPEndpoint(raw string) (string, error) {
+// otlpEndpoint is the decomposed OTLP endpoint: otlptracehttp wants the
+// host:port, the URL path, and TLS-vs-plaintext as separate options.
+type otlpEndpoint struct {
+	host     string
+	path     string
+	insecure *bool
+}
+
+// normalizeOTLPEndpoint decomposes the endpoint into host / path / scheme.
+// Accepts "collector:4318", "http://collector:4318" and
+// "https://collector:4318/v1/traces".
+func normalizeOTLPEndpoint(raw string) (otlpEndpoint, error) {
 	if raw == "" {
-		return "", fmt.Errorf("empty endpoint")
+		return otlpEndpoint{}, fmt.Errorf("empty endpoint")
 	}
 	if strings.Contains(raw, "://") {
 		u, err := url.Parse(raw)
 		if err != nil {
-			return "", err
+			return otlpEndpoint{}, err
 		}
-		return u.Host, nil
+		ep := otlpEndpoint{host: u.Host, path: u.Path}
+		switch u.Scheme {
+		case "http":
+			t := true
+			ep.insecure = &t
+		case "https":
+			f := false
+			ep.insecure = &f
+		}
+		return ep, nil
 	}
-	return raw, nil
+	return otlpEndpoint{host: raw}, nil
 }
 
-// eventSpanName picks a human-readable span name from the event. Keep
-// it short: trace backends index span-name heavily and verbose names
-// balloon cardinality.
+// eventSpanName picks a human-readable span name from the event.
 func eventSpanName(ev *events.Event) string {
 	base := eventTypeString(ev.Type)
 	if ev.Target != "" {
@@ -103,9 +125,7 @@ func eventTypeString(t events.EventType) string {
 }
 
 // eventTypeNames maps the small set of EventType values we care about
-// for span-name readability. Unmatched values fall back to the generic
-// "event_<N>" in eventTypeString — we explicitly prefer this over
-// dumping the bare int so span search queries remain legible.
+// for span-name readability.
 var eventTypeNames = map[events.EventType]string{
 	events.EventDNS:            "dns",
 	events.EventConnect:        "net.connect",

@@ -69,5 +69,16 @@ func ValidateExporterConfigVariant(spec ExporterConfigSpec) error {
 	if populated[0] != spec.Type {
 		return fmt.Errorf("spec.type %q does not match populated field spec.%s", spec.Type, populated[0])
 	}
+	if spec.Type == ExporterTypeOTLP && spec.OTLP != nil {
+		secretHeaders := 0
+		for _, h := range spec.OTLP.Headers {
+			if h.ValueFrom != nil {
+				secretHeaders++
+			}
+		}
+		if secretHeaders > 1 {
+			return fmt.Errorf("at most one headers[].valueFrom is supported (the bundle carries a single credential); move additional secret-backed headers into spec.otlp.headersFromSecret")
+		}
+	}
 	return nil
 }

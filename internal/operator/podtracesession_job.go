@@ -3,6 +3,7 @@ package operator
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -32,7 +33,8 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 		sidecarUploader = tc.Spec.Session.SidecarUploader
 	}
 
-	activeDeadline := int64(s.Spec.Duration.Seconds()) + int64(deadlineOffset)
+	effectiveDuration := effectiveSessionDuration(s, tc)
+	activeDeadline := int64(effectiveDuration.Seconds()) + int64(deadlineOffset)
 
 	imagePullPolicy := corev1.PullIfNotPresent
 	image := ""
@@ -50,7 +52,7 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 	priv := true
 	runAsRoot := int64(0)
 
-	args := buildDiagnoseArgs(s, targetNamespaces)
+	args := buildDiagnoseArgs(s, targetNamespaces, effectiveDuration)
 	reportTo := reportToSpecFromReportRef(s)
 
 	volumes := []corev1.Volume{
@@ -261,9 +263,19 @@ func pointerBool(b bool) *bool {
 
 // buildDiagnoseArgs produces the `podtrace` CLI args that a session Job
 // executes.
-func buildDiagnoseArgs(s *podtracev1alpha1.PodTraceSession, targetNamespaces []string) []string {
+func effectiveSessionDuration(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alpha1.TracerConfig) time.Duration {
+	d := s.Spec.Duration.Duration
+	if tc != nil && tc.Spec.Session.MaxDuration != nil {
+		if cap := tc.Spec.Session.MaxDuration.Duration; cap > 0 && cap < d {
+			return cap
+		}
+	}
+	return d
+}
+
+func buildDiagnoseArgs(s *podtracev1alpha1.PodTraceSession, targetNamespaces []string, duration time.Duration) []string {
 	args := []string{
-		"--diagnose", s.Spec.Duration.Duration.String(),
+		"--diagnose", duration.String(),
 	}
 	if s.Spec.ContainerName != "" {
 		args = append(args, "--container", s.Spec.ContainerName)

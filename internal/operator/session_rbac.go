@@ -235,13 +235,33 @@ func buildSessionReportRules(ref *podtracev1alpha1.ReportReference) []rbacv1.Pol
 			ResourceNames: []string{name},
 			Verbs:         []string{"get", "update"},
 		},
-		rbacv1.PolicyRule{
-			APIGroups: []string{""},
-			Resources: []string{resource},
-			Verbs:     []string{"create"},
-		},
 	)
 	return rules
+}
+
+// ensureSessionReportObject pre-creates an empty report ConfigMap/Secret in the
+// session namespace so the Job's ServiceAccount needs only scoped get/update.
+func ensureSessionReportObject(ctx context.Context, c client.Client, s *podtracev1alpha1.PodTraceSession) error {
+	resource, name := reportRefResource(s.Spec.ReportRef)
+	if name == "" {
+		return nil
+	}
+	labels := sessionRBACLabels(s)
+	labels["podtrace.io/managed-by"] = "podtrace-cli"
+	labels["podtrace.io/kind"] = "session-report"
+	var obj client.Object
+	switch resource {
+	case "configmaps":
+		obj = &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: s.Namespace, Labels: labels}}
+	case "secrets":
+		obj = &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: s.Namespace, Labels: labels}}
+	default:
+		return nil
+	}
+	if err := c.Create(ctx, obj); err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("pre-create session report %s/%s: %w", s.Namespace, name, err)
+	}
+	return nil
 }
 
 // reportRefResource decodes spec.reportRef into the (resource, name)
