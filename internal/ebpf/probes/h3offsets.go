@@ -100,6 +100,9 @@ func h3OffsetsFromDWARF(exePath string) (result h3FieldOffsets, ok bool) {
 		if !ok {
 			continue
 		}
+		if decl, _ := ent.Val(dwarf.AttrDeclaration).(bool); decl {
+			continue
+		}
 		for {
 			c, err := r.Next()
 			if err != nil || c == nil || c.Tag == 0 {
@@ -115,6 +118,12 @@ func h3OffsetsFromDWARF(exePath string) (result h3FieldOffsets, ok bool) {
 			}
 			loc, _ := c.Val(dwarf.AttrDataMemberLoc).(int64)
 			if loc < 0 || loc > maxStructFieldOffset {
+				continue
+			}
+			if w.found {
+				if *w.dst != uint32(loc) {
+					return h3FieldOffsets{}, false
+				}
 				continue
 			}
 			*w.dst = uint32(loc)

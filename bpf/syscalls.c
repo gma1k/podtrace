@@ -273,7 +273,7 @@ int kretprobe_vfs_rename(struct pt_regs *ctx) {
 
 	char *path = bpf_map_lookup_elem(&syscall_paths, &key);
 	if (path) {
-		bpf_probe_read_kernel_str(e->target, sizeof(e->target), path);
+		bpf_probe_read_kernel(e->target, sizeof(e->target), path);
 		bpf_map_delete_elem(&syscall_paths, &key);
 	} else {
 		e->target[0] = '\0';

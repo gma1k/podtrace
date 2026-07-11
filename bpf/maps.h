@@ -679,6 +679,13 @@ struct {
 } h3_adapter_calls SEC(".maps");
 
 struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u64);
+	__type(value, struct h3_txn_record);
+} h3_adapter_pending SEC(".maps");
+
+struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
 	__uint(max_entries, 2 * 1024 * 1024);
 } h3_stream_chunks SEC(".maps");
@@ -732,7 +739,7 @@ struct h2_frame_state {
 	u8  type;
 	u8  flags;
 	u8  preface_seen;
-	u8  _pad;
+	u8  pad;
 };
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);

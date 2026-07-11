@@ -44,6 +44,7 @@ import (
 	"github.com/podtrace/podtrace/internal/metricsexporter"
 	"github.com/podtrace/podtrace/internal/procfs"
 	"github.com/podtrace/podtrace/internal/redactor"
+	"github.com/podtrace/podtrace/internal/safeconv"
 	"github.com/podtrace/podtrace/internal/sysfs"
 	"github.com/podtrace/podtrace/internal/validation"
 )
@@ -1620,14 +1621,36 @@ type quicFlowKey struct {
 // extracted (quic-go splits the ClientHello across two Initials) or the BPF
 // per-flow packet cap is reached.
 type quicFlowState struct {
-	pkts [][]byte
-	done bool
+	pkts     [][]byte
+	done     bool
+	lastSeen time.Time
 }
 
 const (
 	quicInitialMaxPackets = 3
 	quicMaxTrackedFlows   = 2048
+	quicFlowTTL           = 30 * time.Second
 )
+
+// evictQUICFlows makes room in the flow table without discarding flows that are
+// still mid-reassembly.
+func evictQUICFlows(flows map[quicFlowKey]*quicFlowState, now time.Time) {
+	var oldestKey quicFlowKey
+	var oldest time.Time
+	found := false
+	for k, st := range flows {
+		if now.Sub(st.lastSeen) > quicFlowTTL {
+			delete(flows, k)
+			continue
+		}
+		if !found || st.lastSeen.Before(oldest) {
+			oldestKey, oldest, found = k, st.lastSeen, true
+		}
+	}
+	if len(flows) >= quicMaxTrackedFlows && found {
+		delete(flows, oldestKey)
+	}
+}
 
 // runQUICInitialReader drains the QUIC Initial packet ringbuf, extracts the SNI
 // (server name) and ALPN from the client's ClientHello via the quicinitial
@@ -1672,18 +1695,20 @@ func (t *Tracer) runQUICInitialReader(ctx context.Context, eventChan chan<- *eve
 			ip = events.PeerIP(2, binary.BigEndian.Uint32(data[24:28]), v6)
 		}
 
+		now := time.Now()
 		key := quicFlowKey{cgroup: binary.LittleEndian.Uint64(data[8:16]), addr: v6, port: dport}
 		st := flows[key]
 		if st == nil {
 			if len(flows) >= quicMaxTrackedFlows {
-				flows = make(map[quicFlowKey]*quicFlowState)
+				evictQUICFlows(flows, now)
 			}
-			st = &quicFlowState{}
+			st = &quicFlowState{lastSeen: now}
 			flows[key] = st
 		}
 		if st.done {
 			continue
 		}
+		st.lastSeen = now
 		pktEnd := hdr + int(binary.LittleEndian.Uint16(data[40:42]))
 		if pktEnd > len(data) {
 			pktEnd = len(data)
@@ -1694,7 +1719,7 @@ func (t *Tracer) runQUICInitialReader(ctx context.Context, eventChan chan<- *eve
 
 		info, xerr := quicinitial.ExtractPackets(st.pkts)
 		if xerr != nil && len(st.pkts) < quicInitialMaxPackets {
-			continue // wait for the flow's next Initial packet
+			continue
 		}
 		st.done = true
 		st.pkts = nil
@@ -1846,14 +1871,45 @@ func (t *Tracer) pollBPFMapUtilization() {
 		if err != nil || info.MaxEntries == 0 {
 			continue
 		}
-		var count uint32
-		var key, val []byte
-		iter := m.Iterate()
-		for iter.Next(&key, &val) {
-			count++
+		count, ok := batchCountMapEntries(m)
+		if !ok {
+			count = 0
+			var key, val []byte
+			iter := m.Iterate()
+			for iter.Next(&key, &val) {
+				count++
+			}
 		}
 		ratio := float64(count) / float64(info.MaxEntries)
 		metricsexporter.RecordBPFMapUtilization(name, ratio)
+	}
+}
+
+// batchCountMapEntries counts a map's live entries using BPF_MAP_LOOKUP_BATCH,
+// turning the O(n) per-entry get_next_key syscalls of a full iteration into
+// O(n/batch) syscalls.
+func batchCountMapEntries(m *ebpf.Map) (uint32, bool) {
+	ks, vs := int(m.KeySize()), int(m.ValueSize())
+	if ks == 0 || vs == 0 {
+		return 0, false
+	}
+	const batch = 256
+	keys := make([]byte, batch*ks)
+	vals := make([]byte, batch*vs)
+	var cursor ebpf.MapBatchCursor
+	var count uint32
+	for {
+		n, err := m.BatchLookup(&cursor, keys, vals, nil)
+		count += safeconv.IntToUint32(n)
+		if errors.Is(err, ebpf.ErrKeyNotExist) {
+			return count, true
+		}
+		if err != nil {
+			return 0, false
+		}
+		if n == 0 {
+			return count, true
+		}
 	}
 }
 

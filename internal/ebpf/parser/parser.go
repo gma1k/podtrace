@@ -18,6 +18,22 @@ var (
 	}
 )
 
+const maxStringLen = 128
+
+// decodeTarget turns a raw fixed-size target buffer into a string.
+func decodeTarget(eventType uint32, raw []byte) string {
+	if events.EventType(eventType) == events.EventRename && len(raw) >= maxStringLen {
+		half := maxStringLen / 2
+		oldName := string(bytes.TrimRight(raw[:half-1], "\x00"))
+		newName := string(bytes.TrimRight(raw[half:maxStringLen], "\x00"))
+		if newName == "" {
+			return oldName
+		}
+		return oldName + ">" + newName
+	}
+	return string(bytes.TrimRight(raw, "\x00"))
+}
+
 type rawEvent struct {
 	Timestamp uint64
 	PID       uint32
@@ -234,7 +250,7 @@ func ParseEvent(data []byte) *events.Event {
 		event.StackKey = e.StackKey
 		event.CgroupID = e.CgroupID
 		event.ProcessName = string(bytes.TrimRight(e.Comm[:], "\x00"))
-		event.Target = string(bytes.TrimRight(e.Target[:], "\x00"))
+		event.Target = decodeTarget(e.Type, e.Target[:])
 		event.Details = string(bytes.TrimRight(e.Details[:], "\x00"))
 		event.NetNsID = e.NetNsID
 		event.DNSServerIP = e.DNSServerIP
@@ -263,7 +279,7 @@ func ParseEvent(data []byte) *events.Event {
 		event.StackKey = e.StackKey
 		event.CgroupID = e.CgroupID
 		event.ProcessName = string(bytes.TrimRight(e.Comm[:], "\x00"))
-		event.Target = string(bytes.TrimRight(e.Target[:], "\x00"))
+		event.Target = decodeTarget(e.Type, e.Target[:])
 		event.Details = string(bytes.TrimRight(e.Details[:], "\x00"))
 		event.NetNsID = e.NetNsID
 		event.DNSServerIP = e.DNSServerIP
@@ -291,7 +307,7 @@ func ParseEvent(data []byte) *events.Event {
 		event.StackKey = e.StackKey
 		event.CgroupID = e.CgroupID
 		event.ProcessName = string(bytes.TrimRight(e.Comm[:], "\x00"))
-		event.Target = string(bytes.TrimRight(e.Target[:], "\x00"))
+		event.Target = decodeTarget(e.Type, e.Target[:])
 		event.Details = string(bytes.TrimRight(e.Details[:], "\x00"))
 		event.NetNsID = e.NetNsID
 		event.DNSServerIP = e.DNSServerIP
@@ -315,7 +331,7 @@ func ParseEvent(data []byte) *events.Event {
 		event.StackKey = e.StackKey
 		event.CgroupID = e.CgroupID
 		event.ProcessName = string(bytes.TrimRight(e.Comm[:], "\x00"))
-		event.Target = string(bytes.TrimRight(e.Target[:], "\x00"))
+		event.Target = decodeTarget(e.Type, e.Target[:])
 		event.Details = string(bytes.TrimRight(e.Details[:], "\x00"))
 		event.NetNsID = e.NetNsID
 		event.DNSServerIP = e.DNSServerIP
@@ -339,7 +355,7 @@ func ParseEvent(data []byte) *events.Event {
 		event.StackKey = e.StackKey
 		event.CgroupID = e.CgroupID
 		event.ProcessName = string(bytes.TrimRight(e.Comm[:], "\x00"))
-		event.Target = string(bytes.TrimRight(e.Target[:], "\x00"))
+		event.Target = decodeTarget(e.Type, e.Target[:])
 		event.Details = string(bytes.TrimRight(e.Details[:], "\x00"))
 		event.NetNsID = e.NetNsID
 
@@ -362,7 +378,7 @@ func ParseEvent(data []byte) *events.Event {
 		event.StackKey = e.StackKey
 		event.CgroupID = e.CgroupID
 		event.ProcessName = string(bytes.TrimRight(e.Comm[:], "\x00"))
-		event.Target = string(bytes.TrimRight(e.Target[:], "\x00"))
+		event.Target = decodeTarget(e.Type, e.Target[:])
 		event.Details = string(bytes.TrimRight(e.Details[:], "\x00"))
 
 		return event
@@ -383,7 +399,7 @@ func ParseEvent(data []byte) *events.Event {
 		event.TCPState = e.TCPState
 		event.StackKey = e.StackKey
 		event.CgroupID = e.CgroupID
-		event.Target = string(bytes.TrimRight(e.Target[:], "\x00"))
+		event.Target = decodeTarget(e.Type, e.Target[:])
 		event.Details = string(bytes.TrimRight(e.Details[:], "\x00"))
 
 		return event
@@ -402,7 +418,7 @@ func ParseEvent(data []byte) *events.Event {
 	event.Bytes = e.Bytes
 	event.TCPState = e.TCPState
 	event.StackKey = e.StackKey
-	event.Target = string(bytes.TrimRight(e.Target[:], "\x00"))
+	event.Target = decodeTarget(e.Type, e.Target[:])
 	event.Details = string(bytes.TrimRight(e.Details[:], "\x00"))
 
 	return event

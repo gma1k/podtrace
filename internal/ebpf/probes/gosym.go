@@ -166,8 +166,7 @@ func x86ReturnPositions(code []byte) []uint64 {
 	for pos := 0; pos < len(code); {
 		inst, derr := x86asm.Decode(code[pos:], 64)
 		if derr != nil || inst.Len == 0 {
-			pos++
-			continue
+			break
 		}
 		if inst.Op == x86asm.RET {
 			out = append(out, uint64(pos))

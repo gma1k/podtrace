@@ -49,7 +49,7 @@ struct tp_scan_ctx {
 static long tp_scan_cb(u32 i, void *vctx)
 {
 	struct tp_scan_ctx *c = (struct tp_scan_ctx *)vctx;
-	if (i + 16 >= HTTP_SCAN_BUF_SIZE || i >= c->rlen)
+	if (i + 16 >= HTTP_SCAN_BUF_SIZE || i + 12 > c->rlen)
 		return 1;
 	u32 zero = 0;
 	char *buf = bpf_map_lookup_elem(&http_scan_buf, &zero);
@@ -89,7 +89,7 @@ static __noinline void http_capture_traceparent(void *base, u64 avail, char *out
 		return;
 
 	u32 v = (u32)sc.pos + 12;
-	if (v < HTTP_SCAN_BUF_SIZE && buf[v & (HTTP_SCAN_BUF_SIZE - 1)] == ' ')
+	if (v < rlen && buf[v & (HTTP_SCAN_BUF_SIZE - 1)] == ' ')
 		v++;
 
 	if (v + W3C_TRACEPARENT_LEN > rlen)
