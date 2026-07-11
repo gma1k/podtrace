@@ -92,6 +92,8 @@ func NewTargetRegistry(clientset kubernetes.Interface, selection TargetSelection
 	}
 }
 
+const cacheSyncTimeout = 30 * time.Second
+
 func (tr *TargetRegistry) Start(ctx context.Context) error {
 	if tr == nil || tr.clientset == nil {
 		return fmt.Errorf("target registry requires a kubernetes clientset")
@@ -132,8 +134,11 @@ func (tr *TargetRegistry) Start(ctx context.Context) error {
 		syncFns = append(syncFns, podInf.HasSynced)
 		factory.Start(ctx.Done())
 	}
-	if !cache.WaitForCacheSync(ctx.Done(), syncFns...) {
-		return fmt.Errorf("timed out waiting for pod target registry cache sync")
+	syncCtx, cancel := context.WithTimeout(ctx, cacheSyncTimeout)
+	defer cancel()
+	if !cache.WaitForCacheSync(syncCtx.Done(), syncFns...) {
+		return fmt.Errorf("timed out waiting for pod target registry cache sync "+
+			"(after %s; check pods list/watch RBAC)", cacheSyncTimeout)
 	}
 
 	tr.rebuildFromStore(ctx)

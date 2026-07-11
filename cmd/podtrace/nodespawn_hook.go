@@ -21,13 +21,8 @@ import (
 )
 
 // spawnControlFlags are stripped when reconstructing the child argv; they only
-// make sense on the workstation. --metrics is also stripped (with a warning)
-// because the in-pod port can't be reached from the user's machine.
+// make sense on the workstation.
 var spawnControlFlags = map[string]struct{}{
-	// The Splunk HEC token must never ride in the child argv: Pod argv is
-	// persisted in the cluster object and visible in `ps` on the node. It
-	// travels as the PODTRACE_SPLUNK_TOKEN env var instead (read by
-	// config in the spawn pod).
 	"tracing-splunk-token": {},
 	"local":                {},
 	"image":                {},
@@ -45,8 +40,7 @@ var spawnControlFlags = map[string]struct{}{
 	"all-namespaces":       {},
 }
 
-// maybeSpawnOnNode runs the spawn flow when appropriate. The boolean return
-// reports whether the spawn flow handled the invocation.
+// maybeSpawnOnNode runs the spawn flow when appropriate.
 func maybeSpawnOnNode(ctx context.Context, cmd *cobra.Command, resolver pkgkube.PodResolverInterface, selection pkgkube.TargetSelection) (handled bool, err error) {
 	if os.Getenv(nodespawn.EnvNodeLocalSentinel) == "1" {
 		return false, nil
@@ -135,7 +129,11 @@ func maybeSpawnOnNode(ctx context.Context, cmd *cobra.Command, resolver pkgkube.
 	for _, refs := range preResolved.ByNode {
 		allTargetPods = append(allTargetPods, refs...)
 	}
-	finishEventCorrelation := startWorkstationEventCorrelation(ctx, clientset, allTargetPods, streams.Out)
+	eventsOut := streams.Out
+	if exportFormat != "" {
+		eventsOut = streams.ErrOut
+	}
+	finishEventCorrelation := startWorkstationEventCorrelation(ctx, clientset, allTargetPods, eventsOut)
 	defer finishEventCorrelation()
 
 	err = nodespawn.Run(ctx, nodespawn.RunOptions{
@@ -165,9 +163,7 @@ func maybeSpawnOnNode(ctx context.Context, cmd *cobra.Command, resolver pkgkube.
 }
 
 // splunkTokenEnv carries --tracing-splunk-token into the spawn pod as an
-// environment variable. It is stripped from the child argv (see
-// spawnControlFlags): Pod argv is persisted in the cluster object and
-// visible in ps on the node.
+// environment variable.
 func splunkTokenEnv() []corev1.EnvVar {
 	if tracingSplunkToken == "" {
 		return nil
@@ -176,7 +172,6 @@ func splunkTokenEnv() []corev1.EnvVar {
 }
 
 // clusterHandles pulls the kube clientset and rest.Config from the resolver.
-// Returns ok=false when the resolver doesn't expose them (mock paths).
 func clusterHandles(resolver pkgkube.PodResolverInterface) (kubernetes.Interface, *rest.Config, bool) {
 	cp, ok := resolver.(pkgkube.ClientsetProvider)
 	if !ok {
@@ -190,9 +185,7 @@ func clusterHandles(resolver pkgkube.PodResolverInterface) (kubernetes.Interface
 }
 
 // selectionIsSpawnable is a guardrail: when the user invoked --version, --help,
-// or one of the subcommands, we shouldn't try to spawn anything. The cobra
-// layer keeps subcommands out of runPodtrace already, but we still need to
-// bail on empty selection.
+// or one of the subcommands, we shouldn't try to spawn anything.
 func selectionIsSpawnable(sel pkgkube.TargetSelection) bool {
 	if len(sel.Pods) > 0 || sel.PodSelector != "" || sel.AllInNamespace {
 		return true

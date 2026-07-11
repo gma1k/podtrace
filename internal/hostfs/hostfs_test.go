@@ -158,3 +158,54 @@ func TestWriteFile_RejectsTraversal(t *testing.T) {
 		t.Errorf("expected ErrInvalidPath, got %v", err)
 	}
 }
+
+// TestWriteFileAtomic verifies the temp+rename write: the final file has the
+// complete content, the correct perm, and no ".tmp" residue is left behind
+// (the sidecar polls the final path and must never observe a partial file).
+func TestWriteFileAtomic(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.txt")
+	content := []byte("the full report body\n")
+
+	if err := WriteFileAtomic(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFileAtomic: %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if string(got) != string(content) {
+		t.Errorf("content = %q, want %q", got, content)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Errorf("perm = %v, want 0644", info.Mode().Perm())
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("temp file must not linger after rename, stat err = %v", err)
+	}
+}
+
+// TestWriteFileAtomic_Overwrite confirms an existing file is replaced wholesale
+// (rename semantics), not appended to.
+func TestWriteFileAtomic_Overwrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.txt")
+	if err := WriteFileAtomic(path, []byte("first-longer-version"), 0o644); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+	if err := WriteFileAtomic(path, []byte("second"), 0o644); err != nil {
+		t.Fatalf("second write: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if string(got) != "second" {
+		t.Errorf("content = %q, want %q", got, "second")
+	}
+}

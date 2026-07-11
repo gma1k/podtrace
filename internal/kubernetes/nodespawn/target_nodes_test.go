@@ -265,3 +265,29 @@ func TestResolveTargetNodes_SkipsNonRunningContainerIDs(t *testing.T) {
 		t.Errorf("CrashLoopBackOff pod must NOT propagate a stale containerID, got %q", restartingID)
 	}
 }
+
+// TestResolveTargetNodes_DedupesNameAndSelectorMatch guards against a pod that
+// matches both an explicit --pods entry and the label selector being added
+// twice (and thus traced/profiled twice).
+func TestResolveTargetNodes_DedupesNameAndSelectorMatch(t *testing.T) {
+	p := podWithContainer("ns1", "dup", "node-1", "app",
+		"containerd://aaaaaaaaaaaa", corev1.ContainerState{
+			Running: &corev1.ContainerStateRunning{},
+		})
+	p.Labels = map[string]string{"app": "api"}
+	cs := fake.NewClientset(p)
+
+	sel := pkgkube.TargetSelection{
+		DefaultNamespace: "ns1",
+		Namespaces:       []string{"ns1"},
+		Pods:             []string{"dup"},  // explicit match
+		PodSelector:      "app=api",        // selector match too
+	}
+	got, err := ResolveTargetNodes(context.Background(), cs, sel)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if n := len(got.ByNode["node-1"]); n != 1 {
+		t.Fatalf("pod matched by name AND selector must be added once, got %d refs", n)
+	}
+}

@@ -246,6 +246,12 @@ func (t *Tracer) attachGroupUprobes(g probes.ProbeGroup) []link.Link {
 	if coll == nil {
 		return nil
 	}
+	t.probeGroupsMu.Lock()
+	hasContainerTargets := len(t.containerUprobes) > 0
+	t.probeGroupsMu.Unlock()
+	if hasContainerTargets {
+		return nil
+	}
 	id, pid := t.containerID, t.containerPID
 	switch g {
 	case probes.GroupTLS:
@@ -913,38 +919,38 @@ func (t *Tracer) SetContainerIDs(containerIDs []string) error {
 	if len(containerIDs) == 0 {
 		return fmt.Errorf("no container IDs provided")
 	}
-	primary := ""
+	targets := make([]ContainerProbeTarget, 0, len(containerIDs))
+	seen := make(map[string]struct{}, len(containerIDs))
 	for _, id := range containerIDs {
-		if id != "" {
-			primary = id
-			break
+		if id == "" {
+			continue
 		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		targets = append(targets, ContainerProbeTarget{ID: id, PID: t.pidForContainer(id)})
 	}
-	if primary == "" {
+	if len(targets) == 0 {
 		return fmt.Errorf("all container IDs are empty")
 	}
+	t.containerID = targets[0].ID
+	return t.SetContainerTargets(targets)
+}
 
-	t.containerID = primary
-	t.registerGroupLinks(probes.GroupTLS, probes.AttachDNSProbesWithPID(t.collection, primary, t.containerPID))
-	t.registerGroupLinks(probes.GroupTLS, probes.AttachSyncProbesWithPID(t.collection, primary, t.containerPID))
-	t.registerGroupLinks(probes.GroupDatabase, probes.AttachDBProbesWithPID(t.collection, primary, t.containerPID))
-	t.registerGroupLinks(probes.GroupPool, probes.AttachPoolProbesWithPID(t.collection, primary, t.containerPID))
-	t.registerGroupLinks(probes.GroupTLS, probes.AttachTLSProbesWithPID(t.collection, primary, t.containerPID))
-	t.registerGroupLinks(probes.GroupTLS, probes.AttachGoTLSProbes(t.collection, t.containerPID))
-	t.registerGroupLinks(probes.GroupTLS, probes.AttachGoGRPCProbes(t.collection, t.containerPID))
-	t.registerGroupLinks(probes.GroupTLS, probes.AttachRustlsProbes(t.collection, t.containerPID))
-	t.registerGroupLinks(probes.GroupTLS, probes.AttachGoHTTP3Probes(t.collection, t.containerPID))
-	t.registerGroupLinks(probes.GroupTLS, probes.AttachNghttp3Probes(t.collection, t.containerPID))
-	t.registerGroupLinks(probes.GroupTLS, probes.AttachQuicheProbes(t.collection, t.containerPID))
-	t.registerGroupLinks(probes.GroupTLS, probes.AttachQuicheRustProbes(t.collection, t.containerPID))
-	t.registerGroupLinks(probes.GroupCache, probes.AttachRedisProbesWithPID(t.collection, primary, t.containerPID))
-	t.registerGroupLinks(probes.GroupCache, probes.AttachMemcachedProbesWithPID(t.collection, primary, t.containerPID))
-	t.registerGroupLinks(probes.GroupMessaging, probes.AttachKafkaProbesWithPID(t.collection, primary, t.containerPID))
-	t.registerGroupLinks(probes.GroupFastCGI, probes.AttachFastCGIProbes(t.collection))
-	t.registerGroupLinks(probes.GroupNetwork, probes.AttachGRPCProbes(t.collection))
-	t.registerGroupLinks(probes.GroupNetwork, probes.AttachHTTPProbes(t.collection))
-	t.registerGroupLinks(probes.GroupNetwork, probes.AttachH2Probes(t.collection))
-	return nil
+func (t *Tracer) pidForContainer(id string) uint32 {
+	short := id
+	if len(short) > 12 {
+		short = short[:12]
+	}
+	for _, p := range t.cgroupPaths {
+		if strings.Contains(p, id) || (short != "" && strings.Contains(p, short)) {
+			if pid := readFirstPIDFromCgroupProcs(p); pid != 0 {
+				return pid
+			}
+		}
+	}
+	return t.containerPID
 }
 
 func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) error {

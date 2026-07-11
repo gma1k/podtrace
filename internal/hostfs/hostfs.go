@@ -49,9 +49,6 @@ func validate(path string) error {
 	if !filepath.IsAbs(path) {
 		return ErrInvalidPath
 	}
-	// Reject any ".." segment in the supplied path. filepath.Clean
-	// would collapse them and hide the original intent, so we check
-	// the unclean form explicitly.
 	for _, seg := range strings.Split(path, string(filepath.Separator)) {
 		if seg == ".." {
 			return ErrInvalidPath
@@ -62,9 +59,7 @@ func validate(path string) error {
 
 // Stat returns FileInfo for an absolute host path. The path is
 // validated to be absolute and free of ".." segments before the
-// underlying os.Stat fires. Used by probe-attachment code that needs
-// to verify a libc or binary exists at a specific location reported
-// by /proc/<pid>/maps or /proc/<pid>/cmdline.
+// underlying os.Stat fires.
 func Stat(path string) (os.FileInfo, error) {
 	if err := validate(path); err != nil {
 		return nil, err
@@ -73,16 +68,14 @@ func Stat(path string) (os.FileInfo, error) {
 }
 
 // IsRegularFile is a convenience helper: Stat followed by a non-dir
-// check, returning false on any error. Matches the dominant pattern
-// in the probe code.
+// check, returning false on any error.
 func IsRegularFile(path string) bool {
 	info, err := Stat(path)
 	return err == nil && !info.IsDir()
 }
 
 // WalkRegular invokes fn for every regular (non-directory) file under
-// root. Symlinks are followed via os.Stat. Equivalent to filepath.Walk
-// with explicit input validation on the root path.
+// root. Symlinks are followed via os.Stat.
 func WalkRegular(root string, fn func(path string, info os.FileInfo) error) error {
 	if err := validate(root); err != nil {
 		return err
@@ -96,10 +89,7 @@ func WalkRegular(root string, fn func(path string, info os.FileInfo) error) erro
 }
 
 // ReadFile reads a file the operator has explicitly designated via a
-// CLI flag or environment variable. The path is validated to be
-// absolute and free of ".." segments. Use only at boundary code that
-// receives an operator-supplied path; do not call from internal code
-// that constructs its own path.
+// CLI flag or environment variable.
 func ReadFile(path string) ([]byte, error) {
 	if err := validate(path); err != nil {
 		return nil, err
@@ -108,14 +98,30 @@ func ReadFile(path string) ([]byte, error) {
 }
 
 // WriteFile writes data to a path the operator has explicitly
-// designated via a CLI flag. The path is validated to be absolute and
-// free of ".." segments. perm is honoured as-is; callers should
-// prefer 0o600 unless the file must be world-readable for a sidecar.
+// designated via a CLI flag.
 func WriteFile(path string, data []byte, perm os.FileMode) error {
 	if err := validate(path); err != nil {
 		return err
 	}
 	return os.WriteFile(path, data, perm) // #nosec G304,G306 -- operator-supplied path validated; perm is caller-controlled and reviewed at the call site.
+}
+
+// WriteFileAtomic writes data via a temp file + rename so a concurrent reader
+// (e.g. the report-uploader sidecar polling the shared emptyDir) never sees a
+// partially-written or empty file.
+func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+	if err := validate(path); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := WriteFile(tmp, data, perm); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // Compile-time check that fs.FileInfo and os.FileInfo are the same.

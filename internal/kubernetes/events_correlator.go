@@ -161,12 +161,23 @@ func (ec *EventsCorrelator) addEvent(event *corev1.Event) {
 	ec.mu.Lock()
 	defer ec.mu.Unlock()
 
+	ts := event.FirstTimestamp.Time
+	if ts.IsZero() {
+		ts = event.EventTime.Time
+	}
+	if ts.IsZero() {
+		ts = event.LastTimestamp.Time
+	}
+	count := event.Count
+	if count == 0 && event.Series != nil {
+		count = event.Series.Count
+	}
 	k8sEvent := &K8sEvent{
 		Type:      event.Type,
 		Reason:    event.Reason,
 		Message:   event.Message,
-		Timestamp: event.FirstTimestamp.Time,
-		Count:     event.Count,
+		Timestamp: ts,
+		Count:     count,
 	}
 
 	ec.events = append(ec.events, k8sEvent)
