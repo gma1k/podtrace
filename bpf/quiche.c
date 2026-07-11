@@ -117,6 +117,7 @@ int uprobe_quiche_h3_send_request(struct pt_regs *ctx)
 	u64 tid = bpf_get_current_pid_tgid();
 	struct h3_adapter_call call = { .conn = (u64)PT_REGS_PARM1(ctx) };
 	bpf_map_update_elem(&h3_adapter_calls, &tid, &call, BPF_ANY);
+	bpf_map_update_elem(&h3_adapter_pending, &tid, rec, BPF_ANY);
 	return 0;
 }
 
@@ -130,14 +131,22 @@ int uretprobe_quiche_h3_send_request(struct pt_regs *ctx)
 	u64 conn = call->conn;
 	bpf_map_delete_elem(&h3_adapter_calls, &tid);
 
+	struct h3_txn_record *rec = bpf_map_lookup_elem(&h3_adapter_pending, &tid);
+	if (!rec) {
+		return 0;
+	}
+
 	s64 stream_id = (s64)PT_REGS_RC(ctx);
-	if (stream_id < 0)
+	if (stream_id < 0) {
+		bpf_map_delete_elem(&h3_adapter_pending, &tid);
 		return 0;
-	u32 zero = 0;
-	struct h3_txn_scratch *s = bpf_map_lookup_elem(&h3_txn_scratch_map, &zero);
-	if (!s || (s->rec.method_len == 0 && s->rec.path_len == 0))
+	}
+	if (rec->method_len == 0 && rec->path_len == 0) {
+		bpf_map_delete_elem(&h3_adapter_pending, &tid);
 		return 0;
-	h3_adapter_stash_request(&s->rec, conn, (u64)stream_id);
+	}
+	h3_adapter_stash_request(rec, conn, (u64)stream_id);
+	bpf_map_delete_elem(&h3_adapter_pending, &tid);
 	return 0;
 }
 

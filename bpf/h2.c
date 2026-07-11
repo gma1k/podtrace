@@ -90,6 +90,15 @@ static long h2_frames_cb(u32 idx, void *vctx)
 	if (off >= c->avail)
 		return 1;
 
+	if (fs->remaining == 0 && fs->pad > 0) {
+		u32 avail_here = c->avail - off;
+		u32 skip = avail_here < fs->pad ? avail_here : fs->pad;
+		off += skip;
+		fs->pad -= (u8)skip;
+		s->off = off;
+		return 0;
+	}
+
 	if (fs->remaining > 0) {
 		u32 avail_here = c->avail - off;
 		u32 take = avail_here < fs->remaining ? avail_here : fs->remaining;
@@ -137,6 +146,7 @@ static long h2_frames_cb(u32 idx, void *vctx)
 		   ((u32)fh[7] << 8) | (u32)fh[8]) & 0x7fffffff;
 	off += HTTP2_FRAME_HDR;
 
+	u8 pad_bytes = 0;
 	if (type == HTTP2_HEADERS) {
 		if ((flags & HTTP2_FLAG_PADDED) && off < c->avail) {
 			u8 pb = 0;
@@ -144,6 +154,7 @@ static long h2_frames_cb(u32 idx, void *vctx)
 				off += 1;
 				flen = flen >= 1 ? flen - 1 : 0;
 				flen = flen >= pb ? flen - pb : 0;
+				pad_bytes = pb;
 			}
 		}
 		if (flags & HTTP2_FLAG_PRIORITY) {
@@ -155,6 +166,7 @@ static long h2_frames_cb(u32 idx, void *vctx)
 	fs->flags = flags;
 	fs->stream_id = sid;
 	fs->remaining = flen;
+	fs->pad = pad_bytes;
 	s->off = off;
 	return 0;
 }
