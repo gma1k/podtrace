@@ -142,3 +142,33 @@ func TestValidateExporterConfigVariant(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateExporterConfigVariant_MultiSecretHeaders(t *testing.T) {
+	twoSecret := ExporterConfigSpec{
+		Type: ExporterTypeOTLP,
+		OTLP: &OTLPExporter{
+			Endpoint: "otel:4318",
+			Headers: []OTLPHeader{
+				{Name: "a", ValueFrom: &SecretKeySelector{Name: "s1", Key: "k"}},
+				{Name: "b", ValueFrom: &SecretKeySelector{Name: "s2", Key: "k"}},
+			},
+		},
+	}
+	if err := ValidateExporterConfigVariant(twoSecret); err == nil {
+		t.Error("expected rejection of two valueFrom headers")
+	}
+
+	oneSecret := ExporterConfigSpec{
+		Type: ExporterTypeOTLP,
+		OTLP: &OTLPExporter{
+			Endpoint: "otel:4318",
+			Headers: []OTLPHeader{
+				{Name: "a", ValueFrom: &SecretKeySelector{Name: "s1", Key: "k"}},
+				{Name: "b", Value: "literal"},
+			},
+		},
+	}
+	if err := ValidateExporterConfigVariant(oneSecret); err != nil {
+		t.Errorf("one valueFrom header must be accepted: %v", err)
+	}
+}

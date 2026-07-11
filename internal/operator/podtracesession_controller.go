@@ -58,7 +58,8 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if !session.DeletionTimestamp.IsZero() {
 		tc, err := r.resolveTracerConfig(ctx)
 		if err != nil {
-			return ctrl.Result{}, err
+			logger.Info("TracerConfig unreadable during session deletion; using fallback system namespace for cleanup", "error", err.Error())
+			tc = nil
 		}
 		sessionNS := systemNamespaceForSession(tc, r.SystemNamespace)
 		for _, ns := range candidateSystemNamespaces(sessionNS, r.SystemNamespace) {
@@ -94,16 +95,14 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	if session.Spec.ReportRef != nil && session.Spec.ReportRef.ObjectStore != nil {
 		if err := podtracev1alpha1.ValidateObjectStoreReference(session.Spec.ReportRef.ObjectStore); err != nil {
-			r.failSessionTerminally(ctx, &session, "ObjectStoreURIInvalid", err.Error())
-			return ctrl.Result{}, nil
+			return ctrl.Result{}, r.failSessionTerminally(ctx, &session, "ObjectStoreURIInvalid", err.Error())
 		}
 	}
 
 	targetNodes, targetNamespaces, err := r.resolveTargetNodes(ctx, &session)
 	if err != nil {
 		if strings.Contains(err.Error(), "invalid NamespaceSelector") {
-			r.failSessionTerminally(ctx, &session, "NamespaceSelectorInvalid", err.Error())
-			return ctrl.Result{}, nil
+			return ctrl.Result{}, r.failSessionTerminally(ctx, &session, "NamespaceSelectorInvalid", err.Error())
 		}
 		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "ResolveTargets", err.Error())
 		_ = r.Status().Update(ctx, &session)
@@ -156,6 +155,11 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		_ = r.Status().Update(ctx, &session)
 		return ctrl.Result{}, err
 	}
+	if err := ensureSessionReportObject(ctx, r.Client, &session); err != nil {
+		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "SessionRBAC", err.Error())
+		_ = r.Status().Update(ctx, &session)
+		return ctrl.Result{}, err
+	}
 	if err := ensureSessionPodReadRBAC(ctx, r.Client, &session, sessionPodNamespaces(&session, targetNamespaces), systemNS); err != nil {
 		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "SessionRBAC", err.Error())
 		_ = r.Status().Update(ctx, &session)
@@ -184,8 +188,6 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 
-	// Refresh status from Job conditions. summarizeSessionJobs also decides
-	// whether the session has reached a terminal state.
 	session.Status.Jobs = makeSessionJobRefs(jobs)
 	session.Status.State = computeSessionState(jobs, len(targetNodes))
 	session.Status.ObservedGeneration = session.Generation
@@ -396,14 +398,14 @@ func isPodEligible(p *corev1.Pod) bool {
 }
 
 // failSessionTerminally marks a session Failed with a CompletionTime stamp.
-func (r *PodTraceSessionReconciler) failSessionTerminally(ctx context.Context, s *podtracev1alpha1.PodTraceSession, reason, message string) {
+func (r *PodTraceSessionReconciler) failSessionTerminally(ctx context.Context, s *podtracev1alpha1.PodTraceSession, reason, message string) error {
 	s.Status.State = podtracev1alpha1.SessionStateFailed
 	if s.Status.CompletionTime == nil {
 		now := metav1.Now()
 		s.Status.CompletionTime = &now
 	}
 	r.setCondition(s, ConditionDegraded, metav1.ConditionTrue, reason, message)
-	_ = r.Status().Update(ctx, s)
+	return r.Status().Update(ctx, s)
 }
 
 // resolveTracerConfig returns the "default" TracerConfig when present.
@@ -505,10 +507,10 @@ func (r *PodTraceSessionReconciler) ensureJobs(ctx context.Context, s *podtracev
 
 // reconcileTerminalSession handles TTL-driven cleanup only.
 func (r *PodTraceSessionReconciler) reconcileTerminalSession(ctx context.Context, s *podtracev1alpha1.PodTraceSession) (ctrl.Result, error) {
-	ttl := sessionTTL(s)
-	if ttl == 0 || s.Status.CompletionTime == nil {
+	if s.Status.CompletionTime == nil {
 		return ctrl.Result{}, nil
 	}
+	ttl := sessionTTL(s)
 	deadline := s.Status.CompletionTime.Add(time.Duration(ttl) * time.Second)
 	if time.Now().Before(deadline) {
 		return ctrl.Result{RequeueAfter: time.Until(deadline)}, nil

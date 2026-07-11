@@ -11,12 +11,15 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
 )
@@ -24,11 +27,6 @@ import (
 // TracerConfigReconciler owns the cluster-wide agent infrastructure:
 // the agent DaemonSet, its ServiceAccount, and the ClusterRole/Binding
 // that grants agents the minimum RBAC to do their job.
-//
-// Only a single TracerConfig object named "default" is reconciled in
-// this first iteration; other names are accepted but the DaemonSet
-// always lives under AgentDaemonSetName() in SystemNamespace so the
-// agent-side discovery path stays simple.
 type TracerConfigReconciler struct {
 	client.Client
 	Scheme          *runtime.Scheme
@@ -50,17 +48,11 @@ func (r *TracerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	var tc podtracev1alpha1.TracerConfig
 	if err := r.Get(ctx, req.NamespacedName, &tc); err != nil {
 		if apierrors.IsNotFound(err) {
-			// Resource deleted; owner refs on the DaemonSet + RBAC clean
-			// themselves up. Nothing to do here.
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("get TracerConfig: %w", err)
 	}
 
-	// The agent DaemonSet has a single fixed name, so exactly one
-	// TracerConfig can drive it. A second TC used to fight the first over
-	// owner references and the immutable selector, failing its reconcile
-	// forever; it now reports the conflict and stands down.
 	if tc.Name != DefaultTracerConfigName {
 		r.setCondition(&tc, ConditionDegraded, metav1.ConditionTrue, "NotDefaultTracerConfig",
 			fmt.Sprintf("only the %q TracerConfig manages the agent DaemonSet; this resource is inert", DefaultTracerConfigName))
@@ -101,7 +93,12 @@ func (r *TracerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	tc.Status.DesiredAgents = ds.Status.DesiredNumberScheduled
 	tc.Status.ReadyAgents = ds.Status.NumberReady
+	tc.Status.ActiveSessions = r.countActiveSessions(ctx)
 	tc.Status.ObservedGeneration = tc.Generation
+
+	if tc.Spec.BTFMode == podtracev1alpha1.BTFModeEmbedded {
+		logger.Info("spec.btfMode=embedded is not implemented; agent uses host BTF (auto)")
+	}
 	r.setCondition(&tc, ConditionReconciled, metav1.ConditionTrue, "Reconciled", "agent infrastructure reconciled")
 	r.setCondition(&tc, ConditionReady,
 		conditionStatusFromBool(tc.Status.ReadyAgents == tc.Status.DesiredAgents && tc.Status.DesiredAgents > 0),
@@ -123,12 +120,6 @@ func (r *TracerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 // so controller-runtime requeues the TracerConfig whenever an owned
 // resource's status changes.
 func (r *TracerConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// The generation/label predicate must apply to the TracerConfig watch
-	// ONLY. A builder-level WithEventFilter also filtered every Owns()
-	// watch — and DaemonSet status updates do not bump metadata.generation
-	// (RBAC objects have no generation semantics at all), so readyAgents/
-	// desiredAgents and the Ready condition went permanently stale and
-	// manual drift in owned RBAC was never repaired.
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("tracerconfig").
 		For(&podtracev1alpha1.TracerConfig{}, builder.WithPredicates(predicate.Or(
@@ -141,6 +132,10 @@ func (r *TracerConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&rbacv1.ClusterRoleBinding{}).
 		Owns(&rbacv1.Role{}).
 		Owns(&rbacv1.RoleBinding{}).
+		Watches(&podtracev1alpha1.PodTraceSession{},
+			handler.EnqueueRequestsFromMapFunc(func(context.Context, client.Object) []reconcile.Request {
+				return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: DefaultTracerConfigName}}}
+			})).
 		WithOptions(defaultControllerOptions()).
 		Complete(r)
 }
@@ -152,9 +147,27 @@ func (r *TracerConfigReconciler) systemNamespaceFor(tc *podtracev1alpha1.TracerC
 	return r.SystemNamespace
 }
 
+// countActiveSessions reports how many PodTraceSessions are not yet terminal
+// (Pending or Running), populating status.activeSessions, which was declared
+// (and printed as the "Sessions" column) but never set.
+func (r *TracerConfigReconciler) countActiveSessions(ctx context.Context) int32 {
+	var sessions podtracev1alpha1.PodTraceSessionList
+	if err := r.List(ctx, &sessions); err != nil {
+		return 0
+	}
+	var active int32
+	for i := range sessions.Items {
+		switch sessions.Items[i].Status.State {
+		case podtracev1alpha1.SessionStateCompleted, podtracev1alpha1.SessionStateFailed:
+		default:
+			active++
+		}
+	}
+	return active
+}
+
 // ensureAgentRBAC creates / updates the agent SA, ClusterRole, and
-// ClusterRoleBinding. All three are owned by the TracerConfig so that
-// deleting the TracerConfig tears them down.
+// ClusterRoleBinding.
 func (r *TracerConfigReconciler) ensureAgentRBAC(ctx context.Context, tc *podtracev1alpha1.TracerConfig, systemNS string) error {
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: ManagedObjectMeta(AgentServiceAccountName(), systemNS, ComponentAgent, nil),
@@ -197,10 +210,6 @@ func (r *TracerConfigReconciler) ensureAgentRBAC(ctx context.Context, tc *podtra
 		return fmt.Errorf("ClusterRoleBinding: %w", err)
 	}
 
-	// Bundles (ConfigMap + Secret) live in systemNS. Granting the
-	// agent SA cluster-wide configmap/secret read would be a needless
-	// blast-radius expansion — agents only ever read bundles in their
-	// own system namespace. A namespaced Role keeps the grant scoped.
 	role := &rbacv1.Role{
 		ObjectMeta: ManagedObjectMeta(AgentBundleRoleName(), systemNS, ComponentAgent, nil),
 	}
@@ -240,9 +249,7 @@ func (r *TracerConfigReconciler) ensureAgentRBAC(ctx context.Context, tc *podtra
 
 // cleanupStaleAgentNamespaces deletes agent DaemonSets (and their namespaced
 // RBAC companions) left behind in OTHER namespaces after a
-// spec.systemNamespace change. Their ownerReference points at the still-live
-// TracerConfig, so garbage collection never reaps them — without this, a
-// namespace move left two privileged agent fleets running concurrently.
+// spec.systemNamespace change.
 func (r *TracerConfigReconciler) cleanupStaleAgentNamespaces(ctx context.Context, currentNS string) error {
 	agentLabels := client.MatchingLabels{
 		LabelManagedBy: ManagedByValue,
@@ -356,9 +363,7 @@ func agentClusterRoleRules(systemNS string) []rbacv1.PolicyRule {
 }
 
 // setCondition applies one Condition to the TracerConfig status, keyed
-// by Type. The library-standard meta.SetStatusCondition semantics are
-// replicated inline to avoid a dependency on k8s.io/apimachinery/pkg/api/meta
-// just for this.
+// by Type.
 func (r *TracerConfigReconciler) setCondition(tc *podtracev1alpha1.TracerConfig, condType string, status metav1.ConditionStatus, reason, message string) {
 	tc.Status.Conditions = upsertCondition(tc.Status.Conditions, metav1.Condition{
 		Type:               condType,

@@ -11,10 +11,6 @@ import (
 	"github.com/podtrace/podtrace/internal/events"
 )
 
-// TestMetrics_RefreshEmitsDeltaOnly guards the invariant that
-// CounterVecs are Add()'d by the per-tick delta, never Set() (which
-// Prometheus forbids on counters). A bug here would either panic on a
-// CounterVec.Set call or double-count events on every refresh.
 func TestMetrics_RefreshEmitsDeltaOnly(t *testing.T) {
 	m := NewMetrics()
 	router := NewRouter(nil)
@@ -22,26 +18,22 @@ func TestMetrics_RefreshEmitsDeltaOnly(t *testing.T) {
 		mkRule("ns", "pt", []uint64{1, 2}, []events.EventType{events.EventDNS}, &recExp{name: "x"}),
 	})
 
-	// First refresh: counters report 0 (no events yet).
 	m.RefreshFromRouter(router)
 	if got := scrapeMetric(t, m, `events_exported_total{cr_namespace="ns",cr_name="pt"}`); got != 0 {
 		t.Fatalf("initial counter should be 0, got %d", got)
 	}
 
-	// Bump events → refresh. Counter must increment by exactly the delta.
 	router.Stats().incr(CRKey{"ns", "pt"}, 10)
 	m.RefreshFromRouter(router)
 	if got := scrapeMetric(t, m, `events_exported_total{cr_namespace="ns",cr_name="pt"}`); got != 10 {
 		t.Fatalf("after incr(10): counter=%d want 10", got)
 	}
 
-	// Second refresh with no new events must NOT re-add the same 10.
 	m.RefreshFromRouter(router)
 	if got := scrapeMetric(t, m, `events_exported_total{cr_namespace="ns",cr_name="pt"}`); got != 10 {
 		t.Fatalf("idle refresh double-counted: %d", got)
 	}
 
-	// Another bump.
 	router.Stats().incr(CRKey{"ns", "pt"}, 5)
 	m.RefreshFromRouter(router)
 	if got := scrapeMetric(t, m, `events_exported_total{cr_namespace="ns",cr_name="pt"}`); got != 15 {
@@ -49,9 +41,6 @@ func TestMetrics_RefreshEmitsDeltaOnly(t *testing.T) {
 	}
 }
 
-// TestMetrics_RemovedCRDropsLabels guards cardinality: once a CR is
-// removed from the router's rule set, its label series should not
-// linger in /metrics forever.
 func TestMetrics_RemovedCRDropsLabels(t *testing.T) {
 	m := NewMetrics()
 	router := NewRouter(nil)
@@ -66,7 +55,6 @@ func TestMetrics_RemovedCRDropsLabels(t *testing.T) {
 		t.Fatal("pre-removal: metric should have cr_name=goes")
 	}
 
-	// Remove the CR.
 	router.Publish(nil)
 	m.RefreshFromRouter(router)
 
@@ -76,8 +64,6 @@ func TestMetrics_RemovedCRDropsLabels(t *testing.T) {
 	}
 }
 
-// TestMetrics_ActiveCRsTracksRouterSize asserts the global active_crs
-// gauge matches len(rules) after each refresh.
 func TestMetrics_ActiveCRsTracksRouterSize(t *testing.T) {
 	m := NewMetrics()
 	router := NewRouter(nil)
@@ -97,9 +83,6 @@ func TestMetrics_ActiveCRsTracksRouterSize(t *testing.T) {
 	}
 }
 
-// TestMetrics_BackendDegraded_NoSeriesByDefault locks in the contract
-// that keeps `max by(node)(podtrace_agent_backend_degraded) > 0` alerts
-// quiet on healthy agents.
 func TestMetrics_BackendDegraded_NoSeriesByDefault(t *testing.T) {
 	m := NewMetrics()
 	body := scrape(t, m)
@@ -118,10 +101,6 @@ func TestMetrics_BackendDegraded_SetByReason(t *testing.T) {
 	}
 }
 
-// TestMetrics_ProgramAttachFailures_ByProgramAndReason locks in the
-// per-program counter contract: each (program, reason) tuple is a
-// distinct series, increments are atomic, and the metric stays silent
-// on healthy agents (no NaN/zero rows).
 func TestMetrics_ProgramAttachFailures_ByProgramAndReason(t *testing.T) {
 	m := NewMetrics()
 
@@ -141,10 +120,6 @@ func TestMetrics_ProgramAttachFailures_ByProgramAndReason(t *testing.T) {
 	}
 }
 
-// TestMetrics_ProgramAttachFailures_EmptyReasonNormalized guards
-// against a label cardinality regression: an empty reason from a
-// poorly-classified error must collapse to "unknown" rather than
-// emit a blank label that is hostile to Prometheus.
 func TestMetrics_ProgramAttachFailures_EmptyReasonNormalized(t *testing.T) {
 	m := NewMetrics()
 	m.RecordProgramAttachFailure("kprobe_x", "")
@@ -153,10 +128,6 @@ func TestMetrics_ProgramAttachFailures_EmptyReasonNormalized(t *testing.T) {
 	}
 }
 
-// TestMetrics_ProgramAttachFailures_NilReceiverSafe is the contract for
-// the probe observer wiring: tracer construction must never panic when
-// no metrics registry is set up (e.g. unit tests that build a tracer
-// directly).
 func TestMetrics_ProgramAttachFailures_NilReceiverSafe(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -167,9 +138,6 @@ func TestMetrics_ProgramAttachFailures_NilReceiverSafe(t *testing.T) {
 	m.RecordProgramAttachFailure("kprobe_x", "permission_denied")
 }
 
-// TestMetrics_ExporterInit_EdgeTriggered pins the alert-friendly
-// counter contract: one increment per ok→fail transition, repeat
-// failures are silent until the CR returns to healthy.
 func TestMetrics_ExporterInit_EdgeTriggered(t *testing.T) {
 	m := NewMetrics()
 	cr := CRKey{Namespace: "ns", Name: "broken"}
@@ -197,9 +165,6 @@ func TestMetrics_ExporterInit_EdgeTriggered(t *testing.T) {
 	}
 }
 
-// TestMetrics_ExporterInit_ReasonClassification asserts that the
-// reason label is sourced from ClassifyExporterError so dashboards
-// keyed off the closed enum stay stable.
 func TestMetrics_ExporterInit_ReasonClassification(t *testing.T) {
 	m := NewMetrics()
 	cases := []struct {
@@ -240,9 +205,6 @@ func TestMetrics_HandlerServesText(t *testing.T) {
 	}
 }
 
-// --- helpers ----------------------------------------------------------
-
-// scrape hits the handler and returns the plaintext /metrics body.
 func scrape(t *testing.T, m *Metrics) string {
 	t.Helper()
 	srv := httptest.NewServer(m.Handler())
@@ -256,10 +218,6 @@ func scrape(t *testing.T, m *Metrics) string {
 	return string(b)
 }
 
-// scrapeMetric parses a single metric out of the /metrics text and
-// returns its int value. The selector is passed as "name" or
-// "name{needle1,needle2}" where each needle is a label fragment
-// (order-agnostic). Returns 0 when the line is not found.
 func scrapeMetric(t *testing.T, m *Metrics, selector string) int {
 	t.Helper()
 	name, needles := parseSelector(selector)
@@ -295,8 +253,6 @@ func scrapeMetric(t *testing.T, m *Metrics, selector string) int {
 	return 0
 }
 
-// parseSelector splits "name{k1="v1",k2="v2"}" into ("name", [`k1="v1"`, `k2="v2"`]).
-// Plain names without a label block return ("name", nil).
 func parseSelector(sel string) (string, []string) {
 	open := strings.IndexByte(sel, '{')
 	if open < 0 {
@@ -310,7 +266,6 @@ func parseSelector(sel string) (string, []string) {
 	return name, strings.Split(inner, ",")
 }
 
-// sscan is a tiny stand-in for fmt.Sscan to keep imports lean.
 func sscan(s string, out *int) (int, error) {
 	s = strings.TrimSpace(s)
 	v := 0
@@ -337,3 +292,22 @@ var errParse = &parseErr{}
 type parseErr struct{}
 
 func (*parseErr) Error() string { return "parse error" }
+
+func TestMetrics_SpanBatchAndDeliveryCounters(t *testing.T) {
+	m := NewMetrics()
+	cr := CRKey{"ns", "pt"}
+
+	m.ObserveSpanBatched(cr, 5)
+	m.ObserveExportDelivery(cr, 3, nil)
+	m.ObserveExportDelivery(cr, 2, errors.New("refused"))
+
+	if got := scrapeMetric(t, m, `spans_batched_total{cr_namespace="ns",cr_name="pt"}`); got != 5 {
+		t.Errorf("spans_batched_total=%d want 5", got)
+	}
+	if got := scrapeMetric(t, m, `spans_delivered_total{cr_namespace="ns",cr_name="pt"}`); got != 3 {
+		t.Errorf("spans_delivered_total=%d want 3", got)
+	}
+	if got := scrapeMetric(t, m, `export_delivery_dropped_total{cr_namespace="ns",cr_name="pt"}`); got != 2 {
+		t.Errorf("export_delivery_dropped_total=%d want 2", got)
+	}
+}

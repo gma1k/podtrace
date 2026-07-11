@@ -31,6 +31,8 @@ type Metrics struct {
 	ProgramAttachFailures *prometheus.CounterVec
 	ExporterInitFailures  *prometheus.CounterVec
 	ExportDeliveryDropped *prometheus.CounterVec
+	SpansBatched          *prometheus.CounterVec
+	SpansDelivered        *prometheus.CounterVec
 
 	detectorsMu sync.Mutex
 	detectors   map[CRKey]*errorRateDetector
@@ -155,6 +157,16 @@ func NewMetrics() *Metrics {
 			Name:      "export_delivery_dropped_total",
 			Help:      "Spans that were captured and handed to an exporter but FAILED to be delivered to the backend (e.g. collector unreachable). events_exported_total counts spans queued to the SDK; this counts spans the SDK could not ship. A non-zero rate here with events_exported_total climbing means the backend endpoint is wrong/down — data is being lost silently otherwise. Reason comes from ClassifyExporterError.",
 		}, []string{"cr_namespace", "cr_name", "reason"}),
+		SpansBatched: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "podtrace_agent",
+			Name:      "spans_batched_total",
+			Help:      "Spans accepted into the SDK's batch queue (post-sampling). Subtracting spans_delivered_total and export_delivery_dropped_total yields spans silently dropped by BatchSpanProcessor queue overflow, which the SDK does not otherwise expose.",
+		}, []string{"cr_namespace", "cr_name"}),
+		SpansDelivered: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "podtrace_agent",
+			Name:      "spans_delivered_total",
+			Help:      "Spans successfully delivered to the backend by an exporter ExportSpans call.",
+		}, []string{"cr_namespace", "cr_name"}),
 		detectors:          map[CRKey]*errorRateDetector{},
 		lastEvents:         map[CRKey]int64{},
 		lastDropped:        map[CRKey]int64{},
@@ -168,6 +180,7 @@ func NewMetrics() *Metrics {
 		m.ThresholdTripped, m.EffectiveSampleRate, m.PolicyGeneration,
 		m.ErrorRateBreached,
 		m.ProgramAttachFailures, m.ExporterInitFailures, m.ExportDeliveryDropped,
+		m.SpansBatched, m.SpansDelivered,
 	)
 	return m
 }
@@ -175,12 +188,28 @@ func NewMetrics() *Metrics {
 // ObserveExportDelivery records the outcome of one exporter ExportSpans
 // call.
 func (m *Metrics) ObserveExportDelivery(cr CRKey, spanCount int, err error) {
-	if m == nil || err == nil || spanCount <= 0 {
+	if m == nil || spanCount <= 0 {
 		return
 	}
-	if m.ExportDeliveryDropped != nil {
-		m.ExportDeliveryDropped.WithLabelValues(cr.Namespace, cr.Name, ClassifyExporterError(err)).Add(float64(spanCount))
+	if err != nil {
+		if m.ExportDeliveryDropped != nil {
+			m.ExportDeliveryDropped.WithLabelValues(cr.Namespace, cr.Name, ClassifyExporterError(err)).Add(float64(spanCount))
+		}
+		return
 	}
+	if m.SpansDelivered != nil {
+		m.SpansDelivered.WithLabelValues(cr.Namespace, cr.Name).Add(float64(spanCount))
+	}
+}
+
+// ObserveSpanBatched counts spans accepted into the batch queue (post-sampling)
+// so BatchSpanProcessor queue-overflow drops become observable as
+// spans_batched_total, spans_delivered_total, export_delivery_dropped_total.
+func (m *Metrics) ObserveSpanBatched(cr CRKey, spanCount int) {
+	if m == nil || spanCount <= 0 || m.SpansBatched == nil {
+		return
+	}
+	m.SpansBatched.WithLabelValues(cr.Namespace, cr.Name).Add(float64(spanCount))
 }
 
 // RecordProgramAttachFailure increments program_attach_failures_total

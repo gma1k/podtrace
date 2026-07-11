@@ -799,3 +799,46 @@ func hasCondition(conds []metav1.Condition, condType string, want metav1.Conditi
 	}
 	return false
 }
+
+// TestReconcileTerminalSession_TTLSemantics guards op-M1: ttlSecondsAfterFinished
+// must follow Kubernetes semantics — 0 deletes immediately once finished.
+func TestReconcileTerminalSession_TTLSemantics(t *testing.T) {
+	scheme := newOperatorScheme(t)
+	past := metav1.NewTime(time.Now().Add(-time.Minute))
+
+	zero := int32(0)
+	sZero := &podtracev1alpha1.PodTraceSession{
+		ObjectMeta: metav1.ObjectMeta{Name: "z", Namespace: "default", UID: "uid-z"},
+		Spec:       podtracev1alpha1.PodTraceSessionSpec{TTLSecondsAfterFinished: &zero},
+		Status:     podtracev1alpha1.PodTraceSessionStatus{CompletionTime: &past},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sZero).Build()
+	r := &PodTraceSessionReconciler{Client: c, Scheme: scheme, SystemNamespace: "ns-sys"}
+	if _, err := r.reconcileTerminalSession(context.Background(), sZero); err != nil {
+		t.Fatalf("reconcileTerminalSession(ttl=0): %v", err)
+	}
+	err := c.Get(context.Background(), types.NamespacedName{Name: "z", Namespace: "default"}, &podtracev1alpha1.PodTraceSession{})
+	if !apierrors.IsNotFound(err) {
+		t.Errorf("ttl=0 finished session must be deleted immediately, got err=%v", err)
+	}
+
+	big := int32(3600)
+	recent := metav1.NewTime(time.Now())
+	sBig := &podtracev1alpha1.PodTraceSession{
+		ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "default", UID: "uid-b"},
+		Spec:       podtracev1alpha1.PodTraceSessionSpec{TTLSecondsAfterFinished: &big},
+		Status:     podtracev1alpha1.PodTraceSessionStatus{CompletionTime: &recent},
+	}
+	c2 := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sBig).Build()
+	r2 := &PodTraceSessionReconciler{Client: c2, Scheme: scheme, SystemNamespace: "ns-sys"}
+	res, err := r2.reconcileTerminalSession(context.Background(), sBig)
+	if err != nil {
+		t.Fatalf("reconcileTerminalSession(ttl=3600): %v", err)
+	}
+	if res.RequeueAfter <= 0 {
+		t.Errorf("not-yet-elapsed TTL must requeue, got %+v", res)
+	}
+	if err := c2.Get(context.Background(), types.NamespacedName{Name: "b", Namespace: "default"}, &podtracev1alpha1.PodTraceSession{}); err != nil {
+		t.Errorf("session must NOT be deleted before TTL elapses: %v", err)
+	}
+}

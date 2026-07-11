@@ -33,7 +33,8 @@ func newSession(mod func(*podtracev1alpha1.PodTraceSession)) *podtracev1alpha1.P
 }
 
 func TestBuildDiagnoseArgs_SelectorPath(t *testing.T) {
-	args := buildDiagnoseArgs(newSession(nil), nil)
+	s := newSession(nil)
+	args := buildDiagnoseArgs(s, nil, s.Spec.Duration.Duration)
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "--diagnose 5m0s") {
 		t.Errorf("missing --diagnose: %v", args)
@@ -57,7 +58,7 @@ func TestBuildDiagnoseArgs_PodRefsPath(t *testing.T) {
 			{Namespace: "team-b", Name: "pod-b"}, // explicit ns
 		}
 	})
-	args := buildDiagnoseArgs(s, nil)
+	args := buildDiagnoseArgs(s, nil, s.Spec.Duration.Duration)
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "--pods default/pod-a,team-b/pod-b") {
 		t.Errorf("pods flag wrong: %v", args)
@@ -77,7 +78,7 @@ func TestBuildDiagnoseArgs_FiltersAndSample(t *testing.T) {
 		s.Spec.SamplePercent = &pct
 		s.Spec.ContainerName = "api"
 	})
-	args := buildDiagnoseArgs(s, nil)
+	args := buildDiagnoseArgs(s, nil, s.Spec.Duration.Duration)
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "--filter dns,net") {
 		t.Errorf("filter flag wrong: %v", args)
@@ -278,5 +279,30 @@ func TestIsTerminal(t *testing.T) {
 	}
 	if isTerminal(podtracev1alpha1.SessionStatePending) {
 		t.Error("Pending must not be terminal")
+	}
+}
+
+func TestEffectiveSessionDuration(t *testing.T) {
+	s := newSession(func(s *podtracev1alpha1.PodTraceSession) {
+		s.Spec.Duration = metav1.Duration{Duration: 10 * time.Minute}
+	})
+	capTC := func(d time.Duration) *podtracev1alpha1.TracerConfig {
+		return &podtracev1alpha1.TracerConfig{
+			Spec: podtracev1alpha1.TracerConfigSpec{
+				Session: podtracev1alpha1.SessionRuntimeSpec{MaxDuration: &metav1.Duration{Duration: d}},
+			},
+		}
+	}
+	if got := effectiveSessionDuration(s, capTC(5*time.Minute)); got != 5*time.Minute {
+		t.Errorf("maxDuration 5m must cap 10m request, got %v", got)
+	}
+	if got := effectiveSessionDuration(s, capTC(30*time.Minute)); got != 10*time.Minute {
+		t.Errorf("maxDuration longer than request must not extend it, got %v", got)
+	}
+	if got := effectiveSessionDuration(s, nil); got != 10*time.Minute {
+		t.Errorf("no TracerConfig means no cap, got %v", got)
+	}
+	if got := effectiveSessionDuration(s, &podtracev1alpha1.TracerConfig{}); got != 10*time.Minute {
+		t.Errorf("unset maxDuration means no cap, got %v", got)
 	}
 }

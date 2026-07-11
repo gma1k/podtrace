@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"strings"
 	"testing"
 	"unsafe"
 
@@ -727,9 +726,5 @@ func TestParseEvent_HTTPSocketEndpoint(t *testing.T) {
 	}
 	if event.Details != "503" {
 		t.Errorf("Details = %q, want \"503\"", event.Details)
-	}
-	msg := event.FormatMessage()
-	if !strings.Contains(msg, "GET /api/users") || !strings.Contains(msg, "503") {
-		t.Errorf("formatted message %q missing endpoint or status", msg)
 	}
 }

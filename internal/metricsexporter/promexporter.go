@@ -517,15 +517,14 @@ func (l *labelCardinalityLimiter) bound(value string) string {
 }
 
 var (
-	// Wire-derived labels: one limiter per label so a noisy gRPC service
-	// cannot evict Redis commands and vice versa.
 	commandCardinality = newLabelCardinalityLimiter(config.MetricsLabelLimit)
 	methodCardinality  = newLabelCardinalityLimiter(config.MetricsLabelLimit)
 	topicCardinality   = newLabelCardinalityLimiter(config.MetricsLabelLimit)
-	// Pod-churn labels.
 	podCardinality     = newLabelCardinalityLimiter(config.MetricsPodLabelLimit)
 	serviceCardinality = newLabelCardinalityLimiter(config.MetricsPodLabelLimit)
 	podIPCardinality   = newLabelCardinalityLimiter(config.MetricsPodLabelLimit)
+	poolCardinality    = newLabelCardinalityLimiter(config.MetricsLabelLimit)
+	processCardinality = newLabelCardinalityLimiter(config.MetricsLabelLimit)
 )
 
 func HandleEventWithContext(e *events.Event, k8sContext map[string]interface{}) {
@@ -962,28 +961,30 @@ func ExportResourceMetrics(resourceType string, namespace string, limitBytes, us
 	resourceAlertLevelGauge.WithLabelValues(resourceType, namespace).Set(float64(alertLevel))
 }
 
-func ExportPoolAcquireMetricWithContext(e *events.Event, namespace string) {
-	poolID := e.Target
+// poolLabels resolves the (bounded) pool_id and process_name label values so
+// arbitrary pool identifiers and process names cannot grow series without
+// bound, matching how every other traffic-derived label is capped.
+func poolLabels(e *events.Event) (poolID, processName string) {
+	poolID = e.Target
 	if poolID == "" {
 		poolID = "default"
 	}
-	poolAcquiresCounter.WithLabelValues(poolID, e.ProcessName, namespace).Inc()
+	return poolCardinality.bound(poolID), processCardinality.bound(e.ProcessName)
+}
+
+func ExportPoolAcquireMetricWithContext(e *events.Event, namespace string) {
+	poolID, processName := poolLabels(e)
+	poolAcquiresCounter.WithLabelValues(poolID, processName, namespace).Inc()
 }
 
 func ExportPoolReleaseMetricWithContext(e *events.Event, namespace string) {
-	poolID := e.Target
-	if poolID == "" {
-		poolID = "default"
-	}
-	poolReleasesCounter.WithLabelValues(poolID, e.ProcessName, namespace).Inc()
+	poolID, processName := poolLabels(e)
+	poolReleasesCounter.WithLabelValues(poolID, processName, namespace).Inc()
 }
 
 func ExportPoolExhaustedMetricWithContext(e *events.Event, namespace string) {
-	poolID := e.Target
-	if poolID == "" {
-		poolID = "default"
-	}
+	poolID, processName := poolLabels(e)
 	waitTimeSec := float64(e.LatencyNS) / 1e9
-	poolExhaustedCounter.WithLabelValues(poolID, e.ProcessName, namespace).Inc()
-	poolWaitTimeHistogram.WithLabelValues(poolID, e.ProcessName, namespace).Observe(waitTimeSec)
+	poolExhaustedCounter.WithLabelValues(poolID, processName, namespace).Inc()
+	poolWaitTimeHistogram.WithLabelValues(poolID, processName, namespace).Observe(waitTimeSec)
 }
