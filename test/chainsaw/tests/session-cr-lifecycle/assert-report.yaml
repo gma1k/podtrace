@@ -5,4 +5,4 @@ metadata:
   labels:
     podtrace.io/managed-by: podtrace-cli
     podtrace.io/kind: session-report
-(length(data."report.txt") > `0`): true
+(length(values(data)[?length(@) > `0`]) > `0`): true

@@ -1,5 +1,6 @@
 # Binaries
 bin/
+/podtrace
 *.o
 *.so
 

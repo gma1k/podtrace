@@ -66,6 +66,17 @@ func SessionReportRoleBindingName(sessionUID types.UID) string {
 	return "podtrace-session-report-" + shortUID(sessionUID)
 }
 
+// SessionPodReadRoleName / SessionPodReadRoleBindingName name the per-namespace
+// Role+RoleBinding granting the session SA pods/events read in each extra
+// namespace a cross-namespace session targets (beyond its own).
+func SessionPodReadRoleName(sessionUID types.UID) string {
+	return "podtrace-session-podread-" + shortUID(sessionUID)
+}
+
+func SessionPodReadRoleBindingName(sessionUID types.UID) string {
+	return "podtrace-session-podread-" + shortUID(sessionUID)
+}
+
 // AgentClusterRoleName is the ClusterRole granting the agent read access to
 // PodTrace CRs cluster-wide and status-patch on the same.
 func AgentClusterRoleName() string { return "podtrace-agent" }

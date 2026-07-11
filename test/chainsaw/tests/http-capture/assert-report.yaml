@@ -4,4 +4,4 @@ metadata:
   name: http-report
   labels:
     podtrace.io/kind: session-report
-(contains(data."report.txt", 'HTTP')): true
+(length(values(data)[?contains(@, 'HTTP')]) > `0`): true

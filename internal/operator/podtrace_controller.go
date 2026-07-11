@@ -58,6 +58,9 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				return ctrl.Result{}, err
 			}
 		}
+		if err := cleanupOrphanBundles(ctx, r.Client, &pt, ""); err != nil {
+			return ctrl.Result{}, err
+		}
 		if removeFinalizer(&pt) {
 			if err := r.Update(ctx, &pt); err != nil {
 				if apierrors.IsConflict(err) {
@@ -70,9 +73,6 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	if ensureFinalizer(&pt) {
 		if err := r.Update(ctx, &pt); err != nil {
-			// Optimistic-concurrency conflict: the CR was modified between
-			// our Get and Update. Requeue and try again on the fresh
-			// version — this is normal, not an error.
 			if apierrors.IsConflict(err) {
 				return ctrl.Result{RequeueAfter: time.Second}, nil
 			}
@@ -120,6 +120,12 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
 	}
 
+	if err := cleanupOrphanBundles(ctx, r.Client, &pt, r.effectiveSystemNamespace(ctx)); err != nil {
+		r.setCondition(&pt, ConditionDegraded, metav1.ConditionTrue, "OrphanBundleCleanup", err.Error())
+		_ = r.Status().Update(ctx, &pt)
+		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
+	}
+
 	pt.Status.TargetNamespaces = targetNamespaces
 	pt.Status.Policy = resolvePolicyStatus(policyFromPodTrace(&pt), &ec)
 	r.setCondition(&pt, ConditionPolicyApplied, metav1.ConditionTrue, "Reconciled", "policy resolved and written to bundle")
@@ -163,16 +169,38 @@ func (r *PodTraceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&corev1.Namespace{},
 			handler.EnqueueRequestsFromMapFunc(r.namespaceToPodTraces),
 		).
-		// Bundle Secrets are copies of the referenced credential data, so a
-		// rotation must re-trigger the PodTraces that snapshot it; the
-		// ExporterConfig watch alone does not fire (the EC itself is
-		// unchanged and its readiness status stays equal).
 		Watches(
 			&corev1.Secret{},
 			handler.EnqueueRequestsFromMapFunc(r.secretToPodTraces),
 		).
+		Watches(
+			&podtracev1alpha1.TracerConfig{},
+			handler.EnqueueRequestsFromMapFunc(r.tracerConfigToPodTraces),
+		).
 		WithOptions(defaultControllerOptions()).
 		Complete(r)
+}
+
+// tracerConfigToPodTraces enqueues every PodTrace when the default
+// TracerConfig changes, so a spec.systemNamespace change rewrites each
+// bundle into the new namespace (and the reconcile then sweeps the orphan
+// left in the old one).
+func (r *PodTraceReconciler) tracerConfigToPodTraces(ctx context.Context, obj client.Object) []reconcile.Request {
+	if obj.GetName() != "default" {
+		return nil
+	}
+	var list podtracev1alpha1.PodTraceList
+	if err := r.List(ctx, &list); err != nil {
+		return nil
+	}
+	out := make([]reconcile.Request, 0, len(list.Items))
+	for i := range list.Items {
+		pt := &list.Items[i]
+		out = append(out, reconcile.Request{
+			NamespacedName: client.ObjectKey{Namespace: pt.Namespace, Name: pt.Name},
+		})
+	}
+	return out
 }
 
 // secretToPodTraces maps a Secret event to the PodTraces whose
@@ -227,11 +255,6 @@ func (r *PodTraceReconciler) exporterConfigToPodTraces(ctx context.Context, obj 
 }
 
 func (r *PodTraceReconciler) syncExporterBundle(ctx context.Context, pt *podtracev1alpha1.PodTrace, ec *podtracev1alpha1.ExporterConfig, targetNamespaces []string) error {
-	// The bundle must live where agents read it. Agents are launched with
-	// --system-namespace set to the TracerConfig's systemNamespace override
-	// (tracerconfig_daemonset.go), so writing to the operator default here
-	// made continuous tracing silently export nothing whenever the override
-	// was set: agents looked in a namespace the operator never wrote.
 	systemNS := r.effectiveSystemNamespace(ctx)
 	name := ExporterBundleName(pt.UID)
 
@@ -299,9 +322,7 @@ func (r *PodTraceReconciler) syncExporterBundle(ctx context.Context, pt *podtrac
 
 // effectiveSystemNamespace returns the namespace agents read bundles from:
 // the default TracerConfig's spec.systemNamespace override when set,
-// otherwise the operator default. Bundles must be written (and cleaned up)
-// there, mirroring the --system-namespace the rendered DaemonSet passes to
-// agents.
+// otherwise the operator default.
 func (r *PodTraceReconciler) effectiveSystemNamespace(ctx context.Context) string {
 	var tc podtracev1alpha1.TracerConfig
 	if err := r.Get(ctx, types.NamespacedName{Name: "default"}, &tc); err == nil && tc.Spec.SystemNamespace != "" {

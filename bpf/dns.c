@@ -420,9 +420,6 @@ int dns_ingress(struct __sk_buff *skb) {
 		if (atype == DNS_TYPE_A) {
 			__u32 ip = 0;
 			if (bpf_skb_load_bytes(skb, rdata, &ip, sizeof(ip)) == 0) {
-				/* Map key stays network order (the connect probes look it
-				 * up with the raw sockaddr address); only the displayed
-				 * string needs host order. */
 				bpf_map_update_elem(&dns_resolved, &ip, q->name, BPF_ANY);
 				format_ip_port(__builtin_bswap32(ip), 0, e->details);
 				wrote_detail = 1;

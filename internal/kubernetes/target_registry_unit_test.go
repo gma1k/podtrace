@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -235,6 +236,33 @@ func TestHandlePodUpsert_UpdatesExistingAtMaxTargets(t *testing.T) {
 	}
 }
 
+func TestStart_PerNamespaceInformers(t *testing.T) {
+	cases := []struct {
+		name string
+		sel  TargetSelection
+		want int
+	}{
+		{"two namespaces -> two scoped informers", TargetSelection{Namespaces: []string{"a", "b"}}, 2},
+		{"three namespaces -> three", TargetSelection{Namespaces: []string{"a", "b", "c"}}, 3},
+		{"one namespace -> one", TargetSelection{Namespaces: []string{"a"}}, 1},
+		{"default namespace -> one", TargetSelection{DefaultNamespace: "d"}, 1},
+		{"cluster-wide -> one", TargetSelection{}, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := NewTargetRegistry(fake.NewSimpleClientset(), tc.sel)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := tr.Start(ctx); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			if len(tr.podInfs) != tc.want {
+				t.Errorf("got %d pod informers, want %d", len(tr.podInfs), tc.want)
+			}
+		})
+	}
+}
+
 func TestRebuildFromStore_PopulatesFromInformerStore(t *testing.T) {
 	cid := hex64()
 	newCgroupV2Sandbox(t, cid)
@@ -242,14 +270,15 @@ func TestRebuildFromStore_PopulatesFromInformerStore(t *testing.T) {
 	tr := NewTargetRegistry(fake.NewSimpleClientset(), TargetSelection{Namespaces: []string{"prod"}})
 
 	factory := informers.NewSharedInformerFactory(tr.clientset, 0)
-	tr.podInf = factory.Core().V1().Pods().Informer()
+	podInf := factory.Core().V1().Pods().Informer()
+	tr.podInfs = append(tr.podInfs, podInf)
 
 	matching := runningPod("uid-a", "prod", "api-0", "app", cid)
 	nonMatching := runningPod("uid-b", "dev", "api-1", "app", hex64())
-	if err := tr.podInf.GetStore().Add(matching); err != nil {
+	if err := podInf.GetStore().Add(matching); err != nil {
 		t.Fatalf("store add matching: %v", err)
 	}
-	if err := tr.podInf.GetStore().Add(nonMatching); err != nil {
+	if err := podInf.GetStore().Add(nonMatching); err != nil {
 		t.Fatalf("store add non-matching: %v", err)
 	}
 

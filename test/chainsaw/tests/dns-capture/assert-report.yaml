@@ -4,4 +4,4 @@ metadata:
   name: dns-report
   labels:
     podtrace.io/kind: session-report
-(contains(data."report.txt", 'DNS')): true
+(length(values(data)[?contains(@, 'DNS')]) > `0`): true

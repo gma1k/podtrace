@@ -9,6 +9,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
@@ -228,7 +229,7 @@ func TestUpsertReportConfigMap_CreateErrorPropagates(t *testing.T) {
 	client.PrependReactor("create", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, wantErr
 	})
-	err := upsertReportConfigMap(context.Background(), client, "ns", "rpt", "body")
+	err := upsertReportConfigMap(context.Background(), client, "ns", "rpt", "report.txt", "body")
 	if err == nil {
 		t.Fatal("expected error when ConfigMap create fails")
 	}
@@ -243,7 +244,7 @@ func TestUpsertReportConfigMap_GetErrorAfterAlreadyExists(t *testing.T) {
 	client.PrependReactor("get", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, errors.New("get failed")
 	})
-	err := upsertReportConfigMap(context.Background(), client, "ns", "rpt", "body")
+	err := upsertReportConfigMap(context.Background(), client, "ns", "rpt", "report.txt", "body")
 	if err == nil {
 		t.Fatal("expected error when Get after AlreadyExists fails")
 	}
@@ -255,7 +256,7 @@ func TestUpsertReportSecret_CreateErrorPropagates(t *testing.T) {
 	client.PrependReactor("create", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, wantErr
 	})
-	err := upsertReportSecret(context.Background(), client, "ns", "rpt", "body")
+	err := upsertReportSecret(context.Background(), client, "ns", "rpt", "report.txt", "body")
 	if err == nil {
 		t.Fatal("expected error when Secret create fails")
 	}
@@ -270,9 +271,44 @@ func TestUpsertReportSecret_UpdateErrorPropagates(t *testing.T) {
 		return true, nil, errors.New("update failed")
 	})
 	// Create will return AlreadyExists (object seeded), Get succeeds, Update fails.
-	err := upsertReportSecret(context.Background(), client, "ns", "rpt", "body")
+	err := upsertReportSecret(context.Background(), client, "ns", "rpt", "report.txt", "body")
 	if err == nil {
 		t.Fatal("expected error when Secret update fails")
+	}
+}
+
+func TestUpsertReportConfigMap_RetriesOnConflict(t *testing.T) {
+	existing := &corev1.ConfigMap{}
+	existing.Name = "rpt"
+	existing.Namespace = "ns"
+	existing.Data = map[string]string{"report-other.txt": "keep"}
+	client := fake.NewSimpleClientset(existing)
+
+	updates := 0
+	client.PrependReactor("update", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
+		updates++
+		if updates == 1 {
+			return true, nil, apierrors.NewConflict(
+				schema.GroupResource{Resource: "configmaps"}, "rpt", errors.New("stale revision"))
+		}
+		return false, nil, nil // let the default tracker apply subsequent updates
+	})
+
+	if err := upsertReportConfigMap(context.Background(), client, "ns", "rpt", "report-node-a.txt", "A"); err != nil {
+		t.Fatalf("expected retry to succeed after conflict, got %v", err)
+	}
+	if updates < 2 {
+		t.Errorf("expected a retry after the 409, updates=%d", updates)
+	}
+	cm, err := client.CoreV1().ConfigMaps("ns").Get(context.Background(), "rpt", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cm.Data["report-node-a.txt"] != "A" {
+		t.Errorf("this node's key not written after retry: %+v", cm.Data)
+	}
+	if cm.Data["report-other.txt"] != "keep" {
+		t.Errorf("sibling node's key lost during retry: %+v", cm.Data)
 	}
 }
 

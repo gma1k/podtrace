@@ -82,7 +82,7 @@ func TestBuildSessionJobSpec_Redaction(t *testing.T) {
 			Redaction: &podtracev1alpha1.RedactionSpec{Enabled: true},
 		},
 	}
-	spec := buildSessionJobSpec(newSession(nil), tcfg, "node-a")
+	spec := buildSessionJobSpec(newSession(nil), tcfg, "node-a", nil)
 	var mainEnv []corev1.EnvVar
 	for _, c := range spec.Template.Spec.Containers {
 		if c.Name == "podtrace" {

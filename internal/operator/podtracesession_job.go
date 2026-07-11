@@ -11,7 +11,7 @@ import (
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
 )
 
-func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alpha1.TracerConfig, node string) batchv1.JobSpec {
+func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alpha1.TracerConfig, node string, targetNamespaces []string) batchv1.JobSpec {
 	completions := int32(1)
 	parallelism := int32(1)
 
@@ -50,7 +50,7 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 	priv := true
 	runAsRoot := int64(0)
 
-	args := buildDiagnoseArgs(s)
+	args := buildDiagnoseArgs(s, targetNamespaces)
 	reportTo := reportToSpecFromReportRef(s)
 
 	volumes := []corev1.Volume{
@@ -261,7 +261,7 @@ func pointerBool(b bool) *bool {
 
 // buildDiagnoseArgs produces the `podtrace` CLI args that a session Job
 // executes.
-func buildDiagnoseArgs(s *podtracev1alpha1.PodTraceSession) []string {
+func buildDiagnoseArgs(s *podtracev1alpha1.PodTraceSession, targetNamespaces []string) []string {
 	args := []string{
 		"--diagnose", s.Spec.Duration.Duration.String(),
 	}
@@ -281,7 +281,12 @@ func buildDiagnoseArgs(s *podtracev1alpha1.PodTraceSession) []string {
 
 	if s.Spec.Selector != nil {
 		args = append(args, "--pod-selector", labelSelectorToFlag(s.Spec.Selector))
-		args = append(args, "--all-in-namespace", "--namespace", s.Namespace)
+		args = append(args, "--all-in-namespace")
+		if len(targetNamespaces) > 0 {
+			args = append(args, "--namespaces", strings.Join(targetNamespaces, ","))
+		} else {
+			args = append(args, "--namespace", s.Namespace)
+		}
 	}
 	if len(s.Spec.PodRefs) > 0 {
 		refs := make([]string, 0, len(s.Spec.PodRefs))
