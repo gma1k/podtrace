@@ -11,7 +11,7 @@
 #     → .status.jobs[].eventCount > 0
 #
 #   kubectl -n podtrace-demo get cm diag-demo-report
-#     → .data["report.txt"] carries the full human-readable report
+#     → .data["report-<node>.txt"] carries each node's human-readable report
 #
 # Prereqs:
 #   1. Helm chart installed (helm install podtrace ./deploy/charts/podtrace)

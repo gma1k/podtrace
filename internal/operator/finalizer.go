@@ -58,6 +58,46 @@ func cleanupPodTraceChildren(ctx context.Context, c client.Client, pt *podtracev
 	return nil
 }
 
+// cleanupOrphanBundles deletes exporter-bundle ConfigMaps/Secrets for this
+// PodTrace that live in any namespace other than keepNS.
+func cleanupOrphanBundles(ctx context.Context, c client.Client, pt *podtracev1alpha1.PodTrace, keepNS string) error {
+	sel := client.MatchingLabels{
+		LabelManagedBy:    ManagedByValue,
+		LabelComponent:    ComponentBundle,
+		LabelPodTraceName: pt.Name,
+		LabelPodTraceNS:   pt.Namespace,
+	}
+
+	var cms corev1.ConfigMapList
+	if err := c.List(ctx, &cms, sel); err != nil {
+		return fmt.Errorf("list bundle ConfigMaps: %w", err)
+	}
+	for i := range cms.Items {
+		if cms.Items[i].Namespace == keepNS {
+			continue
+		}
+		if err := c.Delete(ctx, &cms.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete orphan bundle ConfigMap %s/%s: %w",
+				cms.Items[i].Namespace, cms.Items[i].Name, err)
+		}
+	}
+
+	var secrets corev1.SecretList
+	if err := c.List(ctx, &secrets, sel); err != nil {
+		return fmt.Errorf("list bundle Secrets: %w", err)
+	}
+	for i := range secrets.Items {
+		if secrets.Items[i].Namespace == keepNS {
+			continue
+		}
+		if err := c.Delete(ctx, &secrets.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete orphan bundle Secret %s/%s: %w",
+				secrets.Items[i].Namespace, secrets.Items[i].Name, err)
+		}
+	}
+	return nil
+}
+
 // candidateSystemNamespaces returns the deduplicated set of namespaces a
 // CR's children may live in: the currently effective system namespace plus
 // the operator default (they differ when TracerConfig.spec.systemNamespace
@@ -100,7 +140,6 @@ func cleanupPodTraceSessionChildren(ctx context.Context, c client.Client, s *pod
 		}
 	}
 
-	// Session-scoped exporter bundle lives in the system namespace.
 	bundleName := SessionBundleName(s.UID)
 	objstoreCredsName := SessionObjectStoreCredsName(s.UID)
 	for _, obj := range []client.Object{
@@ -113,8 +152,10 @@ func cleanupPodTraceSessionChildren(ctx context.Context, c client.Client, s *pod
 		}
 	}
 
-	// Per-session Role + RoleBinding in the user namespace.
 	if err := cleanupSessionReportRBAC(ctx, c, s); err != nil {
+		return err
+	}
+	if err := cleanupSessionPodReadRBAC(ctx, c, s); err != nil {
 		return err
 	}
 	return nil

@@ -50,7 +50,7 @@ func TestBuildSessionJobSpec_ObjectStoreSidecarWiredWithCredentialsSecret(t *tes
 			},
 		},
 	}
-	spec := buildSessionJobSpec(sessionWithObjectStore("s3-creds"), tc, "node-a")
+	spec := buildSessionJobSpec(sessionWithObjectStore("s3-creds"), tc, "node-a", nil)
 
 	if got := len(spec.Template.Spec.InitContainers); got != 1 {
 		t.Fatalf("init containers = %d, want 1", got)
@@ -123,7 +123,7 @@ func TestBuildSessionJobSpec_ObjectStoreAmbientCreds(t *testing.T) {
 			},
 		},
 	}
-	spec := buildSessionJobSpec(sessionWithObjectStore(""), tc, "node-a")
+	spec := buildSessionJobSpec(sessionWithObjectStore(""), tc, "node-a", nil)
 	if got := len(spec.Template.Spec.InitContainers); got != 1 {
 		t.Fatalf("init containers = %d, want 1 (ambient creds still uses the sidecar)", got)
 	}

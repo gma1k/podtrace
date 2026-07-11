@@ -71,8 +71,8 @@ end of diagnose. Mutually exclusive with itself — exactly one of:
 
 | Field | What it produces |
 |---|---|
-| `configMap.name` | A ConfigMap in the session's namespace with `data["report.txt"]` populated. The CLI patches it via a per-session Role + RoleBinding scoped to that exact name. Capped at the etcd ConfigMap limit (~1MiB). |
-| `secret.name` | A Secret in the session's namespace with `data["report.txt"]`. Use this when the report may carry sensitive data (private hostnames, paths, payloads). Same size cap as ConfigMap. |
+| `configMap.name` | A ConfigMap in the session's namespace. Each traced node writes its report under a per-node key `data["report-<node>.txt"]` (so multi-node sessions don't overwrite each other). The CLI patches it via a per-session Role + RoleBinding scoped to that exact name. Capped at the etcd ConfigMap limit (~1MiB). |
+| `secret.name` | A Secret in the session's namespace, same per-node `data["report-<node>.txt"]` keys as the ConfigMap sink. Use this when the report may carry sensitive data (private hostnames, paths, payloads). Same size cap as ConfigMap. |
 | `objectStore` | Uploads to an S3-, GCS-, or Azure-Blob–compatible bucket via a [native sidecar](object-store-reports.md). The only sink that escapes the etcd object-size limit. Requires `TracerConfig.spec.session.sidecarUploader=true` and either ambient cloud credentials (IRSA / Workload Identity / Managed Identity) or an explicit `credentialsSecretRef`. |
 
 When `reportRef` is unset, only the exporter receives event spans and

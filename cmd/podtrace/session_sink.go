@@ -14,6 +14,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/retry"
 
 	"github.com/podtrace/podtrace/internal/diagnose"
 	"github.com/podtrace/podtrace/internal/hostfs"
@@ -201,11 +202,12 @@ func uploadReport(ctx context.Context, spec, reportText string) error {
 	writeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	key := reportDataKey()
 	switch kind {
 	case "configmap":
-		return upsertReportConfigMap(writeCtx, client, namespace, name, reportText)
+		return upsertReportConfigMap(writeCtx, client, namespace, name, key, reportText)
 	case "secret":
-		return upsertReportSecret(writeCtx, client, namespace, name, reportText)
+		return upsertReportSecret(writeCtx, client, namespace, name, key, reportText)
 	default:
 		return fmt.Errorf("unsupported report-to kind %q (want configmap|secret)", kind)
 	}
@@ -227,78 +229,109 @@ func parseReportToSpec(spec string) (kind, namespace, name string, err error) {
 	return strings.ToLower(parts[0]), parts[1], parts[2], nil
 }
 
-// upsertReportConfigMap creates or updates a ConfigMap with the report
-// under the deterministic data key "report.txt".
-func upsertReportConfigMap(ctx context.Context, client kubernetes.Interface, namespace, name, reportText string) error {
-	data := map[string]string{"report.txt": reportText}
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{
-			"podtrace.io/managed-by": "podtrace-cli",
-			"podtrace.io/kind":       "session-report",
-		}},
-		Data: data,
+// reportDataKey returns the ConfigMap/Secret data key the session report is
+// written under.
+func reportDataKey() string {
+	node := os.Getenv("NODE_NAME")
+	if node == "" {
+		return "report.txt"
 	}
-	_, err := client.CoreV1().ConfigMaps(namespace).Create(ctx, cm, metav1.CreateOptions{})
-	if err == nil {
-		return nil
+	return "report-" + sanitizeReportKeySegment(node) + ".txt"
+}
+
+// sanitizeReportKeySegment maps a node name onto the characters a ConfigMap /
+// Secret data key allows ([-._a-zA-Z0-9]).
+func sanitizeReportKeySegment(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if !isReportKeyByte(c) {
+			b[i] = '-'
+		}
 	}
-	if !apierrors.IsAlreadyExists(err) {
-		return fmt.Errorf("create ConfigMap: %w", err)
-	}
-	existing, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
+	return string(b)
+}
+
+// isReportKeyByte reports whether c is valid in a ConfigMap/Secret data key
+// ([-._a-zA-Z0-9]).
+func isReportKeyByte(c byte) bool {
+	return c == '-' || c == '.' || c == '_' ||
+		(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+}
+
+var reportSinkLabels = map[string]string{
+	"podtrace.io/managed-by": "podtrace-cli",
+	"podtrace.io/kind":       "session-report",
+}
+
+// upsertReportConfigMap writes reportText under the given per-node data key,
+// creating the ConfigMap if absent.
+func upsertReportConfigMap(ctx context.Context, client kubernetes.Interface, namespace, name, key, reportText string) error {
+	cms := client.CoreV1().ConfigMaps(namespace)
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existing, err := cms.Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: reportSinkLabels},
+				Data:       map[string]string{key: reportText},
+			}
+			_, cerr := cms.Create(ctx, cm, metav1.CreateOptions{})
+			if cerr == nil || !apierrors.IsAlreadyExists(cerr) {
+				return cerr
+			}
+			// Lost the create race; fall through to a get+update.
+			existing, err = cms.Get(ctx, name, metav1.GetOptions{})
+		}
+		if err != nil {
+			return err
+		}
+		if existing.Data == nil {
+			existing.Data = map[string]string{}
+		}
+		existing.Data[key] = reportText
+		_, uerr := cms.Update(ctx, existing, metav1.UpdateOptions{})
+		return uerr
+	})
 	if err != nil {
-		return fmt.Errorf("get existing ConfigMap: %w", err)
-	}
-	if existing.Data == nil {
-		existing.Data = map[string]string{}
-	}
-	existing.Data["report.txt"] = reportText
-	if _, err := client.CoreV1().ConfigMaps(namespace).Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
-		return fmt.Errorf("update ConfigMap: %w", err)
+		return fmt.Errorf("upsert report ConfigMap: %w", err)
 	}
 	return nil
 }
 
 // upsertReportSecret mirrors upsertReportConfigMap for Secret sinks.
-// Secret is the right sink when the report may contain sensitive
-// hostnames, paths, or payloads — Kubernetes RBAC on Secrets is
-// typically stricter.
-func upsertReportSecret(ctx context.Context, client kubernetes.Interface, namespace, name, reportText string) error {
-	data := map[string][]byte{"report.txt": []byte(reportText)}
-	sec := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{
-			"podtrace.io/managed-by": "podtrace-cli",
-			"podtrace.io/kind":       "session-report",
-		}},
-		Type: corev1.SecretTypeOpaque,
-		Data: data,
-	}
-	_, err := client.CoreV1().Secrets(namespace).Create(ctx, sec, metav1.CreateOptions{})
-	if err == nil {
-		return nil
-	}
-	if !apierrors.IsAlreadyExists(err) {
-		return fmt.Errorf("create Secret: %w", err)
-	}
-	existing, err := client.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
+func upsertReportSecret(ctx context.Context, client kubernetes.Interface, namespace, name, key, reportText string) error {
+	secrets := client.CoreV1().Secrets(namespace)
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existing, err := secrets.Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			sec := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: reportSinkLabels},
+				Type:       corev1.SecretTypeOpaque,
+				Data:       map[string][]byte{key: []byte(reportText)},
+			}
+			_, cerr := secrets.Create(ctx, sec, metav1.CreateOptions{})
+			if cerr == nil || !apierrors.IsAlreadyExists(cerr) {
+				return cerr
+			}
+			existing, err = secrets.Get(ctx, name, metav1.GetOptions{})
+		}
+		if err != nil {
+			return err
+		}
+		if existing.Data == nil {
+			existing.Data = map[string][]byte{}
+		}
+		existing.Data[key] = []byte(reportText)
+		_, uerr := secrets.Update(ctx, existing, metav1.UpdateOptions{})
+		return uerr
+	})
 	if err != nil {
-		return fmt.Errorf("get existing Secret: %w", err)
-	}
-	if existing.Data == nil {
-		existing.Data = map[string][]byte{}
-	}
-	existing.Data["report.txt"] = []byte(reportText)
-	if _, err := client.CoreV1().Secrets(namespace).Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
-		return fmt.Errorf("update Secret: %w", err)
+		return fmt.Errorf("upsert report Secret: %w", err)
 	}
 	return nil
 }
 
 // buildInClusterClient constructs a kubernetes.Interface from the Job
-// pod's ServiceAccount. Falls back to KUBECONFIG for local development
-// so the same code path works when running the CLI outside a cluster
-// (e.g., in unit tests) — the fallback is gated on the in-cluster probe
-// failing, so production behavior is unchanged.
+// pod's ServiceAccount.
 func buildInClusterClient() (kubernetes.Interface, error) {
 	cfg, err := rest.InClusterConfig()
 	if err != nil {

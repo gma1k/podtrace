@@ -58,8 +58,6 @@ static __always_inline void quic_ship(struct __sk_buff *skb, u8 is_v6,
 	rec->timestamp = bpf_ktime_get_ns();
 	rec->cgroup_id = k.cgroup_id;
 	rec->pid = bpf_get_current_pid_tgid() >> 32;
-	/* bpf_get_current_comm is not available to cgroup_skb programs;
-	 * userspace resolves the name from rec->pid instead. */
 	__builtin_memset(rec->comm, 0, sizeof(rec->comm));
 	rec->family = is_v6 ? 10 : 2;
 	rec->_pad = 0;

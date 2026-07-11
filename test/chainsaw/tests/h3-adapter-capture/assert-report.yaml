@@ -4,5 +4,5 @@ metadata:
   name: h3-curl-report
   labels:
     podtrace.io/kind: session-report
-(contains(data."report.txt", 'HTTP/3')): true
-(contains(data."report.txt", '-> 200')): true
+(length(values(data)[?contains(@, 'HTTP/3')]) > `0`): true
+(length(values(data)[?contains(@, '-> 200')]) > `0`): true

@@ -24,9 +24,7 @@ import (
 )
 
 // PodTraceSessionReconciler turns a PodTraceSession CR into one Job per
-// node hosting at least one matched pod. Jobs invoke the standalone
-// `podtrace --diagnose <duration>` CLI, so session execution is
-// decoupled from the DaemonSet agent's lifecycle.
+// node hosting at least one matched pod.
 type PodTraceSessionReconciler struct {
 	client.Client
 	Scheme          *runtime.Scheme
@@ -57,7 +55,6 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, fmt.Errorf("get PodTraceSession: %w", err)
 	}
 
-	// Deletion path: clean up cross-namespace Jobs, then release the finalizer.
 	if !session.DeletionTimestamp.IsZero() {
 		tc, err := r.resolveTracerConfig(ctx)
 		if err != nil {
@@ -105,10 +102,6 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	targetNodes, targetNamespaces, err := r.resolveTargetNodes(ctx, &session)
 	if err != nil {
 		if strings.Contains(err.Error(), "invalid NamespaceSelector") {
-			// Terminal: an invalid selector cannot be fixed by retrying, and
-			// returning the error here put a permanently-failed object on
-			// the infinite-backoff treadmill. A spec edit re-triggers
-			// reconciliation.
 			r.failSessionTerminally(ctx, &session, "NamespaceSelectorInvalid", err.Error())
 			return ctrl.Result{}, nil
 		}
@@ -163,6 +156,11 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		_ = r.Status().Update(ctx, &session)
 		return ctrl.Result{}, err
 	}
+	if err := ensureSessionPodReadRBAC(ctx, r.Client, &session, sessionPodNamespaces(&session, targetNamespaces), systemNS); err != nil {
+		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "SessionRBAC", err.Error())
+		_ = r.Status().Update(ctx, &session)
+		return ctrl.Result{}, err
+	}
 
 	cap := effectiveMaxConcurrentSessionsPerNode(tc)
 
@@ -179,7 +177,7 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 
-	jobs, err := r.ensureJobs(ctx, &session, tc, targetNodes)
+	jobs, err := r.ensureJobs(ctx, &session, tc, targetNodes, targetNamespaces)
 	if err != nil {
 		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "EnsureJobs", err.Error())
 		_ = r.Status().Update(ctx, &session)
@@ -235,9 +233,6 @@ func (r *PodTraceSessionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&corev1.Namespace{},
 			handler.EnqueueRequestsFromMapFunc(r.namespaceToPodTraceSessions),
 		).
-		// Session bundle/object-store Secrets are copies of the referenced
-		// credential data; rotations must re-trigger the non-terminal
-		// sessions that snapshot them.
 		Watches(
 			&corev1.Secret{},
 			handler.EnqueueRequestsFromMapFunc(r.secretToPodTraceSessions),
@@ -401,8 +396,6 @@ func isPodEligible(p *corev1.Pod) bool {
 }
 
 // failSessionTerminally marks a session Failed with a CompletionTime stamp.
-// Failed-by-validation sessions used to be left without a CompletionTime, so
-// reconcileTerminalSession never TTL-garbage-collected them.
 func (r *PodTraceSessionReconciler) failSessionTerminally(ctx context.Context, s *podtracev1alpha1.PodTraceSession, reason, message string) {
 	s.Status.State = podtracev1alpha1.SessionStateFailed
 	if s.Status.CompletionTime == nil {
@@ -413,11 +406,7 @@ func (r *PodTraceSessionReconciler) failSessionTerminally(ctx context.Context, s
 	_ = r.Status().Update(ctx, s)
 }
 
-// resolveTracerConfig returns the "default" TracerConfig when present, nil
-// when it does not exist, and an error for any other Get failure — a
-// transient API error used to be indistinguishable from "no TracerConfig",
-// silently falling back to the default system namespace and an empty session
-// image.
+// resolveTracerConfig returns the "default" TracerConfig when present.
 func (r *PodTraceSessionReconciler) resolveTracerConfig(ctx context.Context) (*podtracev1alpha1.TracerConfig, error) {
 	var tc podtracev1alpha1.TracerConfig
 	if err := r.Get(ctx, types.NamespacedName{Name: DefaultTracerConfigName}, &tc); err != nil {
@@ -430,10 +419,7 @@ func (r *PodTraceSessionReconciler) resolveTracerConfig(ctx context.Context) (*p
 }
 
 // nodesAtCapacity returns the subset of the candidate node list whose
-// current active-session Job count is >= cap. "Active" excludes the
-// session currently being reconciled (its own Jobs don't count against
-// its own cap). Self-identity is (selfNS, selfName), which is unique
-// cluster-wide for PodTraceSession resources.
+// current active-session Job count is >= cap.
 func (r *PodTraceSessionReconciler) nodesAtCapacity(ctx context.Context, candidates []string, cap int32, selfNS, selfName string) ([]string, error) {
 	var allJobs batchv1.JobList
 	if err := r.List(ctx, &allJobs, client.MatchingLabels{
@@ -477,9 +463,8 @@ func effectiveMaxConcurrentSessionsPerNode(tc *podtracev1alpha1.TracerConfig) in
 }
 
 // ensureJobs creates-or-updates one Job per target node, owner-ref'd to
-// the session. Returns all Jobs currently owned by the session (not just
-// those created this call) so Reconcile can roll up status.
-func (r *PodTraceSessionReconciler) ensureJobs(ctx context.Context, s *podtracev1alpha1.PodTraceSession, tc *podtracev1alpha1.TracerConfig, nodes []string) ([]batchv1.Job, error) {
+// the session.
+func (r *PodTraceSessionReconciler) ensureJobs(ctx context.Context, s *podtracev1alpha1.PodTraceSession, tc *podtracev1alpha1.TracerConfig, nodes []string, targetNamespaces []string) ([]batchv1.Job, error) {
 	systemNS := systemNamespaceForSession(tc, r.SystemNamespace)
 
 	for _, node := range nodes {
@@ -498,7 +483,7 @@ func (r *PodTraceSessionReconciler) ensureJobs(ctx context.Context, s *podtracev
 				LabelNodeName:    node,
 			})
 			if job.Spec.Template.Spec.Containers == nil {
-				job.Spec = buildSessionJobSpec(s, tc, node)
+				job.Spec = buildSessionJobSpec(s, tc, node, targetNamespaces)
 			}
 			return nil
 		}); err != nil {
@@ -518,9 +503,7 @@ func (r *PodTraceSessionReconciler) ensureJobs(ctx context.Context, s *podtracev
 	return owned.Items, nil
 }
 
-// reconcileTerminalSession handles TTL-driven cleanup only. Terminal
-// sessions are not re-fanned-out; we just check if their TTL has
-// elapsed and delete the CR.
+// reconcileTerminalSession handles TTL-driven cleanup only.
 func (r *PodTraceSessionReconciler) reconcileTerminalSession(ctx context.Context, s *podtracev1alpha1.PodTraceSession) (ctrl.Result, error) {
 	ttl := sessionTTL(s)
 	if ttl == 0 || s.Status.CompletionTime == nil {
@@ -543,8 +526,7 @@ func sessionTTL(s *podtracev1alpha1.PodTraceSession) int32 {
 	return 300
 }
 
-// setCondition mirrors TracerConfigReconciler.setCondition; duplicated
-// rather than generic so the two reconcilers can evolve independently.
+// setCondition mirrors TracerConfigReconciler.setCondition.
 func (r *PodTraceSessionReconciler) setCondition(s *podtracev1alpha1.PodTraceSession, condType string, status metav1.ConditionStatus, reason, message string) {
 	s.Status.Conditions = upsertCondition(s.Status.Conditions, metav1.Condition{
 		Type:               condType,
