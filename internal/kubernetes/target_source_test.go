@@ -195,3 +195,55 @@ func stringN(i int) string {
 		return []string{"p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10", "p11", "p12", "p13", "p14", "p15", "p16", "p17", "p18"}[i-1]
 	}
 }
+
+// TestChannelTargetSource_StartEmitsLatestAfterPublish guards the Start/Publish
+// ordering: a snapshot published before Start (while started=false, so it is
+// only stored, not emitted) must be the one Start emits — not a stale/empty
+// snapshot. Draining Updates must leave the consumer on the published set.
+func TestChannelTargetSource_StartEmitsLatestAfterPublish(t *testing.T) {
+	src := kubernetes.NewChannelTargetSource()
+	want := []*kubernetes.PodInfo{{PodName: "p1", Namespace: "ns"}}
+	src.Publish(want) // stored only; not started yet
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := src.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Drain to the final delivered snapshot.
+	var last []*kubernetes.PodInfo
+	deadline := time.After(1 * time.Second)
+	for {
+		select {
+		case snap := <-src.Updates():
+			last = snap
+		case <-time.After(50 * time.Millisecond):
+			if len(last) != 1 || last[0].PodName != "p1" {
+				t.Fatalf("consumer left on stale snapshot %v, want [p1]", last)
+			}
+			return
+		case <-deadline:
+			t.Fatal("timed out draining Updates")
+		}
+	}
+}
+
+// TestChannelTargetSource_StartIsIdempotent ensures a second Start does not
+// re-emit and does not panic.
+func TestChannelTargetSource_StartIsIdempotent(t *testing.T) {
+	src := kubernetes.NewChannelTargetSource()
+	ctx := context.Background()
+	if err := src.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	<-src.Updates() // consume the initial empty emit
+	if err := src.Start(ctx); err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+	select {
+	case <-src.Updates():
+		t.Fatal("second Start must not re-emit")
+	case <-time.After(100 * time.Millisecond):
+	}
+}

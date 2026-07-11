@@ -151,6 +151,25 @@ func (d *Diagnostician) Finish() {
 	d.endTime = time.Now()
 }
 
+// EventContexts returns the per-event enrichment contexts, index-aligned with
+// GetEvents().
+func (d *Diagnostician) EventContexts() []map[string]interface{} {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	result := make([]map[string]interface{}, len(d.enrichedEvents))
+	copy(result, d.enrichedEvents)
+	return result
+}
+
+// SetTimeWindow overrides the observation window.
+func (d *Diagnostician) SetTimeWindow(start, end time.Time) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.startTime = start
+	d.endTime = end
+}
+
 func (d *Diagnostician) CalculateRate(count int, duration time.Duration) float64 {
 	if duration.Seconds() > 0 {
 		return float64(count) / duration.Seconds()

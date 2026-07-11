@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -144,8 +145,8 @@ func main() {
 	rootCmd.Flags().StringVar(&logLevel, "log-level", "", "Set log level (debug, info, warn, error, fatal). Overrides PODTRACE_LOG_LEVEL environment variable")
 	rootCmd.Flags().BoolVar(&enableTracing, "tracing", config.DefaultTracingEnabled, "Enable distributed tracing")
 	rootCmd.Flags().StringVar(&tracingOTLPEndpoint, "tracing-otlp-endpoint", config.DefaultOTLPEndpoint, "OpenTelemetry OTLP endpoint")
-	rootCmd.Flags().StringVar(&tracingJaegerEndpoint, "tracing-jaeger-endpoint", config.DefaultJaegerEndpoint, "Jaeger endpoint")
-	rootCmd.Flags().StringVar(&tracingSplunkEndpoint, "tracing-splunk-endpoint", config.DefaultSplunkEndpoint, "Splunk HEC endpoint")
+	rootCmd.Flags().StringVar(&tracingJaegerEndpoint, "tracing-jaeger-endpoint", "", "Jaeger endpoint (opt-in; OTLP is the default exporter)")
+	rootCmd.Flags().StringVar(&tracingSplunkEndpoint, "tracing-splunk-endpoint", "", "Splunk HEC endpoint (opt-in; requires --tracing-splunk-token)")
 	rootCmd.Flags().StringVar(&tracingSplunkToken, "tracing-splunk-token", "", "Splunk HEC token")
 	rootCmd.Flags().Float64Var(&tracingSampleRate, "tracing-sample-rate", config.DefaultTracingSampleRate, "Tracing sample rate (0.0-1.0)")
 	rootCmd.Flags().BoolVar(&enableSynthesizeSpans, "tracing-synthesize-spans", config.DefaultSynthesizeSpans, "Mint spans for correlated L7 traffic (HTTP/gRPC) that carries no inbound W3C/B3 trace context (per-pod root spans)")
@@ -174,16 +175,11 @@ func main() {
 	}
 
 	err := rootCmd.Execute()
-	// Sync BEFORE exiting: a deferred Sync after exitFunc never ran
-	// (os.Exit skips defers), so the logs explaining a failure were the
-	// ones most likely to be lost.
 	logger.Sync()
 	if err != nil {
 		code := 1
 		var exitErr *nodespawn.ExitError
 		if errors.As(err, &exitErr) && exitErr.Code != 0 {
-			// Propagate the spawned pod's real exit code; collapsing
-			// everything to 1 broke scripting around the CLI.
 			code = exitErr.Code
 		}
 		exitFunc(code)
@@ -346,6 +342,12 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid export format: %w", err)
 	}
 
+	if diagnoseDuration != "" {
+		if _, err := time.ParseDuration(diagnoseDuration); err != nil {
+			return fmt.Errorf("invalid --diagnose duration %q: %w", diagnoseDuration, err)
+		}
+	}
+
 	if err := validation.ValidateEventFilter(eventFilter); err != nil {
 		return fmt.Errorf("invalid event filter: %w", err)
 	}
@@ -365,8 +367,6 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 
 	sigChan := make(chan os.Signal, 2)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	// handlerDone disarms the handler when the run returns, so a signal
-	// arriving after completion cannot force-exit the process.
 	handlerDone := make(chan struct{})
 	defer close(handlerDone)
 	defer signal.Stop(sigChan)
@@ -377,9 +377,6 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		case <-handlerDone:
 			return
 		}
-		// A second interrupt must still work: if graceful shutdown hangs
-		// (stuck upload, wedged exporter), the user can force an exit
-		// instead of being permanently ignored.
 		select {
 		case <-sigChan:
 			_, _ = fmt.Fprintln(os.Stderr, "second interrupt — exiting immediately")
@@ -469,6 +466,11 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	}
 	podInfo := targetInfos[0]
 	sourceIndex := newSourcePodIndex(targetInfos)
+
+	if len(targetInfos) > 1 {
+		logger.Info("Tracing multiple target pods on this node",
+			zap.Int("total_targets", len(targetInfos)))
+	}
 
 	for _, p := range targetInfos {
 		logger.Info("Resolved target pod",
@@ -564,13 +566,15 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 
 	eventChan := make(chan *events.Event, config.EventChannelBufferSize)
 
-	// Every consumer below must see EVERY event, so the source channel is
-	// teed: a channel delivers each value to exactly one receiver, and the
-	// previous shared-channel wiring partitioned events randomly between
-	// the report loop, metrics, tracing, and profiling.
 	tracingActive := tracingManager != nil && enableTracing
+	var profilingPodIPs []string
+	for _, ti := range targetInfos {
+		if ti != nil && ti.PodIP != "" {
+			profilingPodIPs = append(profilingPodIPs, ti.PodIP)
+		}
+	}
 	profilingActive := (enableProfiling || config.ProfilingEnabled) &&
-		podInfo != nil && podInfo.PodIP != ""
+		len(profilingPodIPs) > 0
 	auxiliaryConsumers := 0
 	for _, active := range []bool{enableMetrics, tracingActive, profilingActive} {
 		if active {
@@ -654,21 +658,28 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		}()
 	}
 
-	var profilingHandler *profiling.Handler
+	var profilingReporter profiling.Reporter
 	if enableProfiling || config.ProfilingEnabled {
-		config.ProfilingEnabled = true // ensures MetricsEnablePprof() returns true
+		config.ProfilingEnabled = true
 		ports := parsePprofPorts(config.ProfilingPprofPorts)
 		if profilingActive {
-			profilingHandler = profiling.NewHandler(podInfo.PodIP, ports)
-			go profilingHandler.Run(ctx, takeAuxiliary())
-		} else {
-			logger.Warn("Profiling requested but pod IP is not available; skipping pprof discovery")
-		}
-		// Wire profiling routes into the management HTTP server.
-		if profilingHandler != nil {
-			if setter, ok := tracer.(tracerpkg.ProfilingControllerSetter); ok {
-				setter.SetProfilingController(profilingHandler)
+			var controller tracerpkg.ProfilingController
+			if len(profilingPodIPs) == 1 {
+				h := profiling.NewHandler(profilingPodIPs[0], ports)
+				profilingReporter, controller = h, h
+				go h.Run(ctx, takeAuxiliary())
+			} else {
+				m := profiling.NewMultiHandler(profilingPodIPs, ports)
+				profilingReporter, controller = m, m
+				logger.Info("Profiling every target pod on this node",
+					zap.Int("pods", m.Len()))
+				go m.Run(ctx, takeAuxiliary())
 			}
+			if setter, ok := tracer.(tracerpkg.ProfilingControllerSetter); ok {
+				setter.SetProfilingController(controller)
+			}
+		} else {
+			logger.Warn("Profiling requested but no target pod IP is available; skipping pprof discovery")
 		}
 	}
 
@@ -700,17 +711,17 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	}
 
 	if diagnoseDuration != "" {
-		return runDiagnoseModeWithSource(ctx, filteredChan, diagnoseDuration, podInfo, enricher, nil, tracingManager, enableTracing, sourceIndex.Resolve, profilingHandler)
+		return runDiagnoseModeWithSource(ctx, filteredChan, diagnoseDuration, podInfo, enricher, nil, tracingManager, enableTracing, sourceIndex.Resolve, profilingReporter)
 	}
 
-	return runNormalModeWithSource(ctx, filteredChan, podInfo, enricher, nil, tracingManager, enableTracing, sourceIndex.Resolve, profilingHandler)
+	return runNormalModeWithSource(ctx, filteredChan, podInfo, enricher, nil, tracingManager, enableTracing, sourceIndex.Resolve, profilingReporter)
 }
 
 func runNormalMode(ctx context.Context, eventChan <-chan *events.Event, podInfo *kubernetes.PodInfo, enricher *kubernetes.ContextEnricher, eventsCorrelator *kubernetes.EventsCorrelator, tracingManager *tracing.Manager, enableTracing bool) error {
 	return runNormalModeWithSource(ctx, eventChan, podInfo, enricher, eventsCorrelator, tracingManager, enableTracing, nil, nil)
 }
 
-func runNormalModeWithSource(ctx context.Context, eventChan <-chan *events.Event, podInfo *kubernetes.PodInfo, enricher *kubernetes.ContextEnricher, _ *kubernetes.EventsCorrelator, tracingManager *tracing.Manager, enableTracing bool, resolveSource func(*events.Event) *kubernetes.PodInfo, profilingHandler *profiling.Handler) error {
+func runNormalModeWithSource(ctx context.Context, eventChan <-chan *events.Event, podInfo *kubernetes.PodInfo, enricher *kubernetes.ContextEnricher, _ *kubernetes.EventsCorrelator, tracingManager *tracing.Manager, enableTracing bool, resolveSource func(*events.Event) *kubernetes.PodInfo, profilingReporter profiling.Reporter) error {
 	logger.Info("Tracing started",
 		zap.Duration("update_interval", config.DefaultRealtimeUpdateInterval))
 
@@ -771,9 +782,9 @@ func runNormalModeWithSource(ctx context.Context, eventChan <-chan *events.Event
 			fmt.Println("\n=== Final Diagnostic Report ===")
 			fmt.Println()
 			finalDuration := diagnostician.EndTime().Sub(diagnostician.StartTime())
-			report := diagnostician.GenerateReport()
-			if profilingHandler != nil {
-				report += profilingHandler.GenerateSection(diagnostician.GetEvents(), finalDuration)
+			report := generateDiagnoseReport(diagnostician)
+			if profilingReporter != nil {
+				report += profilingReporter.GenerateSection(diagnostician.GetEvents(), finalDuration)
 			}
 			fmt.Println(report)
 			return nil
@@ -785,7 +796,7 @@ func runDiagnoseMode(ctx context.Context, eventChan <-chan *events.Event, durati
 	return runDiagnoseModeWithSource(ctx, eventChan, durationStr, podInfo, enricher, eventsCorrelator, tracingManager, enableTracing, nil, nil)
 }
 
-func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Event, durationStr string, podInfo *kubernetes.PodInfo, enricher *kubernetes.ContextEnricher, _ *kubernetes.EventsCorrelator, tracingManager *tracing.Manager, enableTracing bool, resolveSource func(*events.Event) *kubernetes.PodInfo, profilingHandler *profiling.Handler) error {
+func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Event, durationStr string, podInfo *kubernetes.PodInfo, enricher *kubernetes.ContextEnricher, _ *kubernetes.EventsCorrelator, tracingManager *tracing.Manager, enableTracing bool, resolveSource func(*events.Event) *kubernetes.PodInfo, profilingReporter profiling.Reporter) error {
 	duration, err := time.ParseDuration(durationStr)
 	if err != nil {
 		return fmt.Errorf("invalid duration: %w", err)
@@ -852,9 +863,9 @@ func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Eve
 		case <-timeout:
 			flushBatch()
 			diagnostician.Finish()
-			report := diagnostician.GenerateReport()
-			if profilingHandler != nil {
-				report += profilingHandler.GenerateSection(diagnostician.GetEvents(), duration)
+			report := generateDiagnoseReport(diagnostician)
+			if profilingReporter != nil {
+				report += profilingReporter.GenerateSection(diagnostician.GetEvents(), duration)
 			}
 			finalizeDiagnoseOutputs(ctx, report, diagnostician)
 			if exportFormat != "" {
@@ -865,9 +876,9 @@ func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Eve
 		case <-ctx.Done():
 			flushBatch()
 			diagnostician.Finish()
-			report := diagnostician.GenerateReport()
-			if profilingHandler != nil {
-				report += profilingHandler.GenerateSection(diagnostician.GetEvents(), duration)
+			report := generateDiagnoseReport(diagnostician)
+			if profilingReporter != nil {
+				report += profilingReporter.GenerateSection(diagnostician.GetEvents(), duration)
 			}
 			finalizeDiagnoseOutputs(ctx, report, diagnostician)
 			if exportFormat != "" {
@@ -1056,12 +1067,73 @@ func attachSourcePod(e *events.Event, resolve func(*events.Event) *kubernetes.Po
 	}
 }
 
+// generateDiagnoseReport renders the diagnostic report.
+func generateDiagnoseReport(agg *diagnose.Diagnostician) string {
+	allEvents := agg.GetEvents()
+	contexts := agg.EventContexts()
+
+	type podBucket struct {
+		namespace string
+		podName   string
+		events    []*events.Event
+		contexts  []map[string]interface{}
+	}
+	order := make([]string, 0, 4)
+	buckets := make(map[string]*podBucket)
+	for i, e := range allEvents {
+		var ns, pod string
+		if e.K8s != nil {
+			ns, pod = e.K8s.Namespace, e.K8s.PodName
+		}
+		key := ns + "/" + pod
+		b := buckets[key]
+		if b == nil {
+			b = &podBucket{namespace: ns, podName: pod}
+			buckets[key] = b
+			order = append(order, key)
+		}
+		b.events = append(b.events, e)
+		if i < len(contexts) {
+			b.contexts = append(b.contexts, contexts[i])
+		} else {
+			b.contexts = append(b.contexts, nil)
+		}
+	}
+
+	if len(order) <= 1 {
+		return agg.GenerateReport()
+	}
+
+	sort.Strings(order)
+	var sb strings.Builder
+	for _, key := range order {
+		b := buckets[key]
+		child := diagnose.NewDiagnosticianWithK8sAndThresholds(
+			b.podName, b.namespace, errorRateThreshold, rttSpikeThreshold, fsSlowThreshold)
+		child.SetTimeWindow(agg.StartTime(), agg.EndTime())
+		for i, e := range b.events {
+			child.AddEventWithContext(e, b.contexts[i])
+		}
+		label := key
+		if b.podName == "" {
+			label = "(unattributed source)"
+		}
+		fmt.Fprintf(&sb, "\n================ Diagnosis: %s ================\n\n", label)
+		sb.WriteString(child.GenerateReport())
+	}
+	return sb.String()
+}
+
 func buildK8sContextMap(enriched *kubernetes.EnrichedEvent, source *kubernetes.PodInfo) map[string]interface{} {
 	if enriched == nil || enriched.KubernetesContext == nil {
 		return nil
 	}
+	sourceNamespace := enriched.KubernetesContext.SourceNamespace
+	if source != nil && source.Namespace != "" {
+		sourceNamespace = source.Namespace
+	}
 	ctx := map[string]interface{}{
-		"namespace":         enriched.KubernetesContext.SourceNamespace,
+		"namespace":         sourceNamespace,
 		"target_pod":        enriched.KubernetesContext.TargetPodName,
 		"target_service":    enriched.KubernetesContext.ServiceName,
 		"target_namespace":  enriched.KubernetesContext.TargetNamespace,

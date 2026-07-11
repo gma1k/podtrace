@@ -290,3 +290,60 @@ func TestEventsCorrelator_CorrelateWithAppEvents_EmptyEvents(t *testing.T) {
 	}
 }
 
+
+// TestEventsCorrelator_AddEvent_EventTimeFallback is a regression guard for the
+// events.k8s.io/v1 event shape: those events carry EventTime (a MicroTime) and
+// leave FirstTimestamp zero. Before the fix addEvent recorded a zero Timestamp,
+// which CorrelateWithAppEvents then filtered out of every time window.
+func TestEventsCorrelator_AddEvent_EventTimeFallback(t *testing.T) {
+	correlator := NewEventsCorrelator(nil, "test-pod", "default")
+	when := time.Now()
+
+	event := &corev1.Event{
+		InvolvedObject: corev1.ObjectReference{Name: "test-pod"},
+		Type:           "Warning",
+		Reason:         "BackOff",
+		Message:        "restarting",
+		// No FirstTimestamp: only EventTime, as the v1 events API emits.
+		EventTime: metav1.NewMicroTime(when),
+	}
+
+	correlator.addEvent(event)
+
+	events := correlator.GetEvents()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Timestamp.IsZero() {
+		t.Fatal("EventTime-only event recorded a zero Timestamp; it would be dropped by correlation")
+	}
+	correlated := correlator.CorrelateWithAppEvents(when, time.Second)
+	if len(correlated) != 1 {
+		t.Fatalf("EventTime-only event must correlate within the window, got %d", len(correlated))
+	}
+}
+
+// TestEventsCorrelator_AddEvent_SeriesCount guards the Count fallback: v1
+// aggregated events keep the repeat count in Series.Count, not the deprecated
+// top-level Count.
+func TestEventsCorrelator_AddEvent_SeriesCount(t *testing.T) {
+	correlator := NewEventsCorrelator(nil, "test-pod", "default")
+
+	event := &corev1.Event{
+		InvolvedObject: corev1.ObjectReference{Name: "test-pod"},
+		Type:           "Warning",
+		Reason:         "BackOff",
+		EventTime:      metav1.NewMicroTime(time.Now()),
+		Series:         &corev1.EventSeries{Count: 7},
+	}
+
+	correlator.addEvent(event)
+
+	events := correlator.GetEvents()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Count != 7 {
+		t.Errorf("expected Count 7 from Series.Count, got %d", events[0].Count)
+	}
+}

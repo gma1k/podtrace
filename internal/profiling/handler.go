@@ -247,46 +247,41 @@ func (h *Handler) HTTPStart(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// statusMap builds the profiling status payload for this pod.
+func (h *Handler) statusMap() map[string]interface{} {
+	h.mu.RLock()
+	hasResult := h.result != nil
+	h.mu.RUnlock()
+	return map[string]interface{}{
+		"pprof_available":      h.profiler.foundPort.Load() != 0,
+		"pprof_port":           h.profiler.foundPort.Load(),
+		"has_result":           hasResult,
+		"auto_triggered":       h.triggered.Load(),
+		"trigger_threshold_ms": config.ProfilingAutoTriggerMS,
+		"pod_ip":               h.podIP,
+	}
+}
+
 // HTTPStatus handles GET /profile/status
 func (h *Handler) HTTPStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	h.mu.RLock()
-	hasResult := h.result != nil
-	pprofAvail := h.profiler.foundPort.Load() != 0
-	h.mu.RUnlock()
-
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"pprof_available":      pprofAvail,
-		"pprof_port":           h.profiler.foundPort.Load(),
-		"has_result":           hasResult,
-		"auto_triggered":       h.triggered.Load(),
-		"trigger_threshold_ms": config.ProfilingAutoTriggerMS,
-		"pod_ip":               h.podIP,
-	})
+	_ = json.NewEncoder(w).Encode(h.statusMap())
 }
 
-// HTTPResult handles GET /profile/result
-func (h *Handler) HTTPResult(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+// resultMap builds the JSON-friendly result payload for this pod, or nil when
+// no profiling has occurred.
+func (h *Handler) resultMap() map[string]interface{} {
 	h.mu.RLock()
 	result := h.result
 	h.mu.RUnlock()
-
 	if result == nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNoContent)
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "no_result"})
-		return
+		return nil
 	}
 
-	// Build a JSON-friendly summary (avoid large raw bytes in the response).
 	type frame struct {
 		Frame string `json:"frame"`
 		Count int    `json:"count"`
@@ -317,21 +312,17 @@ func (h *Handler) HTTPResult(w http.ResponseWriter, r *http.Request) {
 			topAllocs = append(topAllocs, allocFn(f))
 		}
 	}
-
 	goroutineCount := 0
 	blockedCount := 0
 	if result.GoroutineProfile != nil {
 		goroutineCount = result.GoroutineProfile.GoroutineCount
 		blockedCount = result.GoroutineProfile.BlockedCount
 	}
-
 	pageFaults := map[string]int{}
 	for pid, cnt := range result.PageFaultCounts {
 		pageFaults[strconv.Itoa(int(pid))] = cnt
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	return map[string]interface{}{
 		"pprof_available":   result.PprofAvailable,
 		"pod_ip":            result.PodIP,
 		"slow_event_count":  len(result.SlowEvents),
@@ -344,5 +335,22 @@ func (h *Handler) HTTPResult(w http.ResponseWriter, r *http.Request) {
 		"oom_event_count":   len(result.OOMEvents),
 		"start_time":        result.StartTime,
 		"end_time":          result.EndTime,
-	})
+	}
+}
+
+// HTTPResult handles GET /profile/result
+func (h *Handler) HTTPResult(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	body := h.resultMap()
+	if body == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNoContent)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "no_result"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(body)
 }

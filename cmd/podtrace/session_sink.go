@@ -184,7 +184,7 @@ const objectStoreReportFile = "/var/run/podtrace/report.txt"
 
 func uploadReport(ctx context.Context, spec, reportText string) error {
 	if strings.Contains(spec, "://") {
-		if err := hostfs.WriteFile(objectStoreReportFile, []byte(reportText), 0o644); err != nil {
+		if err := hostfs.WriteFileAtomic(objectStoreReportFile, []byte(reportText), 0o644); err != nil {
 			return fmt.Errorf("write report file for sidecar: %w", err)
 		}
 		return nil

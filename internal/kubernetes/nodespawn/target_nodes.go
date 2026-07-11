@@ -11,6 +11,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	pkgkube "github.com/podtrace/podtrace/internal/kubernetes"
+	"github.com/podtrace/podtrace/internal/logger"
+	"go.uber.org/zap"
 )
 
 // PodRef holds everything the workstation pre-resolves about a target pod so
@@ -56,9 +58,15 @@ func ResolveTargetNodes(ctx context.Context, clientset kubernetes.Interface, sel
 	tolSeen := map[string]map[string]struct{}{}
 	unscheduled := []PodRef{}
 	missingContainer := []PodRef{}
+	routedWithoutID := []PodRef{}
+	seen := map[string]struct{}{}
 
 	add := func(pod *corev1.Pod) {
 		ref := PodRef{Namespace: pod.Namespace, Name: pod.Name}
+		if _, dup := seen[ref.String()]; dup {
+			return
+		}
+		seen[ref.String()] = struct{}{}
 		if pod.Spec.NodeName == "" {
 			unscheduled = append(unscheduled, ref)
 			return
@@ -73,6 +81,8 @@ func ResolveTargetNodes(ctx context.Context, clientset kubernetes.Interface, sel
 			if idx := indexAfterScheme(cs.ContainerID); idx >= 0 {
 				ref.ContainerID = cs.ContainerID[idx:]
 			}
+		} else {
+			routedWithoutID = append(routedWithoutID, ref)
 		}
 		node := pod.Spec.NodeName
 		byNode[node] = append(byNode[node], ref)
@@ -124,6 +134,22 @@ func ResolveTargetNodes(ctx context.Context, clientset kubernetes.Interface, sel
 		return NodeTargets{}, fmt.Errorf("nodespawn: %d target pod(s) are not yet scheduled to a node: %s",
 			len(unscheduled), joinRefs(unscheduled))
 	}
+	if len(missingContainer) > 0 {
+		logger.Warn("Skipping target pod(s) with no running container matching the requested name",
+			zap.String("container", sel.ContainerName),
+			zap.Int("skipped", len(missingContainer)),
+			zap.String("pods", joinRefs(missingContainer)))
+	}
+	if len(unscheduled) > 0 {
+		logger.Warn("Skipping unscheduled target pod(s)",
+			zap.Int("skipped", len(unscheduled)),
+			zap.String("pods", joinRefs(unscheduled)))
+	}
+	if len(routedWithoutID) > 0 {
+		logger.Warn("Target pod(s) have no running container yet; routed without a resolved container ID",
+			zap.Int("count", len(routedWithoutID)),
+			zap.String("pods", joinRefs(routedWithoutID)))
+	}
 
 	out := NodeTargets{ByNode: byNode, TolerationsByNode: tolByNode}
 	for n := range byNode {
@@ -172,8 +198,7 @@ func indexAfterScheme(s string) int {
 }
 
 // tolerationKey is a stable string used to dedupe Tolerations across the
-// target pods on one node. Effect+Key+Operator+Value+TolerationSeconds is
-// enough to distinguish every Kubernetes toleration uniquely.
+// target pods on one node.
 func tolerationKey(t corev1.Toleration) string {
 	sec := "nil"
 	if t.TolerationSeconds != nil {

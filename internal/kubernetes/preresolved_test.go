@@ -113,3 +113,51 @@ func TestPreResolvedSkip_CauseIsUnwrappable(t *testing.T) {
 		t.Error("cause must be a real error, not nil")
 	}
 }
+// TestNormalizeContainerID guards the pre-resolved container-ID validation:
+// the ID is substring-matched against cgroup paths, so a short or non-hex
+// value could match — and attach to — the wrong container.
+func TestNormalizeContainerID(t *testing.T) {
+	full := "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	cases := []struct {
+		name    string
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{"full hex", full, full, false},
+		{"scheme stripped", "containerd://" + full, full, false},
+		{"docker scheme", "docker://abcdef012345", "abcdef012345", false},
+		{"twelve hex ok", "abcdef012345", "abcdef012345", false},
+		{"too short", "abc123", "", true},
+		{"non hex", "zzzzzzzzzzzz", "", true},
+		{"scheme then short", "containerd://abc", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := normalizeContainerID(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for %q, got %q", tc.in, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error for %q: %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Errorf("normalizeContainerID(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBuildPodInfoFromPreResolved_RejectsUnsafeID ensures the validation is
+// wired into the build path (not just the helper).
+func TestBuildPodInfoFromPreResolved_RejectsUnsafeID(t *testing.T) {
+	_, err := BuildPodInfoFromPreResolved(PreResolvedRef{
+		Namespace: "ns", PodName: "p", ContainerID: "abc",
+	})
+	if err == nil {
+		t.Fatal("expected a too-short containerID to be rejected before cgroup lookup")
+	}
+}
