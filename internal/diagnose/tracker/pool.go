@@ -91,9 +91,9 @@ func (pt *PoolTracker) GetPoolSummary() []PoolSummary {
 
 	var summaries []PoolSummary
 	for _, pool := range pt.pools {
-		reuseRate := 0.0
+		releaseRatio := 0.0
 		if pool.AcquireCount > 0 {
-			reuseRate = float64(pool.ReleaseCount) / float64(pool.AcquireCount)
+			releaseRatio = float64(pool.ReleaseCount) / float64(pool.AcquireCount)
 		}
 
 		avgWaitTime := time.Duration(0)
@@ -108,7 +108,7 @@ func (pt *PoolTracker) GetPoolSummary() []PoolSummary {
 			AcquireCount:   pool.AcquireCount,
 			ReleaseCount:   pool.ReleaseCount,
 			ExhaustedCount: pool.ExhaustedCount,
-			ReuseRate:      reuseRate,
+			ReleaseRatio:   releaseRatio,
 			AvgWaitTime:    avgWaitTime,
 			MaxWaitTime:    pool.MaxWaitTime,
 			LastAcquire:    pool.LastAcquire,
@@ -131,7 +131,7 @@ type PoolSummary struct {
 	AcquireCount   int
 	ReleaseCount   int
 	ExhaustedCount int
-	ReuseRate      float64
+	ReleaseRatio   float64
 	AvgWaitTime    time.Duration
 	MaxWaitTime    time.Duration
 	LastAcquire    time.Time
@@ -177,7 +177,7 @@ func GeneratePoolCorrelation(events []*events.Event) string {
 		}
 		report += fmt.Sprintf("    - %s:\n", summary.PoolID)
 		report += fmt.Sprintf("        Acquires: %d, Releases: %d\n", summary.AcquireCount, summary.ReleaseCount)
-		report += fmt.Sprintf("        Reuse rate: %.2f%%\n", summary.ReuseRate*100)
+		report += fmt.Sprintf("        Release ratio: %.2f%% (releases/acquires)\n", summary.ReleaseRatio*100)
 		report += fmt.Sprintf("        Current connections: %d (peak: %d)\n", summary.CurrentConns, summary.MaxConns)
 
 		healthStatus := determinePoolHealthFromSummary(summary)
@@ -198,6 +198,9 @@ func GeneratePoolCorrelation(events []*events.Event) string {
 
 func determinePoolHealthFromSummary(summary PoolSummary) string {
 	if summary.ExhaustedCount > 0 {
+		if summary.AcquireCount == 0 {
+			return "CRITICAL - Pool exhausted with no successful acquisitions"
+		}
 		exhaustionRate := float64(summary.ExhaustedCount) / float64(summary.AcquireCount)
 		if exhaustionRate > 0.1 {
 			return "CRITICAL - High pool exhaustion rate (>10%)"
@@ -206,8 +209,8 @@ func determinePoolHealthFromSummary(summary PoolSummary) string {
 		}
 	}
 
-	if summary.ReuseRate < 0.5 {
-		return "WARNING - Low connection reuse rate (<50%)"
+	if summary.ReleaseRatio < 0.5 {
+		return "WARNING - Under half of acquired connections released (<50%, possible leak)"
 	}
 
 	if summary.MaxWaitTime > 1000*time.Millisecond {

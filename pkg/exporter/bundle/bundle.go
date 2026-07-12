@@ -190,6 +190,9 @@ func FromConfigMapData(data map[string]string) (*Payload, error) {
 			p.TargetNamespaces = strings.Split(raw, ",")
 		}
 	}
+	if err := validatePayload(p); err != nil {
+		return nil, err
+	}
 	return p, nil
 }
 
@@ -370,20 +373,43 @@ func PolicyHash(p *Payload) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// validatePayload enforces the semantic constraints every Payload wire format
+// shares
+func validatePayload(p *Payload) error {
+	if p.Version != "" && p.Version != CurrentVersion {
+		return fmt.Errorf("bundle: unsupported version %q (this build understands %q)", p.Version, CurrentVersion)
+	}
+	if p.Type == "" {
+		return fmt.Errorf("bundle: missing required field 'type'")
+	}
+	if p.Sample != nil && (*p.Sample < 0 || *p.Sample > 1) {
+		return fmt.Errorf("bundle: sample %v out of range 0-1", *p.Sample)
+	}
+	if p.Thresholds != nil {
+		for _, spec := range thresholdFields() {
+			v := spec.get(p.Thresholds)
+			if v == nil {
+				continue
+			}
+			if *v < 0 {
+				return fmt.Errorf("bundle: %s %d must be non-negative", spec.key, *v)
+			}
+			if spec.max > 0 && int(*v) > spec.max {
+				return fmt.Errorf("bundle: %s %d out of range 0-%d", spec.key, *v, spec.max)
+			}
+		}
+	}
+	return nil
+}
+
 // FromYAML parses a Payload from its YAML serialization.
 func FromYAML(raw []byte) (*Payload, error) {
 	var p Payload
 	if err := yaml.Unmarshal(raw, &p); err != nil {
 		return nil, fmt.Errorf("bundle: parse YAML: %w", err)
 	}
-	if p.Version != "" && p.Version != CurrentVersion {
-		return nil, fmt.Errorf("bundle: unsupported version %q (this build understands %q)", p.Version, CurrentVersion)
-	}
-	if p.Type == "" {
-		return nil, fmt.Errorf("bundle: missing required field 'type'")
-	}
-	if p.Sample != nil && (*p.Sample < 0 || *p.Sample > 1) {
-		return nil, fmt.Errorf("bundle: sample %v out of range 0-1", *p.Sample)
+	if err := validatePayload(&p); err != nil {
+		return nil, err
 	}
 	return &p, nil
 }

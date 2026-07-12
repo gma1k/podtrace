@@ -277,11 +277,13 @@ func (m *Manager) exportTraces(force bool) {
 		return
 	}
 
+	allSucceeded := true
 	for _, target := range m.exporterTargets() {
 		err := target.export(traces)
 		if err == nil {
 			continue
 		}
+		allSucceeded = false
 		logger.Warn("Failed to export traces", zap.String("exporter", target.name), zap.Error(err))
 		if target.suppressAlert {
 			continue
@@ -304,6 +306,12 @@ func (m *Manager) exportTraces(force bool) {
 			Recommendations: target.recommendations,
 		})
 	}
+
+	// Advance the per-trace watermark only when every exporter accepted the
+	// spans.
+	if allSucceeded {
+		m.traceTracker.CommitExport(traces)
+	}
 }
 
 func (m *Manager) GetRequestFlowGraph() *graph.RequestFlowGraph {
@@ -311,8 +319,6 @@ func (m *Manager) GetRequestFlowGraph() *graph.RequestFlowGraph {
 		return nil
 	}
 
-	// Deep-copied snapshot: the graph builder sorts spans in place, which
-	// raced ProcessEvent on the live objects.
 	traces := m.traceTracker.SnapshotAll()
 	return m.graphBuilder.BuildFromTraces(traces)
 }

@@ -663,9 +663,13 @@ func GenerateIssuesSection(d Diagnostician) string {
 			} else {
 				severity = alerting.SeverityWarning
 			}
+			category := issue
+			if idx := strings.IndexByte(issue, ':'); idx > 0 {
+				category = issue[:idx]
+			}
 			alert := &alerting.Alert{
 				Severity:  severity,
-				Title:     "Diagnostic Issue Detected",
+				Title:     "Diagnostic Issue: " + category,
 				Message:   issue,
 				Timestamp: time.Now(),
 				Source:    "error_detector",
@@ -712,7 +716,7 @@ func GeneratePoolSection(d Diagnostician, duration time.Duration) string {
 	releaseRate := d.CalculateRate(stats.TotalReleases, duration)
 	report += fmt.Sprintf("  Total acquires: %d (%.1f/sec)\n", stats.TotalAcquires, acquireRate)
 	report += fmt.Sprintf("  Total releases: %d (%.1f/sec)\n", stats.TotalReleases, releaseRate)
-	report += fmt.Sprintf("  Reuse rate: %.2f%%\n", stats.ReuseRate*100)
+	report += fmt.Sprintf("  Release ratio: %.2f%% (releases/acquires)\n", stats.ReleaseRatio*100)
 	report += fmt.Sprintf("  Peak connections: %d\n", stats.PeakConnections)
 	report += fmt.Sprintf("  Average connections: %.1f\n", stats.AvgConnections)
 
@@ -741,7 +745,7 @@ func GeneratePoolSection(d Diagnostician, duration time.Duration) string {
 			}
 			report += fmt.Sprintf("    - %s:\n", summary.PoolID)
 			report += fmt.Sprintf("        Acquires: %d, Releases: %d\n", summary.AcquireCount, summary.ReleaseCount)
-			report += fmt.Sprintf("        Reuse rate: %.2f%%\n", summary.ReuseRate*100)
+			report += fmt.Sprintf("        Release ratio: %.2f%% (releases/acquires)\n", summary.ReleaseRatio*100)
 			report += fmt.Sprintf("        Current connections: %d (peak: %d)\n", summary.CurrentConns, summary.MaxConns)
 
 			poolHealthStatus := determinePoolHealthFromSummary(summary)
@@ -764,6 +768,9 @@ func GeneratePoolSection(d Diagnostician, duration time.Duration) string {
 
 func determinePoolHealth(stats analyzer.PoolStats) string {
 	if stats.ExhaustedCount > 0 {
+		if stats.TotalAcquires == 0 {
+			return "CRITICAL - Pool exhausted with no successful acquisitions"
+		}
 		exhaustionRate := float64(stats.ExhaustedCount) / float64(stats.TotalAcquires)
 		if exhaustionRate > 0.1 {
 			return "CRITICAL - High pool exhaustion rate (>10%)"
@@ -772,8 +779,8 @@ func determinePoolHealth(stats analyzer.PoolStats) string {
 		}
 	}
 
-	if stats.ReuseRate < 0.5 {
-		return "WARNING - Low connection reuse rate (<50%)"
+	if stats.ReleaseRatio < 0.5 {
+		return "WARNING - Under half of acquired connections released (<50%, possible leak)"
 	}
 
 	if stats.MaxWaitTime > 1000*time.Millisecond {
@@ -793,8 +800,8 @@ func determinePoolHealthFromSummary(summary tracker.PoolSummary) string {
 		}
 	}
 
-	if summary.ReuseRate < 0.5 {
-		return "WARNING - Low connection reuse rate (<50%)"
+	if summary.ReleaseRatio < 0.5 {
+		return "WARNING - Under half of acquired connections released (<50%, possible leak)"
 	}
 
 	if summary.MaxWaitTime > 1000*time.Millisecond {
@@ -805,7 +812,7 @@ func determinePoolHealthFromSummary(summary tracker.PoolSummary) string {
 }
 
 // GenerateSecuritySection warns when an AF_ALG "aead" socket was bound by an
-// unprivileged process — the CVE-2026-31431 ("Copy-Fail") interface.
+// unprivileged process.
 func GenerateSecuritySection(d Diagnostician) string {
 	victims := map[string]string{} // pod -> "process, uid N"
 	for _, e := range d.FilterEvents(events.EventAFALG) {
@@ -1220,13 +1227,8 @@ func formatFastCGIActivity(d Diagnostician, duration time.Duration) string {
 		})
 	}
 	if len(samples) > 0 {
-		// Newest first.
 		sort.Slice(samples, func(i, j int) bool { return samples[i].ts > samples[j].ts })
 
-		// Render timestamps relative to the oldest sample so they're
-		// human-readable regardless of whether ev.Timestamp came from
-		// CLOCK_MONOTONIC or wall-clock — both clocks advance at the
-		// same rate so the deltas are meaningful either way.
 		oldest := samples[len(samples)-1].ts
 
 		const sampleLimit = 10

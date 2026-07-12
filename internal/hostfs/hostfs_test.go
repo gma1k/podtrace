@@ -159,6 +159,35 @@ func TestWriteFile_RejectsTraversal(t *testing.T) {
 	}
 }
 
+// TestWriteFile_ModeGuard locks the invariant behind the G306 suppression:
+// group/other read is allowed (0644 handoffs) but group/other write is
+// rejected, regardless of call site.
+func TestWriteFile_ModeGuard(t *testing.T) {
+	dir := t.TempDir()
+
+	allowed := []os.FileMode{0o600, 0o640, 0o644}
+	for _, perm := range allowed {
+		if err := WriteFile(filepath.Join(dir, "ok"), []byte("x"), perm); err != nil {
+			t.Errorf("WriteFile with safe mode %#o rejected: %v", perm, err)
+		}
+	}
+
+	rejected := []os.FileMode{0o666, 0o622, 0o777, 0o602}
+	for _, perm := range rejected {
+		err := WriteFile(filepath.Join(dir, "bad"), []byte("x"), perm)
+		if !errors.Is(err, ErrUnsafeMode) {
+			t.Errorf("WriteFile with group/other-writable mode %#o: got %v, want ErrUnsafeMode", perm, err)
+		}
+	}
+
+	if err := WriteFileAtomic(filepath.Join(dir, "atomic"), []byte("x"), 0o666); !errors.Is(err, ErrUnsafeMode) {
+		t.Errorf("WriteFileAtomic with 0666: got %v, want ErrUnsafeMode", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "atomic.tmp")); !os.IsNotExist(err) {
+		t.Errorf("rejected atomic write left a .tmp residue")
+	}
+}
+
 // TestWriteFileAtomic verifies the temp+rename write: the final file has the
 // complete content, the correct perm, and no ".tmp" residue is left behind
 // (the sidecar polls the final path and must never observe a partial file).

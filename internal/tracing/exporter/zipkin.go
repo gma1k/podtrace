@@ -161,7 +161,7 @@ func (e *ZipkinExporter) Shutdown(ctx context.Context) error {
 func zipkinKind(span *tracker.Span) string {
 	for _, event := range span.Events {
 		switch event.TypeString() {
-		case "HTTP", "DB", "CACHE", "gRPC":
+		case "HTTP", "HTTPS", "HTTP/2", "HTTP/3", "DB", "CACHE", "gRPC":
 			return "CLIENT"
 		}
 	}

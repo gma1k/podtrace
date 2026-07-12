@@ -171,7 +171,7 @@ func hexToUint64(s string) uint64 {
 func spanType(span *tracker.Span) string {
 	for _, event := range span.Events {
 		switch event.TypeString() {
-		case "HTTP":
+		case "HTTP", "HTTPS", "HTTP/2", "HTTP/3":
 			return "web"
 		case "DB":
 			return "db"

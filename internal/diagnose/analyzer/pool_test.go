@@ -12,26 +12,26 @@ func TestAnalyzePool(t *testing.T) {
 	baseTime := now.UnixNano()
 
 	tests := []struct {
-		name            string
-		acquireEvents   []*events.Event
-		releaseEvents   []*events.Event
-		exhaustedEvents []*events.Event
-		wantAcquires    int
-		wantReleases    int
-		wantExhausted   int
-		wantReuseRate   float64
-		wantPeak        int
+		name             string
+		acquireEvents    []*events.Event
+		releaseEvents    []*events.Event
+		exhaustedEvents  []*events.Event
+		wantAcquires     int
+		wantReleases     int
+		wantExhausted    int
+		wantReleaseRatio float64
+		wantPeak         int
 	}{
 		{
-			name:            "empty events",
-			acquireEvents:   []*events.Event{},
-			releaseEvents:   []*events.Event{},
-			exhaustedEvents: []*events.Event{},
-			wantAcquires:    0,
-			wantReleases:    0,
-			wantExhausted:   0,
-			wantReuseRate:   0,
-			wantPeak:        0,
+			name:             "empty events",
+			acquireEvents:    []*events.Event{},
+			releaseEvents:    []*events.Event{},
+			exhaustedEvents:  []*events.Event{},
+			wantAcquires:     0,
+			wantReleases:     0,
+			wantExhausted:    0,
+			wantReleaseRatio: 0,
+			wantPeak:         0,
 		},
 		{
 			name: "balanced acquire and release",
@@ -43,12 +43,12 @@ func TestAnalyzePool(t *testing.T) {
 				{Timestamp: uint64(baseTime + 5000000), Type: events.EventPoolRelease, Target: "pool1"},
 				{Timestamp: uint64(baseTime + 6000000), Type: events.EventPoolRelease, Target: "pool1"},
 			},
-			exhaustedEvents: []*events.Event{},
-			wantAcquires:    2,
-			wantReleases:    2,
-			wantExhausted:   0,
-			wantReuseRate:   1.0,
-			wantPeak:        2,
+			exhaustedEvents:  []*events.Event{},
+			wantAcquires:     2,
+			wantReleases:     2,
+			wantExhausted:    0,
+			wantReleaseRatio: 1.0,
+			wantPeak:         2,
 		},
 		{
 			name: "pool exhaustion",
@@ -59,11 +59,11 @@ func TestAnalyzePool(t *testing.T) {
 			exhaustedEvents: []*events.Event{
 				{Timestamp: uint64(baseTime + 10000000), Type: events.EventPoolExhausted, Target: "pool1", LatencyNS: 10000000},
 			},
-			wantAcquires:  1,
-			wantReleases:  0,
-			wantExhausted: 1,
-			wantReuseRate: 0,
-			wantPeak:      1,
+			wantAcquires:     1,
+			wantReleases:     0,
+			wantExhausted:    1,
+			wantReleaseRatio: 0,
+			wantPeak:         1,
 		},
 		{
 			name: "multiple pools",
@@ -74,12 +74,12 @@ func TestAnalyzePool(t *testing.T) {
 			releaseEvents: []*events.Event{
 				{Timestamp: uint64(baseTime + 5000000), Type: events.EventPoolRelease, Target: "pool1"},
 			},
-			exhaustedEvents: []*events.Event{},
-			wantAcquires:    2,
-			wantReleases:    1,
-			wantExhausted:   0,
-			wantReuseRate:   0.5,
-			wantPeak:        1,
+			exhaustedEvents:  []*events.Event{},
+			wantAcquires:     2,
+			wantReleases:     1,
+			wantExhausted:    0,
+			wantReleaseRatio: 0.5,
+			wantPeak:         1,
 		},
 	}
 
@@ -96,8 +96,8 @@ func TestAnalyzePool(t *testing.T) {
 			if stats.ExhaustedCount != tt.wantExhausted {
 				t.Errorf("ExhaustedCount = %d, want %d", stats.ExhaustedCount, tt.wantExhausted)
 			}
-			if stats.ReuseRate != tt.wantReuseRate {
-				t.Errorf("ReuseRate = %f, want %f", stats.ReuseRate, tt.wantReuseRate)
+			if stats.ReleaseRatio != tt.wantReleaseRatio {
+				t.Errorf("ReleaseRatio = %f, want %f", stats.ReleaseRatio, tt.wantReleaseRatio)
 			}
 			if stats.PeakConnections != tt.wantPeak {
 				t.Errorf("PeakConnections = %d, want %d", stats.PeakConnections, tt.wantPeak)

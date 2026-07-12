@@ -3,6 +3,7 @@ package correlator
 import (
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/podtrace/podtrace/internal/events"
@@ -28,6 +29,7 @@ type ErrorEvent struct {
 const maxRetainedErrors = 10000
 
 type ErrorCorrelator struct {
+	mu         sync.Mutex
 	errors     []*ErrorEvent
 	chains     []*ErrorChain
 	timeWindow time.Duration
@@ -49,6 +51,9 @@ func (ec *ErrorCorrelator) AddEvent(event *events.Event, k8sContext interface{})
 	if event == nil || !event.IsError() {
 		return
 	}
+
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
 
 	errorEvent := &ErrorEvent{
 		Event:     event,
@@ -99,33 +104,56 @@ func (ec *ErrorCorrelator) buildChains() {
 		return ec.errors[i].Timestamp.Before(ec.errors[j].Timestamp)
 	})
 
-	for i, rootError := range ec.errors {
-		chain := []*ErrorEvent{rootError}
-		rootTime := rootError.Timestamp
-
-		for j := i + 1; j < len(ec.errors); j++ {
-			nextError := ec.errors[j]
-			if nextError.Timestamp.Sub(rootTime) <= ec.timeWindow {
-				if ec.isRelated(rootError, nextError) {
-					chain = append(chain, nextError)
-				}
-			} else {
-				break
-			}
-		}
-
-		if len(chain) > 1 {
-			suggestions := ec.generateSuggestions(chain)
-			severity := ec.calculateSeverity(chain)
-
-			ec.chains = append(ec.chains, &ErrorChain{
-				RootCause:   chain[0],
-				Chain:       chain,
-				Suggestions: suggestions,
-				Severity:    severity,
-			})
-		}
+	type openChain struct {
+		root  time.Time
+		chain []*ErrorEvent
 	}
+	open := map[string]*openChain{}
+	flush := func(oc *openChain) {
+		if oc == nil || len(oc.chain) <= 1 {
+			return
+		}
+		ec.chains = append(ec.chains, &ErrorChain{
+			RootCause:   oc.chain[0],
+			Chain:       oc.chain,
+			Suggestions: ec.generateSuggestions(oc.chain),
+			Severity:    ec.calculateSeverity(oc.chain),
+		})
+	}
+	for _, e := range ec.errors {
+		key := errorChainKey(e)
+		if key == "" {
+			continue
+		}
+		oc := open[key]
+		if oc == nil || e.Timestamp.Sub(oc.root) > ec.timeWindow {
+			flush(oc)
+			open[key] = &openChain{root: e.Timestamp, chain: []*ErrorEvent{e}}
+			continue
+		}
+		oc.chain = append(oc.chain, e)
+	}
+	for _, oc := range open {
+		flush(oc)
+	}
+	sort.Slice(ec.chains, func(i, j int) bool {
+		return ec.chains[i].RootCause.Timestamp.Before(ec.chains[j].RootCause.Timestamp)
+	})
+}
+
+// errorChainKey is the identifier errors are grouped by, most specific first.
+// Errors with no identifier are not chained.
+func errorChainKey(e *ErrorEvent) string {
+	if e.Target != "" {
+		return "t:" + e.Target
+	}
+	if p := e.Context["target_pod"]; p != "" {
+		return "p:" + p
+	}
+	if s := e.Context["target_service"]; s != "" {
+		return "s:" + s
+	}
+	return ""
 }
 
 func (ec *ErrorCorrelator) isRelated(err1, err2 *ErrorEvent) bool {
@@ -204,11 +232,17 @@ func (ec *ErrorCorrelator) calculateSeverity(chain []*ErrorEvent) string {
 }
 
 func (ec *ErrorCorrelator) GetChains() []*ErrorChain {
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
 	ec.ensureChains()
-	return ec.chains
+	out := make([]*ErrorChain, len(ec.chains))
+	copy(out, ec.chains)
+	return out
 }
 
 func (ec *ErrorCorrelator) GetErrorSummary() string {
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
 	if len(ec.errors) == 0 {
 		return ""
 	}

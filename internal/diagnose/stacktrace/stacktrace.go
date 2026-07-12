@@ -2,10 +2,12 @@ package stacktrace
 
 import (
 	"context"
+	"debug/elf"
 	"fmt"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/podtrace/podtrace/internal/config"
@@ -27,7 +29,25 @@ type stackSummary struct {
 }
 
 type stackResolver struct {
-	cache map[string]string
+	cache    map[string]string
+	segments map[string][]loadSegment
+	mappings map[string][]exeMapping
+}
+
+// loadSegment is a PT_LOAD program header: the file-offset range it covers and
+// the virtual address it loads at in the ELF's own (unbiased) address space.
+type loadSegment struct {
+	off    uint64
+	vaddr  uint64
+	filesz uint64
+}
+
+// exeMapping is one file-backed line from /proc/<pid>/maps: the runtime address
+// range and the file offset at its start.
+type exeMapping struct {
+	start uint64
+	end   uint64
+	pgoff uint64
 }
 
 func (r *stackResolver) resolve(ctx context.Context, pid uint32, addr uint64) string {
@@ -68,7 +88,11 @@ func (r *stackResolver) resolve(ctx context.Context, pid uint32, addr uint64) st
 		r.cache[key] = v
 		return v
 	}
-	cmd := exec.CommandContext(timeoutCtx, addr2lineBin, "-e", exePath, fmt.Sprintf("%#x", addr)) // #nosec G204 -- LookPath-resolved binary; exePath validated via hostfs.Stat; address is %#x-formatted
+	symAddr := addr
+	if v, ok := r.translateAddr(pid, exePath, addr); ok {
+		symAddr = v
+	}
+	cmd := exec.CommandContext(timeoutCtx, addr2lineBin, "-e", exePath, fmt.Sprintf("%#x", symAddr)) // #nosec G204 -- LookPath-resolved binary; exePath validated via hostfs.Stat; address is %#x-formatted
 	out, err := cmd.Output()
 	if err != nil {
 		v := fmt.Sprintf("%s@0x%x", filepath.Base(exePath), addr)
@@ -83,6 +107,95 @@ func (r *stackResolver) resolve(ctx context.Context, pid uint32, addr uint64) st
 	}
 	r.cache[key] = line
 	return line
+}
+
+// translateAddr converts a runtime instruction pointer into the ELF virtual
+// address addr2line expects.
+func (r *stackResolver) translateAddr(pid uint32, exePath string, addr uint64) (uint64, bool) {
+	mappings := r.exeMappings(pid, exePath)
+	var fileOffset uint64
+	found := false
+	for _, m := range mappings {
+		if addr >= m.start && addr < m.end {
+			fileOffset = addr - m.start + m.pgoff
+			found = true
+			break
+		}
+	}
+	if !found {
+		return 0, false
+	}
+
+	for _, s := range r.loadSegments(exePath) {
+		if fileOffset >= s.off && fileOffset < s.off+s.filesz {
+			return fileOffset - s.off + s.vaddr, true
+		}
+	}
+	return 0, false
+}
+
+// exeMappings returns the file-backed mappings of exePath in process pid,
+// parsed from /proc/<pid>/maps and cached per (pid, exePath).
+func (r *stackResolver) exeMappings(pid uint32, exePath string) []exeMapping {
+	if r.mappings == nil {
+		r.mappings = make(map[string][]exeMapping)
+	}
+	key := fmt.Sprintf("%d|%s", pid, exePath)
+	if m, ok := r.mappings[key]; ok {
+		return m
+	}
+
+	var out []exeMapping
+	data, err := procfs.ReadFile(fmt.Sprintf("%d/maps", pid))
+	if err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 6 {
+				continue
+			}
+			if strings.Join(fields[5:], " ") != exePath {
+				continue
+			}
+			dash := strings.IndexByte(fields[0], '-')
+			if dash < 0 {
+				continue
+			}
+			start, err1 := strconv.ParseUint(fields[0][:dash], 16, 64)
+			end, err2 := strconv.ParseUint(fields[0][dash+1:], 16, 64)
+			pgoff, err3 := strconv.ParseUint(fields[2], 16, 64)
+			if err1 != nil || err2 != nil || err3 != nil {
+				continue
+			}
+			out = append(out, exeMapping{start: start, end: end, pgoff: pgoff})
+		}
+	}
+	r.mappings[key] = out
+	return out
+}
+
+// loadSegments returns exePath's PT_LOAD program headers, parsing the ELF once
+// and caching the result.
+func (r *stackResolver) loadSegments(exePath string) []loadSegment {
+	if r.segments == nil {
+		r.segments = make(map[string][]loadSegment)
+	}
+	if s, ok := r.segments[exePath]; ok {
+		return s
+	}
+
+	var out []loadSegment
+	if f, err := hostfs.Open(exePath); err == nil {
+		if ef, eerr := elf.NewFile(f); eerr == nil {
+			for _, p := range ef.Progs {
+				if p.Type == elf.PT_LOAD {
+					out = append(out, loadSegment{off: p.Off, vaddr: p.Vaddr, filesz: p.Filesz})
+				}
+			}
+		}
+		_ = f.Close()
+	}
+	r.segments[exePath] = out
+	return out
 }
 
 func GenerateStackTraceSectionWithContext(d Diagnostician, ctx context.Context) string {

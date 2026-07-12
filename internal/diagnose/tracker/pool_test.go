@@ -80,8 +80,8 @@ func TestPoolTracker_ProcessEvent_Release(t *testing.T) {
 	if summary.CurrentConns != 0 {
 		t.Errorf("CurrentConns = %d, want 0", summary.CurrentConns)
 	}
-	if summary.ReuseRate != 1.0 {
-		t.Errorf("ReuseRate = %f, want 1.0", summary.ReuseRate)
+	if summary.ReleaseRatio != 1.0 {
+		t.Errorf("ReleaseRatio = %f, want 1.0", summary.ReleaseRatio)
 	}
 }
 
@@ -318,7 +318,7 @@ func TestDeterminePoolHealthFromSummary(t *testing.T) {
 				AcquireCount:   100,
 				ReleaseCount:   100,
 				ExhaustedCount: 0,
-				ReuseRate:      1.0,
+				ReleaseRatio:   1.0,
 				MaxWaitTime:    100 * time.Millisecond,
 			},
 			want: "OK - Pool operating normally",
@@ -329,7 +329,7 @@ func TestDeterminePoolHealthFromSummary(t *testing.T) {
 				AcquireCount:   100,
 				ReleaseCount:   90,
 				ExhaustedCount: 15,
-				ReuseRate:      0.9,
+				ReleaseRatio:   0.9,
 			},
 			want: "CRITICAL - High pool exhaustion rate (>10%)",
 		},
@@ -339,7 +339,7 @@ func TestDeterminePoolHealthFromSummary(t *testing.T) {
 				AcquireCount:   100,
 				ReleaseCount:   95,
 				ExhaustedCount: 6,
-				ReuseRate:      0.95,
+				ReleaseRatio:   0.95,
 			},
 			want: "WARNING - Moderate pool exhaustion rate (>5%)",
 		},
@@ -349,9 +349,9 @@ func TestDeterminePoolHealthFromSummary(t *testing.T) {
 				AcquireCount:   100,
 				ReleaseCount:   40,
 				ExhaustedCount: 0,
-				ReuseRate:      0.4,
+				ReleaseRatio:   0.4,
 			},
-			want: "WARNING - Low connection reuse rate (<50%)",
+			want: "WARNING - Under half of acquired connections released (<50%, possible leak)",
 		},
 		{
 			name: "high wait times",
@@ -359,7 +359,7 @@ func TestDeterminePoolHealthFromSummary(t *testing.T) {
 				AcquireCount:   100,
 				ReleaseCount:   100,
 				ExhaustedCount: 0,
-				ReuseRate:      1.0,
+				ReleaseRatio:   1.0,
 				MaxWaitTime:    2000 * time.Millisecond,
 			},
 			want: "WARNING - High wait times detected",

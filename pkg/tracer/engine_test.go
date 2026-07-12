@@ -522,7 +522,7 @@ func TestEngine_AttachErrorDoesNotAbortRun(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- eng.Run(ctx, targets) }()
 
-	waitUntil(t, 2*time.Second, func() bool { return eng.Stats().ExporterFailure > 0 })
+	waitUntil(t, 2*time.Second, func() bool { return eng.Stats().AttachFailure > 0 })
 	backend.mu.Lock()
 	backend.setCgroupsErr = nil
 	backend.mu.Unlock()
@@ -805,7 +805,7 @@ func TestEngine_ObserverNotifiedOnChurn(t *testing.T) {
 
 // TestEngine_BackendSetCgroupsErrorPreservesActiveSet asserts that when
 // SetCgroups fails, the engine does NOT clobber its previous active set
-// — the next snapshot retry can still converge.
+// the next snapshot retry can still converge.
 func TestEngine_BackendSetCgroupsErrorPreservesActiveSet(t *testing.T) {
 	backend := &mockBackend{}
 	eng, err := tracer.NewEngine(backend, []tracer.Exporter{&recordingExporter{name: "x"}}, tracer.Config{})
@@ -828,10 +828,8 @@ func TestEngine_BackendSetCgroupsErrorPreservesActiveSet(t *testing.T) {
 	backend.mu.Unlock()
 
 	targets <- tracer.TargetSet{{CgroupPath: "/c/c"}}
-	waitUntil(t, 2*time.Second, func() bool { return eng.Stats().ExporterFailure > 0 })
+	waitUntil(t, 2*time.Second, func() bool { return eng.Stats().AttachFailure > 0 })
 
-	// Active set must still be {a, b} — failed replace did not poison
-	// engine state.
 	if s := eng.Stats(); s.ActiveTargets != 2 {
 		t.Errorf("ActiveTargets=%d after failed replace, want 2", s.ActiveTargets)
 	}

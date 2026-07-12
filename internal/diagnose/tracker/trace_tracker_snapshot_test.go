@@ -29,14 +29,23 @@ func TestSnapshotForExport_ExactlyOnce(t *testing.T) {
 		t.Fatalf("first snapshot = %d traces, want 1 trace with 1 span", len(first))
 	}
 
+	if again := tt.SnapshotForExport(time.Hour, true); len(again) != 1 {
+		t.Fatalf("uncommitted snapshot must re-appear, got %d traces", len(again))
+	}
+
+	tt.CommitExport(first)
 	if second := tt.SnapshotForExport(time.Hour, true); len(second) != 0 {
-		t.Fatalf("second snapshot = %d traces, want 0 (spans must export exactly once)", len(second))
+		t.Fatalf("second snapshot = %d traces, want 0 (spans export exactly once after commit)", len(second))
 	}
 
 	tt.ProcessEvent(snapshotEvent("t1", "s2"), nil)
 	third := tt.SnapshotForExport(time.Hour, true)
 	if len(third) != 1 || len(third[0].Spans) != 1 || third[0].Spans[0].SpanID != "s2" {
 		t.Fatalf("third snapshot must carry only the new span s2, got %+v", third)
+	}
+	tt.CommitExport(third)
+	if fourth := tt.SnapshotForExport(time.Hour, true); len(fourth) != 0 {
+		t.Fatalf("fourth snapshot = %d traces, want 0", len(fourth))
 	}
 }
 
@@ -55,7 +64,7 @@ func TestSnapshotForExport_SettleWindow(t *testing.T) {
 }
 
 // TestSnapshotAll_DeepCopyAndNoWatermark: graph/report consumers get deep
-// copies (mutating them must not touch live state — exporters used to sort
+// copies (mutating them must not touch live state, exporters used to sort
 // and mutate live spans, racing ProcessEvent) and do not consume the export
 // watermark.
 func TestSnapshotAll_DeepCopyAndNoWatermark(t *testing.T) {

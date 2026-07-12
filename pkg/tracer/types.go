@@ -9,10 +9,7 @@ import (
 	"github.com/podtrace/podtrace/internal/events"
 )
 
-// Target describes one pod whose traffic the tracer should observe. Each
-// field is populated by the producer of the target stream (CLI target
-// registry, CR-backed agent, or session Job) and is otherwise opaque to
-// the Engine.
+// Target describes one pod whose traffic the tracer should observe.
 type Target struct {
 	PodName   string
 	Namespace string
@@ -72,6 +69,12 @@ type TracerBackend interface {
 type EngineObserver interface {
 	OnCgroupsAttached(n int)
 	OnCgroupsDetached(n int)
+}
+
+// TargetErrorObserver is an optional capability an EngineObserver may also
+// implement.
+type TargetErrorObserver interface {
+	OnTargetError(stage string, err error)
 }
 
 // CategoryGateable is an optional capability a TracerBackend can
