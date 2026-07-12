@@ -49,7 +49,7 @@ spec:
 | `podRefs` | `[{namespace, name}]` | one of selector/podRefs/appSelector | Explicit pod list. Cross-namespace allowed. |
 | `appSelector` | `{matchSelectors: []LabelSelector}` | one of selector/podRefs/appSelector | Application of several workloads: a pod matching **any** selector is traced (union, de-duplicated). Exactly-one-of is enforced by CEL + webhook. |
 | `namespaceSelector` | LabelSelector | optional | Widens `selector` across namespaces. Field's expressions are not yet evaluated; presence alone enables cluster-wide search. |
-| `filters` | `[dns,net,fs,cpu,proc]` | optional | Empty = all categories. Agents enforce the set per-event in userspace and only the listed categories reach the configured exporter. |
+| `filters` | `[dns,net,fs,cpu,proc,crypto]` | optional | Empty = all categories. Agents enforce the set per-event in userspace and only the listed categories reach the configured exporter. |
 | `exporterRef.name` | string | required | Names an `ExporterConfig` in the same namespace. |
 | `paused` | bool | optional | Stop emitting events without deleting the CR. |
 | `samplePercent` | int 0-100 | optional | Workload-owner sampling intent. The operator combines this with `ExporterConfig.spec.samplePercent` (platform-owner cap) and writes the **minimum** of the two to the bundle — that minimum is what every exporter applies. Unset on either side is treated as 100%. The resolved value is echoed at `status.policy.effectiveSampleRate`. |

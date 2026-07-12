@@ -23,6 +23,10 @@ crds:
 
   adopt: true
 
+  # Image for the CRD-labeler / namespace / cr-bootstrap hook Jobs (kubectl).
+  # Empty uses a digest-pinned alpine/k8s default so these cluster-critical
+  # hooks are reproducible and cannot silently change when the upstream tag
+  # moves. Override with your own (ideally digest-pinned) mirror if needed.
   labelerImage: ""
 
   keep: true

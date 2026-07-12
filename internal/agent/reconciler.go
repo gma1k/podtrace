@@ -694,7 +694,7 @@ func bundlePolicyGeneration(b *BundlePayload) int64 {
 }
 
 // unionCategoriesFromRules returns the sorted, deduplicated union of
-// CRD-filter category strings (dns/net/fs/cpu/proc) across every active
+// CRD-filter category strings (dns/net/fs/cpu/proc/crypto) across every active
 // CRRule.
 func unionCategoriesFromRules(rules []CRRule) []string {
 	seen := make(map[string]struct{}, len(rules))

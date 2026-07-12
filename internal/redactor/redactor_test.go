@@ -146,4 +146,10 @@ func TestRedact_DNSNameBypasses(t *testing.T) {
 	if connect.Target != "10.0.0.8:00443" {
 		t.Errorf("EventConnect target must keep the ip:port, got %q", connect.Target)
 	}
+
+	answer := &events.Event{Type: events.EventDNS, Target: "secret-internal.example.com", Details: "192.0.2.7"}
+	r.Redact(answer)
+	if answer.Details != "[redacted]" {
+		t.Errorf("EventDNS answer IP left in Details = %q, want [redacted]", answer.Details)
+	}
 }

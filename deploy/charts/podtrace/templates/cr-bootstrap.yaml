@@ -229,7 +229,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kubectl
-          image: {{ .Values.crds.labelerImage | default "alpine/k8s:1.30.4" }}
+          image: {{ .Values.crds.labelerImage | default "alpine/k8s:1.30.4@sha256:129291af93e2b5df392f619cee8564cac4b377d66ff45f52f165af87688b68b9" }}
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false

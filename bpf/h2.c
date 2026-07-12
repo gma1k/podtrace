@@ -18,14 +18,14 @@ static __always_inline u32 h2_next_seq(u64 conn_id, u32 dir)
 {
 	struct h2_seq_key k = { .conn_id = conn_id, .dir = dir, ._pad = 0 };
 	u64 *cur = bpf_map_lookup_elem(&h2_seq, &k);
-	if (cur) {
-		u32 seq = (u32)*cur;
-		*cur = *cur + 1;
-		return seq;
+	if (!cur) {
+		u64 zero = 0;
+		bpf_map_update_elem(&h2_seq, &k, &zero, BPF_NOEXIST);
+		cur = bpf_map_lookup_elem(&h2_seq, &k);
+		if (!cur)
+			return 0;
 	}
-	u64 one = 1;
-	bpf_map_update_elem(&h2_seq, &k, &one, BPF_ANY);
-	return 0;
+	return (u32)__sync_fetch_and_add(cur, 1);
 }
 
 struct h2_raw_ctx {

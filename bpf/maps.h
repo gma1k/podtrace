@@ -127,13 +127,6 @@ struct {
 } socket_conns SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, 1024);
-	__type(key, u64);
-	__type(value, u64);
-} tcp_sockets SEC(".maps");
-
-struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 2048);
 	__type(key, u64);
@@ -218,13 +211,6 @@ struct {
 	__type(key, struct pair_key);
 	__type(value, char[MAX_STRING_LEN]);
 } syscall_paths SEC(".maps");
-
-struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, 1024);
-	__type(key, u64);
-	__type(value, u64);
-} tls_handshakes SEC(".maps");
 
 struct resource_limit {
 	u64 limit_bytes;
@@ -344,21 +330,21 @@ struct pool_state {
 };
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 1024);
 	__type(key, u64);
 	__type(value, struct pool_state);
 } pool_states SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 1024);
 	__type(key, u64);
 	__type(value, u64);
 } pool_acquire_times SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 1024);
 	__type(key, u64);
 	__type(value, u32);
@@ -749,7 +735,7 @@ struct {
 } h2_frame_state SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 256);
 	__type(key, u64);
 	__type(value, char[MAX_STRING_LEN]);

@@ -88,10 +88,6 @@ exits. Events flow to the referenced ExporterConfig, not to this terminal.`,
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if !cmd.Flags().Changed("namespace") {
-				// Resolve the default namespace from the SAME kubeconfig
-				// the client uses; reading the default loading rules while
-				// the client honors --kubeconfig mixed namespaces across
-				// clusters.
 				if ctxNamespace, ok := kubernetes.NamespaceFromKubeconfig(watchKubeconfig); ok {
 					namespace = ctxNamespace
 				}
@@ -102,12 +98,11 @@ exits. Events flow to the referenced ExporterConfig, not to this terminal.`,
 	registerTargetFlags(cmd.Flags())
 	registerWatchOnlyFlags(cmd.Flags())
 	cmd.Flags().StringVarP(&namespace, "namespace", "n", config.DefaultNamespace, "Namespace to create the PodTrace in (its ExporterConfig must live here too; defaults to the current kubeconfig context's namespace)")
-	cmd.Flags().StringVar(&eventFilter, "filter", "", "Event categories to capture (dns,net,fs,cpu,proc); empty = all")
+	cmd.Flags().StringVar(&eventFilter, "filter", "", "Event categories to capture (dns,net,fs,cpu,proc,crypto); empty = all")
 	return cmd
 }
 
-// watchOptions is the resolved input to runWatch/buildPodTrace. Splitting it
-// from the flag vars keeps buildPodTrace a pure, unit-testable function.
+// watchOptions is the resolved input to runWatch/buildPodTrace.
 type watchOptions struct {
 	AppName           string
 	Labels            []string

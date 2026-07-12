@@ -21,7 +21,9 @@ import (
 	"time"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
 	"github.com/cilium/ebpf/btf"
+	"github.com/cilium/ebpf/features"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
@@ -425,6 +427,48 @@ func roundUpPow2(n uint32) uint32 {
 
 var _ TracerInterface = (*Tracer)(nil)
 
+// bpfLoopAvailable reports whether the running kernel supports the bpf_loop
+// helper.
+func bpfLoopAvailable() bool {
+	if os.Getenv("PODTRACE_FORCE_DISABLE_L7") == "1" {
+		return false
+	}
+	err := features.HaveProgramHelper(ebpf.Kprobe, asm.FnLoop)
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, ebpf.ErrNotSupported) {
+		return false
+	}
+	logger.Warn("bpf_loop capability probe inconclusive; assuming available", zap.Error(err))
+	return true
+}
+
+// pruneL7ProbesIfNoBPFLoop removes the L7 protocol programs (identified by an
+// actual bpf_loop call in their instruction stream, no hardcoded list) from
+// the collection spec when the kernel lacks bpf_loop.
+func pruneL7ProbesIfNoBPFLoop(spec *ebpf.CollectionSpec) {
+	if bpfLoopAvailable() {
+		return
+	}
+	var pruned []string
+	for name, ps := range spec.Programs {
+		for i := range ps.Instructions {
+			ins := ps.Instructions[i]
+			if ins.IsBuiltinCall() && ins.Constant == int64(asm.FnLoop) {
+				delete(spec.Programs, name)
+				pruned = append(pruned, name)
+				break
+			}
+		}
+	}
+	if len(pruned) > 0 {
+		logger.Warn("Kernel lacks the bpf_loop helper (needs mainline 5.17+ or a distro that backports it); "+
+			"disabling L7 protocol tracing (HTTP/2, HTTP/3, gRPC, HTTP header capture) and continuing with core L4 tracing",
+			zap.Int("pruned_programs", len(pruned)))
+	}
+}
+
 func NewTracer() (*Tracer, error) {
 	if err := setDumpable(); err != nil {
 		logger.Warn("Failed to set dumpable flag", zap.Error(err))
@@ -487,6 +531,8 @@ func NewTracer() (*Tracer, error) {
 		}
 	}
 	applyVerifierLogOptions(&opts)
+
+	pruneL7ProbesIfNoBPFLoop(spec)
 
 	coll, err := ebpf.NewCollectionWithOptions(spec, opts)
 	if err != nil {

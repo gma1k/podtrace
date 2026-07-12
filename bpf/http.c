@@ -197,11 +197,11 @@ static __noinline void http_emit_response(void *ctx, void *base, u64 len,
 			break;
 		status[si++] = c;
 	}
-	if (si == 0)
+	if (si != 3)
 		return;
 	status[si] = '\0';
 
-	if (si == 3 && status[0] == '1')
+	if (status[0] == '1')
 		return;
 
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
