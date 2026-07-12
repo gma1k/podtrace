@@ -1,6 +1,8 @@
 package validation
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -351,6 +353,12 @@ func TestValidatePath(t *testing.T) {
 			basePath: "/base",
 			wantErr:  false,
 		},
+		{
+			name:     "filename containing dot-dot is not traversal",
+			path:     "/base/release-1..2/file",
+			basePath: "/base",
+			wantErr:  false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -359,6 +367,39 @@ func TestValidatePath(t *testing.T) {
 				t.Errorf("ValidatePath() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestValidatePath_SymlinkEscape: a symlink that is lexically inside basePath
+// but resolves outside must be rejected; a symlink that stays inside is fine.
+func TestValidatePath_SymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	base := filepath.Join(root, "base")
+	outside := filepath.Join(root, "outside")
+	for _, d := range []string{base, outside} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	escape := filepath.Join(base, "escape")
+	if err := os.Symlink(outside, escape); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	if err := ValidatePath(escape, base); err == nil {
+		t.Error("symlink escaping basePath must be rejected")
+	}
+
+	inside := filepath.Join(base, "sub")
+	if err := os.MkdirAll(inside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "inlink")
+	if err := os.Symlink(inside, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	if err := ValidatePath(link, base); err != nil {
+		t.Errorf("symlink staying inside basePath must be accepted, got %v", err)
 	}
 }
 

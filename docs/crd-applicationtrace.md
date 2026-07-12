@@ -57,7 +57,7 @@ podtrace watch --application --name checkout \
 | `selectors` | `[]LabelSelector` | yes (≥1) | The application's workloads. A pod matching **any** selector is traced (union). Become `PodTrace.spec.appSelector.matchSelectors`. |
 | `namespaceSelector` | LabelSelector | optional | Widen across namespaces. Empty (set) = every namespace; nil = the application's own namespace. |
 | `exporterRef.name` | string | yes | Names an `ExporterConfig` in the same namespace; inherited by the generated `PodTrace`. |
-| `filters` | `[dns,net,fs,cpu,proc]` | optional | Empty = all categories. |
+| `filters` | `[dns,net,fs,cpu,proc,crypto]` | optional | Empty = all categories. |
 | `samplePercent` | int 0-100 | optional | Sampling intent, passed through. |
 | `thresholds` | object | optional | Passed through to the generated `PodTrace`. |
 | `paused` | bool | optional | Stop tracing without deleting; propagated to the child. |

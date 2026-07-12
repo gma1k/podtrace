@@ -89,6 +89,9 @@ func (r *Redactor) Redact(e *events.Event) {
 		switch e.Type {
 		case events.EventDNS, events.EventDNSQuery:
 			e.Target = "[redacted]"
+			if e.Details != "" {
+				e.Details = "[redacted]"
+			}
 		case events.EventConnect:
 			if e.Details != "" {
 				e.Details = "[redacted]"

@@ -1,6 +1,7 @@
 package analyzer
 
 import (
+	"math"
 	"sort"
 	"testing"
 
@@ -17,11 +18,13 @@ func TestPercentile(t *testing.T) {
 		{"empty slice", []float64{}, 50, 0},
 		{"single value p50", []float64{10}, 50, 10},
 		{"single value p95", []float64{10}, 95, 10},
-		{"two values p50", []float64{10, 20}, 50, 10},
-		{"two values p95", []float64{10, 20}, 95, 10},
-		{"ten values p50", []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, 50, 5},
-		{"ten values p95", []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, 95, 9},
-		{"ten values p99", []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, 99, 9},
+		{"two values p50", []float64{10, 20}, 50, 15},
+		{"two values p95", []float64{10, 20}, 95, 19.5},
+		{"ten values p50", []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, 50, 5.5},
+		{"ten values p95", []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, 95, 9.55},
+		{"ten values p99", []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, 99, 9.91},
+		{"ten values p100", []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, 100, 10},
+		{"ten values p0", []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, 0, 1},
 		{"unsorted", []float64{5, 1, 9, 3, 7}, 50, 5},
 	}
 
@@ -31,7 +34,7 @@ func TestPercentile(t *testing.T) {
 			copy(sorted, tt.data)
 			sort.Float64s(sorted)
 			result := Percentile(sorted, tt.percentile)
-			if result != tt.expected {
+			if math.Abs(result-tt.expected) > 1e-9 {
 				t.Errorf("Percentile() = %v, want %v", result, tt.expected)
 			}
 		})

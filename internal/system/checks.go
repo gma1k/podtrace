@@ -40,7 +40,6 @@ func (v KernelVersion) AtLeast(major, minor int) bool {
 func CheckRequirements() error {
 	kv, err := parseKernelVersion()
 	if err != nil {
-		// Best-effort: if we cannot parse, warn and continue rather than block.
 		logger.Warn("Could not parse kernel version; proceeding anyway",
 			zap.Error(err))
 		return nil
@@ -75,8 +74,6 @@ func CheckRequirements() error {
 }
 
 // CheckSELinux checks if SELinux is in Enforcing mode and warns if so.
-// It does not block execution — only the kernel can prevent BPF operations,
-// and we want a clear warning before the cryptic EACCES from the kernel.
 func CheckSELinux() {
 	enforcing, how := selinuxEnforcing()
 	if !enforcing {
@@ -188,7 +185,6 @@ func parseKernelVersion() (KernelVersion, error) {
 }
 
 func parseVersionString(s string) (KernelVersion, error) {
-	// Strip anything after '-' (distro suffix) or '+' (local build suffix).
 	for _, sep := range []string{"-", "+"} {
 		if idx := strings.Index(s, sep); idx >= 0 {
 			s = s[:idx]
@@ -226,7 +222,6 @@ func selinuxEnforcing() (bool, string) {
 		return false, ""
 	}
 
-	// Method 1: /sys/fs/selinux/enforce contains "1" when enforcing.
 	if data, err := os.ReadFile("/sys/fs/selinux/enforce"); err == nil {
 		if strings.TrimSpace(string(data)) == "1" {
 			return true, "/sys/fs/selinux/enforce"
@@ -234,12 +229,10 @@ func selinuxEnforcing() (bool, string) {
 		return false, ""
 	}
 
-	// Method 2: /sys/fs/selinux exists but enforce is unreadable — still present.
 	if _, err := os.Stat("/sys/fs/selinux"); err == nil {
 		return true, "/sys/fs/selinux (enforce unreadable)"
 	}
 
-	// Method 3: check /proc/cmdline for selinux=1 or security=selinux.
 	if data, err := os.ReadFile("/proc/cmdline"); err == nil {
 		cmdline := string(data)
 		if strings.Contains(cmdline, "security=selinux") || strings.Contains(cmdline, "selinux=1") {

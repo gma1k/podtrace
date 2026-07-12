@@ -1120,14 +1120,24 @@ func formatFastCGIActivity(d Diagnostician, duration time.Duration) string {
 	}
 
 	pctMs := func(sorted []uint64, p int) float64 {
-		if len(sorted) == 0 {
+		n := len(sorted)
+		if n == 0 {
 			return 0
 		}
-		idx := (len(sorted) * p) / 100
-		if idx >= len(sorted) {
-			idx = len(sorted) - 1
+		if n == 1 || p <= 0 {
+			return float64(sorted[0]) / 1e6
 		}
-		return float64(sorted[idx]) / 1e6
+		if p >= 100 {
+			return float64(sorted[n-1]) / 1e6
+		}
+		rank := (float64(p) / 100) * float64(n-1)
+		lo := int(rank)
+		if lo+1 >= n {
+			return float64(sorted[n-1]) / 1e6
+		}
+		frac := rank - float64(lo)
+		val := float64(sorted[lo]) + frac*(float64(sorted[lo+1])-float64(sorted[lo]))
+		return val / 1e6
 	}
 
 	stats := make([]*uriStat, 0, len(byURI))

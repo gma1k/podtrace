@@ -78,10 +78,11 @@ static inline void handle_pool_release(u32 pid, u32 tid, u64 key) {
 	u32 db = db_type ? *db_type : DB_TYPE_SQLITE;
 	
 	if (state->in_use == 1) {
-		state->in_use = 0;
-		bpf_map_update_elem(&pool_states, &key, state, BPF_ANY);
 		emit_pool_event(pid, EVENT_POOL_RELEASE, 0, db);
 	}
+	bpf_map_delete_elem(&pool_states, &key);
+	bpf_map_delete_elem(&pool_db_types, &key);
+	bpf_map_delete_elem(&pool_acquire_times, &key);
 }
 
 static inline void handle_pool_exhaustion(u32 pid, u32 tid, u64 key, u64 now) {

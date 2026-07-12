@@ -74,6 +74,11 @@ static __always_inline int l4_offset(struct __sk_buff *skb, u8 *is_v6, u8 *proto
 			if (bpf_skb_load_bytes(skb, off, &nh, 1) < 0)
 				return -1;
 			if (nexthdr == IP6_FRAGMENT) {
+				__u16 fragoff = 0;
+				if (bpf_skb_load_bytes(skb, off + 2, &fragoff, sizeof(fragoff)) < 0)
+					return -1;
+				if (bpf_ntohs(fragoff) & 0xFFF8)
+					return -1;
 				off += 8;
 			} else {
 				__u8 hlen = 0;
