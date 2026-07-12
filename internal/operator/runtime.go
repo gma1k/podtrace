@@ -39,6 +39,8 @@ type Options struct {
 	GracefulShutdownTimeout time.Duration
 
 	BootstrapFallbackImage string
+
+	BootstrapTracerConfigName string
 }
 
 func DefaultOptions() Options {
@@ -55,8 +57,7 @@ func DefaultOptions() Options {
 }
 
 // NewScheme returns a scheme with both client-go's default types and
-// the podtrace v1alpha1 API group registered. Exposed so tests can
-// share one scheme across envtest harnesses.
+// the podtrace v1alpha1 API group registered.
 func NewScheme() (*runtime.Scheme, error) {
 	s := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(s); err != nil {
@@ -126,9 +127,10 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	if err := mgr.Add(&BootstrapDefaultTracerConfig{
-		Client:          mgr.GetClient(),
-		SystemNamespace: opts.SystemNamespace,
-		FallbackImage:   opts.BootstrapFallbackImage,
+		Client:           mgr.GetClient(),
+		SystemNamespace:  opts.SystemNamespace,
+		FallbackImage:    opts.BootstrapFallbackImage,
+		TracerConfigName: opts.BootstrapTracerConfigName,
 	}); err != nil {
 		return fmt.Errorf("register TracerConfig bootstrap: %w", err)
 	}
@@ -144,8 +146,6 @@ func leaderElectionID(opts Options) string {
 }
 
 // registerWebhooks wires the three validating webhooks onto the manager.
-// Each Setup* function declares a +kubebuilder:webhook marker so the
-// paths match the Helm-rendered ValidatingWebhookConfiguration.
 func registerWebhooks(mgr ctrl.Manager) error {
 	if err := webhookv1alpha1.SetupPodTraceWebhookWithManager(mgr); err != nil {
 		return fmt.Errorf("podtrace webhook: %w", err)

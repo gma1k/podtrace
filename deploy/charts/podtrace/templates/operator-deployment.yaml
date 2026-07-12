@@ -60,6 +60,8 @@ spec:
                   fieldPath: metadata.namespace
             - name: PODTRACE_BOOTSTRAP_IMAGE
               value: {{ include "podtrace.image" . | quote }}
+            - name: PODTRACE_BOOTSTRAP_TC_NAME
+              value: {{ .Values.tracerConfig.name | default "default" | quote }}
             {{- with .Values.operator.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

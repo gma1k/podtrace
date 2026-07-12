@@ -38,7 +38,7 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 	}
 
 	hostPathType := corev1.HostPathDirectory
-	priv := true
+	priv := false
 	runAsRoot := int64(0)
 
 	imagePullPolicy := tc.Spec.ImagePullPolicy

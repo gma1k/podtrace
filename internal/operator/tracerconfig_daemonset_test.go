@@ -44,21 +44,23 @@ func TestBuildAgentDaemonSetSpec_SelectorStability(t *testing.T) {
 	}
 }
 
-func TestBuildAgentDaemonSetSpec_PrivilegedContainer(t *testing.T) {
+func TestBuildAgentDaemonSetSpec_CapabilitiesNotPrivileged(t *testing.T) {
 	spec := buildAgentDaemonSetSpec(tc(nil), "podtrace-system")
 	c := spec.Template.Spec.Containers[0]
 	if c.SecurityContext == nil {
 		t.Fatal("SecurityContext is nil")
 	}
-	if c.SecurityContext.Privileged == nil || !*c.SecurityContext.Privileged {
-		t.Error("agent container must be privileged")
+	if c.SecurityContext.Privileged != nil && *c.SecurityContext.Privileged {
+		t.Error("agent container must NOT be privileged (caps-only)")
 	}
 	if c.SecurityContext.RunAsUser == nil || *c.SecurityContext.RunAsUser != 0 {
 		t.Error("agent must run as root (user 0)")
 	}
-	// Must request the four eBPF-relevant capabilities.
 	wantCaps := map[corev1.Capability]bool{
-		"BPF": false, "SYS_ADMIN": false, "PERFMON": false, "NET_ADMIN": false,
+		"BPF": false, "SYS_ADMIN": false, "PERFMON": false, "SYS_RESOURCE": false, "NET_ADMIN": false,
+	}
+	if c.SecurityContext.Capabilities == nil {
+		t.Fatal("Capabilities must be set when running unprivileged")
 	}
 	for _, added := range c.SecurityContext.Capabilities.Add {
 		if _, ok := wantCaps[added]; ok {
@@ -93,7 +95,6 @@ func TestBuildAgentDaemonSetSpec_HostMounts(t *testing.T) {
 			t.Errorf("volume %q path=%q want %q", name, found[name], path)
 		}
 	}
-	// HostPID MUST be on for pid → cgroup traversal.
 	if !spec.Template.Spec.HostPID {
 		t.Error("HostPID must be true")
 	}
@@ -118,7 +119,6 @@ func TestBuildAgentDaemonSetSpec_ArgsCarryTracerConfigName(t *testing.T) {
 		x.Name = "alt"
 	}), "podtrace-system")
 	args := spec.Template.Spec.Containers[0].Args
-	// Expect the `agent` subcommand with system-namespace and tracer-config flags.
 	if len(args) == 0 || args[0] != "agent" {
 		t.Fatalf("args[0]=%q want agent (full args: %v)", args[0], args)
 	}

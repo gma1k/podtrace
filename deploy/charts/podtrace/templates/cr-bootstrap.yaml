@@ -26,12 +26,16 @@ Why a Job instead of regular templates:
   and the Job's kubectl-apply runs AFTER the CRDs have been installed
   and the apiserver has registered the new types.
 
-  The operator also self-bootstraps a default TracerConfig if none
-  exists (see internal/operator/bootstrap.go) so OLM and raw-kubectl
-  install paths — which don't run Helm hooks — still get a working
-  out-of-the-box state. On Helm installs the Job races with the
-  operator and typically wins; the operator's bootstrap then becomes
-  a no-op. Either way, values.yaml-driven config takes precedence.
+  The operator also self-bootstraps a TracerConfig if none exists
+  (see internal/operator/bootstrap.go) so OLM and raw-kubectl install
+  paths — which don't run Helm hooks — still get a working
+  out-of-the-box state. On Helm installs the Job and the operator's
+  bootstrap may race, but both target the SAME name (the operator
+  reads it from PODTRACE_BOOTSTRAP_TC_NAME, set to tracerConfig.name),
+  so whichever runs second is a no-op (AlreadyExists) — they converge
+  on one object instead of leaving a stray "default". The Job's
+  kubectl-apply then reconciles that object to the values.yaml-driven
+  spec, which takes precedence.
 
   Helm-uninstall semantics: hook resources (this Job, its ConfigMap,
   its RBAC) self-clean via hook-delete-policy. The applied

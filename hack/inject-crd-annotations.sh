@@ -106,20 +106,18 @@ if not match:
     sys.exit(f"inject-crd-annotations: controller-gen marker not found in {path}")
 
 indent = match.group(1)
-annotations = [
-    ('helm.sh/resource-policy', '{{ ternary "keep" "delete" .Values.crds.keep }}'),
-]
 
-addenda = []
-for key, value in annotations:
-    if key in text:
-        continue
-    addenda.append(f"{indent}{key}: {value}")
-
-if not addenda:
+policy_key = "helm.sh/resource-policy"
+if policy_key in text:
     sys.exit(0)
 
-replacement = match.group(0) + "\n" + "\n".join(addenda)
+block = "\n".join([
+    f"{indent}{{{{- if .Values.crds.keep }}}}",
+    f"{indent}{policy_key}: keep",
+    f"{indent}{{{{- end }}}}",
+])
+
+replacement = match.group(0) + "\n" + block
 path.write_text(text.replace(match.group(0), replacement, 1))
 PY
 }

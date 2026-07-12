@@ -35,7 +35,7 @@ concurrency:
 
 jobs:
   build-and-test:
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -129,7 +129,10 @@ jobs:
           fail_ci_if_error: false
 
   cross-compile:
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    # Also run on push to main (scoped by `on.push.branches`) so a merged
+    # commit — which may differ from the tested PR head after squash/rebase —
+    # is verified before a release is cut from it.
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -190,3 +193,32 @@ jobs:
         with:
           name: benchmark-results
           path: benchmark.txt
+
+  # Drift gate: the Makefile generates CRDs (templates/crds) and the reference
+  # webhook manifest (hack/reference) from the api types + kubebuilder markers.
+  # Without this job a change to a marker or CRD type could merge with stale
+  # committed manifests. Regenerate and fail if anything differs.
+  manifests-drift:
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Regenerate CRDs, deepcopy, and webhook reference
+        run: GOTOOLCHAIN=auto make manifests generate
+
+      - name: Fail on manifest drift
+        run: |
+          if ! git diff --exit-code -- deploy/charts/podtrace/templates/crds hack/reference api/v1alpha1; then
+            echo "::error::Generated manifests are stale. Run 'make manifests generate' and commit the result." >&2
+            exit 1
+          fi
