@@ -6,6 +6,9 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.uber.org/zap"
+
+	"github.com/podtrace/podtrace/internal/logger"
 )
 
 // Metrics registers every Prometheus counter/gauge the agent exposes
@@ -394,6 +397,18 @@ func (o *metricsEngineObserver) OnCgroupsDetached(n int) {
 		return
 	}
 	o.m.CgroupsDetached.Add(float64(n))
+}
+
+// OnTargetError logs a backend target-reconcile failure so an attach problem
+// is visible as an attach problem.
+func (o *metricsEngineObserver) OnTargetError(stage string, err error) {
+	if err == nil {
+		return
+	}
+	logger.Warn("tracer target reconcile failed",
+		zap.String("stage", stage),
+		zap.Error(err),
+	)
 }
 
 // RefreshFromRouter walks the router's rule set + stats table and

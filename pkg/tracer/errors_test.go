@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"syscall"
 	"testing"
+
+	"github.com/cilium/ebpf"
 )
 
 func TestClassifyBackendError(t *testing.T) {
@@ -25,6 +27,9 @@ func TestClassifyBackendError(t *testing.T) {
 		{"btf lower", errors.New("btf unsupported on this kernel"), BackendErrBTFUnavailable},
 		{"verifier rejected", errors.New("program load: verifier rejected program: invalid stack access"), BackendErrVerifierRejected},
 		{"verifier error", errors.New("verifier error: too many instructions"), BackendErrVerifierRejected},
+		{"verifier error type wrapping eacces", &ebpf.VerifierError{Cause: syscall.EACCES}, BackendErrVerifierRejected},
+		{"verifier error type wrapping eperm", &ebpf.VerifierError{Cause: syscall.EPERM}, BackendErrVerifierRejected},
+		{"wrapped verifier error type", fmt.Errorf("load collection: %w", &ebpf.VerifierError{Cause: syscall.EACCES}), BackendErrVerifierRejected},
 		{"ringbuf", errors.New("ringbuf reader: bad fd"), BackendErrRingBuffer},
 		{"ring buffer phrase", errors.New("create ring buffer: ENOMEM"), BackendErrRingBuffer},
 		{"map lookup", errors.New("lookup map filter_cgroups: ENOENT"), BackendErrMapLookup},

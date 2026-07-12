@@ -211,9 +211,8 @@ func (tt *TraceTracker) GetAllTraces() []*Trace {
 	return traces
 }
 
-// SnapshotForExport returns deep copies of traces carrying only the spans
-// that have not been handed to an exporter yet, and advances each trace's
-// watermark.
+// SnapshotForExport returns deep copies of traces carrying only the spans that
+// have not been handed to an exporter yet.
 func (tt *TraceTracker) SnapshotForExport(settle time.Duration, force bool) []*Trace {
 	tt.mu.RLock()
 	live := make([]*Trace, 0, len(tt.traces))
@@ -235,15 +234,33 @@ func (tt *TraceTracker) SnapshotForExport(settle time.Duration, force bool) []*T
 			continue
 		}
 		snapshot := cloneTraceLocked(trace, trace.exportedSpans)
-		trace.exportedSpans = len(trace.Spans)
 		trace.mu.Unlock()
 		out = append(out, snapshot)
 	}
 	return out
 }
 
+// CommitExport advances each trace's export watermark by the number of spans
+// that were successfully exported in the matching snapshot.
+func (tt *TraceTracker) CommitExport(exported []*Trace) {
+	tt.mu.RLock()
+	defer tt.mu.RUnlock()
+	for _, snap := range exported {
+		live := tt.traces[snap.TraceID]
+		if live == nil {
+			continue
+		}
+		live.mu.Lock()
+		live.exportedSpans += len(snap.Spans)
+		if live.exportedSpans > len(live.Spans) {
+			live.exportedSpans = len(live.Spans)
+		}
+		live.mu.Unlock()
+	}
+}
+
 // SnapshotAll returns deep copies of every trace (all spans) without touching
-// export watermarks — for read-only consumers like the request-flow graph.
+// export watermarks, for read-only consumers like the request-flow graph.
 func (tt *TraceTracker) SnapshotAll() []*Trace {
 	tt.mu.RLock()
 	live := make([]*Trace, 0, len(tt.traces))
@@ -262,8 +279,7 @@ func (tt *TraceTracker) SnapshotAll() []*Trace {
 }
 
 // cloneTraceLocked deep-copies a trace, including only spans from index
-// fromSpan on. Caller must hold trace.mu. Event pointers are shared — events
-// are not mutated after ProcessEvent — but every slice and map is copied.
+// fromSpan on.
 func cloneTraceLocked(trace *Trace, fromSpan int) *Trace {
 	out := &Trace{
 		TraceID:   trace.TraceID,

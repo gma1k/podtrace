@@ -32,18 +32,24 @@ type EngineStats struct {
 	EventsDropped   int64
 	ActiveTargets   int
 	ExporterFailure int64
+	AttachFailure   int64
 	CgroupsAttached int64
 	CgroupsDetached int64
 }
 
 // Engine orchestrates a TracerBackend + Exporters over a stream of
-// TargetSet snapshots. One instance serves one trace intent end-to-end:
-// CLI invocations, agent DaemonSet processes, and session Jobs each
-// construct an Engine with mode-appropriate backend/exporters/stream.
+// TargetSet snapshots.
 type Engine interface {
 	Run(ctx context.Context, targets <-chan TargetSet) error
 
 	Stats() EngineStats
+}
+
+// cgroupState is the engine's remembered identity for an attached cgroup
+// path.
+type cgroupState struct {
+	containerID  string
+	containerPID uint32
 }
 
 type engine struct {
@@ -52,13 +58,22 @@ type engine struct {
 	cfg       Config
 
 	mu              sync.RWMutex
-	activeCgroups   map[string]struct{}
+	activeCgroups   map[string]cgroupState
 	eventsReceived  int64
 	eventsExported  int64
 	eventsDropped   int64
 	exporterFailure int64
+	attachFailure   int64
 	cgroupsAttached int64
 	cgroupsDetached int64
+}
+
+// attachError pairs a backend reconcile stage with the error it produced, so
+// the engine can report both to a TargetErrorObserver after releasing its
+// lock.
+type attachError struct {
+	stage string
+	err   error
 }
 
 // NewEngine composes a backend and a set of exporters into a runnable
@@ -83,7 +98,7 @@ func NewEngine(backend TracerBackend, exporters []Exporter, cfg Config) (Engine,
 		backend:       backend,
 		exporters:     exporters,
 		cfg:           cfg,
-		activeCgroups: make(map[string]struct{}),
+		activeCgroups: make(map[string]cgroupState),
 	}, nil
 }
 
@@ -92,7 +107,7 @@ func (e *engine) Run(ctx context.Context, targets <-chan TargetSet) error {
 		return errors.New("tracer: targets channel is required")
 	}
 
-	dispatchCtx, cancelDispatch := context.WithCancel(ctx)
+	dispatchCtx, cancelDispatch := context.WithCancel(context.WithoutCancel(ctx))
 
 	eventCh := make(chan *events.Event, e.cfg.EventBufferSize)
 	if err := e.backend.Start(ctx, eventCh); err != nil {
@@ -123,11 +138,7 @@ func (e *engine) Run(ctx context.Context, targets <-chan TargetSet) error {
 				shutdown()
 				return nil
 			}
-			if err := e.applyTargets(set); err != nil {
-				e.mu.Lock()
-				e.exporterFailure++
-				e.mu.Unlock()
-			}
+			_ = e.applyTargets(set)
 		}
 	}
 }
@@ -153,10 +164,15 @@ func (e *engine) applyTargets(set TargetSet) error {
 
 	e.mu.Lock()
 
-	added, removed := 0, 0
-	for path := range desired {
-		if _, ok := e.activeCgroups[path]; !ok {
+	added, removed, changed := 0, 0, 0
+	for path, t := range desired {
+		prev, ok := e.activeCgroups[path]
+		if !ok {
 			added++
+			continue
+		}
+		if prev.containerID != t.ContainerID || prev.containerPID != t.ContainerPID {
+			changed++
 		}
 	}
 	for path := range e.activeCgroups {
@@ -165,13 +181,17 @@ func (e *engine) applyTargets(set TargetSet) error {
 		}
 	}
 
-	if added == 0 && removed == 0 {
+	if added == 0 && removed == 0 && changed == 0 {
 		e.mu.Unlock()
 		return nil
 	}
 
+	var attachErrs []attachError
+
 	if err := e.backend.SetCgroups(snapshot); err != nil {
+		e.attachFailure++
 		e.mu.Unlock()
+		e.reportAttachErrors([]attachError{{stage: "set_cgroups", err: err}})
 		return err
 	}
 
@@ -189,34 +209,34 @@ func (e *engine) applyTargets(set TargetSet) error {
 			cts = append(cts, ContainerUprobeTarget{ContainerID: t.ContainerID, PID: t.ContainerPID})
 		}
 		if err := rec.SetContainerTargets(cts); err != nil {
-			e.exporterFailure++
+			e.attachFailure++
+			attachErrs = append(attachErrs, attachError{stage: "set_container_targets", err: err})
 		}
 	} else {
 		for path, t := range desired {
 			if t.ContainerID == "" {
 				continue
 			}
-			if _, alreadyActive := e.activeCgroups[path]; alreadyActive {
+			if prev, alreadyActive := e.activeCgroups[path]; alreadyActive && prev.containerID == t.ContainerID {
 				continue
 			}
 			if err := e.backend.SetContainerID(t.ContainerID); err != nil {
-				e.exporterFailure++
+				e.attachFailure++
+				attachErrs = append(attachErrs, attachError{stage: "set_container_id", err: err})
 			}
 		}
 	}
 
-	next := make(map[string]struct{}, len(desired))
-	for path := range desired {
-		next[path] = struct{}{}
+	next := make(map[string]cgroupState, len(desired))
+	for path, t := range desired {
+		next[path] = cgroupState{containerID: t.ContainerID, containerPID: t.ContainerPID}
 	}
 	e.activeCgroups = next
 	e.cgroupsAttached += int64(added)
 	e.cgroupsDetached += int64(removed)
 	e.mu.Unlock()
 
-	// Observer callbacks run OUTSIDE the engine lock: an observer calling
-	// back into Stats() (which takes a read lock) deadlocked, and a slow
-	// observer stalled every target reconcile.
+	e.reportAttachErrors(attachErrs)
 	if obs := e.cfg.Observer; obs != nil {
 		if added > 0 {
 			obs.OnCgroupsAttached(added)
@@ -226,6 +246,21 @@ func (e *engine) applyTargets(set TargetSet) error {
 		}
 	}
 	return nil
+}
+
+// reportAttachErrors forwards each attach failure to the Observer if it
+// implements TargetErrorObserver.
+func (e *engine) reportAttachErrors(errs []attachError) {
+	if len(errs) == 0 {
+		return
+	}
+	teo, ok := e.cfg.Observer.(TargetErrorObserver)
+	if !ok {
+		return
+	}
+	for _, ae := range errs {
+		teo.OnTargetError(ae.stage, ae.err)
+	}
 }
 
 func (e *engine) dispatchLoop(ctx context.Context, eventCh <-chan *events.Event) {
@@ -248,26 +283,16 @@ func (e *engine) dispatchLoop(ctx context.Context, eventCh <-chan *events.Event)
 		if delivered {
 			e.eventsExported += int64(len(batch))
 		} else {
-			// No exporter accepted the batch: these events are gone.
-			// EventsDropped used to stay permanently 0, which read as
-			// "nothing was ever lost" even when every export failed.
 			e.eventsDropped += int64(len(batch))
 		}
 		e.mu.Unlock()
 		batch = batch[:0]
 	}
 
-	// shutdownFlush gives the FINAL batch a context that survives the
-	// engine's cancellation: flushing with the already-cancelled run
-	// context made every ctx-honoring exporter drop the tail batch of
-	// every run.
 	shutdownFlush := func() {
 		flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), e.cfg.ShutdownFlushTimeout)
 		defer cancel()
 
-		// Drain events still buffered in eventCh (the backend has been
-		// stopped or the channel closed): they were captured and counted
-		// nowhere before.
 	drain:
 		for {
 			select {
@@ -327,6 +352,7 @@ func (e *engine) Stats() EngineStats {
 		EventsDropped:   e.eventsDropped,
 		ActiveTargets:   len(e.activeCgroups),
 		ExporterFailure: e.exporterFailure,
+		AttachFailure:   e.attachFailure,
 		CgroupsAttached: e.cgroupsAttached,
 		CgroupsDetached: e.cgroupsDetached,
 	}

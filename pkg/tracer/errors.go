@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"syscall"
+
+	"github.com/cilium/ebpf"
 )
 
 // Backend startup error classes. These short, stable strings appear in:
@@ -25,16 +27,21 @@ const (
 )
 
 // ClassifyBackendError maps a backend startup error to one of the
-// BackendErr* constants. Returns the empty string for a nil error and
-// BackendErrUnknown when no class matches.
+// BackendErr* constants.
 func ClassifyBackendError(err error) string {
 	if err == nil {
 		return ""
 	}
+	msg := strings.ToLower(err.Error())
+	var verifierErr *ebpf.VerifierError
+	if errors.As(err, &verifierErr) ||
+		strings.Contains(msg, "verifier rejected") ||
+		strings.Contains(msg, "verifier error") {
+		return BackendErrVerifierRejected
+	}
 	if errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EPERM) {
 		return BackendErrPermission
 	}
-	msg := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(msg, "permission denied"),
 		strings.Contains(msg, "operation not permitted"):
@@ -44,14 +51,6 @@ func ClassifyBackendError(err error) string {
 		return BackendErrTracefsUnmounted
 	case strings.Contains(msg, "btf"):
 		return BackendErrBTFUnavailable
-	case strings.Contains(msg, "verifier rejected"),
-		strings.Contains(msg, "verifier error"):
-		// A verifier rejection is NOT evidence of an old kernel: on
-		// modern kernels it usually means the verifier got stricter (or
-		// the program grew past a limit). Classifying it as
-		// kernel_too_old sent operators chasing upgrades that would make
-		// the problem worse, not better.
-		return BackendErrVerifierRejected
 	case strings.Contains(msg, "ring buffer"),
 		strings.Contains(msg, "ringbuf"):
 		return BackendErrRingBuffer

@@ -35,6 +35,7 @@ package hostfs
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -44,6 +45,10 @@ import (
 // ErrInvalidPath is returned when the supplied path is not absolute or
 // contains a ".." element.
 var ErrInvalidPath = errors.New("hostfs: path must be absolute and contain no '..' elements")
+
+// ErrUnsafeMode is returned by the write helpers when the requested mode
+// grants write permission to group or other.
+var ErrUnsafeMode = errors.New("hostfs: refusing to write with a group/other-writable mode")
 
 func validate(path string) error {
 	if !filepath.IsAbs(path) {
@@ -88,6 +93,13 @@ func WalkRegular(root string, fn func(path string, info os.FileInfo) error) erro
 	})
 }
 
+func Open(path string) (*os.File, error) {
+	if err := validate(path); err != nil {
+		return nil, err
+	}
+	return os.Open(path) // #nosec G304 -- intentional cross-namespace open; validated absolute path with no ".." segments.
+}
+
 // ReadFile reads a file the operator has explicitly designated via a
 // CLI flag or environment variable.
 func ReadFile(path string) ([]byte, error) {
@@ -103,7 +115,10 @@ func WriteFile(path string, data []byte, perm os.FileMode) error {
 	if err := validate(path); err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, perm) // #nosec G304,G306 -- operator-supplied path validated; perm is caller-controlled and reviewed at the call site.
+	if perm&0o022 != 0 {
+		return fmt.Errorf("%w: %#o (%s)", ErrUnsafeMode, perm, path)
+	}
+	return os.WriteFile(path, data, perm) // #nosec G304,G306 -- path validated absolute/no-"..", mode asserted non-group/other-writable above; 0644 read is intended for sidecar/kubelet handoffs.
 }
 
 // WriteFileAtomic writes data via a temp file + rename so a concurrent reader

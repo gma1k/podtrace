@@ -51,9 +51,7 @@ func NewHandler(podIP string, ports []int) *Handler {
 
 // Run consumes eventChan, watching for latency spikes that auto-trigger a
 // heap + goroutine profile fetch. It also services on-demand trigger requests.
-// Run is intended to be called in a goroutine; it exits when ctx is cancelled.
 func (h *Handler) Run(ctx context.Context, eventChan <-chan *events.Event) {
-	// Try to discover the pprof endpoint once at startup (non-blocking for caller).
 	discoverCtx, discoverCancel := context.WithTimeout(ctx, 3*time.Second)
 	h.profiler.Discover(discoverCtx)
 	discoverCancel()
@@ -136,33 +134,41 @@ func (h *Handler) doProfile(ctx context.Context, ptype ProfileType, duration tim
 		// CPU profiles don't feed into CorrelatedResult directly — the binary is
 		// stored in cpu.RawBytes for potential file export. Update metadata only.
 		h.mu.Lock()
-		if h.result == nil {
-			h.result = &CorrelatedResult{PageFaultCounts: map[uint32]int{}, PodIP: h.podIP}
-		}
-		h.result.PprofAvailable = cpu.Available
+		next := h.resultCopyLocked()
+		next.PprofAvailable = cpu.Available
+		h.result = next
 		h.mu.Unlock()
 		return
 	}
 
-	// Merge new profile data into the stored result.
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.result == nil {
-		h.result = &CorrelatedResult{PageFaultCounts: map[uint32]int{}, PodIP: h.podIP}
-	}
+	next := h.resultCopyLocked()
 	if heap != nil {
-		h.result.HeapProfile = heap
+		next.HeapProfile = heap
 		if heap.Available {
-			h.result.PprofAvailable = true
+			next.PprofAvailable = true
 		}
 	}
 	if goroutine != nil {
-		h.result.GoroutineProfile = goroutine
+		next.GoroutineProfile = goroutine
 		if goroutine.Available {
-			h.result.PprofAvailable = true
+			next.PprofAvailable = true
 		}
 	}
-	h.result.PodIP = h.podIP
+	next.PodIP = h.podIP
+	h.result = next
+}
+
+// resultCopyLocked returns a shallow copy of the current result (or a fresh
+// one) so the caller can mutate and republish it without touching the struct
+// readers may still be dereferencing. Caller holds h.mu.
+func (h *Handler) resultCopyLocked() *CorrelatedResult {
+	if h.result == nil {
+		return &CorrelatedResult{PageFaultCounts: map[uint32]int{}, PodIP: h.podIP}
+	}
+	cp := *h.result
+	return &cp
 }
 
 // TriggerNow enqueues an on-demand profile request (non-blocking; drops if full).

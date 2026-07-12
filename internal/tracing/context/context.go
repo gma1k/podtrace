@@ -2,6 +2,7 @@ package context
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -70,6 +71,46 @@ func generateSpanID() string {
 	return hex.EncodeToString(b)
 }
 
+// NewTraceContextFromSeed derives a TraceContext whose TraceID is a stable
+// function of seed.
+func NewTraceContextFromSeed(seed string) *TraceContext {
+	sum := sha256.Sum256([]byte(seed))
+	return &TraceContext{
+		TraceID: hex.EncodeToString(sum[:16]),
+		SpanID:  generateSpanID(),
+		Flags:   0x01,
+	}
+}
+
+// isLowerHex reports whether s is non-empty and composed solely of lowercase
+// hexadecimal digits, as the W3C trace-context spec requires for trace-id,
+// parent-id and trace-flags.
+func isLowerHex(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		isDigit := c >= '0' && c <= '9'
+		isHexLower := c >= 'a' && c <= 'f'
+		if !isDigit && !isHexLower {
+			return false
+		}
+	}
+	return true
+}
+
+// isAllZeroHex reports whether s consists entirely of '0'. The all-zero
+// trace-id and parent-id are explicitly invalid per the W3C spec.
+func isAllZeroHex(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '0' {
+			return false
+		}
+	}
+	return true
+}
+
 func ParseW3CTraceParent(traceParent string) (*TraceContext, error) {
 	if traceParent == "" {
 		return nil, fmt.Errorf("empty traceparent")
@@ -88,14 +129,20 @@ func ParseW3CTraceParent(traceParent string) (*TraceContext, error) {
 	parentID := parts[2]
 	flags := parts[3]
 
-	if len(traceID) != 32 {
-		return nil, fmt.Errorf("invalid trace ID length: %d", len(traceID))
+	if len(traceID) != 32 || !isLowerHex(traceID) {
+		return nil, fmt.Errorf("invalid trace ID: %q", traceID)
 	}
-	if len(parentID) != 16 {
-		return nil, fmt.Errorf("invalid parent ID length: %d", len(parentID))
+	if isAllZeroHex(traceID) {
+		return nil, fmt.Errorf("trace ID must not be all zero")
 	}
-	if len(flags) != 2 {
-		return nil, fmt.Errorf("invalid flags length: %d", len(flags))
+	if len(parentID) != 16 || !isLowerHex(parentID) {
+		return nil, fmt.Errorf("invalid parent ID: %q", parentID)
+	}
+	if isAllZeroHex(parentID) {
+		return nil, fmt.Errorf("parent ID must not be all zero")
+	}
+	if len(flags) != 2 || !isLowerHex(flags) {
+		return nil, fmt.Errorf("invalid flags: %q", flags)
 	}
 
 	var flagsByte uint8

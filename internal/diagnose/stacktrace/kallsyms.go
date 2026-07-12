@@ -6,18 +6,14 @@ import (
 	"strings"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/podtrace/podtrace/internal/logger"
 	"github.com/podtrace/podtrace/internal/procfs"
 )
 
 // kallsymsLookup loads /proc/kallsyms once and resolves kernel addresses to
-// symbol names. /proc/kallsyms is sorted by address; we keep the parsed list
-// and binary-search for the largest symbol whose address <= the target.
-//
-// On clusters where kptr_restrict hides addresses (typical default), the file
-// lists all symbols at address 0x0 and resolution returns "" — callers fall
-// back to the raw hex format. Set sysctl kernel.kptr_restrict=0 to get
-// resolution; podtrace doesn't require it.
+// symbol names.
 type kallsymsLookup struct {
 	once    sync.Once
 	syms    []ksym
@@ -54,6 +50,9 @@ func (k *kallsymsLookup) load() {
 		if addr > k.maxAddr {
 			k.maxAddr = addr
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		logger.Warn("Kernel symbol table read was truncated; some kernel stack frames may show as raw hex", zap.Error(err))
 	}
 	if !isSorted(k.syms) {
 		sortKsyms(k.syms)

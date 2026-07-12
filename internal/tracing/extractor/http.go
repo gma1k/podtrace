@@ -72,7 +72,7 @@ func (e *HTTPExtractor) ExtractFromHeaders(headers map[string]string) *context.T
 
 	if e.extractSplunk {
 		if requestID, ok := normalized["x-splunk-requestid"]; ok {
-			tc := context.NewTraceContext()
+			tc := context.NewTraceContextFromSeed(requestID)
 			tc.State = requestID
 			return tc
 		}
