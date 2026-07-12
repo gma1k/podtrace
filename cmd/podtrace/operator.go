@@ -91,14 +91,15 @@ func toOperatorOptions(c *operatorOptions, leaderNSExplicit bool) operator.Optio
 		leaderNS = envNS
 	}
 	return operator.Options{
-		SystemNamespace:         c.systemNamespace,
-		MetricsBindAddress:      c.metricsAddr,
-		HealthBindAddress:       c.healthAddr,
-		LeaderElection:          c.leaderElect,
-		LeaderElectionNamespace: leaderNS,
-		WebhookPort:             c.webhookPort,
-		WebhookCertDir:          c.webhookCertDir,
-		BootstrapFallbackImage:  bootstrapFallbackImage(),
+		SystemNamespace:           c.systemNamespace,
+		MetricsBindAddress:        c.metricsAddr,
+		HealthBindAddress:         c.healthAddr,
+		LeaderElection:            c.leaderElect,
+		LeaderElectionNamespace:   leaderNS,
+		WebhookPort:               c.webhookPort,
+		WebhookCertDir:            c.webhookCertDir,
+		BootstrapFallbackImage:    bootstrapFallbackImage(),
+		BootstrapTracerConfigName: os.Getenv("PODTRACE_BOOTSTRAP_TC_NAME"),
 	}
 }
 

@@ -26,10 +26,10 @@
                             "type": "object",
                             "properties": {
                                 "cpu": {
-                                    "type": "string"
+                                    "type": ["string", "integer", "number"]
                                 },
                                 "memory": {
-                                    "type": "string"
+                                    "type": ["string", "integer", "number"]
                                 }
                             }
                         },
@@ -37,10 +37,10 @@
                             "type": "object",
                             "properties": {
                                 "cpu": {
-                                    "type": "string"
+                                    "type": ["string", "integer", "number"]
                                 },
                                 "memory": {
-                                    "type": "string"
+                                    "type": ["string", "integer", "number"]
                                 }
                             }
                         }
@@ -214,10 +214,10 @@
                             "type": "object",
                             "properties": {
                                 "cpu": {
-                                    "type": "string"
+                                    "type": ["string", "integer", "number"]
                                 },
                                 "memory": {
-                                    "type": "string"
+                                    "type": ["string", "integer", "number"]
                                 }
                             }
                         },
@@ -225,10 +225,10 @@
                             "type": "object",
                             "properties": {
                                 "cpu": {
-                                    "type": "string"
+                                    "type": ["string", "integer", "number"]
                                 },
                                 "memory": {
-                                    "type": "string"
+                                    "type": ["string", "integer", "number"]
                                 }
                             }
                         }
@@ -266,10 +266,10 @@
                             "type": "object",
                             "properties": {
                                 "cpu": {
-                                    "type": "string"
+                                    "type": ["string", "integer", "number"]
                                 },
                                 "memory": {
-                                    "type": "string"
+                                    "type": ["string", "integer", "number"]
                                 }
                             }
                         },
@@ -277,10 +277,10 @@
                             "type": "object",
                             "properties": {
                                 "cpu": {
-                                    "type": "string"
+                                    "type": ["string", "integer", "number"]
                                 },
                                 "memory": {
-                                    "type": "string"
+                                    "type": ["string", "integer", "number"]
                                 }
                             }
                         }

@@ -4,19 +4,19 @@ crd-labeler — one-time-per-cluster CRD ownership migration.
 Earlier the chart shipped its CRDs in Helm's `crds/`
 directory, which installs once at first `helm install` and never
 updates afterward. We have since moved the CRDs into `templates/crds/`
-with `helm.sh/hook: pre-install,pre-upgrade` so Helm propagates schema
-changes on upgrade.
+as regular chart resources, so Helm propagates schema changes on upgrade.
 
 The wrinkle: clusters already running an older chart version carry
 CRDs that lack the Helm ownership labels (`app.kubernetes.io/managed-by=Helm`
-and the meta.helm.sh/release-* annotations). When the new pre-upgrade
-hook tries to apply the same-named CRD it refuses with "invalid
-ownership metadata" because Helm will not silently take over a
-resource somebody else created.
+and the meta.helm.sh/release-* annotations). When Helm's apply reaches
+the same-named CRD template it refuses with "invalid ownership
+metadata" because Helm will not silently take over a resource somebody
+else created.
 
-This Job runs at weight -20 (before the CRDs themselves at -10) and
-patches the four podtrace.io CRDs with the ownership labels the chart
-expects, so the subsequent CRD hook adopts and updates them cleanly.
+This Job runs as a pre-install/pre-upgrade hook at weight -20, before
+Helm's main apply phase where the CRD templates land, and patches the
+six podtrace.io CRDs with the ownership labels the chart expects, so
+Helm's subsequent apply adopts and updates them cleanly.
 After that first upgrade the CRDs are Helm-owned forever; this Job is
 a no-op on every subsequent run.
 

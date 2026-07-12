@@ -8,9 +8,10 @@ labels onto the existing namespace after Helm creates it.
 
 Installed resources
 -------------------
-  CRDs (podtrace.io/v1alpha1) — installed by the chart's pre-install hook
-                                (templates/crds/, weight -10, runs before
-                                regular templates):
+  CRDs (podtrace.io/v1alpha1) — installed as regular chart resources
+                                (templates/crds/, gated by crds.install;
+                                a pre-upgrade labeler hook adopts any
+                                pre-existing copies first):
     PodTrace          continuous realtime tracing
     PodTraceSession   bounded diagnose-mode tracing
     PodTraceSchedule  cron-style recurring sessions

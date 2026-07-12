@@ -6,7 +6,9 @@ import (
 	"os"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -19,9 +21,10 @@ const DefaultTracerConfigName = "default"
 const BootstrapImageEnv = "PODTRACE_BOOTSTRAP_IMAGE"
 
 type BootstrapDefaultTracerConfig struct {
-	Client          client.Client
-	SystemNamespace string
-	FallbackImage   string
+	Client           client.Client
+	SystemNamespace  string
+	FallbackImage    string
+	TracerConfigName string
 }
 
 func (b *BootstrapDefaultTracerConfig) NeedLeaderElection() bool { return true }
@@ -62,15 +65,26 @@ func (b *BootstrapDefaultTracerConfig) Start(ctx context.Context) error {
 		return nil
 	}
 
+	name := b.TracerConfigName
+	if name == "" {
+		name = DefaultTracerConfigName
+	}
+
 	tc := &podtracev1alpha1.TracerConfig{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: DefaultTracerConfigName,
+			Name: name,
 			Annotations: map[string]string{
 				"podtrace.io/bootstrap-source": "operator",
 			},
 		},
 		Spec: podtracev1alpha1.TracerConfigSpec{
 			Image: image,
+			Agent: podtracev1alpha1.AgentSpec{
+				Resources: defaultAgentResources(),
+			},
+			Session: podtracev1alpha1.SessionRuntimeSpec{
+				Resources: defaultSessionResources(),
+			},
 		},
 	}
 
@@ -84,4 +98,35 @@ func (b *BootstrapDefaultTracerConfig) Start(ctx context.Context) error {
 	logger.Info("created default TracerConfig",
 		"name", tc.Name, "image", image, "source", "operator-bootstrap")
 	return nil
+}
+
+// defaultAgentResources mirrors the chart's values.yaml agent resource
+// defaults so a non-Helm (OLM / raw-kubectl) or race-bootstrapped TracerConfig
+// still bounds the agent DaemonSet.
+func defaultAgentResources() corev1.ResourceRequirements {
+	return corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("50m"),
+			corev1.ResourceMemory: resource.MustParse("64Mi"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("500m"),
+			corev1.ResourceMemory: resource.MustParse("256Mi"),
+		},
+	}
+}
+
+// defaultSessionResources mirrors the chart's values.yaml session resource
+// defaults for the per-session Job pods.
+func defaultSessionResources() corev1.ResourceRequirements {
+	return corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("100m"),
+			corev1.ResourceMemory: resource.MustParse("128Mi"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("1000m"),
+			corev1.ResourceMemory: resource.MustParse("512Mi"),
+		},
+	}
 }

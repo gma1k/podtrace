@@ -49,7 +49,7 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 		resources = tc.Spec.Session.Resources
 	}
 
-	priv := true
+	priv := false
 	runAsRoot := int64(0)
 
 	args := buildDiagnoseArgs(s, targetNamespaces, effectiveDuration)

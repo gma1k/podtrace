@@ -1,18 +1,20 @@
-{{- if .Values.webhook.enabled }}
+{{- /*
+   Require the operator too: the operator pod IS the webhook server. Rendering
+   the ValidatingWebhookConfiguration without it (failurePolicy: Fail) makes the
+   apiserver call an endpoint that does not exist, blocking every podtrace.io
+   create/update cluster-wide. Gate on both so webhook.enabled without
+   operator.enabled is a no-op instead of a self-inflicted outage.
+*/ -}}
+{{- if and .Values.webhook.enabled .Values.operator.enabled }}
 ---
 # Validating admission webhook for podtrace.io/v1alpha1.
 #
 # The paths below are authoritative: they match the kubebuilder markers on
-# the Go webhook types in api/v1alpha1/*_webhook.go. If a marker changes,
-# `make manifests` will emit a mismatch between the Go server and this
-# template — the Makefile target regenerates the reference manifest so
-# drift is caught.
-#
-# TLS source: cert-manager issues the Service's serving cert when
-# .Values.webhook.certSource = "cert-manager" (default). The annotation
-# `cert-manager.io/inject-ca-from` populates each webhook's caBundle at
-# install time. For air-gapped clusters without cert-manager, switch to
-# certSource=self-signed and provide .Values.webhook.caBundle / .tls.
+# the Go webhook types in api/v1alpha1/*_webhook.go. `make manifests`
+# regenerates hack/reference/ from those markers, and the manifests-drift CI
+# job fails if the committed reference is stale. Keep this hand-authored
+# template in sync with hack/reference/ (a manual diff — CI does not compare
+# the template against the reference automatically).
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:

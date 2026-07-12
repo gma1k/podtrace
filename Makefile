@@ -285,9 +285,11 @@ manifests: operator-tools
 	$(CONTROLLER_GEN) crd paths=./api/v1alpha1/... output:crd:artifacts:config=$(CRD_OUT_DIR)
 	@./hack/inject-crd-annotations.sh $(CRD_OUT_DIR)
 	@# Emit the webhook manifest to hack/reference/ as a diff target: the
-	@# Helm template at templates/validating-webhook.yaml is hand-authored,
-	@# but must stay in sync with the paths/rules kubebuilder generates
-	@# from the +kubebuilder:webhook markers. CI compares the two.
+	@# Helm template at templates/validating-webhook.yaml is hand-authored
+	@# and must stay in sync with the paths/rules kubebuilder generates from
+	@# the +kubebuilder:webhook markers. The manifests-drift CI job regenerates
+	@# hack/reference and fails if the committed copy is stale; reconciling the
+	@# hand-authored template against hack/reference is a manual review step.
 	@mkdir -p hack/reference
 	$(CONTROLLER_GEN) webhook paths=./internal/webhook/v1alpha1/... output:webhook:artifacts:config=hack/reference
 
@@ -325,13 +327,16 @@ e2e-kind-cleanup:
 CHAINSAW ?= $(shell command -v chainsaw 2>/dev/null)
 CHAINSAW_VERSION ?= latest
 chainsaw-tools:
-	@if [ -z "$(CHAINSAW)" ]; then \
+	@if [ -z "$(CHAINSAW)" ] && ! command -v chainsaw >/dev/null 2>&1 && [ ! -x "$$($(GO) env GOPATH)/bin/chainsaw" ]; then \
 	  echo "Installing chainsaw@$(CHAINSAW_VERSION)..."; \
 	  $(GO) install github.com/kyverno/chainsaw@$(CHAINSAW_VERSION); \
 	fi
 
 chainsaw: chainsaw-tools
-	$(or $(CHAINSAW),chainsaw) test --test-dir test/chainsaw/tests
+	@CHAINSAW_BIN="$(CHAINSAW)"; \
+	[ -n "$$CHAINSAW_BIN" ] || CHAINSAW_BIN="$$(command -v chainsaw 2>/dev/null)"; \
+	[ -n "$$CHAINSAW_BIN" ] || CHAINSAW_BIN="$$($(GO) env GOPATH)/bin/chainsaw"; \
+	"$$CHAINSAW_BIN" test --test-dir test/chainsaw/tests
 
 helm-template:
 	helm template podtrace deploy/charts/podtrace

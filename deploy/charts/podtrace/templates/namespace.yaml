@@ -17,12 +17,16 @@ Why a Job instead of a templated Namespace resource:
   A pre-install hook Job that runs `kubectl apply` on the Namespace
   sidesteps both problems. `kubectl apply` is the idempotent operation —
   it creates the namespace if missing and patches labels if existing,
-  with no Helm ownership check involved. The Job itself lives in
-  kube-system (always present on every cluster), so it has somewhere to
-  land regardless of whether the user used --create-namespace.
+  with no Helm ownership check involved. The Job (and its SA/RBAC) lands
+  in .Release.Namespace, which Helm creates before any hook runs (with
+  --create-namespace, which NOTES requires). It deliberately does NOT
+  use kube-system: managed platforms such as GKE Autopilot forbid
+  creating resources there, which broke the install outright.
 
-  Weight -100 puts this before crd-labeler (-20) and the CRD templates
-  (-10), so by the time those hooks run, the target namespace exists.
+  Weight -100 puts this before the crd-labeler hook (-20) and, being a
+  pre-install/pre-upgrade hook, ahead of Helm's main apply phase where the
+  CRD templates and the operator land — so the target namespace exists by
+  the time anything references it.
 
   The hook-delete-policy clears the Job after success, so it does not
   accumulate across upgrades. The Namespace itself persists — there is
@@ -34,7 +38,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: {{ include "podtrace.fullname" . }}-namespace-bootstrap
-  namespace: kube-system
+  namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: podtrace
     app.kubernetes.io/instance: {{ .Release.Name }}
@@ -83,13 +87,13 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: {{ include "podtrace.fullname" . }}-namespace-bootstrap
-    namespace: kube-system
+    namespace: {{ .Release.Namespace }}
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: {{ include "podtrace.fullname" . }}-namespace-bootstrap
-  namespace: kube-system
+  namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: podtrace
     app.kubernetes.io/instance: {{ .Release.Name }}
