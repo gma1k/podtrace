@@ -84,6 +84,7 @@ type Tracer struct {
 
 	containerUprobes         map[string]*containerUprobeSet
 	globalProtocolAttached   bool
+	attachContainerGroupFn   func(g probes.ProbeGroup, id string, pid uint32) []link.Link
 	reader                   *ringbuf.Reader
 	h2Reader                 *ringbuf.Reader
 	h2Decoder                *h2decode.Decoder
@@ -106,8 +107,8 @@ type Tracer struct {
 	cgroupPaths              []string
 	useUserspaceCgroupFilter atomic.Bool
 	denyWhenNoTargets        atomic.Bool
-	targetCgroupID           atomic.Uint64
 	targetCgroupIDs          atomic.Pointer[map[uint64]struct{}]
+	cgroupCapacityWarned     atomic.Int64
 	cgroupWriteMu            sync.Mutex
 	cpAnalyzer               *criticalpath.Analyzer
 	piiRedactor              *redactor.Redactor
@@ -147,9 +148,30 @@ type ContainerProbeTarget struct {
 	PID uint32
 }
 
+// containerUprobeSet holds one container's uprobe links keyed by probe group
+// so DisableProbeGroup/EnableProbeGroup can detach and re-attach a group for
+// every targeted container.
 type containerUprobeSet struct {
 	pid   uint32
-	links []link.Link
+	links map[probes.ProbeGroup][]link.Link
+}
+
+func (s *containerUprobeSet) allLinks() []link.Link {
+	var out []link.Link
+	for _, ls := range s.links {
+		out = append(out, ls...)
+	}
+	return out
+}
+
+// containerUprobeGroups lists the probe groups that carry container-scoped
+// uprobes, in attach order.
+var containerUprobeGroups = []probes.ProbeGroup{
+	probes.GroupTLS,
+	probes.GroupDatabase,
+	probes.GroupPool,
+	probes.GroupCache,
+	probes.GroupMessaging,
 }
 
 // attachGlobalProtocolProbesOnce attaches the protocol kprobes that are NOT
@@ -169,32 +191,68 @@ func (t *Tracer) attachGlobalProtocolProbesOnce() {
 	t.registerGroupLinks(probes.GroupNetwork, probes.AttachH2Probes(t.collection))
 }
 
-// attachContainerUprobes attaches every container-scoped uprobe group for one
-// container (resolved via its own PID) and returns the links, without
-// registering them in the shared probeGroups registry, the per-container
-// lifecycle in SetContainerTargets owns them.
-func (t *Tracer) attachContainerUprobes(id string, pid uint32) []link.Link {
+// attachContainerGroupUprobes attaches one probe group's container-scoped
+// uprobes for one container (resolved via its own PID) and returns the links,
+// without registering them in the shared probeGroups registry, the
+// per-container lifecycle in SetContainerTargets owns them.
+func (t *Tracer) attachContainerGroupUprobes(g probes.ProbeGroup, id string, pid uint32) []link.Link {
 	coll := t.collection
 	if coll == nil || id == "" {
 		return nil
 	}
-	var ls []link.Link
-	ls = append(ls, probes.AttachDNSProbesWithPID(coll, id, pid)...)
-	ls = append(ls, probes.AttachSyncProbesWithPID(coll, id, pid)...)
-	ls = append(ls, probes.AttachDBProbesWithPID(coll, id, pid)...)
-	ls = append(ls, probes.AttachPoolProbesWithPID(coll, id, pid)...)
-	ls = append(ls, probes.AttachTLSProbesWithPID(coll, id, pid)...)
-	ls = append(ls, probes.AttachGoTLSProbes(coll, pid)...)
-	ls = append(ls, probes.AttachGoGRPCProbes(coll, pid)...)
-	ls = append(ls, probes.AttachRustlsProbes(coll, pid)...)
-	ls = append(ls, probes.AttachGoHTTP3Probes(coll, pid)...)
-	ls = append(ls, probes.AttachNghttp3Probes(coll, pid)...)
-	ls = append(ls, probes.AttachQuicheProbes(coll, pid)...)
-	ls = append(ls, probes.AttachQuicheRustProbes(coll, pid)...)
-	ls = append(ls, probes.AttachRedisProbesWithPID(coll, id, pid)...)
-	ls = append(ls, probes.AttachMemcachedProbesWithPID(coll, id, pid)...)
-	ls = append(ls, probes.AttachKafkaProbesWithPID(coll, id, pid)...)
-	return ls
+	switch g {
+	case probes.GroupTLS:
+		var ls []link.Link
+		ls = append(ls, probes.AttachDNSProbesWithPID(coll, id, pid)...)
+		ls = append(ls, probes.AttachSyncProbesWithPID(coll, id, pid)...)
+		ls = append(ls, probes.AttachTLSProbesWithPID(coll, id, pid)...)
+		ls = append(ls, probes.AttachGoTLSProbes(coll, pid)...)
+		ls = append(ls, probes.AttachGoGRPCProbes(coll, pid)...)
+		ls = append(ls, probes.AttachRustlsProbes(coll, pid)...)
+		ls = append(ls, probes.AttachGoHTTP3Probes(coll, pid)...)
+		ls = append(ls, probes.AttachNghttp3Probes(coll, pid)...)
+		ls = append(ls, probes.AttachQuicheProbes(coll, pid)...)
+		ls = append(ls, probes.AttachQuicheRustProbes(coll, pid)...)
+		return ls
+	case probes.GroupDatabase:
+		return probes.AttachDBProbesWithPID(coll, id, pid)
+	case probes.GroupPool:
+		return probes.AttachPoolProbesWithPID(coll, id, pid)
+	case probes.GroupCache:
+		var ls []link.Link
+		ls = append(ls, probes.AttachRedisProbesWithPID(coll, id, pid)...)
+		ls = append(ls, probes.AttachMemcachedProbesWithPID(coll, id, pid)...)
+		return ls
+	case probes.GroupMessaging:
+		return probes.AttachKafkaProbesWithPID(coll, id, pid)
+	}
+	return nil
+}
+
+// attachContainerGroup dispatches to the test seam when set.
+func (t *Tracer) attachContainerGroup(g probes.ProbeGroup, id string, pid uint32) []link.Link {
+	if t.attachContainerGroupFn != nil {
+		return t.attachContainerGroupFn(g, id, pid)
+	}
+	return t.attachContainerGroupUprobes(g, id, pid)
+}
+
+// attachContainerUprobes attaches every currently-enabled container-scoped
+// uprobe group for one container.
+func (t *Tracer) attachContainerUprobes(id string, pid uint32) map[probes.ProbeGroup][]link.Link {
+	out := make(map[probes.ProbeGroup][]link.Link, len(containerUprobeGroups))
+	for _, g := range containerUprobeGroups {
+		t.probeGroupsMu.Lock()
+		_, disabled := t.intentionallyDisabled[g]
+		t.probeGroupsMu.Unlock()
+		if disabled {
+			continue
+		}
+		if ls := t.attachContainerGroup(g, id, pid); len(ls) > 0 {
+			out[g] = ls
+		}
+	}
+	return out
 }
 
 // SetContainerTargets reconciles container-scoped uprobes against the full set
@@ -218,7 +276,7 @@ func (t *Tracer) SetContainerTargets(targets []ContainerProbeTarget) error {
 		if pid, ok := want[id]; ok && pid == set.pid {
 			continue
 		}
-		stale = append(stale, set.links...)
+		stale = append(stale, set.allLinks()...)
 		delete(t.containerUprobes, id)
 	}
 	var toAttach []ContainerProbeTarget
@@ -242,60 +300,15 @@ func (t *Tracer) SetContainerTargets(targets []ContainerProbeTarget) error {
 	return nil
 }
 
-// attachGroupUprobes re-attaches the container-scoped probes belonging to a
-// group, using the most recent SetContainerIDs target.
+// attachGroupUprobes re-attaches the probes of a group that are NOT
+// container-scoped. Container-scoped uprobes are re-attached per container by
+// reattachContainerGroupUprobes.
 func (t *Tracer) attachGroupUprobes(g probes.ProbeGroup) []link.Link {
 	coll := t.collection
 	if coll == nil {
 		return nil
 	}
-	t.probeGroupsMu.Lock()
-	hasContainerTargets := len(t.containerUprobes) > 0
-	t.probeGroupsMu.Unlock()
-	if hasContainerTargets {
-		return nil
-	}
-	id, pid := t.containerID, t.containerPID
 	switch g {
-	case probes.GroupTLS:
-		if id == "" {
-			return nil
-		}
-		var ls []link.Link
-		ls = append(ls, probes.AttachDNSProbesWithPID(coll, id, pid)...)
-		ls = append(ls, probes.AttachSyncProbesWithPID(coll, id, pid)...)
-		ls = append(ls, probes.AttachTLSProbesWithPID(coll, id, pid)...)
-		ls = append(ls, probes.AttachGoTLSProbes(coll, pid)...)
-		ls = append(ls, probes.AttachGoGRPCProbes(coll, pid)...)
-		ls = append(ls, probes.AttachRustlsProbes(coll, pid)...)
-		ls = append(ls, probes.AttachGoHTTP3Probes(coll, pid)...)
-		ls = append(ls, probes.AttachNghttp3Probes(coll, pid)...)
-		ls = append(ls, probes.AttachQuicheProbes(coll, pid)...)
-		ls = append(ls, probes.AttachQuicheRustProbes(coll, pid)...)
-		return ls
-	case probes.GroupDatabase:
-		if id == "" {
-			return nil
-		}
-		return probes.AttachDBProbesWithPID(coll, id, pid)
-	case probes.GroupPool:
-		if id == "" {
-			return nil
-		}
-		return probes.AttachPoolProbesWithPID(coll, id, pid)
-	case probes.GroupCache:
-		if id == "" {
-			return nil
-		}
-		var ls []link.Link
-		ls = append(ls, probes.AttachRedisProbesWithPID(coll, id, pid)...)
-		ls = append(ls, probes.AttachMemcachedProbesWithPID(coll, id, pid)...)
-		return ls
-	case probes.GroupMessaging:
-		if id == "" {
-			return nil
-		}
-		return probes.AttachKafkaProbesWithPID(coll, id, pid)
 	case probes.GroupFastCGI:
 		return probes.AttachFastCGIProbes(coll)
 	case probes.GroupNetwork:
@@ -306,6 +319,46 @@ func (t *Tracer) attachGroupUprobes(g probes.ProbeGroup) []link.Link {
 		return ls
 	}
 	return nil
+}
+
+// reattachContainerGroupUprobes re-attaches one probe group's container-scoped
+// uprobes for every currently-targeted container that lost them.
+func (t *Tracer) reattachContainerGroupUprobes(g probes.ProbeGroup) int {
+	type target struct {
+		id  string
+		pid uint32
+	}
+	t.probeGroupsMu.Lock()
+	missing := make([]target, 0, len(t.containerUprobes))
+	for id, set := range t.containerUprobes {
+		if len(set.links[g]) == 0 {
+			missing = append(missing, target{id: id, pid: set.pid})
+		}
+	}
+	t.probeGroupsMu.Unlock()
+
+	reattached := 0
+	for _, c := range missing {
+		ls := t.attachContainerGroup(g, c.id, c.pid)
+		if len(ls) == 0 {
+			continue
+		}
+		t.probeGroupsMu.Lock()
+		if set, ok := t.containerUprobes[c.id]; ok && set.pid == c.pid {
+			if set.links == nil {
+				set.links = map[probes.ProbeGroup][]link.Link{}
+			}
+			set.links[g] = append(set.links[g], ls...)
+			reattached += len(ls)
+			t.probeGroupsMu.Unlock()
+			continue
+		}
+		t.probeGroupsMu.Unlock()
+		for _, l := range ls {
+			_ = l.Close()
+		}
+	}
+	return reattached
 }
 
 // syncDNSPacketProbes reconciles the per-cgroup dns_egress/dns_ingress
@@ -698,7 +751,6 @@ func (t *Tracer) SetCgroups(cgroupPaths []string) error {
 		t.cgroupWriteMu.Lock()
 		t.cgroupPaths = nil
 		t.cgroupPath = ""
-		t.targetCgroupID.Store(0)
 		t.storeCgroupIDs(map[uint64]struct{}{})
 		t.filter.SetCgroupPaths(nil)
 		if err := t.syncTargetCgroupMap(); err != nil {
@@ -756,7 +808,6 @@ func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 	var newIDs map[uint64]struct{}
 	if replace {
 		allPaths = normalized
-		t.targetCgroupID.Store(0)
 		newIDs = make(map[uint64]struct{}, len(normalized))
 	} else {
 		seen := make(map[string]struct{}, len(t.cgroupPaths)+len(normalized))
@@ -800,9 +851,6 @@ func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 		for _, cgroupPath := range newPaths {
 			if cgid, err := getCgroupIDFromPath(cgroupPath); err == nil && cgid != 0 {
 				newIDs[cgid] = struct{}{}
-				if t.targetCgroupID.Load() == 0 {
-					t.targetCgroupID.Store(cgid)
-				}
 			} else if err != nil {
 				logger.Debug("Could not get cgroup ID from path", zap.Error(err), zap.String("cgroup_path", cgroupPath))
 			}
@@ -858,6 +906,7 @@ func (t *Tracer) syncTargetCgroupMap() error {
 	}
 
 	ids := t.loadCgroupIDs()
+	t.warnOnCgroupCapacity(len(ids), targetMap.MaxEntries())
 
 	if len(ids) == 0 {
 		deny := t.denyWhenNoTargets.Load() && len(t.cgroupPaths) == 0
@@ -896,6 +945,54 @@ func (t *Tracer) syncTargetCgroupMap() error {
 		return t.setCgroupFilterEnabled(true)
 	}
 	return nil
+}
+
+// cgroupCapacityExceeded / cgroupCapacityNearFull classify how close the
+// desired target set is to the target_cgroup_ids map capacity.
+const (
+	cgroupCapacityOK = iota
+	cgroupCapacityNearFull
+	cgroupCapacityExceeded
+)
+
+// classifyCgroupCapacity reports whether count exceeds maxEntries or sits
+// above 80% of it.
+func classifyCgroupCapacity(count int, maxEntries uint32) int {
+	if maxEntries == 0 {
+		return cgroupCapacityOK
+	}
+	switch {
+	case count > int(maxEntries):
+		return cgroupCapacityExceeded
+	case count*10 > int(maxEntries)*8:
+		return cgroupCapacityNearFull
+	default:
+		return cgroupCapacityOK
+	}
+}
+
+// warnOnCgroupCapacity logs when the desired target set approaches or exceeds
+// the capacity of the LRU target_cgroup_ids map: beyond capacity the kernel
+// silently evicts the oldest entries and their containers' events are
+// dropped.
+func (t *Tracer) warnOnCgroupCapacity(count int, maxEntries uint32) {
+	level := classifyCgroupCapacity(count, maxEntries)
+	if level == cgroupCapacityOK {
+		t.cgroupCapacityWarned.Store(0)
+		return
+	}
+	if t.cgroupCapacityWarned.Swap(int64(count)) == int64(count) {
+		return
+	}
+	if level == cgroupCapacityExceeded {
+		logger.Error("Target cgroup count exceeds kernel filter capacity; the oldest entries are silently evicted (LRU) and their containers' events dropped",
+			zap.Int("target_count", count),
+			zap.Uint32("max_entries", maxEntries))
+		return
+	}
+	logger.Warn("Target cgroup count approaching kernel filter capacity; targets beyond capacity will be silently evicted (LRU)",
+		zap.Int("target_count", count),
+		zap.Uint32("max_entries", maxEntries))
 }
 
 // setCgroupFilterEnabled flips the dedicated flag the BPF side consults
@@ -985,6 +1082,8 @@ func (t *Tracer) SetContainerIDs(containerIDs []string) error {
 	return t.SetContainerTargets(targets)
 }
 
+// pidForContainer resolves the PID used to discover a container's binaries
+// for uprobe attachment.
 func (t *Tracer) pidForContainer(id string) uint32 {
 	short := id
 	if len(short) > 12 {
@@ -997,7 +1096,10 @@ func (t *Tracer) pidForContainer(id string) uint32 {
 			}
 		}
 	}
-	return t.containerPID
+	logger.Warn("No attached cgroup path matched container ID; uprobe attachment will fall back to scanning /proc for the container",
+		zap.String("container_id", id),
+		zap.Strings("cgroup_paths", t.cgroupPaths))
+	return 0
 }
 
 func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) error {
@@ -1060,7 +1162,6 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 	logger.Info("Starting event collection",
 		zap.String("cgroup_path", t.cgroupPath),
 		zap.Uint32("container_pid", t.containerPID),
-		zap.Uint64("target_cgroup_id", t.targetCgroupID.Load()),
 		zap.Int("target_cgroup_id_count", len(t.loadCgroupIDs())),
 		zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter.Load()))
 
@@ -1083,13 +1184,12 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 							zap.Int64("events_parsed", eventsParsed.Load()),
 							zap.Int64("events_filtered", eventsFiltered.Load()),
 							zap.Int64("events_collected", eventsCollected.Load()),
-							zap.Uint64("target_cgroup_id", t.targetCgroupID.Load()),
+							zap.Int("target_cgroup_id_count", len(t.loadCgroupIDs())),
 							zap.String("cgroup_path", t.cgroupPath),
 							zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter.Load()))
 						filteringDisabled.Store(true)
 						t.cgroupWriteMu.Lock()
 						t.useUserspaceCgroupFilter.Store(false)
-						t.targetCgroupID.Store(0)
 						t.storeCgroupIDs(map[uint64]struct{}{})
 						if err := t.syncTargetCgroupMap(); err == nil {
 							logger.Info("Cleared kernel-side cgroup filter")
@@ -1105,7 +1205,7 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 					}
 				} else if eventsParsed.Load() == 0 && elapsed > 15*time.Second {
 					logger.Warn("No events parsed from ring buffer after 15 seconds - check eBPF program attachment",
-						zap.Uint64("target_cgroup_id", t.targetCgroupID.Load()),
+						zap.Int("target_cgroup_id_count", len(t.loadCgroupIDs())),
 						zap.String("cgroup_path", t.cgroupPath),
 						zap.Duration("elapsed", elapsed),
 						zap.Int("links_attached", t.linkCount()))
@@ -1114,7 +1214,7 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 					logger.Warn("Events parsed but none collected - filtering may be too strict",
 						zap.Int64("events_parsed", eventsParsed.Load()),
 						zap.Int64("events_filtered", eventsFiltered.Load()),
-						zap.Uint64("target_cgroup_id", t.targetCgroupID.Load()),
+						zap.Int("target_cgroup_id_count", len(t.loadCgroupIDs())),
 						zap.String("cgroup_path", t.cgroupPath),
 						zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter.Load()),
 						zap.Duration("elapsed", elapsed))
@@ -1324,7 +1424,7 @@ func (t *Tracer) processAndDispatch(ctx context.Context, event *events.Event,
 		if ec.parsed.Load() <= 5 {
 			logger.Debug("No cgroup filtering active, allowing all events",
 				zap.Uint64("event_cgroup_id", event.CgroupID),
-				zap.Uint64("target_cgroup_id", t.targetCgroupID.Load()),
+				zap.Int("target_cgroup_id_count", len(t.loadCgroupIDs())),
 				zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter.Load()))
 		}
 	}
@@ -1821,7 +1921,7 @@ func (t *Tracer) Stop() error {
 	}
 	t.http3Links = nil
 	for _, set := range t.containerUprobes {
-		closing = append(closing, set.links...)
+		closing = append(closing, set.allLinks()...)
 	}
 	t.containerUprobes = nil
 	t.probeGroupsMu.Unlock()
@@ -1981,14 +2081,7 @@ func (t *Tracer) SetEnabledCategories(categories []string) error {
 		wanted[c] = struct{}{}
 	}
 
-	t.probeGroupsMu.Lock()
-	active := make([]probes.ProbeGroup, 0, len(t.probeGroups))
-	for g := range t.probeGroups {
-		active = append(active, g)
-	}
-	t.probeGroupsMu.Unlock()
-
-	for _, g := range active {
+	for g := range groupCategoryNeeds {
 		if probeGroupNeededBy(g, wanted) {
 			continue
 		}
@@ -2062,7 +2155,12 @@ func (t *Tracer) EnableProbeGroup(g probes.ProbeGroup) error {
 	delete(t.detachWarned, g)
 	t.probeGroupsMu.Unlock()
 
-	logger.Info("Probe group re-attached", zap.String("group", string(g)), zap.Int("links", len(newLinks)))
+	containerLinks := t.reattachContainerGroupUprobes(g)
+
+	logger.Info("Probe group re-attached",
+		zap.String("group", string(g)),
+		zap.Int("links", len(newLinks)),
+		zap.Int("container_links", containerLinks))
 	return nil
 }
 
@@ -2108,18 +2206,29 @@ var groupCategoryNeeds = map[probes.ProbeGroup][]string{
 	probes.GroupCrypto:     {"crypto"},
 }
 
-// DisableProbeGroup closes all links associated with the given group.
+// DisableProbeGroup closes all links associated with the given group,
+// including the container-scoped uprobes attached for it.
 func (t *Tracer) DisableProbeGroup(g probes.ProbeGroup) error {
 	t.probeGroupsMu.Lock()
 	defer t.probeGroupsMu.Unlock()
-	ls, ok := t.probeGroups[g]
-	if !ok || len(ls) == 0 {
+	ls := t.probeGroups[g]
+	var containerLinks []link.Link
+	for _, set := range t.containerUprobes {
+		if cls := set.links[g]; len(cls) > 0 {
+			containerLinks = append(containerLinks, cls...)
+			delete(set.links, g)
+		}
+	}
+	if len(ls) == 0 && len(containerLinks) == 0 {
 		return nil
 	}
 	closed := make(map[link.Link]struct{}, len(ls))
 	for _, l := range ls {
 		_ = l.Close()
 		closed[l] = struct{}{}
+	}
+	for _, l := range containerLinks {
+		_ = l.Close()
 	}
 	kept := t.links[:0]
 	for _, l := range t.links {
@@ -2129,7 +2238,10 @@ func (t *Tracer) DisableProbeGroup(g probes.ProbeGroup) error {
 	}
 	t.links = kept
 	delete(t.probeGroups, g)
-	logger.Info("Probe group disabled", zap.String("group", string(g)))
+	logger.Info("Probe group disabled",
+		zap.String("group", string(g)),
+		zap.Int("links", len(ls)),
+		zap.Int("container_links", len(containerLinks)))
 	return nil
 }
 

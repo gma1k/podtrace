@@ -144,7 +144,7 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 			Privileged: &priv,
 			RunAsUser:  &runAsRoot,
 			Capabilities: &corev1.Capabilities{
-				Add: []corev1.Capability{"BPF", "SYS_ADMIN", "PERFMON", "SYS_RESOURCE", "NET_ADMIN"},
+				Add: []corev1.Capability{"BPF", "SYS_ADMIN", "PERFMON", "SYS_RESOURCE", "NET_ADMIN", "SYS_PTRACE"},
 			},
 		},
 		VolumeMounts: mainVolumeMounts,

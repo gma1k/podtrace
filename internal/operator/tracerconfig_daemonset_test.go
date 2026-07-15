@@ -58,6 +58,7 @@ func TestBuildAgentDaemonSetSpec_CapabilitiesNotPrivileged(t *testing.T) {
 	}
 	wantCaps := map[corev1.Capability]bool{
 		"BPF": false, "SYS_ADMIN": false, "PERFMON": false, "SYS_RESOURCE": false, "NET_ADMIN": false,
+		"SYS_PTRACE": false,
 	}
 	if c.SecurityContext.Capabilities == nil {
 		t.Fatal("Capabilities must be set when running unprivileged")
