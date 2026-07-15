@@ -213,16 +213,33 @@ func (e *engine) applyTargets(set TargetSet) error {
 			attachErrs = append(attachErrs, attachError{stage: "set_container_targets", err: err})
 		}
 	} else {
-		for path, t := range desired {
+		seen := make(map[string]struct{}, len(desired))
+		ids := make([]string, 0, len(desired))
+		for _, t := range desired {
 			if t.ContainerID == "" {
 				continue
 			}
-			if prev, alreadyActive := e.activeCgroups[path]; alreadyActive && prev.containerID == t.ContainerID {
+			if _, dup := seen[t.ContainerID]; dup {
 				continue
 			}
-			if err := e.backend.SetContainerID(t.ContainerID); err != nil {
-				e.attachFailure++
-				attachErrs = append(attachErrs, attachError{stage: "set_container_id", err: err})
+			seen[t.ContainerID] = struct{}{}
+			ids = append(ids, t.ContainerID)
+		}
+		if len(ids) > 0 {
+			if multi, ok := e.backend.(interface {
+				SetContainerIDs(containerIDs []string) error
+			}); ok {
+				if err := multi.SetContainerIDs(ids); err != nil {
+					e.attachFailure++
+					attachErrs = append(attachErrs, attachError{stage: "set_container_ids", err: err})
+				}
+			} else {
+				for _, id := range ids {
+					if err := e.backend.SetContainerID(id); err != nil {
+						e.attachFailure++
+						attachErrs = append(attachErrs, attachError{stage: "set_container_id", err: err})
+					}
+				}
 			}
 		}
 	}

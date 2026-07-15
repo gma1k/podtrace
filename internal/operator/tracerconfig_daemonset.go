@@ -17,9 +17,14 @@ import (
 //
 // Design invariants:
 //
-//   - The agent runs privileged (CAP_BPF + CAP_SYS_ADMIN + CAP_PERFMON)
-//     and as root. The podtrace-system namespace is PSA-privileged so
-//     the pod is admitted.
+//   - The agent runs unprivileged as root with the tracing capability
+//     set (CAP_BPF, CAP_SYS_ADMIN, CAP_PERFMON, CAP_SYS_RESOURCE,
+//     CAP_NET_ADMIN, CAP_SYS_PTRACE). SYS_PTRACE is required to read
+//     /proc/<pid>/{root,exe,maps} of non-root container processes,
+//     without it every per-container library uprobe (TLS, GoTLS, DB,
+//     …) silently attaches nothing for containers that drop root. The
+//     podtrace-system namespace is PSA-privileged so the pod is
+//     admitted.
 //   - Host mounts are kept to the minimum the tracer needs:
 //     /sys/fs/bpf, /sys/kernel/btf, /proc, /sys/fs/cgroup, and the CRI
 //     socket path. All read-only except /sys/fs/bpf (BPF objects
@@ -136,7 +141,7 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 						RunAsUser:  &runAsRoot,
 						Capabilities: &corev1.Capabilities{
 							Add: []corev1.Capability{
-								"BPF", "SYS_ADMIN", "PERFMON", "SYS_RESOURCE", "NET_ADMIN",
+								"BPF", "SYS_ADMIN", "PERFMON", "SYS_RESOURCE", "NET_ADMIN", "SYS_PTRACE",
 							},
 						},
 					},
