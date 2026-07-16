@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -84,7 +85,7 @@ type Tracer struct {
 
 	containerUprobes         map[string]*containerUprobeSet
 	globalProtocolAttached   bool
-	attachContainerGroupFn   func(g probes.ProbeGroup, id string, pid uint32) []link.Link
+	attachContainerGroupFn   func(g probes.ProbeGroup, id string, pids []uint32) []link.Link
 	reader                   *ringbuf.Reader
 	h2Reader                 *ringbuf.Reader
 	h2Decoder                *h2decode.Decoder
@@ -144,16 +145,29 @@ func (t *Tracer) linkCount() int {
 }
 
 type ContainerProbeTarget struct {
-	ID  string
-	PID uint32
+	ID   string
+	PIDs []uint32
 }
 
 // containerUprobeSet holds one container's uprobe links keyed by probe group
 // so DisableProbeGroup/EnableProbeGroup can detach and re-attach a group for
 // every targeted container.
 type containerUprobeSet struct {
-	pid   uint32
+	pids  []uint32
 	links map[probes.ProbeGroup][]link.Link
+}
+
+// samePIDSet compares two sorted PID slices.
+func samePIDSet(a, b []uint32) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *containerUprobeSet) allLinks() []link.Link {
@@ -192,54 +206,56 @@ func (t *Tracer) attachGlobalProtocolProbesOnce() {
 }
 
 // attachContainerGroupUprobes attaches one probe group's container-scoped
-// uprobes for one container (resolved via its own PID) and returns the links,
-// without registering them in the shared probeGroups registry, the
-// per-container lifecycle in SetContainerTargets owns them.
-func (t *Tracer) attachContainerGroupUprobes(g probes.ProbeGroup, id string, pid uint32) []link.Link {
+// uprobes for one container and returns the links, without registering them
+// in the shared probeGroups registry, the per-container lifecycle in
+// SetContainerTargets owns them.
+func (t *Tracer) attachContainerGroupUprobes(g probes.ProbeGroup, id string, pids []uint32) []link.Link {
 	coll := t.collection
-	if coll == nil || id == "" {
+	if coll == nil || id == "" || len(pids) == 0 {
 		return nil
 	}
-	switch g {
-	case probes.GroupTLS:
-		var ls []link.Link
-		ls = append(ls, probes.AttachDNSProbesWithPID(coll, id, pid)...)
-		ls = append(ls, probes.AttachSyncProbesWithPID(coll, id, pid)...)
-		ls = append(ls, probes.AttachTLSProbesWithPID(coll, id, pid)...)
-		ls = append(ls, probes.AttachGoTLSProbes(coll, pid)...)
-		ls = append(ls, probes.AttachGoGRPCProbes(coll, pid)...)
-		ls = append(ls, probes.AttachRustlsProbes(coll, pid)...)
-		ls = append(ls, probes.AttachGoHTTP3Probes(coll, pid)...)
-		ls = append(ls, probes.AttachNghttp3Probes(coll, pid)...)
-		ls = append(ls, probes.AttachQuicheProbes(coll, pid)...)
-		ls = append(ls, probes.AttachQuicheRustProbes(coll, pid)...)
-		return ls
-	case probes.GroupDatabase:
-		return probes.AttachDBProbesWithPID(coll, id, pid)
-	case probes.GroupPool:
-		return probes.AttachPoolProbesWithPID(coll, id, pid)
-	case probes.GroupCache:
-		var ls []link.Link
-		ls = append(ls, probes.AttachRedisProbesWithPID(coll, id, pid)...)
-		ls = append(ls, probes.AttachMemcachedProbesWithPID(coll, id, pid)...)
-		return ls
-	case probes.GroupMessaging:
-		return probes.AttachKafkaProbesWithPID(coll, id, pid)
+	af := probes.NewAttachedFiles()
+	var ls []link.Link
+	for _, pid := range pids {
+		switch g {
+		case probes.GroupTLS:
+			ls = append(ls, probes.AttachDNSProbesWithPID(coll, id, pid, af)...)
+			ls = append(ls, probes.AttachSyncProbesWithPID(coll, id, pid, af)...)
+			ls = append(ls, probes.AttachTLSProbesWithPID(coll, id, pid, af)...)
+			ls = append(ls, probes.AttachGoTLSProbes(coll, pid)...)
+			ls = append(ls, probes.AttachGoGRPCProbes(coll, pid)...)
+			ls = append(ls, probes.AttachRustlsProbes(coll, pid)...)
+			ls = append(ls, probes.AttachGoHTTP3Probes(coll, pid)...)
+			ls = append(ls, probes.AttachNghttp3Probes(coll, pid, af)...)
+			ls = append(ls, probes.AttachQuicheProbes(coll, pid, af)...)
+			ls = append(ls, probes.AttachQuicheRustProbes(coll, pid)...)
+		case probes.GroupDatabase:
+			ls = append(ls, probes.AttachDBProbesWithPID(coll, id, pid, af)...)
+		case probes.GroupPool:
+			ls = append(ls, probes.AttachPoolProbesWithPID(coll, id, pid, af)...)
+		case probes.GroupCache:
+			ls = append(ls, probes.AttachRedisProbesWithPID(coll, id, pid, af)...)
+			ls = append(ls, probes.AttachMemcachedProbesWithPID(coll, id, pid, af)...)
+		case probes.GroupMessaging:
+			ls = append(ls, probes.AttachKafkaProbesWithPID(coll, id, pid, af)...)
+		default:
+			return nil
+		}
 	}
-	return nil
+	return ls
 }
 
 // attachContainerGroup dispatches to the test seam when set.
-func (t *Tracer) attachContainerGroup(g probes.ProbeGroup, id string, pid uint32) []link.Link {
+func (t *Tracer) attachContainerGroup(g probes.ProbeGroup, id string, pids []uint32) []link.Link {
 	if t.attachContainerGroupFn != nil {
-		return t.attachContainerGroupFn(g, id, pid)
+		return t.attachContainerGroupFn(g, id, pids)
 	}
-	return t.attachContainerGroupUprobes(g, id, pid)
+	return t.attachContainerGroupUprobes(g, id, pids)
 }
 
 // attachContainerUprobes attaches every currently-enabled container-scoped
 // uprobe group for one container.
-func (t *Tracer) attachContainerUprobes(id string, pid uint32) map[probes.ProbeGroup][]link.Link {
+func (t *Tracer) attachContainerUprobes(id string, pids []uint32) map[probes.ProbeGroup][]link.Link {
 	out := make(map[probes.ProbeGroup][]link.Link, len(containerUprobeGroups))
 	for _, g := range containerUprobeGroups {
 		t.probeGroupsMu.Lock()
@@ -248,7 +264,7 @@ func (t *Tracer) attachContainerUprobes(id string, pid uint32) map[probes.ProbeG
 		if disabled {
 			continue
 		}
-		if ls := t.attachContainerGroup(g, id, pid); len(ls) > 0 {
+		if ls := t.attachContainerGroup(g, id, pids); len(ls) > 0 {
 			out[g] = ls
 		}
 	}
@@ -256,14 +272,17 @@ func (t *Tracer) attachContainerUprobes(id string, pid uint32) map[probes.ProbeG
 }
 
 // SetContainerTargets reconciles container-scoped uprobes against the full set
-// of currently-targeted containers.
+// of currently-targeted containers. Each target's PIDs are expanded to one
+// representative PID per distinct executable in the container (the caller's
+// PIDs act as seeds), so a container is re-attached whenever its binary set
+// changes, not just when a single PID changes.
 func (t *Tracer) SetContainerTargets(targets []ContainerProbeTarget) error {
 	t.attachGlobalProtocolProbesOnce()
 
-	want := make(map[string]uint32, len(targets))
+	want := make(map[string][]uint32, len(targets))
 	for _, ct := range targets {
 		if ct.ID != "" {
-			want[ct.ID] = ct.PID
+			want[ct.ID] = t.pidsForContainer(ct.ID, ct.PIDs)
 		}
 	}
 
@@ -273,16 +292,16 @@ func (t *Tracer) SetContainerTargets(targets []ContainerProbeTarget) error {
 	}
 	var stale []link.Link
 	for id, set := range t.containerUprobes {
-		if pid, ok := want[id]; ok && pid == set.pid {
+		if pids, ok := want[id]; ok && samePIDSet(pids, set.pids) {
 			continue
 		}
 		stale = append(stale, set.allLinks()...)
 		delete(t.containerUprobes, id)
 	}
 	var toAttach []ContainerProbeTarget
-	for id, pid := range want {
+	for id, pids := range want {
 		if _, ok := t.containerUprobes[id]; !ok {
-			toAttach = append(toAttach, ContainerProbeTarget{ID: id, PID: pid})
+			toAttach = append(toAttach, ContainerProbeTarget{ID: id, PIDs: pids})
 		}
 	}
 	t.probeGroupsMu.Unlock()
@@ -292,9 +311,9 @@ func (t *Tracer) SetContainerTargets(targets []ContainerProbeTarget) error {
 	}
 
 	for _, ct := range toAttach {
-		links := t.attachContainerUprobes(ct.ID, ct.PID)
+		links := t.attachContainerUprobes(ct.ID, ct.PIDs)
 		t.probeGroupsMu.Lock()
-		t.containerUprobes[ct.ID] = &containerUprobeSet{pid: ct.PID, links: links}
+		t.containerUprobes[ct.ID] = &containerUprobeSet{pids: ct.PIDs, links: links}
 		t.probeGroupsMu.Unlock()
 	}
 	return nil
@@ -325,26 +344,26 @@ func (t *Tracer) attachGroupUprobes(g probes.ProbeGroup) []link.Link {
 // uprobes for every currently-targeted container that lost them.
 func (t *Tracer) reattachContainerGroupUprobes(g probes.ProbeGroup) int {
 	type target struct {
-		id  string
-		pid uint32
+		id   string
+		pids []uint32
 	}
 	t.probeGroupsMu.Lock()
 	missing := make([]target, 0, len(t.containerUprobes))
 	for id, set := range t.containerUprobes {
 		if len(set.links[g]) == 0 {
-			missing = append(missing, target{id: id, pid: set.pid})
+			missing = append(missing, target{id: id, pids: set.pids})
 		}
 	}
 	t.probeGroupsMu.Unlock()
 
 	reattached := 0
 	for _, c := range missing {
-		ls := t.attachContainerGroup(g, c.id, c.pid)
+		ls := t.attachContainerGroup(g, c.id, c.pids)
 		if len(ls) == 0 {
 			continue
 		}
 		t.probeGroupsMu.Lock()
-		if set, ok := t.containerUprobes[c.id]; ok && set.pid == c.pid {
+		if set, ok := t.containerUprobes[c.id]; ok && samePIDSet(set.pids, c.pids) {
 			if set.links == nil {
 				set.links = map[probes.ProbeGroup][]link.Link{}
 			}
@@ -1013,15 +1032,18 @@ func (t *Tracer) setCgroupFilterEnabled(enabled bool) error {
 	return flagMap.Update(&zero, &val, ebpf.UpdateAny)
 }
 
-func readFirstPIDFromCgroupProcs(cgroupPath string) uint32 {
+// readPIDsFromCgroupProcs returns every PID listed in the cgroup's
+// cgroup.procs file, in file order.
+func readPIDsFromCgroupProcs(cgroupPath string) []uint32 {
 	rel, ok := sysfs.CgroupRelative(cgroupPath)
 	if !ok {
-		return 0
+		return nil
 	}
 	data, err := sysfs.CgroupReadFile(filepath.Join(rel, "cgroup.procs"))
 	if err != nil {
-		return 0
+		return nil
 	}
+	var pids []uint32
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -1029,8 +1051,15 @@ func readFirstPIDFromCgroupProcs(cgroupPath string) uint32 {
 		}
 		var pid uint32
 		if _, err := fmt.Sscanf(line, "%d", &pid); err == nil && pid > 0 {
-			return pid
+			pids = append(pids, pid)
 		}
+	}
+	return pids
+}
+
+func readFirstPIDFromCgroupProcs(cgroupPath string) uint32 {
+	if pids := readPIDsFromCgroupProcs(cgroupPath); len(pids) > 0 {
+		return pids[0]
 	}
 	return 0
 }
@@ -1073,7 +1102,7 @@ func (t *Tracer) SetContainerIDs(containerIDs []string) error {
 			continue
 		}
 		seen[id] = struct{}{}
-		targets = append(targets, ContainerProbeTarget{ID: id, PID: t.pidForContainer(id)})
+		targets = append(targets, ContainerProbeTarget{ID: id})
 	}
 	if len(targets) == 0 {
 		return fmt.Errorf("all container IDs are empty")
@@ -1084,22 +1113,83 @@ func (t *Tracer) SetContainerIDs(containerIDs []string) error {
 
 // pidForContainer resolves the PID used to discover a container's binaries
 // for uprobe attachment.
-func (t *Tracer) pidForContainer(id string) uint32 {
+const maxDistinctBinariesPerContainer = 8
+
+// pidsForContainer resolves the PIDs used to discover a container's binaries
+// for uprobe attachment: one representative PID per distinct executable
+// (deduplicated by the exe's device+inode) among all processes in the
+// container's cgroup.
+func (t *Tracer) pidsForContainer(id string, seeds []uint32) []uint32 {
 	short := id
 	if len(short) > 12 {
 		short = short[:12]
 	}
+	var procs []uint32
 	for _, p := range t.cgroupPaths {
 		if strings.Contains(p, id) || (short != "" && strings.Contains(p, short)) {
-			if pid := readFirstPIDFromCgroupProcs(p); pid != 0 {
-				return pid
+			if procs = readPIDsFromCgroupProcs(p); len(procs) > 0 {
+				break
 			}
 		}
 	}
-	logger.Warn("No attached cgroup path matched container ID; uprobe attachment will fall back to scanning /proc for the container",
-		zap.String("container_id", id),
-		zap.Strings("cgroup_paths", t.cgroupPaths))
-	return 0
+	if len(procs) == 0 {
+		out := make([]uint32, 0, len(seeds))
+		seen := map[uint32]struct{}{}
+		for _, s := range seeds {
+			if _, dup := seen[s]; s == 0 || dup {
+				continue
+			}
+			seen[s] = struct{}{}
+			out = append(out, s)
+		}
+		if len(out) > 0 {
+			sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+			return out
+		}
+		logger.Warn("No attached cgroup path matched container ID; uprobe attachment will fall back to scanning /proc for the container",
+			zap.String("container_id", id),
+			zap.Strings("cgroup_paths", t.cgroupPaths))
+		return []uint32{0}
+	}
+
+	type exeKey struct {
+		dev uint64
+		ino uint64
+	}
+	seenExe := map[exeKey]struct{}{}
+	out := make([]uint32, 0, maxDistinctBinariesPerContainer)
+	dropped := 0
+	for _, pid := range procs {
+		st, err := os.Stat(filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "exe"))
+		if err != nil {
+			continue
+		}
+		sys, ok := st.Sys().(*syscall.Stat_t)
+		if !ok {
+			continue
+		}
+		k := exeKey{dev: uint64(sys.Dev), ino: sys.Ino}
+		if _, dup := seenExe[k]; dup {
+			continue
+		}
+		seenExe[k] = struct{}{}
+		if len(out) >= maxDistinctBinariesPerContainer {
+			dropped++
+			continue
+		}
+		out = append(out, pid)
+	}
+	if dropped > 0 {
+		logger.Warn("Container has more distinct binaries than the uprobe discovery cap; the extra binaries get no library uprobes",
+			zap.String("container_id", id),
+			zap.Int("cap", maxDistinctBinariesPerContainer),
+			zap.Int("dropped_binaries", dropped))
+	}
+	if len(out) == 0 {
+		out = append(out, procs[0])
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
 }
 
 func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) error {
