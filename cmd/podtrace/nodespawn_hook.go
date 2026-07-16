@@ -210,8 +210,8 @@ func newChildArgsBuilder(cmd *cobra.Command, passMetrics bool) func(string, []no
 			args = append(args, "--"+f.Name+"="+f.Value.String())
 		})
 		for _, p := range pods {
-			if p.ContainerID != "" {
-				args = append(args, "--preresolved-pod="+p.PreResolved())
+			for _, ref := range p.PreResolved() {
+				args = append(args, "--preresolved-pod="+ref)
 			}
 		}
 		return args

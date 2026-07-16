@@ -138,7 +138,7 @@ func main() {
 	rootCmd.Flags().BoolVar(&enableMetrics, "metrics", false, "Enable Prometheus metrics server")
 	rootCmd.Flags().StringVar(&exportFormat, "export", "", "Export format for diagnose report (json, csv)")
 	rootCmd.Flags().StringVar(&eventFilter, "filter", "", "Filter events by type (dns,net,fs,cpu,proc,crypto)")
-	rootCmd.Flags().StringVar(&containerName, "container", "", "Container name to trace (default: first container)")
+	rootCmd.Flags().StringVar(&containerName, "container", "", "Container name to trace (default: all containers of the pod)")
 	rootCmd.Flags().Float64Var(&errorRateThreshold, "error-threshold", config.DefaultErrorRateThreshold, "Error rate threshold percentage for issue detection")
 	rootCmd.Flags().Float64Var(&rttSpikeThreshold, "rtt-threshold", config.DefaultRTTThreshold, "RTT spike threshold in milliseconds")
 	rootCmd.Flags().Float64Var(&fsSlowThreshold, "fs-threshold", config.DefaultFSSlowThreshold, "File system slow operation threshold in milliseconds")
@@ -476,26 +476,32 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		logger.Info("Resolved target pod",
 			zap.String("namespace", p.Namespace),
 			zap.String("pod", p.PodName),
+			zap.Int("containers", len(podContainerTargets(p))),
 			zap.String("container_id", p.ContainerID),
 			zap.String("cgroup_path", p.CgroupPath))
-		if os.Getenv("PODTRACE_ALLOW_BROAD_CGROUP") == "1" || p.CgroupPath == "" {
+		if os.Getenv("PODTRACE_ALLOW_BROAD_CGROUP") == "1" {
 			continue
 		}
-		short := p.ContainerID
-		if len(short) > 12 {
-			short = short[:12]
-		}
-		if !strings.Contains(p.CgroupPath, p.ContainerID) && (short == "" || !strings.Contains(p.CgroupPath, short)) {
-			return fmt.Errorf(
-				"resolved cgroup path %q does not contain container id %q; refusing to run.\n\n"+
-					"This safety check prevents accidentally tracing the wrong container.\n\n"+
-					"Common causes and fixes:\n"+
-					"  • OpenShift/OKD: CRI-O may use a cgroup path that omits the container ID.\n"+
-					"  • Talos Linux: custom cgroup layout may not embed the container ID.\n"+
-					"  • Custom kubelet --cgroup-parent may produce parent-level slice paths.\n\n"+
-					"To bypass this check: set PODTRACE_ALLOW_BROAD_CGROUP=1\n"+
-					"To inspect the path:  ls /sys/fs/cgroup/**/*%s* 2>/dev/null || true",
-				p.CgroupPath, short, short)
+		for _, c := range podContainerTargets(p) {
+			if c.CgroupPath == "" {
+				continue
+			}
+			short := c.ID
+			if len(short) > 12 {
+				short = short[:12]
+			}
+			if !strings.Contains(c.CgroupPath, c.ID) && (short == "" || !strings.Contains(c.CgroupPath, short)) {
+				return fmt.Errorf(
+					"resolved cgroup path %q does not contain container id %q; refusing to run.\n\n"+
+						"This safety check prevents accidentally tracing the wrong container.\n\n"+
+						"Common causes and fixes:\n"+
+						"  • OpenShift/OKD: CRI-O may use a cgroup path that omits the container ID.\n"+
+						"  • Talos Linux: custom cgroup layout may not embed the container ID.\n"+
+						"  • Custom kubelet --cgroup-parent may produce parent-level slice paths.\n\n"+
+						"To bypass this check: set PODTRACE_ALLOW_BROAD_CGROUP=1\n"+
+						"To inspect the path:  ls /sys/fs/cgroup/**/*%s* 2>/dev/null || true",
+					c.CgroupPath, short, short)
+			}
 		}
 	}
 
@@ -513,12 +519,7 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = tracer.Stop() }()
 
-	cgroupPaths := make([]string, 0, len(targetInfos))
-	containerIDs := make([]string, 0, len(targetInfos))
-	for _, target := range targetInfos {
-		cgroupPaths = append(cgroupPaths, target.CgroupPath)
-		containerIDs = append(containerIDs, target.ContainerID)
-	}
+	cgroupPaths, containerIDs := targetAttachSets(targetInfos)
 	if err := attachTracerToCgroups(tracer, cgroupPaths); err != nil {
 		return fmt.Errorf("failed to attach to cgroups: %w", err)
 	}
@@ -536,16 +537,18 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 						logger.Warn("Target registry currently empty; retaining previous cgroup filters")
 						continue
 					}
-					nextCgroups := make([]string, 0, len(snapshot))
-					for _, s := range snapshot {
-						nextCgroups = append(nextCgroups, s.CgroupPath)
-					}
+					nextCgroups, nextContainerIDs := targetAttachSets(snapshot)
 					if err := attachTracerToCgroups(tracer, nextCgroups); err != nil {
 						logger.Warn("Failed to apply dynamic cgroup target update", zap.Error(err))
 						continue
 					}
+					if err := setTracerContainerIDs(tracer, nextContainerIDs); err != nil {
+						logger.Warn("Failed to apply dynamic container uprobe target update", zap.Error(err))
+					}
 					sourceIndex.Replace(snapshot)
-					logger.Info("Updated dynamic target set", zap.Int("pods", len(snapshot)))
+					logger.Info("Updated dynamic target set",
+						zap.Int("pods", len(snapshot)),
+						zap.Int("containers", len(nextContainerIDs)))
 				}
 			}
 		}()
@@ -963,6 +966,34 @@ func exportReport(_ string, format string, d *diagnose.Diagnostician) error {
 	}
 }
 
+// podContainerTargets returns the pod's traced containers, synthesizing a
+// single-entry list from the legacy singular fields when the list is empty.
+func podContainerTargets(p *kubernetes.PodInfo) []kubernetes.ContainerTarget {
+	if p == nil {
+		return nil
+	}
+	if len(p.Containers) > 0 {
+		return p.Containers
+	}
+	return []kubernetes.ContainerTarget{{Name: p.ContainerName, ID: p.ContainerID, CgroupPath: p.CgroupPath}}
+}
+
+// targetAttachSets flattens every traced container of every target pod into
+// the cgroup-path and container-ID attach lists.
+func targetAttachSets(infos []*kubernetes.PodInfo) (cgroupPaths, containerIDs []string) {
+	for _, p := range infos {
+		for _, c := range podContainerTargets(p) {
+			if c.CgroupPath != "" {
+				cgroupPaths = append(cgroupPaths, c.CgroupPath)
+			}
+			if c.ID != "" {
+				containerIDs = append(containerIDs, c.ID)
+			}
+		}
+	}
+	return cgroupPaths, containerIDs
+}
+
 type sourcePodIndex struct {
 	mu    sync.RWMutex
 	byCG  map[uint64]*kubernetes.PodInfo
@@ -987,8 +1018,19 @@ func (s *sourcePodIndex) Replace(targets []*kubernetes.PodInfo) {
 		}
 		cp := *t
 		nextByNSP[t.Namespace+"/"+t.PodName] = &cp
-		if cgid, err := cgroupIDFromPath(t.CgroupPath); err == nil && cgid != 0 {
-			nextByCG[cgid] = &cp
+		for _, c := range podContainerTargets(t) {
+			if c.CgroupPath == "" {
+				continue
+			}
+			cgid, err := cgroupIDFromPath(c.CgroupPath)
+			if err != nil || cgid == 0 {
+				continue
+			}
+			cc := *t
+			cc.ContainerName = c.Name
+			cc.ContainerID = c.ID
+			cc.CgroupPath = c.CgroupPath
+			nextByCG[cgid] = &cc
 		}
 	}
 	s.mu.Lock()
