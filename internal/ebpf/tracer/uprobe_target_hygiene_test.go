@@ -14,8 +14,15 @@ func TestPidForContainer_NoCgroupMatchReturnsZero(t *testing.T) {
 		containerPID: 42,
 		cgroupPaths:  []string{"/sys/fs/cgroup/kubepods/poduid/othercontainerid"},
 	}
-	if pid := tr.pidForContainer("deadbeefdeadbeef"); pid != 0 {
-		t.Fatalf("pidForContainer = %d, want 0 (must not borrow another container's PID)", pid)
+	if pids := tr.pidsForContainer("deadbeefdeadbeef", nil); len(pids) != 1 || pids[0] != 0 {
+		t.Fatalf("pidsForContainer = %v, want [0] (must not borrow another container's PID)", pids)
+	}
+}
+
+func TestPidsForContainer_SeedsUsedWhenCgroupUnreadable(t *testing.T) {
+	tr := &Tracer{}
+	if pids := tr.pidsForContainer("deadbeefdeadbeef", []uint32{7, 0, 3, 7}); len(pids) != 2 || pids[0] != 3 || pids[1] != 7 {
+		t.Fatalf("pidsForContainer with seeds = %v, want [3 7]", pids)
 	}
 }
 
@@ -23,11 +30,11 @@ func TestDisableProbeGroup_ClosesContainerUprobeLinks(t *testing.T) {
 	tr := &Tracer{probeGroups: map[probes.ProbeGroup][]link.Link{}}
 	tlsA, tlsB, dbA := &fakeLink{}, &fakeLink{}, &fakeLink{}
 	tr.containerUprobes = map[string]*containerUprobeSet{
-		"containeraaaa": {pid: 1, links: map[probes.ProbeGroup][]link.Link{
+		"containeraaaa": {pids: []uint32{1}, links: map[probes.ProbeGroup][]link.Link{
 			probes.GroupTLS:      {tlsA},
 			probes.GroupDatabase: {dbA},
 		}},
-		"containerbbbb": {pid: 2, links: map[probes.ProbeGroup][]link.Link{
+		"containerbbbb": {pids: []uint32{2}, links: map[probes.ProbeGroup][]link.Link{
 			probes.GroupTLS: {tlsB},
 		}},
 	}
@@ -56,15 +63,15 @@ func TestEnableProbeGroup_ReattachesContainerUprobes(t *testing.T) {
 		probeGroups: map[probes.ProbeGroup][]link.Link{},
 		collection:  &ebpf.Collection{},
 	}
-	tr.attachContainerGroupFn = func(g probes.ProbeGroup, id string, pid uint32) []link.Link {
+	tr.attachContainerGroupFn = func(g probes.ProbeGroup, id string, pids []uint32) []link.Link {
 		attachCalls[string(g)+"/"+id]++
 		return []link.Link{&fakeLink{}}
 	}
 	tr.containerUprobes = map[string]*containerUprobeSet{
-		"containeraaaa": {pid: 1, links: map[probes.ProbeGroup][]link.Link{
+		"containeraaaa": {pids: []uint32{1}, links: map[probes.ProbeGroup][]link.Link{
 			probes.GroupTLS: {&fakeLink{}},
 		}},
-		"containerbbbb": {pid: 2, links: map[probes.ProbeGroup][]link.Link{
+		"containerbbbb": {pids: []uint32{2}, links: map[probes.ProbeGroup][]link.Link{
 			probes.GroupTLS: {&fakeLink{}},
 		}},
 	}
@@ -92,12 +99,12 @@ func TestSetContainerTargets_SkipsIntentionallyDisabledGroups(t *testing.T) {
 		probeGroups:           map[probes.ProbeGroup][]link.Link{},
 		intentionallyDisabled: map[probes.ProbeGroup]struct{}{probes.GroupTLS: {}},
 	}
-	tr.attachContainerGroupFn = func(g probes.ProbeGroup, id string, pid uint32) []link.Link {
+	tr.attachContainerGroupFn = func(g probes.ProbeGroup, id string, pids []uint32) []link.Link {
 		requested[g]++
 		return []link.Link{&fakeLink{}}
 	}
 
-	if err := tr.SetContainerTargets([]ContainerProbeTarget{{ID: "containeraaaa", PID: 1}}); err != nil {
+	if err := tr.SetContainerTargets([]ContainerProbeTarget{{ID: "containeraaaa", PIDs: []uint32{1}}}); err != nil {
 		t.Fatalf("SetContainerTargets: %v", err)
 	}
 
@@ -120,7 +127,7 @@ func TestSetEnabledCategories_DisablesContainerOnlyGroups(t *testing.T) {
 	}
 	tlsLink := &fakeLink{}
 	tr.containerUprobes = map[string]*containerUprobeSet{
-		"containeraaaa": {pid: 1, links: map[probes.ProbeGroup][]link.Link{
+		"containeraaaa": {pids: []uint32{1}, links: map[probes.ProbeGroup][]link.Link{
 			probes.GroupTLS: {tlsLink},
 		}},
 	}
@@ -146,11 +153,11 @@ func TestSetEnabledCategories_GatesGroupsBeforeAttach(t *testing.T) {
 	}
 
 	requested := map[probes.ProbeGroup]int{}
-	tr.attachContainerGroupFn = func(g probes.ProbeGroup, id string, pid uint32) []link.Link {
+	tr.attachContainerGroupFn = func(g probes.ProbeGroup, id string, pids []uint32) []link.Link {
 		requested[g]++
 		return []link.Link{&fakeLink{}}
 	}
-	if err := tr.SetContainerTargets([]ContainerProbeTarget{{ID: "containeraaaa", PID: 1}}); err != nil {
+	if err := tr.SetContainerTargets([]ContainerProbeTarget{{ID: "containeraaaa", PIDs: []uint32{1}}}); err != nil {
 		t.Fatalf("SetContainerTargets: %v", err)
 	}
 

@@ -279,7 +279,7 @@ func AttachProbeGroup(coll *ebpf.Collection, target ProbeGroup) ([]link.Link, er
 }
 
 func AttachDNSProbes(coll *ebpf.Collection, containerID string) []link.Link {
-	return AttachDNSProbesWithPID(coll, containerID, 0)
+	return AttachDNSProbesWithPID(coll, containerID, 0, nil)
 }
 
 // packetDNSCaptureEnabled reports whether the libc-independent, packet-based
@@ -391,9 +391,12 @@ func AttachHTTP3Probes(coll *ebpf.Collection, cgroupPaths []string) []link.Link 
 	return links
 }
 
-func AttachDNSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint32) []link.Link {
+func AttachDNSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint32, af *AttachedFiles) []link.Link {
 	var links []link.Link
 	libcPath := FindLibcPathWithPID(containerID, pid)
+	if libcPath != "" && !af.Claim("dns", libcPath) {
+		return links
+	}
 	if libcPath != "" {
 		uprobe, err := link.OpenExecutable(libcPath)
 		if err == nil {
@@ -427,13 +430,13 @@ func AttachDNSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint3
 }
 
 func AttachSyncProbes(coll *ebpf.Collection, containerID string) []link.Link {
-	return AttachSyncProbesWithPID(coll, containerID, 0)
+	return AttachSyncProbesWithPID(coll, containerID, 0, nil)
 }
 
-func AttachSyncProbesWithPID(coll *ebpf.Collection, containerID string, pid uint32) []link.Link {
+func AttachSyncProbesWithPID(coll *ebpf.Collection, containerID string, pid uint32, af *AttachedFiles) []link.Link {
 	var links []link.Link
 	libcPath := FindLibcPathWithPID(containerID, pid)
-	if libcPath == "" {
+	if libcPath == "" || !af.Claim("sync", libcPath) {
 		return links
 	}
 	uprobe, err := link.OpenExecutable(libcPath)
@@ -461,16 +464,19 @@ func AttachSyncProbesWithPID(coll *ebpf.Collection, containerID string, pid uint
 }
 
 func AttachDBProbes(coll *ebpf.Collection, containerID string) []link.Link {
-	return AttachDBProbesWithPID(coll, containerID, 0)
+	return AttachDBProbesWithPID(coll, containerID, 0, nil)
 }
 
-func AttachDBProbesWithPID(coll *ebpf.Collection, containerID string, pid uint32) []link.Link {
+func AttachDBProbesWithPID(coll *ebpf.Collection, containerID string, pid uint32, af *AttachedFiles) []link.Link {
 	var links []link.Link
 
 	libpqPaths := findDBLibsWithPID(containerID, pid, []string{"libpq.so.5", "libpq.so"})
 	for _, path := range libpqPaths {
 		info, err := os.Stat(path)
 		if err != nil || info.IsDir() {
+			continue
+		}
+		if !af.Claim("db", path) {
 			continue
 		}
 		exe, err := link.OpenExecutable(path)
@@ -495,6 +501,9 @@ func AttachDBProbesWithPID(coll *ebpf.Collection, containerID string, pid uint32
 	for _, path := range mysqlPaths {
 		info, err := os.Stat(path)
 		if err != nil || info.IsDir() {
+			continue
+		}
+		if !af.Claim("db", path) {
 			continue
 		}
 		exe, err := link.OpenExecutable(path)
@@ -531,10 +540,10 @@ type dbProbeConfig struct {
 }
 
 func AttachPoolProbes(coll *ebpf.Collection, containerID string) []link.Link {
-	return AttachPoolProbesWithPID(coll, containerID, 0)
+	return AttachPoolProbesWithPID(coll, containerID, 0, nil)
 }
 
-func AttachPoolProbesWithPID(coll *ebpf.Collection, containerID string, pid uint32) []link.Link {
+func AttachPoolProbesWithPID(coll *ebpf.Collection, containerID string, pid uint32, af *AttachedFiles) []link.Link {
 	var links []link.Link
 
 	var binaryPaths []string
@@ -613,6 +622,9 @@ func AttachPoolProbesWithPID(coll *ebpf.Collection, containerID string, pid uint
 			logger.Debug("Attaching pool probes", zap.String("database", dbConfig.name), zap.String("path", path))
 			info, err := os.Stat(path)
 			if err != nil || info.IsDir() {
+				continue
+			}
+			if !af.Claim("pool/"+dbConfig.name, path) {
 				continue
 			}
 			exe, err := link.OpenExecutable(path)
@@ -849,6 +861,8 @@ func fileInProcMapFiles(pid uint32, addrRange string) string {
 func findContainerProcess(containerID string) uint32 {
 	entries, err := os.ReadDir(config.ProcBasePath)
 	if err != nil {
+		logger.Debug("Container process scan: cannot read proc base",
+			zap.String("proc_base", config.ProcBasePath), zap.Error(err))
 		return 0
 	}
 
@@ -871,6 +885,8 @@ func findContainerProcess(containerID string) uint32 {
 			}
 		}
 	}
+	logger.Debug("Container process scan found no process; library uprobes for this container are silently skipped",
+		zap.String("container_id", containerID))
 	return 0
 }
 
@@ -1896,10 +1912,10 @@ func getArchitectureTLSPaths(libPatterns []string) []string {
 }
 
 func AttachTLSProbes(coll *ebpf.Collection, containerID string) []link.Link {
-	return AttachTLSProbesWithPID(coll, containerID, 0)
+	return AttachTLSProbesWithPID(coll, containerID, 0, nil)
 }
 
-func AttachTLSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint32) []link.Link {
+func AttachTLSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint32, af *AttachedFiles) []link.Link {
 	links := []link.Link{}
 
 	tlsLibPaths := findTLSLibsWithPID(containerID, pid)
@@ -1921,6 +1937,9 @@ func AttachTLSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint3
 	for _, libPath := range tlsLibPaths {
 		info, err := os.Stat(libPath)
 		if err != nil || info.IsDir() {
+			continue
+		}
+		if !af.Claim("tls", libPath) {
 			continue
 		}
 		exe, err := link.OpenExecutable(libPath)
@@ -2195,8 +2214,8 @@ func AttachGoHTTP3Probes(coll *ebpf.Collection, pid uint32) []link.Link {
 // AttachNghttp3Probes attaches uprobes on nghttp3's public C ABI
 // (nghttp3_conn_submit_request / nghttp3_conn_submit_response) in libraries
 // mapped by the target process.
-func AttachNghttp3Probes(coll *ebpf.Collection, pid uint32) []link.Link {
-	return attachCLibraryH3Probes(coll, pid, "nghttp3",
+func AttachNghttp3Probes(coll *ebpf.Collection, pid uint32, af *AttachedFiles) []link.Link {
+	return attachCLibraryH3Probes(coll, pid, af, "nghttp3",
 		[]string{"libnghttp3"},
 		map[string][2]string{
 			"nghttp3_conn_submit_request":  {"uprobe_nghttp3_submit_request", ""},
@@ -2207,8 +2226,8 @@ func AttachNghttp3Probes(coll *ebpf.Collection, pid uint32) []link.Link {
 
 // AttachQuicheProbes attaches uprobes on Cloudflare quiche's C FFI
 // (quiche_h3_send_request / quiche_h3_send_response); see bpf/quiche.c.
-func AttachQuicheProbes(coll *ebpf.Collection, pid uint32) []link.Link {
-	return attachCLibraryH3Probes(coll, pid, "quiche",
+func AttachQuicheProbes(coll *ebpf.Collection, pid uint32, af *AttachedFiles) []link.Link {
+	return attachCLibraryH3Probes(coll, pid, af, "quiche",
 		[]string{"libquiche"},
 		map[string][2]string{
 			"quiche_h3_send_request":  {"uprobe_quiche_h3_send_request", "uretprobe_quiche_h3_send_request"},
@@ -2220,7 +2239,7 @@ func AttachQuicheProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 // attachCLibraryH3Probes discovers libraries matching the patterns in the
 // target process's memory maps (including dlopen'd-then-deleted files via
 // map_files) and attaches the given symbol->program uprobes.
-func attachCLibraryH3Probes(coll *ebpf.Collection, pid uint32, adapter string,
+func attachCLibraryH3Probes(coll *ebpf.Collection, pid uint32, af *AttachedFiles, adapter string,
 	libPatterns []string, symbolProgs map[string][2]string) []link.Link {
 	var links []link.Link
 	if pid == 0 {
@@ -2259,6 +2278,9 @@ func attachCLibraryH3Probes(coll *ebpf.Collection, pid uint32, adapter string,
 	}
 
 	for _, libPath := range libPaths {
+		if !af.Claim(adapter, libPath) {
+			continue
+		}
 		exe, err := link.OpenExecutable(libPath)
 		if err != nil {
 			logger.Debug("HTTP/3 adapter: cannot open library",
