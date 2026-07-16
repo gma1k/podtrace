@@ -2353,25 +2353,25 @@ func TestFindTLSLibsViaProcessMapsProcRoot_EmptyPatterns(t *testing.T) {
 
 func TestAttachRedisProbesWithPID_NilCollection(t *testing.T) {
 	// nil collection → should return empty without panic
-	links := AttachRedisProbesWithPID(nil, "", 0)
+	links := AttachRedisProbesWithPID(nil, "", 0, nil)
 	_ = links
 }
 
 func TestAttachRedisProbesWithPID_EmptyCollection(t *testing.T) {
 	coll := &ebpf.Collection{Programs: make(map[string]*ebpf.Program)}
-	links := AttachRedisProbesWithPID(coll, "", 0)
+	links := AttachRedisProbesWithPID(coll, "", 0, nil)
 	_ = links
 }
 
 func TestAttachMemcachedProbesWithPID_EmptyCollection(t *testing.T) {
 	coll := &ebpf.Collection{Programs: make(map[string]*ebpf.Program)}
-	links := AttachMemcachedProbesWithPID(coll, "", 0)
+	links := AttachMemcachedProbesWithPID(coll, "", 0, nil)
 	_ = links
 }
 
 func TestAttachKafkaProbesWithPID_EmptyCollection(t *testing.T) {
 	coll := &ebpf.Collection{Programs: make(map[string]*ebpf.Program)}
-	links := AttachKafkaProbesWithPID(coll, "", 0)
+	links := AttachKafkaProbesWithPID(coll, "", 0, nil)
 	_ = links
 }
 

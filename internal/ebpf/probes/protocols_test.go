@@ -36,7 +36,7 @@ func TestAttachRedisProbes_NoLibFound(t *testing.T) {
 }
 
 func TestAttachRedisProbesWithPID_NoMatch(t *testing.T) {
-	if got := AttachRedisProbesWithPID(emptyColl(), "", 0); len(got) != 0 {
+	if got := AttachRedisProbesWithPID(emptyColl(), "", 0, nil); len(got) != 0 {
 		t.Errorf("expected no links, got %d", len(got))
 	}
 }
@@ -51,7 +51,7 @@ func TestAttachMemcachedProbes_NoLibFound(t *testing.T) {
 }
 
 func TestAttachMemcachedProbesWithPID_NoMatch(t *testing.T) {
-	if got := AttachMemcachedProbesWithPID(emptyColl(), "", 0); len(got) != 0 {
+	if got := AttachMemcachedProbesWithPID(emptyColl(), "", 0, nil); len(got) != 0 {
 		t.Errorf("expected no links, got %d", len(got))
 	}
 }
@@ -63,7 +63,7 @@ func TestAttachKafkaProbes_NoLibFound(t *testing.T) {
 }
 
 func TestAttachKafkaProbesWithPID_NoMatch(t *testing.T) {
-	if got := AttachKafkaProbesWithPID(emptyColl(), "", 0); len(got) != 0 {
+	if got := AttachKafkaProbesWithPID(emptyColl(), "", 0, nil); len(got) != 0 {
 		t.Errorf("expected no links, got %d", len(got))
 	}
 }
