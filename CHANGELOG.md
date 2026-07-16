@@ -9,6 +9,29 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.13.9](https://github.com/gma1k/podtrace/compare/v0.13.8...v0.13.9) (2026-07-16)
+
+
+### Features
+
+* probe every distinct binary in a container for uprobes ([#320](https://github.com/gma1k/podtrace/issues/320)) ([0461b10](https://github.com/gma1k/podtrace/commit/0461b10efaffe47db2b482712d3b2a23ed896582))
+* trace every container of a targeted pod by default ([#323](https://github.com/gma1k/podtrace/issues/323)) ([19d3fe5](https://github.com/gma1k/podtrace/commit/19d3fe5eb05312512a78a40cdbbb6aee76ec86a2))
+
+
+### Bug Fixes
+
+* gate container uprobes correctly and add missing SYS_PTRACE ([#319](https://github.com/gma1k/podtrace/issues/319)) ([772f0ad](https://github.com/gma1k/podtrace/commit/772f0ad66a0793062b12e67b827f7bc8b6e033ff))
+
+
+### Maintenance
+
+* **deps:** update actions/setup-go action to v7 ([#322](https://github.com/gma1k/podtrace/issues/322)) ([88e97b2](https://github.com/gma1k/podtrace/commit/88e97b2153c970ed286aa595b60c45e13dcd8201))
+* **deps:** update github/codeql-action action to v4.37.1 ([#324](https://github.com/gma1k/podtrace/issues/324)) ([e1f1777](https://github.com/gma1k/podtrace/commit/e1f1777059621b8e11d28008a4535bba32f8bf2e))
+* **deps:** update go modules (non-major) ([#318](https://github.com/gma1k/podtrace/issues/318)) ([4d8f3a6](https://github.com/gma1k/podtrace/commit/4d8f3a654331ec453c5b7656221768d2b9f28846))
+* **deps:** update module cloud.google.com/go/storage to v1.63.1 ([#315](https://github.com/gma1k/podtrace/issues/315)) ([da5df5d](https://github.com/gma1k/podtrace/commit/da5df5d8357aa676702a07af0e3178d0e0f825d4))
+* **deps:** update module google.golang.org/grpc to v1.82.1 ([#321](https://github.com/gma1k/podtrace/issues/321)) ([982a4ab](https://github.com/gma1k/podtrace/commit/982a4ab60bacdca3a72975e92396c62e9e64b20e))
+* **deps:** update softprops/action-gh-release action to v3.0.2 ([#317](https://github.com/gma1k/podtrace/issues/317)) ([5dd8ca7](https://github.com/gma1k/podtrace/commit/5dd8ca756f947ee12677f2e1804653a4c65c4a1b))
+
 ## [0.13.8](https://github.com/gma1k/podtrace/compare/v0.13.7...v0.13.8) (2026-07-12)
 
 
