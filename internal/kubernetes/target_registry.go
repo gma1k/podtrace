@@ -17,7 +17,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/podtrace/podtrace/internal/logger"
-	"github.com/podtrace/podtrace/internal/validation"
 	"go.uber.org/zap"
 )
 
@@ -345,32 +344,27 @@ func resolvePodInfoFromObject(ctx context.Context, pod *corev1.Pod, containerNam
 		return nil, fmt.Errorf("pod %s/%s has no container statuses", pod.Namespace, pod.Name)
 	}
 
-	containerStatus, containerSpec := pickContainer(pod, containerName)
-	if containerStatus == nil {
-		return nil, fmt.Errorf("container %q has no status yet in pod %s/%s", containerName, pod.Namespace, pod.Name)
-	}
-
-	containerID := containerStatus.ContainerID
-	parts := strings.Split(containerID, "://")
-	if len(parts) != 2 {
-		return nil, fmt.Errorf("invalid container id format for %s/%s: %q", pod.Namespace, pod.Name, containerID)
-	}
-	shortID := parts[1]
-	if !validation.ValidateContainerID(shortID) {
-		return nil, fmt.Errorf("container id validation failed for %s/%s", pod.Namespace, pod.Name)
+	statuses := pickContainers(pod, containerName)
+	if len(statuses) == 0 {
+		return nil, fmt.Errorf("no running container matching %q in pod %s/%s", containerName, pod.Namespace, pod.Name)
 	}
 
 	resolveCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	cgroupPath, err := resolveCgroupPathCRI(resolveCtx, shortID)
-	if err != nil || cgroupPath == "" {
-		cgroupPath, err = findCgroupPath(shortID)
-		if err != nil || cgroupPath == "" {
-			cgroupPath, err = findCgroupPathFromProc(shortID)
+	targets := resolveContainerTargets(resolveCtx, pod, statuses)
+	if len(targets) == 0 {
+		for _, cs := range statuses {
+			shortID, err := shortContainerID(cs.ContainerID)
 			if err != nil {
-				return nil, fmt.Errorf("failed to resolve cgroup path for %s/%s: %w", pod.Namespace, pod.Name, err)
+				continue
 			}
+			targets = append(targets, ContainerTarget{Name: cs.Name, ID: shortID})
 		}
+		if len(targets) == 0 {
+			return nil, fmt.Errorf("no usable container in pod %s/%s", pod.Namespace, pod.Name)
+		}
+		logger.Debug("No container cgroup resolved; keeping target with container IDs only",
+			zap.String("pod", pod.Namespace+"/"+pod.Name))
 	}
 
 	labels := make(map[string]string, len(pod.Labels))
@@ -383,16 +377,13 @@ func resolvePodInfoFromObject(ctx context.Context, pod *corev1.Pod, containerNam
 		ownerName = pod.OwnerReferences[0].Name
 	}
 
-	name := ""
-	if containerSpec != nil {
-		name = containerSpec.Name
-	}
 	return &PodInfo{
 		PodName:       pod.Name,
 		Namespace:     pod.Namespace,
-		ContainerID:   shortID,
-		CgroupPath:    cgroupPath,
-		ContainerName: name,
+		Containers:    targets,
+		ContainerID:   targets[0].ID,
+		CgroupPath:    targets[0].CgroupPath,
+		ContainerName: targets[0].Name,
 		Labels:        labels,
 		PodIP:         pod.Status.PodIP,
 		OwnerKind:     ownerKind,

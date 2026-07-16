@@ -131,8 +131,8 @@ func (r *PodResolver) ResolvePod(ctx context.Context, podName, namespace, contai
 		return nil, NewNoContainersError()
 	}
 
-	containerStatus, containerSpec := pickContainer(pod, containerName)
-	if containerStatus == nil {
+	statuses := pickContainers(pod, containerName)
+	if len(statuses) == 0 {
 		name := containerName
 		if name == "" && len(pod.Spec.Containers) > 0 {
 			name = pod.Spec.Containers[0].Name
@@ -140,36 +140,13 @@ func (r *PodResolver) ResolvePod(ctx context.Context, podName, namespace, contai
 		return nil, NewContainerNotFoundError(name)
 	}
 
-	containerID := containerStatus.ContainerID
-
-	parts := strings.Split(containerID, "://")
-	if len(parts) != 2 {
-		return nil, NewInvalidContainerIDError("invalid container ID format")
-	}
-	shortID := parts[1]
-
-	if !validation.ValidateContainerID(shortID) {
-		return nil, NewInvalidContainerIDError("validation failed")
-	}
-
-	cgroupPath, err := resolveCgroupPathCRI(ctx, shortID)
-	if err != nil || cgroupPath == "" {
-		logger.Debug("CRI cgroup resolution failed, trying filesystem scan", zap.Error(err), zap.String("container_id", shortID))
-		cgroupPath, err = findCgroupPath(shortID)
+	targets := resolveContainerTargets(ctx, pod, statuses)
+	if len(targets) == 0 {
+		shortID, err := shortContainerID(statuses[0].ContainerID)
 		if err != nil {
-			logger.Debug("Filesystem cgroup scan failed, trying /proc fallback", zap.Error(err), zap.String("container_id", shortID))
-			cgroupPathFromProc, procErr := findCgroupPathFromProc(shortID)
-			if procErr == nil && cgroupPathFromProc != "" {
-				cgroupPath = cgroupPathFromProc
-				logger.Debug("Found cgroup path via /proc fallback", zap.String("cgroup_path", cgroupPath))
-			} else {
-				return nil, NewCgroupNotFoundError(shortID)
-			}
-		} else {
-			logger.Debug("Found cgroup path via filesystem scan", zap.String("cgroup_path", cgroupPath))
+			return nil, err
 		}
-	} else {
-		logger.Debug("Found cgroup path via CRI", zap.String("cgroup_path", cgroupPath))
+		return nil, NewCgroupNotFoundError(shortID)
 	}
 
 	labels := make(map[string]string)
@@ -188,14 +165,81 @@ func (r *PodResolver) ResolvePod(ctx context.Context, podName, namespace, contai
 	return &PodInfo{
 		PodName:       podName,
 		Namespace:     namespace,
-		ContainerID:   shortID,
-		CgroupPath:    cgroupPath,
-		ContainerName: containerSpec.Name,
+		Containers:    targets,
+		ContainerID:   targets[0].ID,
+		CgroupPath:    targets[0].CgroupPath,
+		ContainerName: targets[0].Name,
 		Labels:        labels,
 		PodIP:         pod.Status.PodIP,
 		OwnerKind:     ownerKind,
 		OwnerName:     ownerName,
 	}, nil
+}
+
+// resolveContainerTargets turns picked container statuses into ContainerTargets
+// with resolved cgroup paths. Containers whose ID or cgroup cannot be resolved
+// are skipped with a warning; the caller decides whether an empty result is
+// fatal.
+func resolveContainerTargets(ctx context.Context, pod *corev1.Pod, statuses []corev1.ContainerStatus) []ContainerTarget {
+	targets := make([]ContainerTarget, 0, len(statuses))
+	for _, cs := range statuses {
+		shortID, err := shortContainerID(cs.ContainerID)
+		if err != nil {
+			logger.Warn("Skipping container with unusable container ID",
+				zap.String("pod", pod.Namespace+"/"+pod.Name),
+				zap.String("container", cs.Name),
+				zap.Error(err))
+			continue
+		}
+		cgroupPath, err := resolveContainerCgroup(ctx, shortID)
+		if err != nil {
+			logger.Warn("Skipping container whose cgroup could not be resolved",
+				zap.String("pod", pod.Namespace+"/"+pod.Name),
+				zap.String("container", cs.Name),
+				zap.String("container_id", shortID),
+				zap.Error(err))
+			continue
+		}
+		targets = append(targets, ContainerTarget{Name: cs.Name, ID: shortID, CgroupPath: cgroupPath})
+	}
+	return targets
+}
+
+// shortContainerID strips the runtime scheme from a status ContainerID and
+// validates the remainder.
+func shortContainerID(containerID string) (string, error) {
+	parts := strings.Split(containerID, "://")
+	if len(parts) != 2 {
+		return "", NewInvalidContainerIDError("invalid container ID format")
+	}
+	shortID := parts[1]
+	if !validation.ValidateContainerID(shortID) {
+		return "", NewInvalidContainerIDError("validation failed")
+	}
+	return shortID, nil
+}
+
+// resolveContainerCgroup resolves one container's cgroup path via the
+// CRI -> filesystem-scan -> /proc fallback chain.
+func resolveContainerCgroup(ctx context.Context, shortID string) (string, error) {
+	cgroupPath, err := resolveCgroupPathCRI(ctx, shortID)
+	if err == nil && cgroupPath != "" {
+		logger.Debug("Found cgroup path via CRI", zap.String("cgroup_path", cgroupPath))
+		return cgroupPath, nil
+	}
+	logger.Debug("CRI cgroup resolution failed, trying filesystem scan", zap.Error(err), zap.String("container_id", shortID))
+	cgroupPath, err = findCgroupPath(shortID)
+	if err == nil && cgroupPath != "" {
+		logger.Debug("Found cgroup path via filesystem scan", zap.String("cgroup_path", cgroupPath))
+		return cgroupPath, nil
+	}
+	logger.Debug("Filesystem cgroup scan failed, trying /proc fallback", zap.Error(err), zap.String("container_id", shortID))
+	cgroupPath, err = findCgroupPathFromProc(shortID)
+	if err == nil && cgroupPath != "" {
+		logger.Debug("Found cgroup path via /proc fallback", zap.String("cgroup_path", cgroupPath))
+		return cgroupPath, nil
+	}
+	return "", NewCgroupNotFoundError(shortID)
 }
 
 // cgroupRootCandidates returns base paths to search when resolving cgroup paths.
@@ -395,32 +439,41 @@ func resolveCgroupPathCRI(ctx context.Context, containerID string) (string, erro
 	return "", errors.New("podtrace: CRI cgroup path not found on filesystem")
 }
 
-// pickContainer selects the container to trace: the named one, or the
-// pod's first spec container when no name is given.
-func pickContainer(pod *corev1.Pod, containerName string) (*corev1.ContainerStatus, *corev1.Container) {
-	name := containerName
-	if name == "" && len(pod.Spec.Containers) > 0 {
-		name = pod.Spec.Containers[0].Name
+// pickContainers selects the containers to trace: every running container
+// with a container ID, regular, restartable-init (sidecar), and ephemeral,
+// matching the agent's containerStatusIndex enumeration so both planes agree,
+// when no name is given, or exactly the named one.
+func pickContainers(pod *corev1.Pod, containerName string) []corev1.ContainerStatus {
+	var out []corev1.ContainerStatus
+	add := func(list []corev1.ContainerStatus) {
+		for i := range list {
+			cs := list[i]
+			if cs.ContainerID == "" || cs.State.Running == nil {
+				continue
+			}
+			if containerName != "" && cs.Name != containerName {
+				continue
+			}
+			out = append(out, cs)
+		}
 	}
+	add(pod.Status.ContainerStatuses)
+	add(pod.Status.InitContainerStatuses)
+	add(pod.Status.EphemeralContainerStatuses)
+	return out
+}
 
-	var spec *corev1.Container
-	for j := range pod.Spec.Containers {
-		if pod.Spec.Containers[j].Name == name {
-			spec = &pod.Spec.Containers[j]
-			break
-		}
-	}
-	for i := range pod.Status.ContainerStatuses {
-		if pod.Status.ContainerStatuses[i].Name == name {
-			return &pod.Status.ContainerStatuses[i], spec
-		}
-	}
-	return nil, spec
+// ContainerTarget identifies one traced container of a resolved pod.
+type ContainerTarget struct {
+	Name       string
+	ID         string
+	CgroupPath string
 }
 
 type PodInfo struct {
 	PodName       string
 	Namespace     string
+	Containers    []ContainerTarget
 	ContainerID   string
 	CgroupPath    string
 	ContainerName string

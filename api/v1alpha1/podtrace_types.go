@@ -22,6 +22,9 @@ type PodTraceSpec struct {
 	// +optional
 	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
 
+	// ContainerName narrows tracing to one named container of each matched
+	// pod. Empty means every running container (including restartable-init
+	// sidecars and ephemeral containers) is traced.
 	// +optional
 	ContainerName string `json:"containerName,omitempty"`
 

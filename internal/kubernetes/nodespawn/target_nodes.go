@@ -15,6 +15,12 @@ import (
 	"go.uber.org/zap"
 )
 
+// ContainerRef identifies one running container of a pre-resolved pod.
+type ContainerRef struct {
+	ID   string
+	Name string
+}
+
 // PodRef holds everything the workstation pre-resolves about a target pod so
 // the spawned binary can build its PodInfo without a single K8s API call.
 type PodRef struct {
@@ -22,6 +28,7 @@ type PodRef struct {
 	Name          string
 	ContainerID   string
 	ContainerName string
+	Containers    []ContainerRef
 }
 
 // String returns the "namespace/name" form ResolvePod accepts.
@@ -29,10 +36,21 @@ func (r PodRef) String() string {
 	return r.Namespace + "/" + r.Name
 }
 
-// PreResolved returns the "ns/name/containerID/containerName" form the spawn
-// pod accepts via --preresolved-pod (single string keeps the argv compact).
-func (r PodRef) PreResolved() string {
-	return r.Namespace + "/" + r.Name + "/" + r.ContainerID + "/" + r.ContainerName
+// PreResolved returns one "ns/name/containerID/containerName" string per
+// traced container, each accepted by --preresolved-pod.
+func (r PodRef) PreResolved() []string {
+	containers := r.Containers
+	if len(containers) == 0 && r.ContainerID != "" {
+		containers = []ContainerRef{{ID: r.ContainerID, Name: r.ContainerName}}
+	}
+	out := make([]string, 0, len(containers))
+	for _, c := range containers {
+		if c.ID == "" {
+			continue
+		}
+		out = append(out, r.Namespace+"/"+r.Name+"/"+c.ID+"/"+c.Name)
+	}
+	return out
 }
 
 // NodeTargets groups the resolved target pods by the node they run on.
@@ -71,16 +89,21 @@ func ResolveTargetNodes(ctx context.Context, clientset kubernetes.Interface, sel
 			unscheduled = append(unscheduled, ref)
 			return
 		}
-		cs := pickRunningContainer(pod, sel.ContainerName)
-		if sel.ContainerName != "" && cs == nil {
+		statuses := pickRunningContainers(pod, sel.ContainerName)
+		if sel.ContainerName != "" && len(statuses) == 0 {
 			missingContainer = append(missingContainer, ref)
 			return
 		}
-		if cs != nil {
-			ref.ContainerName = cs.Name
-			if idx := indexAfterScheme(cs.ContainerID); idx >= 0 {
-				ref.ContainerID = cs.ContainerID[idx:]
+		if len(statuses) > 0 {
+			for _, cs := range statuses {
+				if idx := indexAfterScheme(cs.ContainerID); idx >= 0 && cs.ContainerID[idx:] != "" {
+					ref.Containers = append(ref.Containers, ContainerRef{ID: cs.ContainerID[idx:], Name: cs.Name})
+				}
 			}
+		}
+		if len(ref.Containers) > 0 {
+			ref.ContainerID = ref.Containers[0].ID
+			ref.ContainerName = ref.Containers[0].Name
 		} else {
 			routedWithoutID = append(routedWithoutID, ref)
 		}
@@ -168,23 +191,30 @@ func ResolveTargetNodes(ctx context.Context, clientset kubernetes.Interface, sel
 	return out, nil
 }
 
-// pickRunningContainer returns the running container matching name, or the
-// first running container when name is empty.
-func pickRunningContainer(pod *corev1.Pod, name string) *corev1.ContainerStatus {
+// pickRunningContainers returns every running container with a container ID,
+// regular, restartable-init (sidecar), and ephemeral, when name is empty,
+// or exactly the named one.
+func pickRunningContainers(pod *corev1.Pod, name string) []corev1.ContainerStatus {
 	if pod == nil {
 		return nil
 	}
-	for i := range pod.Status.ContainerStatuses {
-		cs := &pod.Status.ContainerStatuses[i]
-		if cs.State.Running == nil || cs.ContainerID == "" {
-			continue
+	var out []corev1.ContainerStatus
+	add := func(list []corev1.ContainerStatus) {
+		for i := range list {
+			cs := list[i]
+			if cs.State.Running == nil || cs.ContainerID == "" {
+				continue
+			}
+			if name != "" && cs.Name != name {
+				continue
+			}
+			out = append(out, cs)
 		}
-		if name != "" && cs.Name != name {
-			continue
-		}
-		return cs
 	}
-	return nil
+	add(pod.Status.ContainerStatuses)
+	add(pod.Status.InitContainerStatuses)
+	add(pod.Status.EphemeralContainerStatuses)
+	return out
 }
 
 // indexAfterScheme returns the offset right after "://" in a containerID like

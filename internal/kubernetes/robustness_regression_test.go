@@ -38,35 +38,51 @@ func TestParseTarget_BracketedIPv6WithoutPort(t *testing.T) {
 	}
 }
 
-// TestPickContainer_StatusOrderIndependent: ContainerStatuses is not
-// guaranteed to share Spec.Containers' order; positional pairing returned
-// the wrong container's ID and cgroup.
-func TestPickContainer_StatusOrderIndependent(t *testing.T) {
+func TestPickContainers_DefaultIsAllContainers(t *testing.T) {
+	running := corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}
 	pod := &corev1.Pod{
 		Spec: corev1.PodSpec{Containers: []corev1.Container{
 			{Name: "app"}, {Name: "sidecar"},
 		}},
-		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{
-			{Name: "sidecar", ContainerID: "containerd://side"},
-			{Name: "app", ContainerID: "containerd://app1"},
-		}},
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{
+				{Name: "sidecar", ContainerID: "containerd://side", State: running},
+				{Name: "app", ContainerID: "containerd://app1", State: running},
+			},
+			InitContainerStatuses: []corev1.ContainerStatus{
+				{Name: "mesh-init", ContainerID: "containerd://mesh", State: running},
+				{Name: "done-init", ContainerID: "containerd://done", State: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{ExitCode: 0},
+				}},
+			},
+			EphemeralContainerStatuses: []corev1.ContainerStatus{
+				{Name: "debugger", ContainerID: "containerd://dbg", State: running},
+			},
+		},
 	}
 
-	status, spec := pickContainer(pod, "")
-	if status == nil || spec == nil {
-		t.Fatal("expected the first spec container to resolve")
+	got := pickContainers(pod, "")
+	names := make([]string, 0, len(got))
+	for _, cs := range got {
+		names = append(names, cs.Name)
 	}
-	if status.Name != "app" || status.ContainerID != "containerd://app1" || spec.Name != "app" {
-		t.Errorf("default pick = status %q/%s spec %q, want the app container", status.Name, status.ContainerID, spec.Name)
+	want := []string{"sidecar", "app", "mesh-init", "debugger"}
+	if len(got) != len(want) {
+		t.Fatalf("default pick = %v, want all running containers %v", names, want)
+	}
+	for i, name := range want {
+		if names[i] != name {
+			t.Errorf("default pick[%d] = %q, want %q", i, names[i], name)
+		}
 	}
 
-	status, spec = pickContainer(pod, "sidecar")
-	if status == nil || status.ContainerID != "containerd://side" || spec == nil || spec.Name != "sidecar" {
-		t.Errorf("named pick mismatched: status %+v spec %+v", status, spec)
+	named := pickContainers(pod, "sidecar")
+	if len(named) != 1 || named[0].ContainerID != "containerd://side" {
+		t.Errorf("named pick = %+v, want exactly the sidecar", named)
 	}
 
-	if status, _ := pickContainer(pod, "missing"); status != nil {
-		t.Errorf("unknown container name must return nil status, got %+v", status)
+	if got := pickContainers(pod, "missing"); len(got) != 0 {
+		t.Errorf("unknown container name must select nothing, got %+v", got)
 	}
 }
 

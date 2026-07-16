@@ -64,15 +64,15 @@ func TestResolveTargetNodes_MissingContainerNameFails(t *testing.T) {
 	}
 }
 
-func TestPickRunningContainer_ByName(t *testing.T) {
+func TestPickRunningContainers_ByName(t *testing.T) {
 	pod := multiContainerPod()
-	if cs := pickRunningContainer(pod, "app"); cs == nil || cs.Name != "app" {
-		t.Errorf("pickRunningContainer(pod, app) = %+v, want the app container", cs)
+	if got := pickRunningContainers(pod, "app"); len(got) != 1 || got[0].Name != "app" {
+		t.Errorf("pickRunningContainers(pod, app) = %+v, want exactly the app container", got)
 	}
-	if cs := pickRunningContainer(pod, ""); cs == nil || cs.Name != "sidecar" {
-		t.Errorf("pickRunningContainer(pod, \"\") = %+v, want first running (sidecar)", cs)
+	if got := pickRunningContainers(pod, ""); len(got) != 2 || got[0].Name != "sidecar" || got[1].Name != "app" {
+		t.Errorf("pickRunningContainers(pod, \"\") = %+v, want all running containers", got)
 	}
-	if cs := pickRunningContainer(pod, "ghost"); cs != nil {
-		t.Errorf("pickRunningContainer(pod, ghost) = %+v, want nil", cs)
+	if got := pickRunningContainers(pod, "ghost"); len(got) != 0 {
+		t.Errorf("pickRunningContainers(pod, ghost) = %+v, want empty", got)
 	}
 }

@@ -34,9 +34,6 @@ const (
 
 // PodTraceSessionSpec defines a bounded diagnose-mode trace. The operator
 // reconciles this into one privileged Job per node hosting matched pods.
-// The CEL one-of mirrors PodTraceSpec: without it, installs that disable
-// the validating webhook (the chart default) accepted sessions with no
-// target selection at all, or with conflicting ones.
 // +kubebuilder:validation:XValidation:rule="[has(self.selector), has(self.podRefs)].filter(x, x).size() == 1",message="exactly one of spec.selector or spec.podRefs must be set"
 type PodTraceSessionSpec struct {
 	// +optional

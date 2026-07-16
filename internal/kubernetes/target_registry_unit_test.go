@@ -63,7 +63,8 @@ func runningPod(uid, ns, name, containerName, containerID string) *corev1.Pod {
 		Status: corev1.PodStatus{
 			PodIP: "10.1.2.3",
 			ContainerStatuses: []corev1.ContainerStatus{
-				{Name: containerName, ContainerID: "containerd://" + containerID},
+				{Name: containerName, ContainerID: "containerd://" + containerID,
+					State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}},
 			},
 		},
 	}
@@ -119,8 +120,10 @@ func TestResolvePodInfoFromObject_NamedContainerSelected(t *testing.T) {
 		},
 		Status: corev1.PodStatus{
 			ContainerStatuses: []corev1.ContainerStatus{
-				{Name: "sidecar", ContainerID: "containerd://" + hex64()},
-				{Name: "main", ContainerID: "containerd://" + cid},
+				{Name: "sidecar", ContainerID: "containerd://" + hex64(),
+					State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}},
+				{Name: "main", ContainerID: "containerd://" + cid,
+					State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}},
 			},
 		},
 	}
@@ -148,7 +151,8 @@ func TestResolvePodInfoFromObject_MissingOptionalFields(t *testing.T) {
 		},
 		Status: corev1.PodStatus{
 			ContainerStatuses: []corev1.ContainerStatus{
-				{Name: "c0", ContainerID: "containerd://" + cid},
+				{Name: "c0", ContainerID: "containerd://" + cid,
+					State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}},
 			},
 		},
 	}

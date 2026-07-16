@@ -127,6 +127,10 @@ spec:
                 - matchSelectors
                 type: object
               containerName:
+                description: |-
+                  ContainerName narrows tracing to one named container of each matched
+                  pod. Empty means every running container (including restartable-init
+                  sidecars and ephemeral containers) is traced.
                 type: string
               exporterRef:
                 description: LocalObjectReference references an object in the same

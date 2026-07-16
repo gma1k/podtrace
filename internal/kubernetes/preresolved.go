@@ -15,8 +15,8 @@ type PreResolvedRef struct {
 }
 
 // ParsePreResolvedRef parses the "namespace/podName/containerID/containerName"
-// form. Empty containerName is allowed (the spawned binary defaults to the
-// first container's name during its own resolution).
+// form. Each ref names exactly one container; a multi-container pod arrives
+// as one ref per container. Empty containerName is allowed.
 func ParsePreResolvedRef(s string) (PreResolvedRef, error) {
 	parts := strings.SplitN(s, "/", 4)
 	if len(parts) < 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
@@ -53,8 +53,11 @@ func BuildPodInfoFromPreResolved(ref PreResolvedRef) (*PodInfo, error) {
 		cgroupPath = fromProc
 	}
 	return &PodInfo{
-		PodName:       ref.PodName,
-		Namespace:     ref.Namespace,
+		PodName:   ref.PodName,
+		Namespace: ref.Namespace,
+		Containers: []ContainerTarget{
+			{Name: ref.ContainerName, ID: ref.ContainerID, CgroupPath: cgroupPath},
+		},
 		ContainerID:   ref.ContainerID,
 		ContainerName: ref.ContainerName,
 		CgroupPath:    cgroupPath,
@@ -94,10 +97,10 @@ type PreResolvedSkip struct {
 // strings and returns:
 //   - infos:    the successfully-resolved targets
 //   - skipped:  per-ref failures with their reason (parse error, empty container,
-//               cgroup not found on THIS node) — caller decides whether to warn
-//               and continue, or hard-fail
+//     cgroup not found on THIS node) — caller decides whether to warn
+//     and continue, or hard-fail
 //   - parseErr: the first malformed-input error, if any (returned alongside the
-//               other slices so the caller can surface it deterministically)
+//     other slices so the caller can surface it deterministically)
 func BuildPodInfosFromPreResolved(refs []string) (infos []*PodInfo, skipped []PreResolvedSkip, parseErr error) {
 	for _, raw := range refs {
 		ref, err := ParsePreResolvedRef(raw)
