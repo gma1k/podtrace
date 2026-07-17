@@ -32,6 +32,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/podtrace/podtrace/internal/analysis/criticalpath"
+	"github.com/podtrace/podtrace/internal/attribution"
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/ebpf/cache"
 	"github.com/podtrace/podtrace/internal/ebpf/filter"
@@ -83,37 +84,39 @@ type Tracer struct {
 	intentionallyDisabled map[probes.ProbeGroup]struct{}
 	detachWarned          map[probes.ProbeGroup]struct{}
 
-	containerUprobes         map[string]*containerUprobeSet
-	globalProtocolAttached   bool
-	attachContainerGroupFn   func(g probes.ProbeGroup, id string, pids []uint32) []link.Link
-	reader                   *ringbuf.Reader
-	h2Reader                 *ringbuf.Reader
-	h2Decoder                *h2decode.Decoder
-	h3Reader                 *ringbuf.Reader
-	h3Decoder                *h3decode.Decoder
-	h3ChunkReader            *ringbuf.Reader
-	h3Assembler              *h3stream.Assembler
-	h3SectionStash           *h3stream.SectionStash
-	h3ParkedMu               sync.Mutex
-	h3Parked                 []h3ParkedTxn
-	quicReader               *ringbuf.Reader
-	filter                   *filter.CgroupFilter
-	containerID              string
-	containerPID             uint32
-	processNameCache         *cache.LRUCache
-	pathCache                *cache.PathCache
-	resourceMgr              *resourceMonitorManager
-	cgroupPath               string
-	lastDNSDrops             uint64
-	cgroupPaths              []string
-	useUserspaceCgroupFilter atomic.Bool
-	denyWhenNoTargets        atomic.Bool
-	targetCgroupIDs          atomic.Pointer[map[uint64]struct{}]
-	cgroupCapacityWarned     atomic.Int64
-	cgroupWriteMu            sync.Mutex
-	cpAnalyzer               *criticalpath.Analyzer
-	piiRedactor              *redactor.Redactor
-	profilingCtrl            ProfilingController
+	containerUprobes              map[string]*containerUprobeSet
+	globalProtocolAttached        bool
+	attachContainerGroupFn        func(g probes.ProbeGroup, id string, pids []uint32) []link.Link
+	reader                        *ringbuf.Reader
+	h2Reader                      *ringbuf.Reader
+	h2Decoder                     *h2decode.Decoder
+	h3Reader                      *ringbuf.Reader
+	h3Decoder                     *h3decode.Decoder
+	h3ChunkReader                 *ringbuf.Reader
+	h3Assembler                   *h3stream.Assembler
+	h3SectionStash                *h3stream.SectionStash
+	h3ParkedMu                    sync.Mutex
+	h3Parked                      []h3ParkedTxn
+	quicReader                    *ringbuf.Reader
+	filter                        *filter.CgroupFilter
+	containerID                   string
+	containerPID                  uint32
+	processNameCache              *cache.LRUCache
+	attributionTable              *attribution.Table
+	attributionCorrelatorDisabled bool
+	pathCache                     *cache.PathCache
+	resourceMgr                   *resourceMonitorManager
+	cgroupPath                    string
+	lastDNSDrops                  uint64
+	cgroupPaths                   []string
+	useUserspaceCgroupFilter      atomic.Bool
+	denyWhenNoTargets             atomic.Bool
+	targetCgroupIDs               atomic.Pointer[map[uint64]struct{}]
+	cgroupCapacityWarned          atomic.Int64
+	cgroupWriteMu                 sync.Mutex
+	cpAnalyzer                    *criticalpath.Analyzer
+	piiRedactor                   *redactor.Redactor
+	profilingCtrl                 ProfilingController
 }
 
 // registerGroupLinks records freshly attached links under their probe group
@@ -606,6 +609,8 @@ func NewTracer() (*Tracer, error) {
 
 	pruneL7ProbesIfNoBPFLoop(spec)
 
+	HaveSkStorageCrossContext()
+
 	coll, err := ebpf.NewCollectionWithOptions(spec, opts)
 	if err != nil {
 		logVerifierFailure(err)
@@ -706,23 +711,25 @@ func NewTracer() (*Tracer, error) {
 	processCache := cache.NewLRUCache(config.CacheMaxSize, ttl)
 
 	t := &Tracer{
-		collection:            coll,
-		links:                 links,
-		probeGroups:           probeGroups,
-		intentionallyDisabled: map[probes.ProbeGroup]struct{}{},
-		reader:                rd,
-		h2Reader:              h2rd,
-		h2Decoder:             h2dec,
-		h3Reader:              h3rd,
-		h3Decoder:             h3decode.NewDecoder(captureHeaders),
-		h3ChunkReader:         h3chunkrd,
-		h3Assembler:           h3asm,
-		h3SectionStash:        h3stash,
-		quicReader:            quicrd,
-		filter:                filter.NewCgroupFilter(),
-		processNameCache:      processCache,
-		pathCache:             cache.NewPathCache(),
-		resourceMgr:           newResourceMonitorManager(),
+		collection:                    coll,
+		links:                         links,
+		probeGroups:                   probeGroups,
+		intentionallyDisabled:         map[probes.ProbeGroup]struct{}{},
+		reader:                        rd,
+		h2Reader:                      h2rd,
+		h2Decoder:                     h2dec,
+		h3Reader:                      h3rd,
+		h3Decoder:                     h3decode.NewDecoder(captureHeaders),
+		h3ChunkReader:                 h3chunkrd,
+		h3Assembler:                   h3asm,
+		h3SectionStash:                h3stash,
+		quicReader:                    quicrd,
+		filter:                        filter.NewCgroupFilter(),
+		processNameCache:              processCache,
+		attributionTable:              attribution.New(0, 0),
+		attributionCorrelatorDisabled: os.Getenv("PODTRACE_DISABLE_ATTRIBUTION_CORRELATOR") == "1",
+		pathCache:                     cache.NewPathCache(),
+		resourceMgr:                   newResourceMonitorManager(),
 	}
 	t.useUserspaceCgroupFilter.Store(true)
 	t.storeCgroupIDs(map[uint64]struct{}{})
@@ -1449,9 +1456,7 @@ func (t *Tracer) processAndDispatch(ctx context.Context, event *events.Event,
 	processingStart time.Time) {
 	ec.parsed.Add(1)
 	resolveAndConsumeStack(stackMap, event)
-	if event.ProcessName == "" {
-		event.ProcessName = t.getProcessNameQuick(event.PID)
-	}
+	attributionSource := t.attributeProcessName(event)
 	event.ProcessName = validation.SanitizeProcessName(event.ProcessName)
 
 	if isLikelyTransientComm(event.ProcessName) {
@@ -1467,6 +1472,8 @@ func (t *Tracer) processAndDispatch(ctx context.Context, event *events.Event,
 			event.ProcessName = "runc-bootstrap[" + event.ProcessName + "]"
 		}
 	}
+
+	t.recordAttributionOutcome(event, attributionSource)
 
 	cache.SnapshotCPUTime(event.PID)
 

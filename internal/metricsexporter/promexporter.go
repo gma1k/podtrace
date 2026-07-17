@@ -186,6 +186,28 @@ var (
 		[]string{"event_type", "error_code"},
 	)
 
+	attributionCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "podtrace_attribution_total",
+			Help: "Process-identity attribution outcomes at event ingest, per source. " +
+				"event_comm = comm arrived in the kernel event (kprobe/uprobe producers); " +
+				"correlator = filled from the pid→comm table fed by kernel-context events; " +
+				"proc_fallback = resolved by reading /proc at ingest (racy for short-lived processes); " +
+				"none = unattributed. The event label buckets dns/quic (cgroup_skb producers, " +
+				"the attribution gap) against everything else.",
+		},
+		[]string{"source", "event"},
+	)
+
+	attributionPidReuseCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "podtrace_attribution_pid_reuse_suspected_total",
+			Help: "Attribution lookups rejected because the pid's cached identity " +
+				"belonged to a different cgroup — the strongest observable signal " +
+				"that the pid was recycled between capture and ingest.",
+		},
+	)
+
 	tlsGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "podtrace_tls_handshake_latency_latest_seconds",
@@ -410,6 +432,8 @@ func init() {
 	prometheus.MustRegister(pidCacheMissesCounter)
 	prometheus.MustRegister(eventProcessingLatencyHistogram)
 	prometheus.MustRegister(errorRateCounter)
+	prometheus.MustRegister(attributionCounter)
+	prometheus.MustRegister(attributionPidReuseCounter)
 	prometheus.MustRegister(tlsGauge)
 	prometheus.MustRegister(tlsHistogram)
 	prometheus.MustRegister(tlsHandshakesCounter)
@@ -760,6 +784,18 @@ func RecordEventProcessingLatency(duration time.Duration) {
 
 func RecordError(eventType string, errorCode int32) {
 	errorRateCounter.WithLabelValues(eventType, fmt.Sprintf("%d", errorCode)).Inc()
+}
+
+// RecordAttribution counts one process-identity attribution outcome at
+// event ingest.
+func RecordAttribution(source, eventKind string) {
+	attributionCounter.WithLabelValues(source, eventKind).Inc()
+}
+
+// RecordAttributionPidReuseSuspected counts one attribution lookup that
+// was rejected on a cgroup mismatch.
+func RecordAttributionPidReuseSuspected() {
+	attributionPidReuseCounter.Inc()
 }
 
 func RecordChannelDepths(eventLen, filteredLen int) {
