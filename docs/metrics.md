@@ -38,6 +38,8 @@ All metrics are exported per process and per event type.
 | `podtrace_grpc_latency_seconds` | Distribution of gRPC method call latencies |
 | `podtrace_kafka_latency_seconds` | Distribution of Kafka produce/consume latencies |
 | `podtrace_kafka_bytes_total` | Total bytes in Kafka produce/consume operations |
+| `podtrace_attribution_total` | Process-identity attribution outcome per event, labeled `source` (`event_comm`/`correlator`/`proc_fallback`/`none`) and `event` (`dns`/`quic`/`other`) |
+| `podtrace_attribution_pid_reuse_suspected_total` | Attribution lookups rejected on a cgroup mismatch (suspected pid reuse) |
 
 ## Enabling Metrics
 
