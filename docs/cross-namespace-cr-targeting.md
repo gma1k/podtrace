@@ -6,6 +6,14 @@ own namespace. With it, the operator resolves the label expression
 against every namespace in the cluster and applies the resulting
 **allowlist** to pod matching.
 
+> **Cross-namespace tracing is opt-in from the target side.** A CR may
+> only trace pods in a *foreign* namespace when that namespace grants
+> access via the `podtrace.io/allow-tracing-from` annotation (see
+> [Target-namespace consent](#target-namespace-consent-required)).
+> Without the grant, foreign namespaces are silently excluded from the
+> allowlist, a CR can never reach another team's traffic just by
+> naming their namespace. This is the tenancy boundary.
+
 This page covers when to use it, exactly how the allowlist is
 resolved, what shows up on `.status`, and the RBAC / lifecycle
 implications. For the CLI multi-pod analogue see
@@ -42,22 +50,78 @@ matched pods live elsewhere.
 `spec.selector` is required regardless; `namespaceSelector` only
 extends *where* the pod selector is evaluated.
 
+## Target-namespace consent (required)
+
+A namespaced CR living in namespace **A** carries the authority of
+whoever can `create` that CR in **A**. Left unchecked, that authority
+would extend into any namespace **B** the CR names, the operator holds
+cluster-wide RBAC and would happily provision pod-read access in **B**
+and spawn a privileged eBPF Job that captures **B**'s decrypted L7
+payloads, DNS, syscalls, and file paths. That is a cross-tenant
+interception primitive, and the decision to allow it belongs to the
+owner of the **target** namespace, not the CR author.
+
+Podtrace therefore follows the [Gateway API ReferenceGrant][refgrant]
+model: **the target namespace must opt in**. Annotate namespace **B**:
+
+```bash
+# Allow CRs from the "observability" namespace to trace this namespace
+kubectl annotate ns team-b podtrace.io/allow-tracing-from=observability
+
+# Allow a specific set of source namespaces
+kubectl annotate ns team-b podtrace.io/allow-tracing-from=observability,platform-ops
+
+# Allow every namespace (use deliberately)
+kubectl annotate ns team-b podtrace.io/allow-tracing-from='*'
+```
+
+Rules:
+
+- A namespace **always** allows tracing from CRs in **its own**
+  namespace — no annotation needed for same-namespace tracing.
+- The annotation value is a comma-separated list of source namespace
+  names, or `*` for any. Whitespace around entries is ignored; an empty
+  or whitespace-only value grants nothing.
+- Matching is exact per entry — `observer` does **not** match
+  `observer-2` or `the-observer-ns`.
+- The check runs at **every reconcile**, so revoking the grant (or
+  deleting the annotation) stops an in-flight continuous trace on the
+  next reconcile, and grants added after the CR was created take effect
+  without recreating the CR.
+- `spec.podRefs` naming an ungranted foreign namespace are **rejected at
+  admission** (the webhook) and dropped at reconcile (the operator).
+  `spec.namespaceSelector` matches in ungranted namespaces are
+  **excluded** from the allowlist; the webhook emits a warning rather
+  than an error because the selector is dynamic.
+
+The enforcement is defense-in-depth: the validating webhook gives fast
+admission feedback, but the **operator's namespace resolution is the
+authoritative gate**. Disabling the webhook (`webhook.enabled=false`)
+does not weaken the boundary.
+
+[refgrant]: https://gateway-api.sigs.k8s.io/api-types/referencegrant/
+
 ## How resolution works
 
 1. The operator watches `Namespace` objects cluster-wide via the
    controller-runtime cache.
 2. On every reconcile of a CR that has a non-nil `namespaceSelector`,
    the operator filters the cached namespace list against the
-   selector expression.
+   selector expression, then drops any matched namespace that does not
+   grant tracing from the CR's namespace (own namespace is always
+   granted).
 3. The result is a sorted `[]string` of namespace names — the
-   **allowlist**.
+   **allowlist**. Matched-but-ungranted namespaces are reported on the
+   CR's `Reconciled` / `CrossNamespaceNotGranted` condition so the
+   exclusion is visible.
 4. The allowlist is:
    - Written to `.status.targetNamespaces` for debuggability.
    - Pushed into the agent bundle as `target_namespaces` so the agent
      accepts pods from any allowlisted namespace.
-5. Any change to a namespace's labels triggers a re-reconcile of every
-   CR with a non-nil `namespaceSelector` (over-enqueue is intentional;
-   the cost is negligible and the correctness story is simple).
+5. Any change to a namespace's labels **or grant annotation** triggers a
+   re-reconcile of every CR with a non-nil `namespaceSelector`
+   (over-enqueue is intentional; the cost is negligible and the
+   correctness story is simple).
 
 Three observable cases on `.status.targetNamespaces`:
 
@@ -74,6 +138,10 @@ Three observable cases on `.status.targetNamespaces`:
 kubectl create ns app-a && kubectl label ns app-a tier=prod
 kubectl create ns app-b && kubectl label ns app-b tier=prod
 kubectl create ns app-c && kubectl label ns app-c tier=staging
+
+# Each target namespace must consent to being traced from the observer
+# namespace. Without this, the allowlist resolves empty.
+kubectl annotate ns app-a app-b app-c podtrace.io/allow-tracing-from=observability
 
 # A workload labelled app=api in each
 for ns in app-a app-b app-c; do
@@ -156,17 +224,41 @@ controller's defensive path catches the same error during reconcile
 and surfaces it as `Degraded=True / NamespaceSelectorInvalid` on the
 CR. The session never spawns Jobs.
 
+The webhook also enforces target-namespace consent at admission:
+
+- A `spec.podRefs` entry naming a foreign namespace that has not
+  granted access is **rejected**:
+  `spec.podRefs: namespace "team-b" does not grant tracing to
+  "observability"; the target namespace must carry the annotation
+  podtrace.io/allow-tracing-from=...`.
+- A `spec.namespaceSelector` that matches ungranted namespaces is
+  **admitted with a warning** naming them; the operator excludes them
+  from the allowlist.
+
+Because the operator re-checks consent on every reconcile, these are
+fast-feedback conveniences, the boundary holds with the webhook off.
+
 ## RBAC and namespace permissions
 
 The operator's ClusterRole already grants `namespaces: [get,list,watch]`
 cluster-wide (see [operator-rbac.yaml](../deploy/charts/podtrace/templates/operator-rbac.yaml)).
-That single grant is what powers the allowlist resolution.
+That single grant powers both the allowlist resolution and the
+target-namespace consent check — the operator reads the
+`podtrace.io/allow-tracing-from` annotation from the same namespace
+list. **No new operator RBAC is required by the consent mechanism.**
 
-Per-target-namespace RBAC is **not** required — the agent runs as a
-DaemonSet under `serviceaccounts/podtrace-agent`, which has
-cluster-wide pod-read RBAC. Pod matching happens locally in each
-agent's process, against pods running on the same node, gated by the
-allowlist pushed via the bundle.
+For continuous `PodTrace`, per-target-namespace RBAC is **not** required
+— the agent runs as a DaemonSet under `serviceaccounts/podtrace-agent`,
+which has cluster-wide pod-read RBAC. Pod matching happens locally in
+each agent's process, against pods running on the same node, gated by
+the (grant-filtered) allowlist pushed via the bundle.
+
+For a bounded `PodTraceSession`, the in-Job CLI reads pod metadata via a
+per-session ServiceAccount. When a session targets a foreign namespace,
+the operator provisions a scoped pod-read `Role`+`RoleBinding` **in that
+namespace**, but only after the consent check passes. An ungranted
+target never receives this RBAC, so the escape leaves no trace in the
+victim namespace.
 
 ## Multi-node behaviour
 
@@ -202,8 +294,12 @@ spec:
 - **`namespaceSelector` set, `selector` unset → match nothing**.
   The pod selector still has to do work. `selector` is required.
 - **Allowlist empty even though namespaces exist with the right label**.
-  Race after label edit — the next reconcile (within seconds) picks
-  it up. If it stays empty, double-check label values:
+  Two causes: (1) a race after a label edit — the next reconcile (within
+  seconds) picks it up; or (2) the matched namespaces have not granted
+  tracing. Check the CR's conditions for `CrossNamespaceNotGranted`, and
+  verify the grant: `kubectl get ns team-b -o
+  jsonpath='{.metadata.annotations.podtrace\.io/allow-tracing-from}'`.
+  If it stays empty, double-check label values:
   `kubectl get ns -l tier=prod`.
 - **Same exporter, many CRs**. Each `ExporterConfig` is referenced by
   name in the CR's own namespace only — exporters can't be shared

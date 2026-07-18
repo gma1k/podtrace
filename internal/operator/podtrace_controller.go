@@ -106,7 +106,7 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	//   nil   → selector not set on the CR (agent falls back to own-ns)
 	//   []{}  → selector set but matched zero namespaces
 	//   list  → resolved allowlist
-	targetNamespaces, err := ResolveNamespaceSelector(ctx, r.Client, pt.Spec.NamespaceSelector)
+	targetNamespaces, deniedNamespaces, err := ResolveNamespaceSelector(ctx, r.Client, pt.Spec.NamespaceSelector, pt.Namespace)
 	if err != nil {
 		r.setCondition(&pt, ConditionDegraded, metav1.ConditionTrue, "NamespaceSelectorInvalid", err.Error())
 		_ = r.Status().Update(ctx, &pt)
@@ -137,6 +137,9 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		r.setCondition(&pt, ConditionDegraded, metav1.ConditionTrue, condReason,
 			fmt.Sprintf("node %s: %s", node, msg))
+	} else if len(deniedNamespaces) > 0 && len(targetNamespaces) == 0 {
+		r.setCondition(&pt, ConditionDegraded, metav1.ConditionTrue, "CrossNamespaceNotGranted",
+			crossNamespaceDeniedMessage(pt.Namespace, deniedNamespaces))
 	} else {
 		r.setCondition(&pt, ConditionDegraded, metav1.ConditionFalse, "Reconciled", "")
 	}
@@ -145,7 +148,11 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	allReady := len(pt.Status.NodeStatus) > 0 && allNodesReady(pt.Status.NodeStatus)
 	r.setCondition(&pt, ConditionReady, conditionStatusFromBool(allReady), "AgentsReady",
 		fmt.Sprintf("%d node(s) reporting", len(pt.Status.NodeStatus)))
-	r.setCondition(&pt, ConditionReconciled, metav1.ConditionTrue, "Reconciled", "exporter bundle up to date")
+	reconciledMessage := "exporter bundle up to date"
+	if len(deniedNamespaces) > 0 {
+		reconciledMessage += "; " + crossNamespaceDeniedMessage(pt.Namespace, deniedNamespaces)
+	}
+	r.setCondition(&pt, ConditionReconciled, metav1.ConditionTrue, "Reconciled", reconciledMessage)
 	pt.Status.ObservedGeneration = pt.Generation
 
 	if err := r.Status().Update(ctx, &pt); err != nil {

@@ -18,11 +18,14 @@ import (
 
 // newClientWithExporter returns a fake client whose backing store already
 // contains the given ExporterConfig in the given namespace.
-func newClientWithExporter(t *testing.T, namespace, name string) client.Client {
+func newClientWithExporter(t *testing.T, namespace, name string, extra ...client.Object) client.Client {
 	t.Helper()
 	scheme := runtime.NewScheme()
 	if err := podtracev1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
+	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("corev1.AddToScheme: %v", err)
 	}
 	builder := fake.NewClientBuilder().WithScheme(scheme)
 	if name != "" {
@@ -33,6 +36,9 @@ func newClientWithExporter(t *testing.T, namespace, name string) client.Client {
 				OTLP: &podtracev1alpha1.OTLPExporter{Endpoint: "x:4318"},
 			},
 		})
+	}
+	if len(extra) > 0 {
+		builder = builder.WithObjects(extra...)
 	}
 	return builder.Build()
 }

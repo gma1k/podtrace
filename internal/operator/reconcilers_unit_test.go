@@ -742,10 +742,11 @@ func TestResolveTargetNodes_BySelectorAndPodRefs(t *testing.T) {
 	}
 
 	r := &PodTraceSessionReconciler{Client: c, Scheme: scheme}
-	got, _, err := r.resolveTargetNodes(context.Background(), s)
+	targets, err := r.resolveSessionTargets(context.Background(), s)
 	if err != nil {
 		t.Fatal(err)
 	}
+	got := targets.Nodes
 	want := []string{"n1", "n2", "n4"}
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)

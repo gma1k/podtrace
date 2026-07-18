@@ -216,16 +216,30 @@ func TestDeepReconcile_Session_DeletionRunsCleanup(t *testing.T) {
 }
 
 // TestDeepReconcile_ResolveTargetNodes_NamespaceSelector drives the
-// cluster-wide list + allowlist filter branch of resolveTargetNodes (the
-// existing test only covers the own-namespace + podRefs branches).
+// cluster-wide list + allowlist filter branch of resolveSessionTargets
+// (the existing test only covers the own-namespace + podRefs branches),
+// including the tenancy grant.
 func TestDeepReconcile_ResolveTargetNodes_NamespaceSelector(t *testing.T) {
 	scheme := newOperatorScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "allowed", Labels: map[string]string{"team": "obs"}}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+			Name:        "allowed",
+			Labels:      map[string]string{"team": "obs"},
+			Annotations: map[string]string{podtracev1alpha1.AllowTracingFromAnnotation: "default"},
+		}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+			Name:   "ungranted",
+			Labels: map[string]string{"team": "obs"},
+		}},
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "denied"}},
 		&corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: "p-allowed", Namespace: "allowed", Labels: map[string]string{"app": "x"}},
 			Spec:       corev1.PodSpec{NodeName: "n-allowed"},
+			Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+		},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "p-ungranted", Namespace: "ungranted", Labels: map[string]string{"app": "x"}},
+			Spec:       corev1.PodSpec{NodeName: "n-ungranted"},
 			Status:     corev1.PodStatus{Phase: corev1.PodRunning},
 		},
 		&corev1.Pod{
@@ -243,20 +257,23 @@ func TestDeepReconcile_ResolveTargetNodes_NamespaceSelector(t *testing.T) {
 		},
 	}
 	r := &PodTraceSessionReconciler{Client: c, Scheme: scheme}
-	nodes, namespaces, err := r.resolveTargetNodes(context.Background(), s)
+	targets, err := r.resolveSessionTargets(context.Background(), s)
 	if err != nil {
-		t.Fatalf("resolveTargetNodes: %v", err)
+		t.Fatalf("resolveSessionTargets: %v", err)
 	}
-	if len(nodes) != 1 || nodes[0] != "n-allowed" {
-		t.Errorf("nodes = %v, want [n-allowed]", nodes)
+	if len(targets.Nodes) != 1 || targets.Nodes[0] != "n-allowed" {
+		t.Errorf("nodes = %v, want [n-allowed]", targets.Nodes)
 	}
-	if len(namespaces) != 1 || namespaces[0] != "allowed" {
-		t.Errorf("namespaces = %v, want [allowed]", namespaces)
+	if len(targets.Namespaces) != 1 || targets.Namespaces[0] != "allowed" {
+		t.Errorf("namespaces = %v, want [allowed]", targets.Namespaces)
+	}
+	if len(targets.DeniedNamespaces) != 1 || targets.DeniedNamespaces[0] != "ungranted" {
+		t.Errorf("deniedNamespaces = %v, want [ungranted]", targets.DeniedNamespaces)
 	}
 }
 
 // TestDeepReconcile_ResolveTargetNodes_EmptyAllowlist drives the
-// "selector set but no namespaces match" short-circuit (no pods listed).
+// "selector set but no namespaces match" short-circuit.
 func TestDeepReconcile_ResolveTargetNodes_EmptyAllowlist(t *testing.T) {
 	scheme := newOperatorScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
@@ -274,15 +291,15 @@ func TestDeepReconcile_ResolveTargetNodes_EmptyAllowlist(t *testing.T) {
 		},
 	}
 	r := &PodTraceSessionReconciler{Client: c, Scheme: scheme}
-	nodes, namespaces, err := r.resolveTargetNodes(context.Background(), s)
+	targets, err := r.resolveSessionTargets(context.Background(), s)
 	if err != nil {
-		t.Fatalf("resolveTargetNodes: %v", err)
+		t.Fatalf("resolveSessionTargets: %v", err)
 	}
-	if len(nodes) != 0 {
-		t.Errorf("nodes = %v, want empty (no namespaces match)", nodes)
+	if len(targets.Nodes) != 0 {
+		t.Errorf("nodes = %v, want empty (no namespaces match)", targets.Nodes)
 	}
-	if namespaces == nil || len(namespaces) != 0 {
-		t.Errorf("namespaces = %v, want empty non-nil slice", namespaces)
+	if targets.Namespaces == nil || len(targets.Namespaces) != 0 {
+		t.Errorf("namespaces = %v, want empty non-nil slice", targets.Namespaces)
 	}
 }
 

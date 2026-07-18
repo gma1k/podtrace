@@ -34,7 +34,7 @@ func newSession(mod func(*podtracev1alpha1.PodTraceSession)) *podtracev1alpha1.P
 
 func TestBuildDiagnoseArgs_SelectorPath(t *testing.T) {
 	s := newSession(nil)
-	args := buildDiagnoseArgs(s, nil, s.Spec.Duration.Duration)
+	args := buildDiagnoseArgs(s, sessionTargets{PodRefs: s.Spec.PodRefs}, s.Spec.Duration.Duration)
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "--diagnose 5m0s") {
 		t.Errorf("missing --diagnose: %v", args)
@@ -58,7 +58,7 @@ func TestBuildDiagnoseArgs_PodRefsPath(t *testing.T) {
 			{Namespace: "team-b", Name: "pod-b"}, // explicit ns
 		}
 	})
-	args := buildDiagnoseArgs(s, nil, s.Spec.Duration.Duration)
+	args := buildDiagnoseArgs(s, sessionTargets{PodRefs: s.Spec.PodRefs}, s.Spec.Duration.Duration)
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "--pods default/pod-a,team-b/pod-b") {
 		t.Errorf("pods flag wrong: %v", args)
@@ -78,7 +78,7 @@ func TestBuildDiagnoseArgs_FiltersAndSample(t *testing.T) {
 		s.Spec.SamplePercent = &pct
 		s.Spec.ContainerName = "api"
 	})
-	args := buildDiagnoseArgs(s, nil, s.Spec.Duration.Duration)
+	args := buildDiagnoseArgs(s, sessionTargets{PodRefs: s.Spec.PodRefs}, s.Spec.Duration.Duration)
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "--filter dns,net") {
 		t.Errorf("filter flag wrong: %v", args)
@@ -104,7 +104,7 @@ func TestBuildSessionJobSpec_CoreInvariants(t *testing.T) {
 			},
 		},
 	}
-	spec := buildSessionJobSpec(newSession(nil), tc, "node-a", nil)
+	spec := buildSessionJobSpec(newSession(nil), tc, "node-a", sessionTargets{})
 
 	if spec.BackoffLimit == nil || *spec.BackoffLimit != 0 {
 		t.Errorf("backoffLimit: %v", spec.BackoffLimit)
@@ -171,7 +171,7 @@ func TestBuildSessionJobSpec_SidecarOptedIn(t *testing.T) {
 			ConfigMap: &corev1.LocalObjectReference{Name: "rpt"},
 		}
 	})
-	spec := buildSessionJobSpec(s, tc, "node-a", nil)
+	spec := buildSessionJobSpec(s, tc, "node-a", sessionTargets{PodRefs: s.Spec.PodRefs})
 
 	if len(spec.Template.Spec.InitContainers) != 1 {
 		t.Fatalf("sidecar not emitted: %d init containers", len(spec.Template.Spec.InitContainers))
@@ -198,7 +198,7 @@ func TestBuildSessionJobSpec_SidecarSuppressedWithoutReportRef(t *testing.T) {
 			},
 		},
 	}
-	spec := buildSessionJobSpec(newSession(nil), tc, "node-a", nil)
+	spec := buildSessionJobSpec(newSession(nil), tc, "node-a", sessionTargets{})
 	if len(spec.Template.Spec.InitContainers) != 0 {
 		t.Errorf("sidecar should be suppressed without reportRef: %d", len(spec.Template.Spec.InitContainers))
 	}
