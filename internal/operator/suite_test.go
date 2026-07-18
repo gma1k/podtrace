@@ -33,6 +33,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -50,9 +51,7 @@ var (
 )
 
 // setupSharedEnvtest brings up the apiserver+etcd exactly once per
-// `go test` invocation. Subsequent calls are no-ops. On failure the
-// first call returns the error and subsequent calls observe it via
-// testClient==nil → t.Skip.
+// `go test` invocation.
 func setupSharedEnvtest(t *testing.T) (*runtime.Scheme, client.Client, string) {
 	t.Helper()
 	testCfgLock.Lock()
@@ -179,6 +178,25 @@ func ensureDefaultTracerConfig(t *testing.T, c client.Client) {
 	}
 }
 
+// grantTracingFrom annotates the target namespace so CRs in source may
+// trace its pods.
+func grantTracingFrom(t *testing.T, c client.Client, target, source string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var ns corev1.Namespace
+	if err := c.Get(ctx, types.NamespacedName{Name: target}, &ns); err != nil {
+		t.Fatalf("get namespace %q: %v", target, err)
+	}
+	if ns.Annotations == nil {
+		ns.Annotations = map[string]string{}
+	}
+	ns.Annotations[podtracev1alpha1.AllowTracingFromAnnotation] = source
+	if err := c.Update(ctx, &ns); err != nil {
+		t.Fatalf("grant tracing on namespace %q: %v", target, err)
+	}
+}
+
 func ensureExporterConfig(t *testing.T, c client.Client, namespace, name string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -200,7 +218,7 @@ func ensureExporterConfig(t *testing.T, c client.Client, namespace, name string)
 }
 
 // locateCRDPath reuses the stripHelmDirectives technique from the
-// api/v1alpha1 envtest — the CRD YAMLs under deploy/charts/podtrace are
+// api/v1alpha1 envtest, the CRD YAMLs under deploy/charts/podtrace are
 // wrapped with `{{- if .Values.crds.install }}` which plain YAML loaders
 // reject. We materialize a cleaned copy in a tempdir at test time.
 func locateCRDPath(t *testing.T) string {
@@ -263,9 +281,7 @@ func findRepoRoot(t *testing.T) string {
 }
 
 // reconcileUntil drives a single reconcile iteration repeatedly until
-// `want` returns nil or the deadline passes. Tests use this instead of
-// wiring a full manager — reconcilers take a ctrl.Request so direct
-// invocation is simple and deterministic.
+// `want` returns nil or the deadline passes.
 func reconcileUntil(t *testing.T, deadline time.Duration, want func() error, reconcile func() error) {
 	t.Helper()
 	end := time.Now().Add(deadline)

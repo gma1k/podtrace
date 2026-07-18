@@ -12,7 +12,7 @@ import (
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
 )
 
-func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alpha1.TracerConfig, node string, targetNamespaces []string) batchv1.JobSpec {
+func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alpha1.TracerConfig, node string, targets sessionTargets) batchv1.JobSpec {
 	completions := int32(1)
 	parallelism := int32(1)
 
@@ -52,7 +52,7 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 	priv := false
 	runAsRoot := int64(0)
 
-	args := buildDiagnoseArgs(s, targetNamespaces, effectiveDuration)
+	args := buildDiagnoseArgs(s, targets, effectiveDuration)
 	reportTo := reportToSpecFromReportRef(s)
 
 	volumes := []corev1.Volume{
@@ -273,7 +273,9 @@ func effectiveSessionDuration(s *podtracev1alpha1.PodTraceSession, tc *podtracev
 	return d
 }
 
-func buildDiagnoseArgs(s *podtracev1alpha1.PodTraceSession, targetNamespaces []string, duration time.Duration) []string {
+// buildDiagnoseArgs renders the in-Job CLI arguments from the session's
+// grant-authorized targets.
+func buildDiagnoseArgs(s *podtracev1alpha1.PodTraceSession, targets sessionTargets, duration time.Duration) []string {
 	args := []string{
 		"--diagnose", duration.String(),
 	}
@@ -294,15 +296,15 @@ func buildDiagnoseArgs(s *podtracev1alpha1.PodTraceSession, targetNamespaces []s
 	if s.Spec.Selector != nil {
 		args = append(args, "--pod-selector", labelSelectorToFlag(s.Spec.Selector))
 		args = append(args, "--all-in-namespace")
-		if len(targetNamespaces) > 0 {
-			args = append(args, "--namespaces", strings.Join(targetNamespaces, ","))
+		if len(targets.Namespaces) > 0 {
+			args = append(args, "--namespaces", strings.Join(targets.Namespaces, ","))
 		} else {
 			args = append(args, "--namespace", s.Namespace)
 		}
 	}
-	if len(s.Spec.PodRefs) > 0 {
-		refs := make([]string, 0, len(s.Spec.PodRefs))
-		for _, r := range s.Spec.PodRefs {
+	if len(targets.PodRefs) > 0 {
+		refs := make([]string, 0, len(targets.PodRefs))
+		for _, r := range targets.PodRefs {
 			if r.Namespace != "" {
 				refs = append(refs, r.Namespace+"/"+r.Name)
 			} else {

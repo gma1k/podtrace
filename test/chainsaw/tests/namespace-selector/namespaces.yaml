@@ -4,6 +4,8 @@ metadata:
   name: ns-selector-in
   labels:
     podtrace.io/chainsaw-ns-selector: "in"
+  annotations:
+    podtrace.io/allow-tracing-from: "*"
 ---
 apiVersion: v1
 kind: Namespace
@@ -11,3 +13,12 @@ metadata:
   name: ns-selector-out
   labels:
     podtrace.io/chainsaw-ns-selector: "out"
+  annotations:
+    podtrace.io/allow-tracing-from: "*"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ns-selector-ungranted
+  labels:
+    podtrace.io/chainsaw-ns-selector: "in"

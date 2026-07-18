@@ -99,7 +99,7 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 
-	targetNodes, targetNamespaces, err := r.resolveTargetNodes(ctx, &session)
+	targets, err := r.resolveSessionTargets(ctx, &session)
 	if err != nil {
 		if strings.Contains(err.Error(), "invalid NamespaceSelector") {
 			return ctrl.Result{}, r.failSessionTerminally(ctx, &session, "NamespaceSelectorInvalid", err.Error())
@@ -108,11 +108,16 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		_ = r.Status().Update(ctx, &session)
 		return ctrl.Result{}, err
 	}
-	session.Status.TargetNamespaces = targetNamespaces
-	if len(targetNodes) == 0 {
-		logger.Info("no matched pods; session stays Pending until pods appear")
+	session.Status.TargetNamespaces = targets.Namespaces
+	if len(targets.Nodes) == 0 {
+		reason, message := "NoMatchedPods", "selector matched zero pods"
+		if len(targets.DeniedNamespaces) > 0 {
+			reason = "CrossNamespaceNotGranted"
+			message = crossNamespaceDeniedMessage(session.Namespace, targets.DeniedNamespaces)
+		}
+		logger.Info("no matched pods; session stays Pending until pods appear", "reason", reason)
 		session.Status.State = podtracev1alpha1.SessionStatePending
-		r.setCondition(&session, ConditionReconciled, metav1.ConditionTrue, "NoMatchedPods", "selector matched zero pods")
+		r.setCondition(&session, ConditionReconciled, metav1.ConditionTrue, reason, message)
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, r.Status().Update(ctx, &session)
 	}
 
@@ -160,7 +165,7 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		_ = r.Status().Update(ctx, &session)
 		return ctrl.Result{}, err
 	}
-	if err := ensureSessionPodReadRBAC(ctx, r.Client, &session, sessionPodNamespaces(&session, targetNamespaces), systemNS); err != nil {
+	if err := ensureSessionPodReadRBAC(ctx, r.Client, &session, sessionPodNamespaces(&session, targets), systemNS); err != nil {
 		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "SessionRBAC", err.Error())
 		_ = r.Status().Update(ctx, &session)
 		return ctrl.Result{}, err
@@ -169,7 +174,7 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	cap := effectiveMaxConcurrentSessionsPerNode(tc)
 
 	if cap > 0 {
-		exceeded, err := r.nodesAtCapacity(ctx, targetNodes, cap, session.Namespace, session.Name)
+		exceeded, err := r.nodesAtCapacity(ctx, targets.Nodes, cap, session.Namespace, session.Name)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -181,7 +186,7 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 
-	jobs, err := r.ensureJobs(ctx, &session, tc, targetNodes, targetNamespaces)
+	jobs, err := r.ensureJobs(ctx, &session, tc, targets)
 	if err != nil {
 		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "EnsureJobs", err.Error())
 		_ = r.Status().Update(ctx, &session)
@@ -189,7 +194,7 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	session.Status.Jobs = makeSessionJobRefs(jobs)
-	session.Status.State = computeSessionState(jobs, len(targetNodes))
+	session.Status.State = computeSessionState(jobs, len(targets.Nodes))
 	session.Status.ObservedGeneration = session.Generation
 
 	if err := populateSessionSummaries(ctx, r.Client, &session, jobs); err != nil {
@@ -203,8 +208,11 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		now := metav1.Now()
 		session.Status.CompletionTime = &now
 	}
-	r.setCondition(&session, ConditionReconciled, metav1.ConditionTrue, "Reconciled",
-		fmt.Sprintf("%d Job(s) on %d node(s)", len(jobs), len(targetNodes)))
+	reconciledMessage := fmt.Sprintf("%d Job(s) on %d node(s)", len(jobs), len(targets.Nodes))
+	if len(targets.DeniedNamespaces) > 0 {
+		reconciledMessage += "; " + crossNamespaceDeniedMessage(session.Namespace, targets.DeniedNamespaces)
+	}
+	r.setCondition(&session, ConditionReconciled, metav1.ConditionTrue, "Reconciled", reconciledMessage)
 	r.setCondition(&session, ConditionDegraded, metav1.ConditionFalse, "Reconciled", "")
 
 	if obs, err := harvestReportLocation(ctx, r.Client, &session, systemNS); err != nil {
@@ -298,20 +306,41 @@ func (r *PodTraceSessionReconciler) namespaceToPodTraceSessions(ctx context.Cont
 	return out
 }
 
-// resolveTargetNodes expands spec.selector / spec.podRefs into the set of
-// node names hosting at least one matched pod.
-func (r *PodTraceSessionReconciler) resolveTargetNodes(ctx context.Context, s *podtracev1alpha1.PodTraceSession) ([]string, []string, error) {
+// sessionTargets is the grant-authorized view of a session's targets.
+// Everything downstream, node fan-out, Job arguments, per-namespace
+// pod-read RBAC, must derive from this struct, never from the raw
+// spec, so the tenancy boundary is enforced in exactly one place.
+type sessionTargets struct {
+	Nodes            []string
+	Namespaces       []string
+	PodRefs          []podtracev1alpha1.PodRef
+	DeniedNamespaces []string
+}
+
+// resolveSessionTargets expands spec.selector / spec.podRefs into the
+// set of node names hosting at least one matched pod, restricted to
+// namespaces the session is authorized to target.
+func (r *PodTraceSessionReconciler) resolveSessionTargets(ctx context.Context, s *podtracev1alpha1.PodTraceSession) (sessionTargets, error) {
 	nodes := map[string]struct{}{}
 
-	targetNamespaces, err := ResolveNamespaceSelector(ctx, r.Client, s.Spec.NamespaceSelector)
+	targetNamespaces, deniedNamespaces, err := ResolveNamespaceSelector(ctx, r.Client, s.Spec.NamespaceSelector, s.Namespace)
 	if err != nil {
-		return nil, nil, err
+		return sessionTargets{}, err
 	}
+	if s.Spec.Selector == nil {
+		targetNamespaces, deniedNamespaces = nil, nil
+	}
+
+	allowedPodRefs, deniedRefNamespaces, err := filterGrantedPodRefs(ctx, r.Client, s.Namespace, s.Spec.PodRefs)
+	if err != nil {
+		return sessionTargets{}, err
+	}
+	deniedNamespaces = mergeSortedNamespaceSets(deniedNamespaces, deniedRefNamespaces)
 
 	if s.Spec.Selector != nil {
 		sel, err := metav1.LabelSelectorAsSelector(s.Spec.Selector)
 		if err != nil {
-			return nil, nil, fmt.Errorf("invalid selector: %w", err)
+			return sessionTargets{}, fmt.Errorf("invalid selector: %w", err)
 		}
 
 		// Allowlist drives the namespace scope. Three cases:
@@ -332,7 +361,7 @@ func (r *PodTraceSessionReconciler) resolveTargetNodes(ctx context.Context, s *p
 			listOpts := &client.ListOptions{LabelSelector: sel, Namespace: s.Namespace}
 			var list corev1.PodList
 			if err := r.List(ctx, &list, listOpts); err != nil {
-				return nil, nil, fmt.Errorf("list pods for selector: %w", err)
+				return sessionTargets{}, fmt.Errorf("list pods for selector: %w", err)
 			}
 			for _, p := range list.Items {
 				if p.Spec.NodeName != "" && isPodEligible(&p) {
@@ -348,7 +377,7 @@ func (r *PodTraceSessionReconciler) resolveTargetNodes(ctx context.Context, s *p
 			listOpts := &client.ListOptions{LabelSelector: sel} // Namespace empty == cluster-wide
 			var list corev1.PodList
 			if err := r.List(ctx, &list, listOpts); err != nil {
-				return nil, nil, fmt.Errorf("list pods for selector: %w", err)
+				return sessionTargets{}, fmt.Errorf("list pods for selector: %w", err)
 			}
 			for _, p := range list.Items {
 				if _, ok := allowSet[p.Namespace]; !ok {
@@ -361,7 +390,7 @@ func (r *PodTraceSessionReconciler) resolveTargetNodes(ctx context.Context, s *p
 		}
 	}
 
-	for _, ref := range s.Spec.PodRefs {
+	for _, ref := range allowedPodRefs {
 		ns := ref.Namespace
 		if ns == "" {
 			ns = s.Namespace
@@ -371,7 +400,7 @@ func (r *PodTraceSessionReconciler) resolveTargetNodes(ctx context.Context, s *p
 			if apierrors.IsNotFound(err) {
 				continue
 			}
-			return nil, nil, fmt.Errorf("get pod %s/%s: %w", ns, ref.Name, err)
+			return sessionTargets{}, fmt.Errorf("get pod %s/%s: %w", ns, ref.Name, err)
 		}
 		if pod.Spec.NodeName != "" && isPodEligible(&pod) {
 			nodes[pod.Spec.NodeName] = struct{}{}
@@ -383,7 +412,36 @@ func (r *PodTraceSessionReconciler) resolveTargetNodes(ctx context.Context, s *p
 		out = append(out, n)
 	}
 	sort.Strings(out)
-	return out, targetNamespaces, nil
+	return sessionTargets{
+		Nodes:            out,
+		Namespaces:       targetNamespaces,
+		PodRefs:          allowedPodRefs,
+		DeniedNamespaces: deniedNamespaces,
+	}, nil
+}
+
+// mergeSortedNamespaceSets unions two sorted namespace lists, keeping
+// the result sorted and duplicate-free. Both inputs may be nil.
+func mergeSortedNamespaceSets(a, b []string) []string {
+	if len(a) == 0 {
+		return b
+	}
+	if len(b) == 0 {
+		return a
+	}
+	set := make(map[string]struct{}, len(a)+len(b))
+	for _, ns := range a {
+		set[ns] = struct{}{}
+	}
+	for _, ns := range b {
+		set[ns] = struct{}{}
+	}
+	out := make([]string, 0, len(set))
+	for ns := range set {
+		out = append(out, ns)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // isPodEligible filters out pods the tracer cannot attach to: those in
@@ -466,10 +524,10 @@ func effectiveMaxConcurrentSessionsPerNode(tc *podtracev1alpha1.TracerConfig) in
 
 // ensureJobs creates-or-updates one Job per target node, owner-ref'd to
 // the session.
-func (r *PodTraceSessionReconciler) ensureJobs(ctx context.Context, s *podtracev1alpha1.PodTraceSession, tc *podtracev1alpha1.TracerConfig, nodes []string, targetNamespaces []string) ([]batchv1.Job, error) {
+func (r *PodTraceSessionReconciler) ensureJobs(ctx context.Context, s *podtracev1alpha1.PodTraceSession, tc *podtracev1alpha1.TracerConfig, targets sessionTargets) ([]batchv1.Job, error) {
 	systemNS := systemNamespaceForSession(tc, r.SystemNamespace)
 
-	for _, node := range nodes {
+	for _, node := range targets.Nodes {
 		job := &batchv1.Job{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      SessionJobName(s.UID, node),
@@ -485,7 +543,7 @@ func (r *PodTraceSessionReconciler) ensureJobs(ctx context.Context, s *podtracev
 				LabelNodeName:    node,
 			})
 			if job.Spec.Template.Spec.Containers == nil {
-				job.Spec = buildSessionJobSpec(s, tc, node, targetNamespaces)
+				job.Spec = buildSessionJobSpec(s, tc, node, targets)
 			}
 			return nil
 		}); err != nil {

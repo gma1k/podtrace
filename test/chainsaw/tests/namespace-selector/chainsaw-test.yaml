@@ -5,17 +5,24 @@ metadata:
 spec:
   description: |
     Verifies cross-namespace targeting via spec.namespaceSelector:
-      1. Create two test namespaces with distinct labels.
-      2. Create a PodTrace whose NamespaceSelector matches exactly one.
+      1. Create test namespaces with distinct labels. Two carry the
+         podtrace.io/allow-tracing-from consent annotation; a third
+         matches the selector label but grants no consent.
+      2. Create a PodTrace whose NamespaceSelector matches the consenting
+         namespace (and the ungranted one).
       3. Assert the bundle ConfigMap surfaces the resolved namespace
          allowlist in data.target_namespaces and the PodTrace status
-         echoes it in status.targetNamespaces.
-      4. Re-label the previously-excluded namespace; assert the operator
-         requeues on the Namespace event and the allowlist grows.
+         echoes it in status.targetNamespaces — the ungranted namespace
+         is excluded even though it matches the selector.
+      4. Re-label the previously-excluded (but consenting) namespace;
+         assert the operator requeues on the Namespace event and the
+         allowlist grows, while the ungranted namespace stays excluded.
 
-    The Namespace event watch is the load-bearing piece — without it the
-    bundle would only update on the next PodTrace reconcile, which is
-    operator-period-bound and not user-visible.
+    Two load-bearing pieces: (a) the Namespace event watch — without it
+    the bundle would only update on the next PodTrace reconcile, which is
+    operator-period-bound and not user-visible; (b) the target-namespace
+    consent gate — a selector match alone must not admit a namespace that
+    has not opted in.
   timeouts:
     apply: 30s
     assert: 120s
@@ -58,3 +65,8 @@ spec:
               apiVersion: v1
               kind: Namespace
               name: ns-selector-out
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Namespace
+              name: ns-selector-ungranted

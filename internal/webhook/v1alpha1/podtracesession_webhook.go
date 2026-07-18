@@ -67,7 +67,7 @@ func (v *PodTraceSessionCustomValidator) validate(ctx context.Context, s *podtra
 	if err := validateReportRef(s.Spec.ReportRef); err != nil {
 		return nil, err
 	}
-	return nil, nil
+	return validateCrossNamespaceGrants(ctx, v.Client, s.Namespace, s.Spec.PodRefs, s.Spec.NamespaceSelector)
 }
 
 // validateReportRef enforces the sink-exclusivity rule and validates

@@ -63,5 +63,5 @@ func (v *PodTraceCustomValidator) validate(ctx context.Context, pt *podtracev1al
 	if err := resolveExporterRef(ctx, v.Client, pt.Namespace, pt.Spec.ExporterRef.Name); err != nil {
 		return nil, err
 	}
-	return nil, nil
+	return validateCrossNamespaceGrants(ctx, v.Client, pt.Namespace, pt.Spec.PodRefs, pt.Spec.NamespaceSelector)
 }

@@ -30,6 +30,8 @@ func TestPodTraceReconciler_NamespaceSelectorAllowlist(t *testing.T) {
 	const tracedKey = "podtrace.io/test-ns-selector-allowlist"
 	matchNS := ensureLabeledNamespace(t, c, tracedKey, "yes")
 	otherNS := ensureLabeledNamespace(t, c, tracedKey, "no")
+	grantTracingFrom(t, c, matchNS, ns)
+	grantTracingFrom(t, c, otherNS, ns)
 
 	ensureExporterConfig(t, c, ns, "otlp")
 
