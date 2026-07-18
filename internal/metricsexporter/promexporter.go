@@ -615,7 +615,7 @@ func HandleEventWithContext(e *events.Event, k8sContext map[string]interface{}) 
 		if cmd == "" {
 			cmd = "unknown"
 		}
-		redisLatencyHistogram.WithLabelValues(cmd, e.ProcessName, namespace).Observe(latSec)
+		redisLatencyHistogram.WithLabelValues(cmd, boundProcessName(e), namespace).Observe(latSec)
 
 	case events.EventMemcachedCmd:
 		latSec := float64(e.LatencyNS) / 1e9
@@ -623,7 +623,7 @@ func HandleEventWithContext(e *events.Event, k8sContext map[string]interface{}) 
 		if op == "" {
 			op = "unknown"
 		}
-		memcachedLatencyHistogram.WithLabelValues(op, e.ProcessName, namespace).Observe(latSec)
+		memcachedLatencyHistogram.WithLabelValues(op, boundProcessName(e), namespace).Observe(latSec)
 
 	case events.EventFastCGIResp:
 		latSec := float64(e.LatencyNS) / 1e9
@@ -631,7 +631,7 @@ func HandleEventWithContext(e *events.Event, k8sContext map[string]interface{}) 
 		if method == "" {
 			method = "unknown"
 		}
-		fastcgiLatencyHistogram.WithLabelValues(method, e.ProcessName, namespace).Observe(latSec)
+		fastcgiLatencyHistogram.WithLabelValues(method, boundProcessName(e), namespace).Observe(latSec)
 
 	case events.EventGRPCMethod:
 		latSec := float64(e.LatencyNS) / 1e9
@@ -639,7 +639,7 @@ func HandleEventWithContext(e *events.Event, k8sContext map[string]interface{}) 
 		if method == "" {
 			method = "unknown"
 		}
-		grpcLatencyHistogram.WithLabelValues(method, e.ProcessName, namespace).Observe(latSec)
+		grpcLatencyHistogram.WithLabelValues(method, boundProcessName(e), namespace).Observe(latSec)
 
 	case events.EventKafkaProduce:
 		latSec := float64(e.LatencyNS) / 1e9
@@ -647,9 +647,10 @@ func HandleEventWithContext(e *events.Event, k8sContext map[string]interface{}) 
 		if topic == "" {
 			topic = "unknown"
 		}
-		kafkaLatencyHistogram.WithLabelValues("produce", topic, e.ProcessName, namespace).Observe(latSec)
+		procName := boundProcessName(e)
+		kafkaLatencyHistogram.WithLabelValues("produce", topic, procName, namespace).Observe(latSec)
 		if e.Bytes > 0 {
-			kafkaBytesCounter.WithLabelValues("produce", topic, e.ProcessName, namespace).Add(float64(e.Bytes))
+			kafkaBytesCounter.WithLabelValues("produce", topic, procName, namespace).Add(float64(e.Bytes))
 		}
 
 	case events.EventKafkaFetch:
@@ -658,9 +659,10 @@ func HandleEventWithContext(e *events.Event, k8sContext map[string]interface{}) 
 		if topic == "" {
 			topic = "unknown"
 		}
-		kafkaLatencyHistogram.WithLabelValues("fetch", topic, e.ProcessName, namespace).Observe(latSec)
+		procName := boundProcessName(e)
+		kafkaLatencyHistogram.WithLabelValues("fetch", topic, procName, namespace).Observe(latSec)
 		if e.Bytes > 0 {
-			kafkaBytesCounter.WithLabelValues("fetch", topic, e.ProcessName, namespace).Add(float64(e.Bytes))
+			kafkaBytesCounter.WithLabelValues("fetch", topic, procName, namespace).Add(float64(e.Bytes))
 		}
 	}
 }
@@ -681,8 +683,9 @@ func ExportRTTMetric(e *events.Event) {
 
 func ExportRTTMetricWithContext(e *events.Event, namespace, targetPod, targetService string) {
 	rttSec := float64(e.LatencyNS) / 1e9
-	rttHistogram.WithLabelValues(e.TypeString(), e.ProcessName, namespace, targetPod, targetService).Observe(rttSec)
-	rttGauge.WithLabelValues(e.TypeString(), e.ProcessName, namespace, targetPod, targetService).Set(rttSec)
+	procName := boundProcessName(e)
+	rttHistogram.WithLabelValues(e.TypeString(), procName, namespace, targetPod, targetService).Observe(rttSec)
+	rttGauge.WithLabelValues(e.TypeString(), procName, namespace, targetPod, targetService).Set(rttSec)
 }
 
 func ExportTCPMetric(e *events.Event) {
@@ -691,8 +694,9 @@ func ExportTCPMetric(e *events.Event) {
 
 func ExportTCPMetricWithContext(e *events.Event, namespace, targetPod, targetService string) {
 	latencySec := float64(e.LatencyNS) / 1e9
-	latencyHistogram.WithLabelValues(e.TypeString(), e.ProcessName, namespace, targetPod, targetService).Observe(latencySec)
-	latencyGauge.WithLabelValues(e.TypeString(), e.ProcessName, namespace, targetPod, targetService).Set(latencySec)
+	procName := boundProcessName(e)
+	latencyHistogram.WithLabelValues(e.TypeString(), procName, namespace, targetPod, targetService).Observe(latencySec)
+	latencyGauge.WithLabelValues(e.TypeString(), procName, namespace, targetPod, targetService).Set(latencySec)
 }
 
 func ExportDNSMetric(e *events.Event) {
@@ -701,8 +705,9 @@ func ExportDNSMetric(e *events.Event) {
 
 func ExportDNSMetricWithContext(e *events.Event, namespace string) {
 	latencySec := float64(e.LatencyNS) / 1e9
-	dnsGauge.WithLabelValues(e.TypeString(), e.ProcessName, namespace).Set(latencySec)
-	dnsHistogram.WithLabelValues(e.TypeString(), e.ProcessName, namespace).Observe(latencySec)
+	procName := boundProcessName(e)
+	dnsGauge.WithLabelValues(e.TypeString(), procName, namespace).Set(latencySec)
+	dnsHistogram.WithLabelValues(e.TypeString(), procName, namespace).Observe(latencySec)
 }
 
 func ExportFileSystemMetric(e *events.Event) {
@@ -711,8 +716,9 @@ func ExportFileSystemMetric(e *events.Event) {
 
 func ExportFileSystemMetricWithContext(e *events.Event, namespace string) {
 	latencySec := float64(e.LatencyNS) / 1e9
-	fsGauge.WithLabelValues(e.TypeString(), e.ProcessName, namespace).Set(latencySec)
-	fsHistogram.WithLabelValues(e.TypeString(), e.ProcessName, namespace).Observe(latencySec)
+	procName := boundProcessName(e)
+	fsGauge.WithLabelValues(e.TypeString(), procName, namespace).Set(latencySec)
+	fsHistogram.WithLabelValues(e.TypeString(), procName, namespace).Observe(latencySec)
 }
 
 func ExportSchedSwitchMetric(e *events.Event) {
@@ -721,8 +727,9 @@ func ExportSchedSwitchMetric(e *events.Event) {
 
 func ExportSchedSwitchMetricWithContext(e *events.Event, namespace string) {
 	blockSec := float64(e.LatencyNS) / 1e9
-	cpuGauge.WithLabelValues(e.TypeString(), e.ProcessName, namespace).Set(blockSec)
-	cpuHistogram.WithLabelValues(e.TypeString(), e.ProcessName, namespace).Observe(blockSec)
+	procName := boundProcessName(e)
+	cpuGauge.WithLabelValues(e.TypeString(), procName, namespace).Set(blockSec)
+	cpuHistogram.WithLabelValues(e.TypeString(), procName, namespace).Observe(blockSec)
 }
 
 func ExportNetworkBandwidthMetric(e *events.Event, direction string) {
@@ -731,7 +738,7 @@ func ExportNetworkBandwidthMetric(e *events.Event, direction string) {
 
 func ExportNetworkBandwidthMetricWithContext(e *events.Event, direction, namespace, targetPod, targetService string) {
 	if e.Bytes > 0 {
-		networkBytesCounter.WithLabelValues(e.TypeString(), e.ProcessName, direction, namespace, targetPod, targetService).Add(float64(e.Bytes))
+		networkBytesCounter.WithLabelValues(e.TypeString(), boundProcessName(e), direction, namespace, targetPod, targetService).Add(float64(e.Bytes))
 	}
 }
 
@@ -741,7 +748,7 @@ func ExportFilesystemBandwidthMetric(e *events.Event, operation string) {
 
 func ExportFilesystemBandwidthMetricWithContext(e *events.Event, operation, namespace string) {
 	if e.Bytes > 0 {
-		filesystemBytesCounter.WithLabelValues(e.TypeString(), e.ProcessName, operation, namespace).Add(float64(e.Bytes))
+		filesystemBytesCounter.WithLabelValues(e.TypeString(), boundProcessName(e), operation, namespace).Add(float64(e.Bytes))
 	}
 }
 
@@ -928,9 +935,10 @@ func ExportTLSMetric(e *events.Event) {
 
 func ExportTLSMetricWithContext(e *events.Event, namespace string) {
 	latencySec := float64(e.LatencyNS) / 1e9
-	tlsGauge.WithLabelValues(e.TypeString(), e.ProcessName, namespace).Set(latencySec)
-	tlsHistogram.WithLabelValues(e.TypeString(), e.ProcessName, namespace).Observe(latencySec)
-	tlsHandshakesCounter.WithLabelValues(e.TypeString(), e.ProcessName, namespace).Inc()
+	procName := boundProcessName(e)
+	tlsGauge.WithLabelValues(e.TypeString(), procName, namespace).Set(latencySec)
+	tlsHistogram.WithLabelValues(e.TypeString(), procName, namespace).Observe(latencySec)
+	tlsHandshakesCounter.WithLabelValues(e.TypeString(), procName, namespace).Inc()
 }
 
 func ExportResourceLimitMetric(e *events.Event) {
@@ -997,6 +1005,11 @@ func ExportResourceMetrics(resourceType string, namespace string, limitBytes, us
 	resourceAlertLevelGauge.WithLabelValues(resourceType, namespace).Set(float64(alertLevel))
 }
 
+// boundProcessName caps process_name label cardinality.
+func boundProcessName(e *events.Event) string {
+	return processCardinality.bound(e.ProcessName)
+}
+
 // poolLabels resolves the (bounded) pool_id and process_name label values so
 // arbitrary pool identifiers and process names cannot grow series without
 // bound, matching how every other traffic-derived label is capped.
@@ -1005,7 +1018,7 @@ func poolLabels(e *events.Event) (poolID, processName string) {
 	if poolID == "" {
 		poolID = "default"
 	}
-	return poolCardinality.bound(poolID), processCardinality.bound(e.ProcessName)
+	return poolCardinality.bound(poolID), boundProcessName(e)
 }
 
 func ExportPoolAcquireMetricWithContext(e *events.Event, namespace string) {
