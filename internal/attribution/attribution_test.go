@@ -99,16 +99,22 @@ func TestCgroupMismatchSuspectsPidReuse(t *testing.T) {
 	}
 }
 
-func TestZeroCgroupSkipsReuseCheck(t *testing.T) {
+// TestZeroCgroupIsUnverifiable is the regression for the pid-reuse guard
+// bypass.
+func TestZeroCgroupIsUnverifiable(t *testing.T) {
 	table, _ := newTestTable(time.Minute, 16)
-	table.Record(42, 0, "no-cgroup-producer")
-	if _, ok, reuse := table.Lookup(42, 200); !ok || reuse {
-		t.Fatalf("zero recorded cgroup must not trigger reuse: hit=%v reuse=%v", ok, reuse)
+
+	table.Record(42, 0, "victim-pod-comm")
+	if comm, ok, reuse := table.Lookup(42, 200); ok || reuse || comm != "" {
+		t.Fatalf("zero recorded cgroup must be unverifiable (miss), got hit=%v reuse=%v comm=%q", ok, reuse, comm)
 	}
 
 	table.Record(43, 100, "curl")
-	if _, ok, reuse := table.Lookup(43, 0); !ok || reuse {
-		t.Fatalf("zero lookup cgroup must not trigger reuse: hit=%v reuse=%v", ok, reuse)
+	if comm, ok, reuse := table.Lookup(43, 0); ok || reuse || comm != "" {
+		t.Fatalf("zero event cgroup must be unverifiable (miss), got hit=%v reuse=%v comm=%q", ok, reuse, comm)
+	}
+	if comm, ok, reuse := table.Lookup(43, 100); !ok || reuse || comm != "curl" {
+		t.Fatalf("unverifiable lookup must not evict the entry; want curl hit, got hit=%v reuse=%v comm=%q", ok, reuse, comm)
 	}
 }
 

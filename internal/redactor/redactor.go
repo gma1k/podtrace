@@ -101,14 +101,32 @@ func (r *Redactor) Redact(e *events.Event) {
 	for _, rule := range r.rules {
 		e.Target = rule.Pattern.ReplaceAllString(e.Target, rule.Replace)
 		e.Details = rule.Pattern.ReplaceAllString(e.Details, rule.Replace)
+		e.TraceState = rule.Pattern.ReplaceAllString(e.TraceState, rule.Replace)
 	}
 }
+
+// credentialKeyNames is the single source of truth for the key names whose
+// values are treated as secrets, shared by the key=value, JSON, and YAML
+// rules so coverage cannot drift between formats.
+const credentialKeyNames = `password|passwd|pwd|token|api[_-]?key|apikey|secret|access[_-]?key|` +
+	`authorization|auth|bearer|session[_-]?id|jsessionid|phpsessid|asp\.net_sessionid|session|sid|` +
+	`csrf[_-]?token|xsrf[_-]?token|refresh[_-]?token|id[_-]?token`
+
+// sensitiveHeaderNames are HTTP header names whose entire value is a
+// credential (or a cookie jar of them).
+const sensitiveHeaderNames = `cookie|set-cookie|authorization|proxy-authorization|` +
+	`x-auth-token|x-api-key|x-csrf-token|x-xsrf-token`
 
 func defaultRules() []Rule {
 	return []Rule{
 		{
+			Name:    "sensitive_headers",
+			Pattern: regexp.MustCompile(`(?im)^(` + sensitiveHeaderNames + `)[ \t]*:[ \t]*.+$`),
+			Replace: "${1}: ***",
+		},
+		{
 			Name:    "credential_kv",
-			Pattern: regexp.MustCompile(`(?i)(password|passwd|pwd|token|api[_-]?key|apikey|secret|access[_-]?key|auth)=[^\s&]+`),
+			Pattern: regexp.MustCompile(`(?i)(` + credentialKeyNames + `)=[^\s&;,]+`),
 			Replace: "${1}=***",
 		},
 		{
@@ -123,12 +141,12 @@ func defaultRules() []Rule {
 		},
 		{
 			Name:    "credential_json",
-			Pattern: regexp.MustCompile(`(?i)"(password|passwd|pwd|token|api[_-]?key|apikey|secret|access[_-]?key)"\s*:\s*"[^"]*"`),
+			Pattern: regexp.MustCompile(`(?i)"(` + credentialKeyNames + `)"\s*:\s*"[^"]*"`),
 			Replace: `"${1}":"***"`,
 		},
 		{
 			Name:    "credential_yaml",
-			Pattern: regexp.MustCompile(`(?i)\b(password|passwd|pwd|token|api[_-]?key|apikey|secret|access[_-]?key)\s*:\s+[^\s,}]+`),
+			Pattern: regexp.MustCompile(`(?i)\b(` + credentialKeyNames + `)\s*:\s+[^\s,}]+`),
 			Replace: "${1}: ***",
 		},
 		{

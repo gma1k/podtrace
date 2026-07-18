@@ -88,8 +88,9 @@ func (t *Table) Record(pid uint32, cgroupID uint64, comm string) {
 	})
 }
 
-// Lookup returns the comm recorded for pid, if it is still within TTL
-// and its cgroup is consistent with the event being attributed.
+// Lookup returns the comm recorded for pid when it is still within TTL and
+// its cgroup can be positively confirmed to match the event being
+// attributed.
 func (t *Table) Lookup(pid uint32, cgroupID uint64) (comm string, ok bool, reuseSuspected bool) {
 	if t == nil || pid == 0 {
 		return "", false, false
@@ -106,7 +107,10 @@ func (t *Table) Lookup(pid uint32, cgroupID uint64) (comm string, ok bool, reuse
 		delete(t.entries, pid)
 		return "", false, false
 	}
-	if cgroupID != 0 && e.cgroupID != 0 && e.cgroupID != cgroupID {
+	if cgroupID == 0 || e.cgroupID == 0 {
+		return "", false, false
+	}
+	if e.cgroupID != cgroupID {
 		t.order.Remove(el)
 		delete(t.entries, pid)
 		return "", false, true
