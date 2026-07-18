@@ -8,6 +8,7 @@ import (
 
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/events"
+	"github.com/podtrace/podtrace/internal/sanitize"
 )
 
 type PoolInfo struct {
@@ -175,7 +176,7 @@ func GeneratePoolCorrelation(events []*events.Event) string {
 		if i >= config.MaxConnectionTargets {
 			break
 		}
-		report += fmt.Sprintf("    - %s:\n", summary.PoolID)
+		report += fmt.Sprintf("    - %s:\n", sanitize.Terminal(summary.PoolID))
 		report += fmt.Sprintf("        Acquires: %d, Releases: %d\n", summary.AcquireCount, summary.ReleaseCount)
 		report += fmt.Sprintf("        Release ratio: %.2f%% (releases/acquires)\n", summary.ReleaseRatio*100)
 		report += fmt.Sprintf("        Current connections: %d (peak: %d)\n", summary.CurrentConns, summary.MaxConns)

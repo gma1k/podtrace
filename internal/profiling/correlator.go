@@ -10,6 +10,7 @@ import (
 	"github.com/podtrace/podtrace/internal/clock"
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/events"
+	"github.com/podtrace/podtrace/internal/sanitize"
 )
 
 func safeInt64(v uint64) int64 {
@@ -34,7 +35,7 @@ type ProcessCPU struct {
 	AvgBlockNS float64
 }
 
-// CorrelatedResult is the output of Correlate — it ties together BPF-observed
+// CorrelatedResult is the output of Correlate, it ties together BPF-observed
 // slow events, CPU hot-path frames from SchedSwitch stacks, memory page-fault
 // data, and optional pprof endpoint results fetched from the pod.
 type CorrelatedResult struct {
@@ -49,7 +50,7 @@ type CorrelatedResult struct {
 	CPUHotProcesses []ProcessCPU
 
 	// Memory — BPF-observed page faults and OOM kills.
-	PageFaultCounts map[uint32]int   // PID → fault count
+	PageFaultCounts map[uint32]int // PID → fault count
 	OOMEvents       []*events.Event
 
 	// Optional pprof endpoint data (nil if pod has no pprof server).
@@ -258,9 +259,9 @@ func GenerateSection(cr *CorrelatedResult, duration time.Duration) string {
 			fmt.Fprintf(&sb, "    %s  PID=%-6d  %-12s  latency=%v  target=%s\n",
 				e.TypeString(),
 				e.PID,
-				e.ProcessName,
+				sanitize.Terminal(e.ProcessName),
 				time.Duration(safeInt64(e.LatencyNS)),
-				truncate(e.Target, 60))
+				sanitize.Terminal(truncate(e.Target, 60)))
 		}
 		sb.WriteString("\n")
 	}
@@ -272,7 +273,7 @@ func GenerateSection(cr *CorrelatedResult, duration time.Duration) string {
 			"PID", "Process", "Switches", "Avg Block Time")
 		for _, ps := range cr.CPUHotProcesses {
 			fmt.Fprintf(&sb, "    %-8d  %-16s  %-10d  %v\n",
-				ps.PID, truncate(ps.Name, 15), ps.SchedCount,
+				ps.PID, sanitize.Terminal(truncate(ps.Name, 15)), ps.SchedCount,
 				time.Duration(int64(ps.AvgBlockNS)).Round(time.Microsecond))
 		}
 		sb.WriteString("\n")
@@ -339,7 +340,7 @@ func GenerateSection(cr *CorrelatedResult, duration time.Duration) string {
 	if len(cr.OOMEvents) > 0 {
 		fmt.Fprintf(&sb, "  OOM Kill events: %d\n", len(cr.OOMEvents))
 		for _, e := range cr.OOMEvents {
-			fmt.Fprintf(&sb, "    task=%s  mem=%s\n", e.Target, formatBytes(safeInt64(e.Bytes)))
+			fmt.Fprintf(&sb, "    task=%s  mem=%s\n", sanitize.Terminal(e.Target), formatBytes(safeInt64(e.Bytes)))
 		}
 		sb.WriteString("\n")
 	}

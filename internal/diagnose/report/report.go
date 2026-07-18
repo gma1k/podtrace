@@ -16,6 +16,7 @@ import (
 	"github.com/podtrace/podtrace/internal/diagnose/tracker"
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/internal/safeconv"
+	"github.com/podtrace/podtrace/internal/sanitize"
 )
 
 type Diagnostician interface {
@@ -639,7 +640,7 @@ func formatOOMKills(oomKillEvents []*events.Event) string {
 			if procName == "" {
 				procName = fmt.Sprintf("PID %d", e.PID)
 			}
-			result += fmt.Sprintf("    - %s (%s)\n", procName, analyzer.FormatBytes(e.Bytes))
+			result += fmt.Sprintf("    - %s (%s)\n", sanitize.Terminal(procName), analyzer.FormatBytes(e.Bytes))
 		}
 	}
 	return result
@@ -743,7 +744,7 @@ func GeneratePoolSection(d Diagnostician, duration time.Duration) string {
 			if i >= config.MaxConnectionTargets {
 				break
 			}
-			report += fmt.Sprintf("    - %s:\n", summary.PoolID)
+			report += fmt.Sprintf("    - %s:\n", sanitize.Terminal(summary.PoolID))
 			report += fmt.Sprintf("        Acquires: %d, Releases: %d\n", summary.AcquireCount, summary.ReleaseCount)
 			report += fmt.Sprintf("        Release ratio: %.2f%% (releases/acquires)\n", summary.ReleaseRatio*100)
 			report += fmt.Sprintf("        Current connections: %d (peak: %d)\n", summary.CurrentConns, summary.MaxConns)
@@ -823,7 +824,7 @@ func GenerateSecuritySection(d Diagnostician) string {
 		if e.K8s != nil && e.K8s.PodName != "" {
 			pod = e.K8s.PodName
 		}
-		victims[pod] = fmt.Sprintf("%s, uid %d", e.ProcessName, e.Bytes)
+		victims[pod] = fmt.Sprintf("%s, uid %d", sanitize.Terminal(e.ProcessName), e.Bytes)
 	}
 	if len(victims) == 0 {
 		return ""
@@ -1068,7 +1069,7 @@ func formatFastCGIActivity(d Diagnostician, duration time.Duration) string {
 			if name == "" {
 				name = "unknown"
 			}
-			result += fmt.Sprintf("    PID %d (%s): %d req\n", w.pid, name, w.count)
+			result += fmt.Sprintf("    PID %d (%s): %d req\n", w.pid, sanitize.Terminal(name), w.count)
 		}
 	}
 
@@ -1161,7 +1162,7 @@ func formatFastCGIActivity(d Diagnostician, duration time.Duration) string {
 		if method == "" {
 			method = "REQ"
 		}
-		line := fmt.Sprintf("    - %s %s: %d req", method, s.uri, s.count)
+		line := fmt.Sprintf("    - %s %s: %d req", sanitize.Terminal(method), sanitize.Terminal(s.uri), s.count)
 		if len(s.latencies) > 0 {
 			line += fmt.Sprintf(", p50=%.2fms, p95=%.2fms, p99=%.2fms, max=%.2fms",
 				pctMs(s.latencies, 50), pctMs(s.latencies, 95),
@@ -1290,7 +1291,7 @@ func formatProcessActivity(allEvents []*events.Event) string {
 			name = "unknown"
 		}
 		result += fmt.Sprintf("    - PID %d (%s)%s: %d events (%.1f%%)\n",
-			pidInfo.Pid, name, pidInfo.PodSuffix(), pidInfo.Count, pidInfo.Percentage)
+			pidInfo.Pid, sanitize.Terminal(name), pidInfo.PodSuffix(), pidInfo.Count, pidInfo.Percentage)
 	}
 	result += "\n"
 	return result

@@ -7,6 +7,7 @@ import (
 
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/events"
+	"github.com/podtrace/podtrace/internal/sanitize"
 )
 
 type ConnectionInfo struct {
@@ -128,7 +129,7 @@ func GenerateConnectionCorrelation(events []*events.Event) string {
 		if i >= config.MaxConnectionTargets {
 			break
 		}
-		report += fmt.Sprintf("    - %s:\n", summary.Target)
+		report += fmt.Sprintf("    - %s:\n", sanitize.Terminal(summary.Target))
 		report += fmt.Sprintf("        Connect: %s\n", summary.ConnectTime.Format("15:04:05"))
 		report += fmt.Sprintf("        Operations: %d send, %d recv (total: %d)\n", summary.SendCount, summary.RecvCount, summary.TotalOps)
 		report += fmt.Sprintf("        Avg latency: %.2fms\n", float64(summary.AvgLatency.Nanoseconds())/float64(config.NSPerMS))

@@ -2,6 +2,7 @@ package stacktrace
 
 import (
 	"bufio"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -101,12 +102,12 @@ func isSorted(s []ksym) bool {
 	return true
 }
 
+// sortKsyms orders symbols by address so Resolve can binary-search. It
+// runs whenever /proc/kallsyms is not already address-sorted, which is
+// common once kernel modules are loaded. /proc/kallsyms holds ~10^5–10^6
+// symbols, so this must be O(n log n): an insertion sort here (~10^10+
+// comparisons) hung stack symbolication — and the whole diagnose report —
+// for minutes.
 func sortKsyms(s []ksym) {
-	for i := 1; i < len(s); i++ {
-		j := i
-		for j > 0 && s[j].Addr < s[j-1].Addr {
-			s[j], s[j-1] = s[j-1], s[j]
-			j--
-		}
-	}
+	sort.Slice(s, func(i, j int) bool { return s[i].Addr < s[j].Addr })
 }
