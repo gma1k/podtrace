@@ -7,6 +7,7 @@ import (
 
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/diagnose/analyzer"
+	"github.com/podtrace/podtrace/internal/sanitize"
 )
 
 func SectionHeader(title string) string {
@@ -42,7 +43,7 @@ func TopTargets(targets []analyzer.TargetCount, limit int, headerLabel, countLab
 		if i >= limit {
 			break
 		}
-		result += fmt.Sprintf("    - %s (%d %s)\n", target.Target, target.Count, countLabel)
+		result += fmt.Sprintf("    - %s (%d %s)\n", sanitize.Terminal(target.Target), target.Count, countLabel)
 	}
 	return result
 }
@@ -88,7 +89,7 @@ func TopItems(items map[string]int, limit int, headerLabel, itemLabel string) st
 		if i >= limit {
 			break
 		}
-		result += fmt.Sprintf("    - %s (%d %s)\n", ic.name, ic.count, itemLabel)
+		result += fmt.Sprintf("    - %s (%d %s)\n", sanitize.Terminal(ic.name), ic.count, itemLabel)
 	}
 	return result
 }
@@ -117,10 +118,11 @@ func TopItemsWithRate(items map[string]int, limit int, headerLabel, itemLabel st
 		if i >= limit {
 			break
 		}
+		name := sanitize.Terminal(ic.name)
 		if secs > 0 {
-			result += fmt.Sprintf("    - %s (%d %s, %.1f/sec)\n", ic.name, ic.count, itemLabel, float64(ic.count)/secs)
+			result += fmt.Sprintf("    - %s (%d %s, %.1f/sec)\n", name, ic.count, itemLabel, float64(ic.count)/secs)
 		} else {
-			result += fmt.Sprintf("    - %s (%d %s)\n", ic.name, ic.count, itemLabel)
+			result += fmt.Sprintf("    - %s (%d %s)\n", name, ic.count, itemLabel)
 		}
 	}
 	return result

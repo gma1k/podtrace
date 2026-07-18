@@ -8,6 +8,7 @@ import (
 
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/events"
+	"github.com/podtrace/podtrace/internal/sanitize"
 )
 
 type PodCommunication struct {
@@ -178,7 +179,7 @@ func GeneratePodCommunicationReport(summaries []PodCommunicationSummary) string 
 
 	for i := 0; i < maxDisplay; i++ {
 		summary := summaries[i]
-		report += fmt.Sprintf("    - %s (namespace: %s):\n", summary.Target, summary.Namespace)
+		report += fmt.Sprintf("    - %s (namespace: %s):\n", sanitize.Terminal(summary.Target), sanitize.Terminal(summary.Namespace))
 		report += fmt.Sprintf("        Connections: %d\n", summary.ConnectionCount)
 		if summary.TotalBytes > 0 {
 			report += fmt.Sprintf("        Total bytes: %s\n", formatBytes(summary.TotalBytes))

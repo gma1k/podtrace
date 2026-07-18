@@ -15,6 +15,7 @@ import (
 	"github.com/podtrace/podtrace/internal/hostfs"
 	"github.com/podtrace/podtrace/internal/procfs"
 	"github.com/podtrace/podtrace/internal/safeconv"
+	"github.com/podtrace/podtrace/internal/sanitize"
 )
 
 type Diagnostician interface {
@@ -265,7 +266,7 @@ func GenerateStackTraceSectionWithContext(d Diagnostician, ctx context.Context) 
 			continue
 		}
 		if e.Target != "" {
-			report += fmt.Sprintf("  Hot stack %d: %d events, type=%s, target=%s, avg latency=%.2fms\n", i+1, s.Count, e.TypeString(), e.Target, float64(e.LatencyNS)/float64(config.NSPerMS))
+			report += fmt.Sprintf("  Hot stack %d: %d events, type=%s, target=%s, avg latency=%.2fms\n", i+1, s.Count, e.TypeString(), sanitize.Terminal(e.Target), float64(e.LatencyNS)/float64(config.NSPerMS))
 		} else {
 			report += fmt.Sprintf("  Hot stack %d: %d events, type=%s, avg latency=%.2fms\n", i+1, s.Count, e.TypeString(), float64(e.LatencyNS)/float64(config.NSPerMS))
 		}
