@@ -27,13 +27,25 @@ func TestRedact_Password(t *testing.T) {
 
 func TestRedact_BearerToken(t *testing.T) {
 	r := redactor.Default()
-	e := makeEvent("", "Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.payload")
+	e := makeEvent("", "grpc call carried Bearer eyJhbGciOiJSUzI1NiJ9.payload downstream")
 	r.Redact(e)
 	if strings.Contains(e.Details, "eyJ") {
 		t.Errorf("bearer token not redacted: %q", e.Details)
 	}
 	if !strings.Contains(e.Details, "Bearer ***") {
 		t.Errorf("expected Bearer ***: %q", e.Details)
+	}
+}
+
+func TestRedact_AuthorizationHeaderFullyRedacted(t *testing.T) {
+	r := redactor.Default()
+	e := makeEvent("", "Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.payload")
+	r.Redact(e)
+	if strings.Contains(e.Details, "eyJ") {
+		t.Errorf("authorization token not redacted: %q", e.Details)
+	}
+	if !strings.Contains(e.Details, "Authorization: ***") {
+		t.Errorf("expected the whole Authorization value redacted: %q", e.Details)
 	}
 }
 
