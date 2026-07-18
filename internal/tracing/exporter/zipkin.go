@@ -43,8 +43,9 @@ type zipkinAnnotation struct {
 }
 
 func NewZipkinExporter(endpoint string, sampleRate float64) (*ZipkinExporter, error) {
-	if endpoint == "" {
-		endpoint = config.DefaultZipkinEndpoint
+	endpoint, err := validateExporterEndpoint(endpoint, config.DefaultZipkinEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("zipkin: %w", err)
 	}
 
 	return &ZipkinExporter{

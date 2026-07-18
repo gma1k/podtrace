@@ -38,8 +38,9 @@ type datadogSpan struct {
 }
 
 func NewDataDogExporter(endpoint, apiKey string, sampleRate float64) (*DataDogExporter, error) {
-	if endpoint == "" {
-		endpoint = config.DefaultDataDogEndpoint
+	endpoint, err := validateExporterEndpoint(endpoint, config.DefaultDataDogEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("datadog: %w", err)
 	}
 
 	return &DataDogExporter{

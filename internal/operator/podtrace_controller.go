@@ -63,8 +63,8 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		if removeFinalizer(&pt) {
 			if err := r.Update(ctx, &pt); err != nil {
-				if apierrors.IsConflict(err) {
-					return ctrl.Result{RequeueAfter: time.Second}, nil
+				if res, handled := finalizerUpdateOutcome(err); handled {
+					return res, nil
 				}
 				return ctrl.Result{}, fmt.Errorf("clear finalizer: %w", err)
 			}
@@ -73,8 +73,8 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	if ensureFinalizer(&pt) {
 		if err := r.Update(ctx, &pt); err != nil {
-			if apierrors.IsConflict(err) {
-				return ctrl.Result{RequeueAfter: time.Second}, nil
+			if res, handled := finalizerUpdateOutcome(err); handled {
+				return res, nil
 			}
 			return ctrl.Result{}, fmt.Errorf("set finalizer: %w", err)
 		}

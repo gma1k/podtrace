@@ -172,3 +172,37 @@ func TestValidateExporterConfigVariant_MultiSecretHeaders(t *testing.T) {
 		t.Errorf("one valueFrom header must be accepted: %v", err)
 	}
 }
+
+// TestValidateExporterConfigVariant_EndpointScheme is the admission-side
+// regression for the exporter SSRF/cleartext finding: an explicit
+// non-http(s) scheme must be rejected; bare host:port and http/https are
+// accepted (the cleartext-to-non-loopback refusal lives in the exporter
+// constructors, which know the runtime insecure override).
+func TestValidateExporterConfigVariant_EndpointScheme(t *testing.T) {
+	tests := []struct {
+		name    string
+		spec    ExporterConfigSpec
+		wantErr string
+	}{
+		{"otlp bare host:port ok", ExporterConfigSpec{Type: ExporterTypeOTLP, OTLP: &OTLPExporter{Endpoint: "otel-collector:4318"}}, ""},
+		{"otlp https ok", ExporterConfigSpec{Type: ExporterTypeOTLP, OTLP: &OTLPExporter{Endpoint: "https://otel:4318"}}, ""},
+		{"datadog gopher rejected", ExporterConfigSpec{Type: ExporterTypeDataDog, DataDog: &DataDogExporter{Endpoint: "gopher://evil.internal:70/x"}}, "scheme must be http or https"},
+		{"splunk ftp rejected", ExporterConfigSpec{Type: ExporterTypeSplunk, Splunk: &SplunkExporter{Endpoint: "ftp://evil.internal/x"}}, "scheme must be http or https"},
+		{"zipkin http ok", ExporterConfigSpec{Type: ExporterTypeZipkin, Zipkin: &ZipkinExporter{Endpoint: "http://zipkin:9411/api/v2/spans"}}, ""},
+		{"jaeger dict rejected", ExporterConfigSpec{Type: ExporterTypeJaeger, Jaeger: &JaegerExporter{Endpoint: "dict://evil.internal:2628/x"}}, "scheme must be http or https"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateExporterConfigVariant(tt.spec)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("got %v, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}

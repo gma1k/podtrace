@@ -51,7 +51,7 @@ func TestNamingHelpers(t *testing.T) {
 		{"AgentBundleRoleBindingName", AgentBundleRoleBindingName(), "podtrace-agent-bundles"},
 		{"AgentServiceAccountName", AgentServiceAccountName(), "podtrace-agent"},
 		{"OperatorWebhookServiceName", OperatorWebhookServiceName(), "podtrace-webhook"},
-		{"SessionServiceAccountName", SessionServiceAccountName(), "podtrace-session"},
+		{"SessionServiceAccountName", SessionServiceAccountName("abcdef012345xyz"), "podtrace-session-abcdef012345"},
 	}
 	for _, c := range cases {
 		if c.got != c.want {

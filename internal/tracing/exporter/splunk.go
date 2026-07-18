@@ -29,8 +29,9 @@ type SplunkEvent struct {
 }
 
 func NewSplunkExporter(endpoint, token string, sampleRate float64) (*SplunkExporter, error) {
-	if endpoint == "" {
-		endpoint = config.DefaultSplunkEndpoint
+	endpoint, err := validateExporterEndpoint(endpoint, config.DefaultSplunkEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("splunk: %w", err)
 	}
 
 	return &SplunkExporter{

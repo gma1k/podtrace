@@ -80,5 +80,50 @@ func ValidateExporterConfigVariant(spec ExporterConfigSpec) error {
 			return fmt.Errorf("at most one headers[].valueFrom is supported (the bundle carries a single credential); move additional secret-backed headers into spec.otlp.headersFromSecret")
 		}
 	}
+	if err := validateExporterEndpoint(spec); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateExporterEndpoint enforces the endpoint scheme allowlist on the
+// populated exporter variant.
+func validateExporterEndpoint(spec ExporterConfigSpec) error {
+	switch {
+	case spec.OTLP != nil:
+		return validateEndpointScheme("spec.otlp.endpoint", spec.OTLP.Endpoint)
+	case spec.Jaeger != nil:
+		return validateEndpointScheme("spec.jaeger.endpoint", spec.Jaeger.Endpoint)
+	case spec.Zipkin != nil:
+		return validateEndpointScheme("spec.zipkin.endpoint", spec.Zipkin.Endpoint)
+	case spec.Splunk != nil:
+		return validateEndpointScheme("spec.splunk.endpoint", spec.Splunk.Endpoint)
+	case spec.DataDog != nil:
+		return validateEndpointScheme("spec.datadog.endpoint", spec.DataDog.Endpoint)
+	}
+	return nil
+}
+
+// validateEndpointScheme mirrors the exporter constructors' normalization:
+// a bare host:port is treated as http:// (allowed); an explicit scheme must
+// be http or https.
+func validateEndpointScheme(field, endpoint string) error {
+	raw := strings.TrimSpace(endpoint)
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("%s: parse %q: %w", field, raw, err)
+	}
+	if u.Scheme == "" || u.Host == "" {
+		if _, err := url.Parse("http://" + raw); err != nil {
+			return fmt.Errorf("%s: parse %q: %w", field, raw, err)
+		}
+		return nil
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("%s: endpoint scheme must be http or https, got %q", field, u.Scheme)
+	}
 	return nil
 }

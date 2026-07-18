@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -70,8 +71,8 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		forgetReportObservations(session.Namespace, session.Name)
 		if removeFinalizer(&session) {
 			if err := r.Update(ctx, &session); err != nil {
-				if apierrors.IsConflict(err) {
-					return ctrl.Result{RequeueAfter: time.Second}, nil
+				if res, handled := finalizerUpdateOutcome(err); handled {
+					return res, nil
 				}
 				return ctrl.Result{}, fmt.Errorf("clear finalizer: %w", err)
 			}
@@ -80,8 +81,8 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 	if ensureFinalizer(&session) {
 		if err := r.Update(ctx, &session); err != nil {
-			if apierrors.IsConflict(err) {
-				return ctrl.Result{RequeueAfter: time.Second}, nil
+			if res, handled := finalizerUpdateOutcome(err); handled {
+				return res, nil
 			}
 			return ctrl.Result{}, fmt.Errorf("set finalizer: %w", err)
 		}
@@ -150,17 +151,21 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
 	}
 
-	if err := ensureSessionServiceAccount(ctx, r.Client, systemNS); err != nil {
+	if err := ensureSessionServiceAccount(ctx, r.Client, &session, systemNS); err != nil {
 		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "SessionSA", err.Error())
 		_ = r.Status().Update(ctx, &session)
 		return ctrl.Result{}, err
 	}
-	if err := ensureSessionReportRBAC(ctx, r.Client, &session, systemNS); err != nil {
+	if err := ensureSessionReportObject(ctx, r.Client, &session); err != nil {
+		var conflict *reportObjectConflictError
+		if errors.As(err, &conflict) {
+			return ctrl.Result{}, r.failSessionTerminally(ctx, &session, "ReportObjectConflict", err.Error())
+		}
 		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "SessionRBAC", err.Error())
 		_ = r.Status().Update(ctx, &session)
 		return ctrl.Result{}, err
 	}
-	if err := ensureSessionReportObject(ctx, r.Client, &session); err != nil {
+	if err := ensureSessionReportRBAC(ctx, r.Client, &session, systemNS); err != nil {
 		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "SessionRBAC", err.Error())
 		_ = r.Status().Update(ctx, &session)
 		return ctrl.Result{}, err
@@ -186,15 +191,16 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 
-	jobs, err := r.ensureJobs(ctx, &session, tc, targets)
+	completedNodes := completedSessionNodes(session.Status.Jobs)
+	jobs, err := r.ensureJobs(ctx, &session, tc, targets, completedNodes)
 	if err != nil {
 		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "EnsureJobs", err.Error())
 		_ = r.Status().Update(ctx, &session)
 		return ctrl.Result{}, err
 	}
 
-	session.Status.Jobs = makeSessionJobRefs(jobs)
-	session.Status.State = computeSessionState(jobs, len(targets.Nodes))
+	session.Status.Jobs = mergeSessionJobRefs(jobs, session.Status.Jobs)
+	session.Status.State = computeSessionState(session.Status.Jobs, jobs, len(targets.Nodes))
 	session.Status.ObservedGeneration = session.Generation
 
 	if err := populateSessionSummaries(ctx, r.Client, &session, jobs); err != nil {
@@ -524,10 +530,13 @@ func effectiveMaxConcurrentSessionsPerNode(tc *podtracev1alpha1.TracerConfig) in
 
 // ensureJobs creates-or-updates one Job per target node, owner-ref'd to
 // the session.
-func (r *PodTraceSessionReconciler) ensureJobs(ctx context.Context, s *podtracev1alpha1.PodTraceSession, tc *podtracev1alpha1.TracerConfig, targets sessionTargets) ([]batchv1.Job, error) {
+func (r *PodTraceSessionReconciler) ensureJobs(ctx context.Context, s *podtracev1alpha1.PodTraceSession, tc *podtracev1alpha1.TracerConfig, targets sessionTargets, completedNodes map[string]struct{}) ([]batchv1.Job, error) {
 	systemNS := systemNamespaceForSession(tc, r.SystemNamespace)
 
 	for _, node := range targets.Nodes {
+		if _, done := completedNodes[node]; done {
+			continue
+		}
 		job := &batchv1.Job{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      SessionJobName(s.UID, node),

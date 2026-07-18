@@ -502,6 +502,10 @@ func OTLPAllowInsecureNonLoopback() bool {
 	return getBoolEnvOrDefault("PODTRACE_OTLP_INSECURE", false)
 }
 
+func ExporterAllowInsecureNonLoopback() bool {
+	return getBoolEnvOrDefault("PODTRACE_EXPORTER_INSECURE", false)
+}
+
 func MetricsEnablePprof() bool {
 	return getBoolEnvOrDefault("PODTRACE_METRICS_ENABLE_PPROF", false) || ProfilingEnabled
 }
@@ -518,17 +522,10 @@ func AllowCgroupFilterAutoDisable() bool {
 	return getBoolEnvOrDefault("PODTRACE_ALLOW_CGROUP_FILTER_DISABLE", false)
 }
 
-// MaxCaptureHeaders bounds the header-capture allowlist; mirrors H3_HDR_SLOTS
-// in bpf/events.h.
 const MaxCaptureHeaders = 4
 
-// MaxCaptureHeaderNameLen bounds a captured header name; mirrors
-// H3_HDR_NAME_MAX in bpf/events.h.
 const MaxCaptureHeaderNameLen = 32
 
-// CaptureHeaderList parses PODTRACE_CAPTURE_HEADERS (comma-separated HTTP
-// header names) into the normalized lowercase allowlist applied to HTTP/2 and
-// HTTP/3 events.
 func CaptureHeaderList() []string {
 	return ParseCaptureHeaders(CaptureHeaders)
 }

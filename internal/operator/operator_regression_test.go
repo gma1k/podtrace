@@ -107,7 +107,7 @@ func TestEnsureSessionPodReadRBAC(t *testing.T) {
 		if err := c.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: SessionPodReadRoleBindingName(s.UID)}, &rb); err != nil {
 			t.Fatalf("pod-read RoleBinding missing in %s: %v", ns, err)
 		}
-		if len(rb.Subjects) != 1 || rb.Subjects[0].Namespace != systemNS || rb.Subjects[0].Name != SessionServiceAccountName() {
+		if len(rb.Subjects) != 1 || rb.Subjects[0].Namespace != systemNS || rb.Subjects[0].Name != SessionServiceAccountName(s.UID) {
 			t.Errorf("RoleBinding in %s bound to wrong subject: %+v", ns, rb.Subjects)
 		}
 	}
