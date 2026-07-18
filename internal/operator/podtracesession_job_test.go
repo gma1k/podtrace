@@ -124,8 +124,8 @@ func TestBuildSessionJobSpec_CoreInvariants(t *testing.T) {
 	if spec.Template.Spec.Containers[0].Image != "ghcr.io/gma1k/podtrace:test" {
 		t.Errorf("image: %q", spec.Template.Spec.Containers[0].Image)
 	}
-	if spec.Template.Spec.ServiceAccountName != SessionServiceAccountName() {
-		t.Errorf("SA=%q want %q", spec.Template.Spec.ServiceAccountName, SessionServiceAccountName())
+	if spec.Template.Spec.ServiceAccountName != SessionServiceAccountName("u-sess") {
+		t.Errorf("SA=%q want %q", spec.Template.Spec.ServiceAccountName, SessionServiceAccountName("u-sess"))
 	}
 	args := strings.Join(spec.Template.Spec.Containers[0].Args, " ")
 	if !slices.Contains(spec.Template.Spec.Containers[0].Args, "--tracing") {
@@ -224,7 +224,7 @@ func TestComputeSessionPhase_Transitions(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			if got := computeSessionState(tc.jobs, len(tc.jobs)); got != tc.want {
+			if got := computeSessionState(makeSessionJobRefs(tc.jobs), tc.jobs, len(tc.jobs)); got != tc.want {
 				t.Errorf("got %q want %q", got, tc.want)
 			}
 		})

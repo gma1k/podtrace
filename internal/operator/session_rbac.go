@@ -15,21 +15,30 @@ import (
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
 )
 
-func ensureSessionServiceAccount(ctx context.Context, c client.Client, systemNS string) error {
+func ensureSessionServiceAccount(ctx context.Context, c client.Client, s *podtracev1alpha1.PodTraceSession, systemNS string) error {
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      SessionServiceAccountName(),
+			Name:      SessionServiceAccountName(s.UID),
 			Namespace: systemNS,
 		},
 	}
 	if _, err := controllerutil.CreateOrUpdate(ctx, c, sa, func() error {
-		sa.Labels = mergeLabels(sa.Labels, map[string]string{
-			LabelManagedBy: ManagedByValue,
-			LabelComponent: ComponentSession,
-		})
+		sa.Labels = mergeLabels(sa.Labels, sessionRBACLabels(s))
 		return nil
 	}); err != nil {
 		return fmt.Errorf("ensure session SA: %w", err)
+	}
+	return nil
+}
+
+// cleanupSessionServiceAccount deletes the per-session ServiceAccount in
+// the system namespace.
+func cleanupSessionServiceAccount(ctx context.Context, c client.Client, s *podtracev1alpha1.PodTraceSession, systemNS string) error {
+	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
+		Name: SessionServiceAccountName(s.UID), Namespace: systemNS,
+	}}
+	if err := c.Delete(ctx, sa); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete session SA %s/%s: %w", systemNS, sa.Name, err)
 	}
 	return nil
 }
@@ -73,7 +82,7 @@ func ensureSessionReportRBAC(ctx context.Context, c client.Client, s *podtracev1
 		}
 		binding.Subjects = []rbacv1.Subject{{
 			Kind:      rbacv1.ServiceAccountKind,
-			Name:      SessionServiceAccountName(),
+			Name:      SessionServiceAccountName(s.UID),
 			Namespace: systemNS,
 		}}
 		return nil
@@ -84,8 +93,7 @@ func ensureSessionReportRBAC(ctx context.Context, c client.Client, s *podtracev1
 }
 
 // cleanupSessionReportRBAC deletes the per-session Role+RoleBinding in
-// the user namespace. Called from the session finalizer path. NotFound
-// is non-fatal — the session may have been created without a reportRef.
+// the user namespace.
 func cleanupSessionReportRBAC(ctx context.Context, c client.Client, s *podtracev1alpha1.PodTraceSession) error {
 	objects := []client.Object{
 		&rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{
@@ -165,7 +173,7 @@ func ensureSessionPodReadRBAC(ctx context.Context, c client.Client, s *podtracev
 			}
 			binding.Subjects = []rbacv1.Subject{{
 				Kind:      rbacv1.ServiceAccountKind,
-				Name:      SessionServiceAccountName(),
+				Name:      SessionServiceAccountName(s.UID),
 				Namespace: systemNS,
 			}}
 			return nil
@@ -239,6 +247,26 @@ func buildSessionReportRules(ref *podtracev1alpha1.ReportReference) []rbacv1.Pol
 	return rules
 }
 
+const (
+	labelReportKind  = "podtrace.io/kind"
+	reportKindValue  = "session-report"
+	reportManagedBy  = "podtrace.io/managed-by"
+	reportManagedVal = "podtrace-cli"
+)
+
+// reportObjectConflictError signals that spec.reportRef names a
+// pre-existing ConfigMap/Secret the session did not create.
+type reportObjectConflictError struct {
+	namespace string
+	name      string
+	resource  string
+}
+
+func (e *reportObjectConflictError) Error() string {
+	return fmt.Sprintf("spec.reportRef names %s %s/%s which already exists and was not created by this session; "+
+		"pick a name that does not collide with an existing object", e.resource, e.namespace, e.name)
+}
+
 // ensureSessionReportObject pre-creates an empty report ConfigMap/Secret in the
 // session namespace so the Job's ServiceAccount needs only scoped get/update.
 func ensureSessionReportObject(ctx context.Context, c client.Client, s *podtracev1alpha1.PodTraceSession) error {
@@ -247,8 +275,8 @@ func ensureSessionReportObject(ctx context.Context, c client.Client, s *podtrace
 		return nil
 	}
 	labels := sessionRBACLabels(s)
-	labels["podtrace.io/managed-by"] = "podtrace-cli"
-	labels["podtrace.io/kind"] = "session-report"
+	labels[reportManagedBy] = reportManagedVal
+	labels[labelReportKind] = reportKindValue
 	var obj client.Object
 	switch resource {
 	case "configmaps":
@@ -258,15 +286,35 @@ func ensureSessionReportObject(ctx context.Context, c client.Client, s *podtrace
 	default:
 		return nil
 	}
-	if err := c.Create(ctx, obj); err != nil && !apierrors.IsAlreadyExists(err) {
+	err := c.Create(ctx, obj)
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("pre-create session report %s/%s: %w", s.Namespace, name, err)
+	}
+
+	existing := obj.DeepCopyObject().(client.Object)
+	if getErr := c.Get(ctx, client.ObjectKey{Namespace: s.Namespace, Name: name}, existing); getErr != nil {
+		return fmt.Errorf("inspect existing session report %s/%s: %w", s.Namespace, name, getErr)
+	}
+	if !reportObjectOwnedBySession(existing.GetLabels(), s) {
+		return &reportObjectConflictError{namespace: s.Namespace, name: name, resource: resource}
 	}
 	return nil
 }
 
+// reportObjectOwnedBySession reports whether a pre-existing report object
+// carries the labels this session stamps on the objects it creates.
+func reportObjectOwnedBySession(labels map[string]string, s *podtracev1alpha1.PodTraceSession) bool {
+	return labels[labelReportKind] == reportKindValue &&
+		labels[reportManagedBy] == reportManagedVal &&
+		labels[LabelSessionName] == s.Name &&
+		labels[LabelSessionNS] == s.Namespace
+}
+
 // reportRefResource decodes spec.reportRef into the (resource, name)
-// tuple the RBAC grant needs. Returns empty strings when no supported
-// sink is set (including ObjectStore, which the webhook rejects today).
+// tuple the RBAC grant needs.
 func reportRefResource(ref *podtracev1alpha1.ReportReference) (string, string) {
 	switch {
 	case ref == nil:

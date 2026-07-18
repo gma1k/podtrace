@@ -28,13 +28,14 @@ func TestEnsureSessionServiceAccount_IsIdempotent(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 	ctx := context.Background()
 
+	s := &podtracev1alpha1.PodTraceSession{ObjectMeta: metav1.ObjectMeta{Name: "diag", Namespace: "team-a", UID: "u-sa-idem"}}
 	for i := 0; i < 2; i++ {
-		if err := ensureSessionServiceAccount(ctx, c, "podtrace-system"); err != nil {
+		if err := ensureSessionServiceAccount(ctx, c, s, "podtrace-system"); err != nil {
 			t.Fatalf("call %d: %v", i, err)
 		}
 	}
 	var sa corev1.ServiceAccount
-	if err := c.Get(ctx, types.NamespacedName{Name: SessionServiceAccountName(), Namespace: "podtrace-system"}, &sa); err != nil {
+	if err := c.Get(ctx, types.NamespacedName{Name: SessionServiceAccountName(s.UID), Namespace: "podtrace-system"}, &sa); err != nil {
 		t.Fatalf("expected SA: %v", err)
 	}
 	if sa.Labels[LabelManagedBy] != ManagedByValue {
@@ -75,10 +76,6 @@ func TestEnsureSessionReportRBAC_CreatesNarrowRole(t *testing.T) {
 	if !foundResourceNamed {
 		t.Errorf("role should scope to resourceNames=[smoke-report]: %+v", role.Rules)
 	}
-	// The sink resource (configmaps/secrets) MUST NOT grant
-	// list/watch/delete — those are footguns for a session-scoped SA.
-	// Pod and event reads DO need list/watch (the CLI uses informers);
-	// this guard scopes the check to the report sink only.
 	for _, rule := range role.Rules {
 		isSinkRule := false
 		for _, res := range rule.Resources {
@@ -105,16 +102,13 @@ func TestEnsureSessionReportRBAC_CreatesNarrowRole(t *testing.T) {
 		t.Errorf("binding.roleRef wrong: %+v", binding.RoleRef)
 	}
 	if len(binding.Subjects) != 1 ||
-		binding.Subjects[0].Name != SessionServiceAccountName() ||
+		binding.Subjects[0].Name != SessionServiceAccountName(s.UID) ||
 		binding.Subjects[0].Namespace != "podtrace-system" {
 		t.Errorf("binding subject wrong: %+v", binding.Subjects)
 	}
 }
 
 func TestEnsureSessionReportRBAC_NoSinkStillGrantsPodRead(t *testing.T) {
-	// Sessions without a reportRef still need pod reads in the user
-	// namespace so the CLI can resolve spec.podRefs / spec.selector.
-	// A Role must be created for every session, even without reportRef.
 	scheme := newRBACScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 	ctx := context.Background()

@@ -269,7 +269,7 @@ func TestFakeReconcile_EnsureJobs(t *testing.T) {
 		},
 	}
 
-	jobs, err := r.ensureJobs(context.Background(), s, nil, sessionTargets{Nodes: []string{"n1", "n2"}})
+	jobs, err := r.ensureJobs(context.Background(), s, nil, sessionTargets{Nodes: []string{"n1", "n2"}}, nil)
 	if err != nil {
 		t.Fatalf("ensureJobs: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestFakeReconcile_EnsureJobs(t *testing.T) {
 		}
 	}
 
-	jobs2, err := r.ensureJobs(context.Background(), s, nil, sessionTargets{Nodes: []string{"n1", "n2"}})
+	jobs2, err := r.ensureJobs(context.Background(), s, nil, sessionTargets{Nodes: []string{"n1", "n2"}}, nil)
 	if err != nil {
 		t.Fatalf("second ensureJobs: %v", err)
 	}

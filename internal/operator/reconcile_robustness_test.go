@@ -16,10 +16,6 @@ import (
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
 )
 
-// TestLabelSelectorToFlag_MatchExpressions is a regression test: only
-// MatchLabels were serialized, so an expression-only selector became an
-// empty string — which combined with --all-in-namespace traced every pod in
-// the namespace.
 func TestLabelSelectorToFlag_MatchExpressions(t *testing.T) {
 	flag := labelSelectorToFlag(&metav1.LabelSelector{
 		MatchLabels: map[string]string{"app": "api"},
@@ -41,23 +37,17 @@ func TestLabelSelectorToFlag_MatchExpressions(t *testing.T) {
 	}
 }
 
-// TestComputeSessionState_UndercountedJobsNotTerminal: the Job List comes
-// from the informer cache and may not yet contain a just-created Job — fewer
-// Jobs than target nodes must never read as Completed.
 func TestComputeSessionState_UndercountedJobsNotTerminal(t *testing.T) {
 	succeeded := batchv1.Job{Status: batchv1.JobStatus{Succeeded: 1}}
-	state := computeSessionState([]batchv1.Job{succeeded}, 2)
+	state := computeSessionState(makeSessionJobRefs([]batchv1.Job{succeeded}), []batchv1.Job{succeeded}, 2)
 	if state == podtracev1alpha1.SessionStateCompleted || state == podtracev1alpha1.SessionStateFailed {
 		t.Errorf("state = %s with 1 of 2 expected Jobs visible, must not be terminal", state)
 	}
-	if state := computeSessionState([]batchv1.Job{succeeded}, 1); state != podtracev1alpha1.SessionStateCompleted {
+	if state := computeSessionState(makeSessionJobRefs([]batchv1.Job{succeeded}), []batchv1.Job{succeeded}, 1); state != podtracev1alpha1.SessionStateCompleted {
 		t.Errorf("state = %s with all expected Jobs succeeded, want Completed", state)
 	}
 }
 
-// TestComputeSessionState_DeadlineExceededIsTerminal regression: a
-// Job killed by ActiveDeadlineSeconds carries a JobFailed condition (reason
-// DeadlineExceeded) but its .status.Failed count does not exceed backoffLimit.
 func TestComputeSessionState_DeadlineExceededIsTerminal(t *testing.T) {
 	backoff := int32(6)
 	deadlineKilled := batchv1.Job{
@@ -71,21 +61,18 @@ func TestComputeSessionState_DeadlineExceededIsTerminal(t *testing.T) {
 			}},
 		},
 	}
-	if state := computeSessionState([]batchv1.Job{deadlineKilled}, 1); state != podtracev1alpha1.SessionStateFailed {
+	if state := computeSessionState(makeSessionJobRefs([]batchv1.Job{deadlineKilled}), []batchv1.Job{deadlineKilled}, 1); state != podtracev1alpha1.SessionStateFailed {
 		t.Errorf("deadline-exceeded Job: state = %s, want Failed (else the session re-runs forever)", state)
 	}
 
 	complete := batchv1.Job{Status: batchv1.JobStatus{
 		Conditions: []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}},
 	}}
-	if state := computeSessionState([]batchv1.Job{complete}, 1); state != podtracev1alpha1.SessionStateCompleted {
+	if state := computeSessionState(makeSessionJobRefs([]batchv1.Job{complete}), []batchv1.Job{complete}, 1); state != podtracev1alpha1.SessionStateCompleted {
 		t.Errorf("JobComplete condition: state = %s, want Completed", state)
 	}
 }
 
-// TestSessionValidationFailureIsTerminalAndGCable: validation failures used
-// to set Failed without a CompletionTime (never TTL-collected) and returned
-// an error on a permanently failed object (infinite backoff).
 func TestSessionValidationFailureIsTerminalAndGCable(t *testing.T) {
 	scheme := newOperatorScheme(t)
 	session := &podtracev1alpha1.PodTraceSession{
@@ -129,9 +116,6 @@ func TestSessionValidationFailureIsTerminalAndGCable(t *testing.T) {
 	}
 }
 
-// TestNonDefaultTracerConfigIsInert: the agent DaemonSet has one fixed name,
-// so a second TracerConfig used to fight the first over owner references and
-// the immutable selector, failing its reconcile forever.
 func TestNonDefaultTracerConfigIsInert(t *testing.T) {
 	scheme := newOperatorScheme(t)
 	tc := &podtracev1alpha1.TracerConfig{
@@ -164,9 +148,6 @@ func TestNonDefaultTracerConfigIsInert(t *testing.T) {
 	}
 }
 
-// TestScheduleSkipsBacklogPastMissedRunBound: without startingDeadlineSeconds
-// every missed tick used to replay serially — a month-long suspension at a
-// minutely cron meant tens of thousands of stale sessions.
 func TestScheduleSkipsBacklogPastMissedRunBound(t *testing.T) {
 	scheme := newOperatorScheme(t)
 	sch := &podtracev1alpha1.PodTraceSchedule{
@@ -212,9 +193,6 @@ func TestScheduleSkipsBacklogPastMissedRunBound(t *testing.T) {
 	}
 }
 
-// TestApplicationTraceRefusesAdoption: a pre-existing user PodTrace with the
-// same name used to be silently adopted — its spec overwritten and an
-// ownerReference added that garbage-collects it with the ApplicationTrace.
 func TestApplicationTraceRefusesAdoption(t *testing.T) {
 	scheme := newOperatorScheme(t)
 	app := mkApp()

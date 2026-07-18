@@ -3,12 +3,14 @@ package operator
 import (
 	"context"
 	"fmt"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -41,12 +43,23 @@ func removeFinalizer(obj client.Object) bool {
 	return controllerutil.RemoveFinalizer(obj, FinalizerCleanup)
 }
 
+// finalizerUpdateOutcome classifies the error from a set/clear-finalizer
+// Update.
+func finalizerUpdateOutcome(err error) (ctrl.Result, bool) {
+	switch {
+	case apierrors.IsNotFound(err):
+		return ctrl.Result{}, true
+	case apierrors.IsConflict(err):
+		return ctrl.Result{RequeueAfter: time.Second}, true
+	default:
+		return ctrl.Result{}, false
+	}
+}
+
 // cleanupPodTraceChildren deletes the bundle ConfigMap + Secret this
 // PodTrace owns across namespaces. Called on CR deletion.
 func cleanupPodTraceChildren(ctx context.Context, c client.Client, pt *podtracev1alpha1.PodTrace, systemNS string) error {
 	bundleName := ExporterBundleName(pt.UID)
-	// Delete ConfigMap + Secret with matching name. Ignore NotFound so
-	// repeated cleanups are idempotent.
 	for _, obj := range []client.Object{
 		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: bundleName, Namespace: systemNS}},
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: bundleName, Namespace: systemNS}},
@@ -156,6 +169,9 @@ func cleanupPodTraceSessionChildren(ctx context.Context, c client.Client, s *pod
 		return err
 	}
 	if err := cleanupSessionPodReadRBAC(ctx, c, s); err != nil {
+		return err
+	}
+	if err := cleanupSessionServiceAccount(ctx, c, s, systemNS); err != nil {
 		return err
 	}
 	return nil

@@ -56,7 +56,9 @@ func AgentDaemonSetName() string { return "podtrace-agent" }
 // AgentServiceAccountName is the ServiceAccount the agent DaemonSet runs as.
 func AgentServiceAccountName() string { return "podtrace-agent" }
 
-func SessionServiceAccountName() string { return "podtrace-session" }
+func SessionServiceAccountName(sessionUID types.UID) string {
+	return "podtrace-session-" + shortUID(sessionUID)
+}
 
 func SessionReportRoleName(sessionUID types.UID) string {
 	return "podtrace-session-report-" + shortUID(sessionUID)

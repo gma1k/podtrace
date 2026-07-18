@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -174,7 +175,7 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 			},
 			Spec: corev1.PodSpec{
 				RestartPolicy:      corev1.RestartPolicyNever,
-				ServiceAccountName: SessionServiceAccountName(),
+				ServiceAccountName: SessionServiceAccountName(s.UID),
 				NodeSelector: map[string]string{
 					"kubernetes.io/hostname": node,
 				},
@@ -343,6 +344,8 @@ func priorityClassNameFrom(tc *podtracev1alpha1.TracerConfig) string {
 
 // makeSessionJobRefs rolls up a list of child Jobs into the slim status
 // representation carried on PodTraceSession.
+const sessionJobFailedMessage = "Job failed"
+
 func makeSessionJobRefs(jobs []batchv1.Job) []podtracev1alpha1.SessionJobRef {
 	refs := make([]podtracev1alpha1.SessionJobRef, 0, len(jobs))
 	for _, j := range jobs {
@@ -359,11 +362,46 @@ func makeSessionJobRefs(jobs []batchv1.Job) []podtracev1alpha1.SessionJobRef {
 			ref.CompletionTime = j.Status.CompletionTime
 		}
 		if jobFailed(&j) && !jobSucceeded(&j) {
-			ref.Message = "Job failed"
+			ref.Message = sessionJobFailedMessage
 		}
 		refs = append(refs, ref)
 	}
 	return refs
+}
+
+// mergeSessionJobRefs unions the live Job list with the previously recorded
+// per-node refs, carrying forward any node whose Job already completed but
+// has since been TTL-garbage-collected.
+func mergeSessionJobRefs(live []batchv1.Job, prior []podtracev1alpha1.SessionJobRef) []podtracev1alpha1.SessionJobRef {
+	refs := makeSessionJobRefs(live)
+	seen := make(map[string]struct{}, len(refs))
+	for i := range refs {
+		seen[refs[i].Node] = struct{}{}
+	}
+	for i := range prior {
+		p := prior[i]
+		if p.Completed && p.Node != "" {
+			if _, ok := seen[p.Node]; !ok {
+				refs = append(refs, p)
+				seen[p.Node] = struct{}{}
+			}
+		}
+	}
+	sort.Slice(refs, func(i, j int) bool { return refs[i].Node < refs[j].Node })
+	return refs
+}
+
+// completedSessionNodes returns the set of nodes with a recorded terminal
+// Job outcome, so the reconciler never recreates a Job for a node that has
+// already finished this session.
+func completedSessionNodes(refs []podtracev1alpha1.SessionJobRef) map[string]struct{} {
+	done := make(map[string]struct{})
+	for i := range refs {
+		if refs[i].Completed && refs[i].Node != "" {
+			done[refs[i].Node] = struct{}{}
+		}
+	}
+	return done
 }
 
 func jobBackoffLimit(j *batchv1.Job) int32 {
@@ -400,54 +438,33 @@ func jobFailed(j *batchv1.Job) bool {
 //   - Any failed past limit → Failed
 //   - Any running           → Running
 //   - Otherwise             → Pending
-//
-// computeSessionState rolls Job conditions up into a session state.
-// expectedJobs is the number of target nodes this reconcile fanned out to:
-// the Job List comes from the informer cache, which may not yet contain a
-// Job created moments ago — without the guard a freshly grown target set
-// could read as "all (visible) Jobs succeeded" and terminate the session
-// early, orphaning the invisible Job's results.
-func computeSessionState(jobs []batchv1.Job, expectedJobs int) podtracev1alpha1.SessionState {
-	if len(jobs) == 0 {
+func computeSessionState(refs []podtracev1alpha1.SessionJobRef, liveJobs []batchv1.Job, expectedNodes int) podtracev1alpha1.SessionState {
+	if len(refs) == 0 || expectedNodes == 0 {
 		return podtracev1alpha1.SessionStatePending
 	}
-	if len(jobs) < expectedJobs {
-		for i := range jobs {
-			if jobs[i].Status.Active > 0 {
-				return podtracev1alpha1.SessionStateRunning
-			}
+	completed := 0
+	anyFailed := false
+	for i := range refs {
+		if !refs[i].Completed {
+			continue
 		}
-		return podtracev1alpha1.SessionStatePending
-	}
-	allSucceeded := true
-	anyRunning := false
-	anyFailedFatal := false
-	for i := range jobs {
-		j := &jobs[i]
-		succeeded := jobSucceeded(j)
-		failed := jobFailed(j)
-		running := j.Status.Active > 0
-
-		if !succeeded {
-			allSucceeded = false
-		}
-		if failed {
-			anyFailedFatal = true
-		}
-		if running {
-			anyRunning = true
+		completed++
+		if refs[i].Message == sessionJobFailedMessage {
+			anyFailed = true
 		}
 	}
 	switch {
-	case allSucceeded:
-		return podtracev1alpha1.SessionStateCompleted
-	case anyFailedFatal:
+	case anyFailed:
 		return podtracev1alpha1.SessionStateFailed
-	case anyRunning:
-		return podtracev1alpha1.SessionStateRunning
-	default:
-		return podtracev1alpha1.SessionStatePending
+	case completed >= expectedNodes:
+		return podtracev1alpha1.SessionStateCompleted
 	}
+	for i := range liveJobs {
+		if liveJobs[i].Status.Active > 0 {
+			return podtracev1alpha1.SessionStateRunning
+		}
+	}
+	return podtracev1alpha1.SessionStatePending
 }
 
 func isTerminal(p podtracev1alpha1.SessionState) bool {
