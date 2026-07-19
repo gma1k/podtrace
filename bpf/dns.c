@@ -466,11 +466,12 @@ int dns_ingress(struct __sk_buff *skb) {
 		ancount = bpf_ntohs(ancount);
 	e->bytes = ancount;
 
-	int aoff = skip_name(skb, dns_off + 12) + 4;
+	int qname_end = skip_name(skb, dns_off + 12);
+	int aoff = qname_end + 4;
 	int wrote_detail = 0;
 
 	for (int a = 0; a < MAX_ANSWERS; a++) {
-		if (a >= ancount)
+		if (a >= ancount || qname_end < 0)
 			break;
 		aoff = skip_name(skb, aoff);
 		if (aoff < 0)

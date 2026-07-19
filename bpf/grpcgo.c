@@ -162,8 +162,7 @@ static __always_inline void grpc_go_process(void *ctx, u64 fields, u64 n, u32 st
 			e->pid = pid;
 			e->type = EVENT_HTTP_RESP;
 			e->latency_ns = 0;
-			s32 code = (s->status[0] - '0') * 100 + (s->status[1] - '0') * 10 +
-				   (s->status[2] - '0');
+			s32 code = http_parse_status3(s->status);
 			e->error = code >= 500 ? code : 0;
 			e->bytes = 0;
 			e->tcp_state = HTTP_TRANSPORT_H2_TLS;

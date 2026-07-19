@@ -212,8 +212,7 @@ static __noinline void http_emit_response(void *ctx, void *base, u64 len,
 		return;
 
 	u64 latency_ns = calc_latency(req->start_ns);
-	s32 status_num = (status[0] - '0') * 100 + (status[1] - '0') * 10 +
-			 (status[2] - '0');
+	s32 status_num = http_parse_status3(status);
 
 	struct event *e = get_event_buf();
 	if (e) {
