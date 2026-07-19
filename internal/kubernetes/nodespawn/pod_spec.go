@@ -27,15 +27,20 @@ const (
 
 	EnvNodeLocalSentinel = "PODTRACE_NODE_LOCAL"
 
+	SplunkSecretKey = "token"
+
 	ReaperMaxAge = 2 * time.Hour
 )
 
+func SplunkSecretName(podName string) string {
+	return podName + "-splunk"
+}
+
 // PodSpecOptions configures BuildPodSpec.
 type PodSpecOptions struct {
-	// ExtraEnv carries values that must not appear in the container argv
-	// (e.g. the Splunk HEC token): argv is persisted in the Pod object
-	// and visible in ps on the node.
 	ExtraEnv []corev1.EnvVar
+
+	SplunkToken string
 
 	NodeName              string
 	Namespace             string
@@ -125,6 +130,18 @@ func BuildPodSpec(opts PodSpecOptions) (*corev1.Pod, error) {
 		}
 	}
 	env = append(env, opts.ExtraEnv...)
+
+	if opts.SplunkToken != "" {
+		env = append(env, corev1.EnvVar{
+			Name: "PODTRACE_SPLUNK_TOKEN", // contract read by internal/config.SplunkToken
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: SplunkSecretName(name)},
+					Key:                  SplunkSecretKey,
+				},
+			},
+		})
+	}
 
 	container := corev1.Container{
 		Name:                     "podtrace",

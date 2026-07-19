@@ -890,9 +890,10 @@ func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 	}
 	t.filter.SetCgroupPaths(allPaths)
 
-	if t.containerPID == 0 {
+	if !pidInCgroupPaths(t.containerPID, allPaths) {
+		t.containerPID = 0
 		for _, cgroupPath := range allPaths {
-			if pid := readFirstPIDFromCgroupProcs(cgroupPath); pid != 0 {
+			if pid := readMainPIDFromCgroupProcs(cgroupPath); pid != 0 {
 				t.containerPID = pid
 				break
 			}
@@ -1091,11 +1092,32 @@ func readPIDsFromCgroupProcs(cgroupPath string) []uint32 {
 	return pids
 }
 
-func readFirstPIDFromCgroupProcs(cgroupPath string) uint32 {
-	if pids := readPIDsFromCgroupProcs(cgroupPath); len(pids) > 0 {
-		return pids[0]
+// readMainPIDFromCgroupProcs returns the container's main host PID, the lowest
+// (oldest, hence entrypoint) PID in cgroup.procs or 0.
+func readMainPIDFromCgroupProcs(cgroupPath string) uint32 {
+	var main uint32
+	for _, p := range readPIDsFromCgroupProcs(cgroupPath) {
+		if p != 0 && (main == 0 || p < main) {
+			main = p
+		}
 	}
-	return 0
+	return main
+}
+
+// pidInCgroupPaths reports whether pid is currently listed in any of the given
+// cgroups' cgroup.procs — i.e. still alive and a member, not exited or reused.
+func pidInCgroupPaths(pid uint32, cgroupPaths []string) bool {
+	if pid == 0 {
+		return false
+	}
+	for _, cp := range cgroupPaths {
+		for _, p := range readPIDsFromCgroupProcs(cp) {
+			if p == pid {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func isCgroupV2Base(basePath string) bool {

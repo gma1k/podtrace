@@ -1825,7 +1825,39 @@ func TestGetCgroupIDFromPath_NonExistent(t *testing.T) {
 	}
 }
 
-func TestReadFirstPIDFromCgroupProcs_Valid(t *testing.T) {
+func TestReadMainPIDFromCgroupProcs_Valid(t *testing.T) {
+	base := t.TempDir()
+	useCgroupBase(t, base)
+	pod := filepath.Join(base, "pod-1")
+	if err := os.MkdirAll(pod, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pod, "cgroup.procs"), []byte("5678\n1234\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if pid := readMainPIDFromCgroupProcs(pod); pid != 1234 {
+		t.Errorf("expected main PID 1234 (lowest), got %d", pid)
+	}
+}
+
+func TestReadMainPIDFromCgroupProcs_Empty(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte("\n\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if pid := readMainPIDFromCgroupProcs(dir); pid != 0 {
+		t.Errorf("expected 0 for empty procs file, got %d", pid)
+	}
+}
+
+func TestReadMainPIDFromCgroupProcs_NoFile(t *testing.T) {
+	dir := t.TempDir()
+	if pid := readMainPIDFromCgroupProcs(dir); pid != 0 {
+		t.Errorf("expected 0 when file does not exist, got %d", pid)
+	}
+}
+
+func TestPIDInCgroupPaths(t *testing.T) {
 	base := t.TempDir()
 	useCgroupBase(t, base)
 	pod := filepath.Join(base, "pod-1")
@@ -1835,39 +1867,28 @@ func TestReadFirstPIDFromCgroupProcs_Valid(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(pod, "cgroup.procs"), []byte("1234\n5678\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if pid := readFirstPIDFromCgroupProcs(pod); pid != 1234 {
-		t.Errorf("expected PID 1234, got %d", pid)
+	if !pidInCgroupPaths(1234, []string{pod}) {
+		t.Error("pid 1234 should be reported as a live member of the cgroup")
+	}
+	if pidInCgroupPaths(4242, []string{pod}) {
+		t.Error("pid 4242 is not in cgroup.procs and must be reported absent")
+	}
+	if pidInCgroupPaths(0, []string{pod}) {
+		t.Error("pid 0 must never be reported present")
 	}
 }
 
-func TestReadFirstPIDFromCgroupProcs_Empty(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte("\n\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if pid := readFirstPIDFromCgroupProcs(dir); pid != 0 {
-		t.Errorf("expected 0 for empty procs file, got %d", pid)
-	}
-}
-
-func TestReadFirstPIDFromCgroupProcs_NoFile(t *testing.T) {
-	dir := t.TempDir()
-	if pid := readFirstPIDFromCgroupProcs(dir); pid != 0 {
-		t.Errorf("expected 0 when file does not exist, got %d", pid)
-	}
-}
-
-func TestReadFirstPIDFromCgroupProcs_InvalidContent(t *testing.T) {
+func TestReadMainPIDFromCgroupProcs_InvalidContent(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte("not-a-pid\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if pid := readFirstPIDFromCgroupProcs(dir); pid != 0 {
+	if pid := readMainPIDFromCgroupProcs(dir); pid != 0 {
 		t.Errorf("expected 0 for non-numeric content, got %d", pid)
 	}
 }
 
-func TestReadFirstPIDFromCgroupProcs_LeadingBlankLines(t *testing.T) {
+func TestReadMainPIDFromCgroupProcs_LeadingBlankLines(t *testing.T) {
 	base := t.TempDir()
 	useCgroupBase(t, base)
 	pod := filepath.Join(base, "pod-1")
@@ -1877,7 +1898,7 @@ func TestReadFirstPIDFromCgroupProcs_LeadingBlankLines(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(pod, "cgroup.procs"), []byte("\n  \n9999\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if pid := readFirstPIDFromCgroupProcs(pod); pid != 9999 {
+	if pid := readMainPIDFromCgroupProcs(pod); pid != 9999 {
 		t.Errorf("expected PID 9999, got %d", pid)
 	}
 }
@@ -1925,7 +1946,7 @@ func TestAttachToCgroup_CRIOSubfolder(t *testing.T) {
 	}
 }
 
-func TestAttachToCgroup_PreserveExistingPID(t *testing.T) {
+func TestAttachToCgroup_ReresolveStalePID(t *testing.T) {
 	base := t.TempDir()
 	useCgroupBase(t, base)
 	pod := filepath.Join(base, "pod-1")
@@ -1935,13 +1956,37 @@ func TestAttachToCgroup_PreserveExistingPID(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(pod, "cgroup.procs"), []byte("100\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Cached PID 999 is NOT in cgroup.procs (exited or reused elsewhere), so
+	// it must be re-resolved to the live main PID (100) rather than preserved —
+	// this is the TOCTOU/PID-reuse guard for /proc/<pid>/root discovery.
 	tr := &Tracer{
 		filter:       filter.NewCgroupFilter(),
 		containerPID: 999,
 	}
 	_ = tr.AttachToCgroup(pod)
-	if tr.containerPID != 999 {
-		t.Errorf("expected containerPID to remain 999, got %d", tr.containerPID)
+	if tr.containerPID != 100 {
+		t.Errorf("stale containerPID 999 should re-resolve to live main PID 100, got %d", tr.containerPID)
+	}
+}
+
+func TestAttachToCgroup_PreserveLiveMemberPID(t *testing.T) {
+	base := t.TempDir()
+	useCgroupBase(t, base)
+	pod := filepath.Join(base, "pod-1")
+	if err := os.MkdirAll(pod, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Cached PID 100 IS still a member, so it is preserved (no needless churn).
+	if err := os.WriteFile(filepath.Join(pod, "cgroup.procs"), []byte("100\n250\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tr := &Tracer{
+		filter:       filter.NewCgroupFilter(),
+		containerPID: 100,
+	}
+	_ = tr.AttachToCgroup(pod)
+	if tr.containerPID != 100 {
+		t.Errorf("live cached containerPID 100 should be preserved, got %d", tr.containerPID)
 	}
 }
 

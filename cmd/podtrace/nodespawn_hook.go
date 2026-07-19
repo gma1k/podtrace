@@ -143,7 +143,7 @@ func maybeSpawnOnNode(ctx context.Context, cmd *cobra.Command, resolver pkgkube.
 		Image:                 image,
 		SpawnNamespace:        ns,
 		BuildChildArgs:        build,
-		ExtraEnv:              splunkTokenEnv(),
+		SplunkToken:           tracingSplunkToken,
 		OwnerHost:             host,
 		OwnerPID:              os.Getpid(),
 		Streams:               streams,
@@ -160,15 +160,6 @@ func maybeSpawnOnNode(ctx context.Context, cmd *cobra.Command, resolver pkgkube.
 		return true, err
 	}
 	return true, nil
-}
-
-// splunkTokenEnv carries --tracing-splunk-token into the spawn pod as an
-// environment variable.
-func splunkTokenEnv() []corev1.EnvVar {
-	if tracingSplunkToken == "" {
-		return nil
-	}
-	return []corev1.EnvVar{{Name: "PODTRACE_SPLUNK_TOKEN", Value: tracingSplunkToken}}
 }
 
 // clusterHandles pulls the kube clientset and rest.Config from the resolver.

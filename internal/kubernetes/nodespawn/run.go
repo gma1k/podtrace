@@ -56,9 +56,9 @@ type RunOptions struct {
 
 	KeepSpawnPodOnFailure bool
 
-	// ExtraEnv is forwarded into the spawn pod's environment. Use for
-	// values that must not appear in argv (tokens, credentials).
 	ExtraEnv []corev1.EnvVar
+
+	SplunkToken string
 }
 
 // Run orchestrates the spawn + stream lifecycle. It returns when every per-node
@@ -119,6 +119,7 @@ func Run(ctx context.Context, opts RunOptions) error {
 			OwnerHost:             opts.OwnerHost,
 			OwnerPID:              opts.OwnerPID,
 			ExtraEnv:              opts.ExtraEnv,
+			SplunkToken:           opts.SplunkToken,
 		})
 		if err != nil {
 			cmu.Lock()
@@ -200,14 +201,32 @@ func nodePodLabel(podRefs []PodRef) string {
 }
 
 func runOneNode(ctx context.Context, opts RunOptions, podSpec *corev1.Pod, multiNode bool, wmu *sync.Mutex, nodeLabel string) (retErr error) {
+	secretName := ""
+	if opts.SplunkToken != "" {
+		secretName = SplunkSecretName(podSpec.Name)
+		if serr := createSplunkTokenSecret(ctx, opts.Clientset, podSpec.Namespace, secretName, podSpec.Labels, opts.SplunkToken); serr != nil {
+			return serr
+		}
+	}
+
 	created, err := opts.Clientset.CoreV1().Pods(podSpec.Namespace).Create(ctx, podSpec, metav1.CreateOptions{})
 	if err != nil {
+		if secretName != "" {
+			_ = DeleteSecret(context.Background(), opts.Clientset, podSpec.Namespace, secretName)
+		}
 		if apierrors.IsForbidden(err) && strings.Contains(err.Error(), "violates PodSecurity") {
 			return fmt.Errorf("spawn pod admission rejected by PodSecurity in namespace %q. "+
 				"Remediation: kubectl label ns/%s pod-security.kubernetes.io/enforce=privileged --overwrite\n  (or use --spawn-namespace to point at a namespace that allows privileged pods). "+
 				"Underlying error: %w", podSpec.Namespace, podSpec.Namespace, err)
 		}
 		return fmt.Errorf("create spawn pod %s/%s: %w", podSpec.Namespace, podSpec.Name, err)
+	}
+
+	if secretName != "" {
+		if oerr := ownSecretByPod(ctx, opts.Clientset, created, secretName); oerr != nil {
+			logger.Debug("Could not own Splunk token secret by pod",
+				zap.String("secret", secretName), zap.Error(oerr))
+		}
 	}
 	logger.Debug("Spawn pod created",
 		zap.String("namespace", created.Namespace),
@@ -227,6 +246,9 @@ func runOneNode(ctx context.Context, opts RunOptions, podSpec *corev1.Pod, multi
 			return
 		}
 		_ = DeletePod(cleanupCtx, opts.Clientset, created.Namespace, created.Name)
+		if secretName != "" {
+			_ = DeleteSecret(cleanupCtx, opts.Clientset, created.Namespace, secretName)
+		}
 	}()
 
 	running, err := waitForPodRunningOrTerminated(ctx, opts.Clientset, created.Namespace, created.Name)
