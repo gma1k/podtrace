@@ -994,6 +994,8 @@ spec:
                       webhookURL:
                         type: string
                     type: object
+                  dnsFullAnswers:
+                    type: boolean
                   dnsPacketCapture:
                     type: boolean
                   eventBufferSize:
@@ -1071,6 +1073,8 @@ spec:
                     type: object
                   statusReportInterval:
                     type: string
+                  usdt:
+                    type: boolean
                 type: object
               btfMode:
                 description: BTFMode controls how the agent resolves BTF for CO-RE.

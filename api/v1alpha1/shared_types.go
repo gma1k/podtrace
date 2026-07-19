@@ -37,16 +37,17 @@ type AppSelector struct {
 }
 
 // EventFilter enumerates the event categories podtrace can capture.
-// +kubebuilder:validation:Enum=dns;net;fs;cpu;proc;crypto
+// +kubebuilder:validation:Enum=dns;net;fs;cpu;proc;crypto;usdt
 type EventFilter string
 
 const (
-	FilterDNS  EventFilter = "dns"
-	FilterNet  EventFilter = "net"
-	FilterFS   EventFilter = "fs"
-	FilterCPU  EventFilter = "cpu"
-	FilterProc EventFilter = "proc"
+	FilterDNS    EventFilter = "dns"
+	FilterNet    EventFilter = "net"
+	FilterFS     EventFilter = "fs"
+	FilterCPU    EventFilter = "cpu"
+	FilterProc   EventFilter = "proc"
 	FilterCrypto EventFilter = "crypto"
+	FilterUSDT   EventFilter = "usdt"
 )
 
 // Thresholds control anomaly detection on the agent side.

@@ -127,6 +127,16 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 	if tc != nil {
 		mainEnv = append(mainEnv, redactionEnv(tc.Spec.Redaction)...)
 		mainEnv = append(mainEnv, captureEnv(tc.Spec.Capture)...)
+		usdtEnabled := true
+		if u := tc.Spec.Agent.USDT; u != nil {
+			usdtEnabled = *u
+		}
+		mainEnv = append(mainEnv, corev1.EnvVar{Name: "PODTRACE_USDT_ENABLED", Value: strconv.FormatBool(usdtEnabled)})
+		dnsFull := true
+		if d := tc.Spec.Agent.DNSFullAnswers; d != nil {
+			dnsFull = *d
+		}
+		mainEnv = append(mainEnv, corev1.EnvVar{Name: "PODTRACE_DNS_PAYLOAD_ENABLED", Value: strconv.FormatBool(dnsFull)})
 		if lvl := tc.Spec.Agent.LogLevel; lvl != "" {
 			mainEnv = append(mainEnv, corev1.EnvVar{Name: "PODTRACE_LOG_LEVEL", Value: lvl})
 		}

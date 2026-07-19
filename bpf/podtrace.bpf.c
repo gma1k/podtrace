@@ -28,5 +28,6 @@
 #include "nghttp3.c"
 #include "quiche.c"
 #include "crypto.c"
+#include "usdt.c"
 
 char LICENSE[] SEC("license") = "GPL";

@@ -101,3 +101,42 @@ func FuzzParse(f *testing.F) {
 		_ = Parse(data)
 	})
 }
+
+// msgMultiQuestion builds a response with qdcount questions (the first named
+// qname, the rest filler) followed by ancount answers, to exercise the
+// question-skipping path.
+func msgMultiQuestion(qnames []string, qtype uint16, ancount uint16, answers []byte) []byte {
+	b := make([]byte, 12)
+	binary.BigEndian.PutUint16(b[0:2], 0x1234)
+	binary.BigEndian.PutUint16(b[2:4], 0x8180) // response, NOERROR
+	binary.BigEndian.PutUint16(b[4:6], uint16(len(qnames)))
+	binary.BigEndian.PutUint16(b[6:8], ancount)
+	for _, qn := range qnames {
+		b = append(b, encodeName(qn)...)
+		q := make([]byte, 4)
+		binary.BigEndian.PutUint16(q[0:2], qtype)
+		binary.BigEndian.PutUint16(q[2:4], 1) // IN
+		b = append(b, q...)
+	}
+	return append(b, answers...)
+}
+
+// TestParse_MultipleQuestionsAlignsAnswers is the regression for qdcount>1:
+// extra questions must be skipped so the answer section stays aligned.
+func TestParse_MultipleQuestionsAlignsAnswers(t *testing.T) {
+	ans := aRecord([4]byte{93, 184, 216, 34})
+	m := Parse(msgMultiQuestion([]string{"example.com", "second.example.org"}, TypeA, 1, ans))
+
+	if m.QName != "example.com" {
+		t.Errorf("QName = %q, want example.com (first question)", m.QName)
+	}
+	if m.Truncated {
+		t.Errorf("message wrongly flagged truncated: %+v", m)
+	}
+	if len(m.Answers) != 1 {
+		t.Fatalf("expected 1 answer after skipping the extra question, got %d", len(m.Answers))
+	}
+	if m.Answers[0].Type != TypeA || m.Answers[0].IP != "93.184.216.34" {
+		t.Errorf("answer misaligned: %+v", m.Answers[0])
+	}
+}

@@ -16,11 +16,15 @@ const (
 	GroupMessaging  ProbeGroup = "messaging" // Kafka
 	GroupFastCGI    ProbeGroup = "fastcgi"   // PHP-FPM / FastCGI unix socket probes
 	GroupCrypto     ProbeGroup = "crypto"    // AF_ALG crypto-socket detection
+	GroupUSDT       ProbeGroup = "usdt"      // USDT (.note.stapsdt) userspace probes
 )
 
 // probeGroupMap maps each BPF program name to its ProbeGroup.
 // Programs absent from this map are treated as GroupNetwork by default.
 var probeGroupMap = map[string]ProbeGroup{
+	// USDT
+	"uprobe_usdt": GroupUSDT,
+
 	// Network
 	"kprobe_tcp_connect":             GroupNetwork,
 	"kretprobe_tcp_connect":          GroupNetwork,

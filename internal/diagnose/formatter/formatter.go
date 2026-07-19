@@ -3,6 +3,7 @@ package formatter
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/podtrace/podtrace/internal/config"
@@ -44,6 +45,24 @@ func TopTargets(targets []analyzer.TargetCount, limit int, headerLabel, countLab
 			break
 		}
 		result += fmt.Sprintf("    - %s (%d %s)\n", sanitize.Terminal(target.Target), target.Count, countLabel)
+	}
+	return result
+}
+
+// ResolvedAddresses renders the per-name resolved A/AAAA addresses. Names are
+// scrubbed with sanitize.Terminal (attacker-influenced); addresses are numeric
+// and rendered verbatim.
+func ResolvedAddresses(targets []analyzer.TargetAddrs, limit int) string {
+	if len(targets) == 0 {
+		return ""
+	}
+	var result string
+	result += "  Resolved addresses:\n"
+	for i, t := range targets {
+		if i >= limit {
+			break
+		}
+		result += fmt.Sprintf("    - %s -> %s\n", sanitize.Terminal(t.Target), strings.Join(t.Addrs, ", "))
 	}
 	return result
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -34,6 +35,7 @@ import (
 	"github.com/podtrace/podtrace/internal/analysis/criticalpath"
 	"github.com/podtrace/podtrace/internal/attribution"
 	"github.com/podtrace/podtrace/internal/config"
+	"github.com/podtrace/podtrace/internal/dns"
 	"github.com/podtrace/podtrace/internal/ebpf/cache"
 	"github.com/podtrace/podtrace/internal/ebpf/filter"
 	"github.com/podtrace/podtrace/internal/ebpf/h2decode"
@@ -49,6 +51,7 @@ import (
 	"github.com/podtrace/podtrace/internal/procfs"
 	"github.com/podtrace/podtrace/internal/redactor"
 	"github.com/podtrace/podtrace/internal/safeconv"
+	"github.com/podtrace/podtrace/internal/sanitize"
 	"github.com/podtrace/podtrace/internal/sysfs"
 	"github.com/podtrace/podtrace/internal/validation"
 )
@@ -98,6 +101,9 @@ type Tracer struct {
 	h3ParkedMu                    sync.Mutex
 	h3Parked                      []h3ParkedTxn
 	quicReader                    *ringbuf.Reader
+	dnsPayloadReader              *ringbuf.Reader
+	dnsResolvedMap                *ebpf.Map
+	dnsResolved6Map               *ebpf.Map
 	filter                        *filter.CgroupFilter
 	containerID                   string
 	containerPID                  uint32
@@ -189,6 +195,7 @@ var containerUprobeGroups = []probes.ProbeGroup{
 	probes.GroupPool,
 	probes.GroupCache,
 	probes.GroupMessaging,
+	probes.GroupUSDT,
 }
 
 // attachGlobalProtocolProbesOnce attaches the protocol kprobes that are NOT
@@ -241,6 +248,8 @@ func (t *Tracer) attachContainerGroupUprobes(g probes.ProbeGroup, id string, pid
 			ls = append(ls, probes.AttachMemcachedProbesWithPID(coll, id, pid, af)...)
 		case probes.GroupMessaging:
 			ls = append(ls, probes.AttachKafkaProbesWithPID(coll, id, pid, af)...)
+		case probes.GroupUSDT:
+			ls = append(ls, probes.AttachUSDTProbes(coll, pid)...)
 		default:
 			return nil
 		}
@@ -707,6 +716,21 @@ func NewTracer() (*Tracer, error) {
 		}
 	}
 
+	var dnspayrd *ringbuf.Reader
+	var dnsResolvedMap, dnsResolved6Map *ebpf.Map
+	if config.DNSPayloadEnabled {
+		if m := coll.Maps["dns_payload_events"]; m != nil {
+			if r, derr := ringbuf.NewReader(m); derr == nil {
+				dnspayrd = r
+				setDNSPayloadFlag(coll, true)
+				dnsResolvedMap = coll.Maps["dns_resolved"]
+				dnsResolved6Map = coll.Maps["dns_resolved6"]
+			} else {
+				logger.Warn("DNS payload decode disabled: ringbuf reader unavailable", zap.Error(derr))
+			}
+		}
+	}
+
 	ttl := time.Duration(config.CacheTTLSeconds) * time.Second
 	processCache := cache.NewLRUCache(config.CacheMaxSize, ttl)
 
@@ -724,6 +748,9 @@ func NewTracer() (*Tracer, error) {
 		h3Assembler:                   h3asm,
 		h3SectionStash:                h3stash,
 		quicReader:                    quicrd,
+		dnsPayloadReader:              dnspayrd,
+		dnsResolvedMap:                dnsResolvedMap,
+		dnsResolved6Map:               dnsResolved6Map,
 		filter:                        filter.NewCgroupFilter(),
 		processNameCache:              processCache,
 		attributionTable:              attribution.New(0, 0),
@@ -1414,6 +1441,10 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 		go t.runQUICInitialReader(ctx, eventChan, stackMap, ec)
 	}
 
+	if t.dnsPayloadReader != nil {
+		go t.runDNSPayloadReader(ctx, eventChan, stackMap, ec)
+	}
+
 	return nil
 }
 
@@ -1605,6 +1636,135 @@ func (t *Tracer) runH2DecodeReader(ctx context.Context, eventChan chan<- *events
 			t.processAndDispatch(ctx, ev, eventChan, stackMap, ec, time.Now())
 		}
 	}
+}
+
+const dnsResolvedNameLen = 128
+
+// setDNSPayloadFlag flips the dedicated array flag the DNS ingress program
+// consults before shipping raw DNS payloads.
+func setDNSPayloadFlag(coll *ebpf.Collection, enabled bool) {
+	if coll == nil || coll.Maps == nil {
+		return
+	}
+	m, ok := coll.Maps["dns_payload_enabled"]
+	if !ok || m == nil {
+		return
+	}
+	var zero uint32
+	val := uint32(0)
+	if enabled {
+		val = 1
+	}
+	if err := m.Update(&zero, &val, ebpf.UpdateAny); err != nil {
+		logger.Warn("failed to enable DNS payload flag", zap.Error(err))
+	}
+}
+
+// runDNSPayloadReader drains the raw DNS payload ringbuf, decodes the full
+// answer set in userspace (the in-kernel path only records a single address),
+// and dispatches one enriched EventDNS per response through the same
+// enrichment + filtering path as kernel events.
+func (t *Tracer) runDNSPayloadReader(ctx context.Context, eventChan chan<- *events.Event,
+	stackMap *ebpf.Map, ec *eventCounters) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("Panic in DNS payload reader",
+				zap.Any("panic", r), zap.ByteString("stack", debug.Stack()))
+		}
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		record, err := t.dnsPayloadReader.Read()
+		if err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, ringbuf.ErrClosed) ||
+				strings.Contains(err.Error(), "closed") {
+				return
+			}
+			continue
+		}
+
+		rec, ok := dns.ParseRecord(record.RawSample)
+		if !ok {
+			continue
+		}
+		t.populateDNSResolved(rec)
+		t.processAndDispatch(ctx, buildDNSEventFromRecord(rec), eventChan, stackMap, ec, time.Now())
+	}
+}
+
+// populateDNSResolved mirrors the in-kernel dns_resolved/dns_resolved6 answer
+// caching that the payload path skips, so network.c can still attribute a
+// connection's remote address to the hostname that resolved it.
+func (t *Tracer) populateDNSResolved(rec dns.Record) {
+	name := dnsResolvedValue(rec.Msg.QName)
+	for _, a := range rec.Msg.Answers {
+		switch a.Type {
+		case dns.TypeA:
+			if t.dnsResolvedMap == nil {
+				continue
+			}
+			if ip4 := net.ParseIP(a.IP).To4(); ip4 != nil {
+				var key [4]byte
+				copy(key[:], ip4)
+				_ = t.dnsResolvedMap.Update(key[:], name[:], ebpf.UpdateAny)
+			}
+		case dns.TypeAAAA:
+			if t.dnsResolved6Map == nil {
+				continue
+			}
+			if ip6 := net.ParseIP(a.IP).To16(); ip6 != nil {
+				var key [16]byte
+				copy(key[:], ip6)
+				_ = t.dnsResolved6Map.Update(key[:], name[:], ebpf.UpdateAny)
+			}
+		}
+	}
+}
+
+// dnsResolvedValue renders a query name into the fixed-width, NUL-terminated
+// buffer the BPF dns_resolved maps store as their value (char[MAX_STRING_LEN]).
+func dnsResolvedValue(name string) [dnsResolvedNameLen]byte {
+	var buf [dnsResolvedNameLen]byte
+	// Reserve the final byte for the NUL terminator.
+	copy(buf[:dnsResolvedNameLen-1], name)
+	return buf
+}
+
+// buildDNSEventFromRecord turns a decoded DNS payload record into the same
+// events.Event shape the compact BPF path emits, but with every resolved
+// address (A/AAAA) joined into Details instead of just the first.
+func buildDNSEventFromRecord(rec dns.Record) *events.Event {
+	e := &events.Event{
+		Timestamp:    rec.Timestamp,
+		PID:          rec.PID,
+		CgroupID:     rec.CgroupID,
+		Type:         events.EventDNS,
+		LatencyNS:    rec.LatencyNS,
+		Error:        int32(rec.RCode),
+		TCPState:     uint32(rec.QType),
+		DNSServerIP:  rec.ServerIP,
+		DNSServerIP6: rec.ServerIP6,
+		DNSTransport: rec.Transport,
+		Target:       sanitize.Terminal(rec.Msg.QName),
+	}
+
+	if ips := rec.ResolvedIPs(); len(ips) > 0 {
+		e.Details = strings.Join(ips, ", ")
+	} else {
+		for _, a := range rec.Msg.Answers {
+			if a.CNAME != "" {
+				e.Details = sanitize.Terminal(a.CNAME)
+				break
+			}
+		}
+	}
+	return e
 }
 
 // runH3DecodeReader drains the HTTP/3 transaction ringbuf (one record per
@@ -2004,6 +2164,9 @@ func (t *Tracer) Stop() error {
 	if t.quicReader != nil {
 		_ = t.quicReader.Close()
 	}
+	if t.dnsPayloadReader != nil {
+		_ = t.dnsPayloadReader.Close()
+	}
 
 	t.probeGroupsMu.Lock()
 	closing := t.links
@@ -2301,6 +2464,7 @@ var groupCategoryNeeds = map[probes.ProbeGroup][]string{
 	probes.GroupFastCGI:    {"net"},
 	probes.GroupTLS:        {"dns", "cpu", "net"},
 	probes.GroupCrypto:     {"crypto"},
+	probes.GroupUSDT:       {"usdt"},
 }
 
 // DisableProbeGroup closes all links associated with the given group,

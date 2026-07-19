@@ -1022,7 +1022,7 @@ func TestUnionCategoriesFromRules_NoFilterWidensToAll(t *testing.T) {
 		{Key: CRKey{Namespace: "ns", Name: "b"}},
 	}
 	got := unionCategoriesFromRules(rules)
-	want := []string{"cpu", "dns", "fs", "net", "proc"}
+	want := []string{"cpu", "crypto", "dns", "fs", "net", "proc", "usdt"}
 	if !equalStrings(got, want) {
 		t.Errorf("union = %v, want %v", got, want)
 	}

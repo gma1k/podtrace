@@ -55,6 +55,16 @@ func (in *AgentSpec) DeepCopyInto(out *AgentSpec) {
 		*out = new(bool)
 		**out = **in
 	}
+	if in.DNSFullAnswers != nil {
+		in, out := &in.DNSFullAnswers, &out.DNSFullAnswers
+		*out = new(bool)
+		**out = **in
+	}
+	if in.USDT != nil {
+		in, out := &in.USDT, &out.USDT
+		*out = new(bool)
+		**out = **in
+	}
 	if in.Alerting != nil {
 		in, out := &in.Alerting, &out.Alerting
 		*out = new(AgentAlertingSpec)

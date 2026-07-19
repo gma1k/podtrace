@@ -38,6 +38,12 @@ type AgentSpec struct {
 	DNSPacketCapture *bool `json:"dnsPacketCapture,omitempty"`
 
 	// +optional
+	DNSFullAnswers *bool `json:"dnsFullAnswers,omitempty"`
+
+	// +optional
+	USDT *bool `json:"usdt,omitempty"`
+
+	// +optional
 	Alerting *AgentAlertingSpec `json:"alerting,omitempty"`
 }
 

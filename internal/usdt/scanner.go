@@ -4,66 +4,77 @@ package usdt
 
 import (
 	"debug/elf"
+	"encoding/binary"
 	"fmt"
+
+	"github.com/podtrace/podtrace/internal/ebpf/safeelf"
 )
 
 // Probe represents a single USDT probe found in an ELF binary.
 type Probe struct {
 	Provider string
 	Name     string
-	PC       uint64 // probe PC address
-	SemAddr  uint64 // semaphore address (0 if none)
+	PC       uint64
+	SemAddr  uint64
+	Args     []Arg
 }
 
 // Scan parses the .note.stapsdt section of exePath and returns all USDT probes.
 // Returns nil, nil when no USDT probes are present.
-func Scan(exePath string) ([]Probe, error) {
-	f, err := elf.Open(exePath)
+func Scan(exePath string) (probes []Probe, err error) {
+	defer safeelf.RecoverParse("usdt.Scan")
+
+	f, err := safeelf.Open(exePath)
 	if err != nil {
 		return nil, fmt.Errorf("usdt: open %q: %w", exePath, err)
 	}
 	defer func() { _ = f.Close() }()
 
-	section := f.Section(".note.stapsdt")
-	if section == nil {
-		return nil, nil
-	}
+	return ScanFile(f)
+}
 
-	data, err := section.Data()
+// ScanFile parses the .note.stapsdt notes of an already-open ELF and returns
+// its USDT probes.
+func ScanFile(f *elf.File) ([]Probe, error) {
+	data, err := safeelf.SectionData(f.Section(".note.stapsdt"))
 	if err != nil {
 		return nil, fmt.Errorf("usdt: read .note.stapsdt: %w", err)
 	}
+	if data == nil {
+		return nil, nil
+	}
+	return parseStapsdtNotes(data, f.ByteOrder), nil
+}
 
-	order := f.ByteOrder
+// parseStapsdtNotes walks the .note.stapsdt note stream and returns the USDT
+// probes it declares. data is attacker-controlled.
+func parseStapsdtNotes(data []byte, order binary.ByteOrder) []Probe {
 	var probes []Probe
-	offset := 0
-
-	for offset+12 <= len(data) {
-		nameLen := int(order.Uint32(data[offset:]))
-		descLen := int(order.Uint32(data[offset+4:]))
+	dlen := uint64(len(data))
+	var offset uint64
+	for offset+12 <= dlen {
+		nameSz := uint64(order.Uint32(data[offset:]))
+		descSz := uint64(order.Uint32(data[offset+4:]))
 		noteType := order.Uint32(data[offset+8:])
 		offset += 12
 
-		namePad := align4(nameLen)
-		descPad := align4(descLen)
-		if offset+namePad+descPad > len(data) {
+		namePad := align4(nameSz)
+		descPad := align4(descSz)
+		if offset+namePad+descPad > dlen {
 			break
 		}
-
-		rawName := data[offset : offset+nameLen]
-		if nameLen > 0 && rawName[nameLen-1] == 0 {
-			rawName = rawName[:nameLen-1]
+		rawName := data[offset : offset+nameSz]
+		if nameSz > 0 && rawName[nameSz-1] == 0 {
+			rawName = rawName[:nameSz-1]
 		}
 		offset += namePad
 
-		desc := data[offset : offset+descLen]
+		desc := data[offset : offset+descSz]
 		offset += descPad
 
-		// NT_STAPSDT = 3; section name must be "stapsdt"
 		if noteType != 3 || string(rawName) != "stapsdt" {
 			continue
 		}
-		// Descriptor layout: pc(8) base(8) semaphore(8) provider\0name\0argdesc\0
 		if len(desc) < 24 {
 			continue
 		}
@@ -71,28 +82,30 @@ func Scan(exePath string) ([]Probe, error) {
 		pc := order.Uint64(desc[0:])
 		semAddr := order.Uint64(desc[16:])
 
-		strs := desc[24:]
-		provider, rest, ok := cstring(strs)
+		provider, rest, ok := cstring(desc[24:])
 		if !ok {
 			continue
 		}
-		probeName, _, ok := cstring(rest)
+		probeName, rest, ok := cstring(rest)
 		if !ok {
 			continue
 		}
+		argDesc, _, _ := cstring(rest)
 
 		probes = append(probes, Probe{
 			Provider: provider,
 			Name:     probeName,
 			PC:       pc,
 			SemAddr:  semAddr,
+			Args:     parseArgDesc(argDesc),
 		})
 	}
-
-	return probes, nil
+	return probes
 }
 
-func align4(n int) int {
+// align4 rounds n up to the next multiple of 4 in the uint64 domain. n is at
+// most a uint32 promoted to uint64, so n+3 cannot overflow.
+func align4(n uint64) uint64 {
 	return (n + 3) &^ 3
 }
 

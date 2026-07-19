@@ -98,7 +98,7 @@ exits. Events flow to the referenced ExporterConfig, not to this terminal.`,
 	registerTargetFlags(cmd.Flags())
 	registerWatchOnlyFlags(cmd.Flags())
 	cmd.Flags().StringVarP(&namespace, "namespace", "n", config.DefaultNamespace, "Namespace to create the PodTrace in (its ExporterConfig must live here too; defaults to the current kubeconfig context's namespace)")
-	cmd.Flags().StringVar(&eventFilter, "filter", "", "Event categories to capture (dns,net,fs,cpu,proc,crypto); empty = all")
+	cmd.Flags().StringVar(&eventFilter, "filter", "", "Event categories to capture (dns,net,fs,cpu,proc,crypto,usdt); empty = all")
 	return cmd
 }
 

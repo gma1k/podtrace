@@ -210,6 +210,8 @@ func (e *OTLPExporter) spanSnapshot(span *tracker.Span) (sdktrace.ReadOnlySpan, 
 			)
 			if event.Details != "" {
 				attrs = append(attrs, attribute.String("dns.resolved", event.Details))
+				attrs = append(attrs, attribute.Int("dns.answer.count",
+					strings.Count(event.Details, ",")+1))
 			}
 			if s := event.DNSServerAddr(); s != "" {
 				attrs = append(attrs, attribute.String("dns.server", s))
