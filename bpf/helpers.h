@@ -17,8 +17,6 @@ static inline struct pair_key make_pair_key(u32 pair) {
 	return k;
 }
 
-// fill_event_peer fuses an L7 event with its L4 peer 4-tuple, read from the
-// per-thread stash that the tcp_sendmsg/tcp_recvmsg kprobes maintain.
 static inline struct tcp_peer *lookup_tcp_peer(u32 prefer_pair) {
 	struct pair_key k = {};
 	k.pid_tgid = bpf_get_current_pid_tgid();
@@ -43,8 +41,6 @@ static inline void fill_event_peer(struct event *e) {
 	__builtin_memcpy(e->peer_daddr6, p->daddr6, 16);
 }
 
-// fill_h2_record_peer fuses an h2 header record with its L4 peer, preferring the
-// stash matching the record's direction (egress->send, ingress->recv).
 static inline void fill_h2_record_peer(struct h2_hdr_record *rec, u32 dir) {
 	u32 prefer = (dir == H2_DIR_EGRESS) ? PAIR_TCP_SENDMSG : PAIR_TCP_RECVMSG;
 	struct tcp_peer *p = lookup_tcp_peer(prefer);
@@ -203,6 +199,15 @@ static inline void capture_user_stack(void *ctx, u32 pid, u32 tid, struct event 
 	u64 key = build_stack_key(pid, tid, e->timestamp);
 	bpf_map_update_elem(&stack_traces, &key, trace, BPF_ANY);
 	e->stack_key = key;
+}
+
+static __always_inline s32 http_parse_status3(const char *s)
+{
+	if (s[0] < '0' || s[0] > '9' ||
+	    s[1] < '0' || s[1] > '9' ||
+	    s[2] < '0' || s[2] > '9')
+		return -1;
+	return (s32)((s[0] - '0') * 100 + (s[1] - '0') * 10 + (s[2] - '0'));
 }
 
 #endif

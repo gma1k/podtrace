@@ -113,6 +113,12 @@ emit_params: ;
 	u8 params[FCGI_PARAMS_SCAN_LEN] = {};
 	u32 scan_len = content_len < FCGI_PARAMS_SCAN_LEN ? content_len : FCGI_PARAMS_SCAN_LEN;
 
+	u32 avail = (u32)rc_bytes > params_buf_offset ? (u32)rc_bytes - params_buf_offset : 0;
+	if (scan_len > avail)
+		scan_len = avail;
+	if (scan_len == 0)
+		return 0;
+
 	u8 *params_base = (u8 *)user_ptr + params_buf_offset;
 	if (bpf_probe_read_user(params, scan_len & 0xFF, params_base) != 0)
 		return 0;
@@ -139,6 +145,8 @@ emit_params: ;
 					}
 					if (copy >= MAX_STRING_LEN)
 						copy = MAX_STRING_LEN - 1;
+					if (vstart + copy > FCGI_PARAMS_SCAN_LEN)
+						copy = FCGI_PARAMS_SCAN_LEN - vstart;
 					bpf_probe_read_kernel(e->target, copy & (MAX_STRING_LEN - 1),
 					                     &params[vstart]);
 					e->target[copy & (MAX_STRING_LEN - 1)] = '\0';
