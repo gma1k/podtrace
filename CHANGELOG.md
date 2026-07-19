@@ -9,6 +9,38 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.13.10](https://github.com/gma1k/podtrace/compare/v0.13.9...v0.13.10) (2026-07-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* PodTrace/PodTraceSession/PodTraceSchedule CRs can no longer target pods in another namespace unless that namespace opts in via the podtrace.io/allow-tracing-from annotation. Existing cross-namespace CRs silently narrow to their own namespace until the target namespaces are annotated.
+
+### Features
+
+* attribute cgroup_skb events to owning process at ingest ([#327](https://github.com/gma1k/podtrace/issues/327)) ([f09f667](https://github.com/gma1k/podtrace/commit/f09f6672bceaa91cb06e321c2e2b6857ccea15fa))
+* wire USDT tracing and full DNS answer decode into the agent ([#333](https://github.com/gma1k/podtrace/issues/333)) ([9070bbf](https://github.com/gma1k/podtrace/commit/9070bbf750980c5939cc8f9fb8596e0611e42502))
+
+
+### Bug Fixes
+
+* bound process_name label cardinality in all metric exporters ([#329](https://github.com/gma1k/podtrace/issues/329)) ([bb445f3](https://github.com/gma1k/podtrace/commit/bb445f314c2f54b1c185e1ce53a32aba36dd2210))
+* gate cross-namespace tracing on target-namespace consent ([#328](https://github.com/gma1k/podtrace/issues/328)) ([acc5944](https://github.com/gma1k/podtrace/commit/acc594401e1e8f38c06c3770cfbf791c0e5cccd6))
+* harden cgroup match, numeric conversions, router, and DNS report ([#338](https://github.com/gma1k/podtrace/issues/338)) ([a0c8cec](https://github.com/gma1k/podtrace/commit/a0c8cec026d6a38f005d1daea82ecff37f89b316))
+* harden fastcgi/dns/grpc L7 parsing against malformed input ([#334](https://github.com/gma1k/podtrace/issues/334)) ([b02ce31](https://github.com/gma1k/podtrace/commit/b02ce31d6cfcd3491c02ec6953aa6023acbc021f))
+* harden graph, truncation, nil derefs, and analyzer bounds ([#337](https://github.com/gma1k/podtrace/issues/337)) ([0e8c21d](https://github.com/gma1k/podtrace/commit/0e8c21d1d71a1778118cec090da5ea8ad21d009b))
+* harden session child GC, dedup, env parsing, and artifact perms ([#336](https://github.com/gma1k/podtrace/issues/336)) ([88f4187](https://github.com/gma1k/podtrace/commit/88f41876e016b3627755397bae00d0e92d67bfe6))
+* harden session lifecycle and exporter endpoint validation ([#330](https://github.com/gma1k/podtrace/issues/330)) ([333ab38](https://github.com/gma1k/podtrace/commit/333ab38823bb6d96e9e9bbfc0d7dabe4bc938a60))
+* redact session/auth headers and harden pid-reuse attribution guard ([#332](https://github.com/gma1k/podtrace/issues/332)) ([8395355](https://github.com/gma1k/podtrace/commit/8395355054854e674f1671d650a96fdb488030a1))
+* resolve container main PID and store Splunk token in a Secret ([#335](https://github.com/gma1k/podtrace/issues/335)) ([69e9956](https://github.com/gma1k/podtrace/commit/69e995688b47a01e941ade626b35596569bd883f))
+* strip terminal control sequences from diagnose reports and sort kallsyms in n log n ([#331](https://github.com/gma1k/podtrace/issues/331)) ([7642ff3](https://github.com/gma1k/podtrace/commit/7642ff3f524cfe412a23bea8129721e0dbfe8a73))
+
+
+### Maintenance
+
+* **deps:** update go modules (non-major) ([#325](https://github.com/gma1k/podtrace/issues/325)) ([7e9179e](https://github.com/gma1k/podtrace/commit/7e9179ef7bef7af046b4825db69171f65dba15c2))
+* release 0.13.10 ([2834c35](https://github.com/gma1k/podtrace/commit/2834c35b6251575ba436bfbcc0d4f810014c0fbb))
+
 ## [0.13.9](https://github.com/gma1k/podtrace/compare/v0.13.8...v0.13.9) (2026-07-16)
 
 
