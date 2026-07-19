@@ -6,6 +6,7 @@ import (
 	"net"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/podtrace/podtrace/internal/clock"
 	"github.com/podtrace/podtrace/internal/safeconv"
@@ -37,14 +38,31 @@ func sanitizeString(s string) string {
 	return strings.ReplaceAll(s, "%", "%%")
 }
 
+// truncateString shortens s to at most max bytes without splitting a
+// multi-byte UTF-8 rune, so the result is always valid UTF-8.
 func truncateString(s string, max int) string {
 	if max <= 0 || len(s) <= max {
 		return s
 	}
 	if max <= 3 {
-		return s[:max]
+		return cutRunes(s, max)
 	}
-	return s[:max-3] + "..."
+	return cutRunes(s, max-3) + "..."
+}
+
+// cutRunes returns s truncated to at most n bytes, backing off to the nearest
+// rune boundary.
+func cutRunes(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	if n >= len(s) {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 type EventType uint32
