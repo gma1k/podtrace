@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/retry"
 
+	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/diagnose"
 	"github.com/podtrace/podtrace/internal/hostfs"
 	"github.com/podtrace/podtrace/internal/logger"
@@ -26,10 +27,6 @@ func finalizeDiagnoseOutputs(ctx context.Context, report string, d *diagnose.Dia
 	if summaryFile == "" && terminationMessagePath == "" && reportTo == "" {
 		return
 	}
-	// On the interrupt path ctx is already cancelled (Ctrl+C, Job deletion,
-	// node drain), and every sink write derives a timeout from it — so the
-	// report was silently lost on exactly the early-termination cases the
-	// sinks exist for. Detach and bound with a grace period instead.
 	finalizeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeGracePeriod)
 	defer cancel()
 	node := os.Getenv("NODE_NAME")
@@ -44,9 +41,7 @@ func finalizeDiagnoseOutputs(ctx context.Context, report string, d *diagnose.Dia
 const finalizeGracePeriod = 30 * time.Second
 
 // SessionSummary is the compact, machine-readable summary the CLI emits
-// at the end of --diagnose. Matches the CRD's SessionSummary type
-// field-for-field so the operator can JSON-unmarshal the termination
-// message directly.
+// at the end of --diagnose.
 type SessionSummary struct {
 	TotalEvents    int64  `json:"totalEvents"`
 	DNSEvents      int64  `json:"dnsEvents,omitempty"`
@@ -93,9 +88,7 @@ func computeSessionSummary(d *diagnose.Diagnostician, node string) SessionSummar
 
 // categoryForEventType maps the internal events.Event.TypeString() value
 // (uppercase category names like DNS/NET/FS/CPU/PROC) into the five
-// top-level buckets the PodTrace CRD exposes. Categories outside this
-// set (MEM, LOCK, HTTP, …) contribute to TotalEvents but not to any
-// per-category count.
+// top-level buckets the PodTrace CRD exposes.
 func categoryForEventType(typeStr string) string {
 	switch strings.ToLower(typeStr) {
 	case "dns":
@@ -120,10 +113,6 @@ func categoryForEventType(typeStr string) string {
 //     via Kubernetes' terminationMessagePath contract.
 //   - reportTo: patches a ConfigMap or Secret with the human-readable
 //     report text (the "full artifact" per spec.reportRef).
-//
-// All three are best-effort individually: a failure on one does not
-// block the others. The return error is a composite when multiple paths
-// fail, so the Job log shows the complete picture.
 func emitSessionArtifacts(ctx context.Context, summary SessionSummary, reportText string) error {
 	var errs []string
 
@@ -149,6 +138,21 @@ func emitSessionArtifacts(ctx context.Context, summary SessionSummary, reportTex
 	return fmt.Errorf("session artifact emission: %s", strings.Join(errs, "; "))
 }
 
+// k8sTerminationLog is the fixed kubelet termination-message path, the one
+// artifact target that legitimately lives outside the session run directory.
+const k8sTerminationLog = "/dev/termination-log"
+
+// writeArtifactFile writes a session artifact, confining it to
+// config.ArtifactBaseDir() when the operator has set one (the privileged Job
+// context).
+func writeArtifactFile(path string, data []byte, perm os.FileMode) error {
+	base := config.ArtifactBaseDir()
+	if base == "" || path == k8sTerminationLog {
+		return hostfs.WriteFile(path, data, perm)
+	}
+	return hostfs.WriteFileWithin(base, path, data, perm)
+}
+
 // writeSummaryFile writes the JSON summary to the given path. Used by
 // the sidecar uploader (reads this file) as the source of truth for
 // summary content when the CLI succeeds.
@@ -157,13 +161,12 @@ func writeSummaryFile(path string, summary SessionSummary) error {
 	if err != nil {
 		return err
 	}
-	return hostfs.WriteFile(path, data, 0o600)
+	return writeArtifactFile(path, data, 0o600)
 }
 
 // writeTerminationMessage writes a compact JSON encoding of the summary
 // so the apiserver surfaces it in Pod.Status.ContainerStatuses[].
-// State.Terminated.Message. 4KB is the kernel-enforced ceiling on this
-// path; the SessionSummary shape intentionally fits well within it.
+// State.Terminated.Message.
 func writeTerminationMessage(path string, summary SessionSummary) error {
 	data, err := json.Marshal(summary)
 	if err != nil {
@@ -173,17 +176,19 @@ func writeTerminationMessage(path string, summary SessionSummary) error {
 	if len(data) > maxTerminationBytes {
 		return fmt.Errorf("summary JSON %d bytes exceeds 4KB termination message limit", len(data))
 	}
-	return hostfs.WriteFile(path, data, 0o600)
+	return writeArtifactFile(path, data, 0o600)
 }
 
 // objectStoreReportFile is the on-disk handoff path between the main
-// session container and the report-uploader sidecar. EmptyDir-mounted
-// at /var/run/podtrace in both containers; the main writes here when
-// the sink is an ObjectStore URI, the sidecar reads from here.
-const objectStoreReportFile = "/var/run/podtrace/report.txt"
+// session container and the report-uploader sidecar. A var, not a const,
+// so tests can redirect it. Lives in a pod-private emptyDir.
+var objectStoreReportFile = "/var/run/podtrace/report.txt"
 
 func uploadReport(ctx context.Context, spec, reportText string) error {
 	if strings.Contains(spec, "://") {
+		// 0644 (other-readable) is required, not lax: the main container runs
+		// as root but the report-uploader sidecar is the distroless nonroot
+		// user, and it must read this file over the shared emptyDir.
 		if err := hostfs.WriteFileAtomic(objectStoreReportFile, []byte(reportText), 0o644); err != nil {
 			return fmt.Errorf("write report file for sidecar: %w", err)
 		}
@@ -214,8 +219,7 @@ func uploadReport(ctx context.Context, spec, reportText string) error {
 }
 
 // parseReportToSpec breaks a string of the form "kind/namespace/name"
-// into its three components. Case-folds the kind so "ConfigMap",
-// "configmap", and "CONFIGMAP" all work.
+// into its three components.
 func parseReportToSpec(spec string) (kind, namespace, name string, err error) {
 	parts := strings.Split(spec, "/")
 	if len(parts) != 3 {
@@ -278,7 +282,6 @@ func upsertReportConfigMap(ctx context.Context, client kubernetes.Interface, nam
 			if cerr == nil || !apierrors.IsAlreadyExists(cerr) {
 				return cerr
 			}
-			// Lost the create race; fall through to a get+update.
 			existing, err = cms.Get(ctx, name, metav1.GetOptions{})
 		}
 		if err != nil {

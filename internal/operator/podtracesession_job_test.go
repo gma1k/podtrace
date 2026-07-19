@@ -140,6 +140,18 @@ func TestBuildSessionJobSpec_CoreInvariants(t *testing.T) {
 	if !strings.Contains(args, "--termination-message-path /dev/termination-log") {
 		t.Errorf("missing --termination-message-path: %v", spec.Template.Spec.Containers[0].Args)
 	}
+	foundArtifactBase := false
+	for _, e := range spec.Template.Spec.Containers[0].Env {
+		if e.Name == "PODTRACE_ARTIFACT_BASE" {
+			foundArtifactBase = true
+			if e.Value != "/var/run/podtrace" {
+				t.Errorf("PODTRACE_ARTIFACT_BASE=%q, want /var/run/podtrace", e.Value)
+			}
+		}
+	}
+	if !foundArtifactBase {
+		t.Error("main container missing PODTRACE_ARTIFACT_BASE env (artifact base-dir jail)")
+	}
 	if n := len(spec.Template.Spec.Containers[0].VolumeMounts); n != 9 {
 		t.Errorf("main container mounts=%d want 9", n)
 	}

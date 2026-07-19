@@ -135,6 +135,10 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("register TracerConfig bootstrap: %w", err)
 	}
 
+	if err := mgr.Add(&SessionChildReaper{Client: mgr.GetClient()}); err != nil {
+		return fmt.Errorf("register session-child reaper: %w", err)
+	}
+
 	return mgr.Start(ctx)
 }
 

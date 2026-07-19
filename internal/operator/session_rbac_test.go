@@ -57,7 +57,7 @@ func TestEnsureSessionReportRBAC_CreatesNarrowRole(t *testing.T) {
 		},
 	}
 
-	if err := ensureSessionReportRBAC(ctx, c, s, "podtrace-system"); err != nil {
+	if err := ensureSessionReportRBAC(ctx, c, s, scheme, "podtrace-system"); err != nil {
 		t.Fatalf("ensureSessionReportRBAC: %v", err)
 	}
 
@@ -116,7 +116,7 @@ func TestEnsureSessionReportRBAC_NoSinkStillGrantsPodRead(t *testing.T) {
 	s := &podtracev1alpha1.PodTraceSession{
 		ObjectMeta: metav1.ObjectMeta{Name: "diag", Namespace: "team-a", UID: "sess-abc"},
 	}
-	if err := ensureSessionReportRBAC(ctx, c, s, "podtrace-system"); err != nil {
+	if err := ensureSessionReportRBAC(ctx, c, s, scheme, "podtrace-system"); err != nil {
 		t.Fatalf("ensureSessionReportRBAC: %v", err)
 	}
 
@@ -145,9 +145,6 @@ func TestBuildSessionReportRules_IncludesPodReads(t *testing.T) {
 			t.Errorf("session Role must not grant events:%s (read-only): %+v", verb, rules)
 		}
 	}
-	// Without reportRef, the rule set must not grant any configmap/
-	// secret verbs — those need a resourceNames-scoped rule that only
-	// appears when reportRef is configured.
 	if hasRuleFor(rules, "configmaps", "update") || hasRuleFor(rules, "secrets", "update") {
 		t.Errorf("no-reportRef ruleset leaked write verbs: %+v", rules)
 	}
@@ -171,9 +168,6 @@ func TestBuildSessionReportRules_ResourceNamesScoped(t *testing.T) {
 	if scoped[0].ResourceNames[0] != "rpt" {
 		t.Errorf("resourceNames=%v want [rpt]", scoped[0].ResourceNames)
 	}
-	// The scoped rule must not contain the "create" verb — create is
-	// checked at the collection level, so it belongs on a separate
-	// unscoped rule. A scoped rule with create would be dead code.
 	for _, v := range scoped[0].Verbs {
 		if v == "create" {
 			t.Errorf("resourceNames-scoped rule contains create verb: %+v", scoped[0])
@@ -181,10 +175,6 @@ func TestBuildSessionReportRules_ResourceNamesScoped(t *testing.T) {
 	}
 }
 
-// hasRuleFor reports whether any policy rule grants the given verb on
-// the given core-API resource. Matches regardless of ResourceNames
-// scoping; tests that care about that scope check ResourceNames
-// directly.
 func hasRuleFor(rules []rbacv1.PolicyRule, resource, verb string) bool {
 	for _, r := range rules {
 		resMatch := false
@@ -259,5 +249,72 @@ func TestReportToSpecFromReportRef(t *testing.T) {
 	}
 	if got := reportToSpecFromReportRef(s); got != "secret/team-a/rpt" {
 		t.Errorf("secret spec: %q", got)
+	}
+}
+
+func ownedBySession(refs []metav1.OwnerReference, s *podtracev1alpha1.PodTraceSession) bool {
+	for _, o := range refs {
+		if o.Kind == "PodTraceSession" && o.UID == s.UID && o.Controller != nil && *o.Controller {
+			return true
+		}
+	}
+	return false
+}
+
+func TestEnsureSessionReportRBAC_OwnsSameNamespaceRBAC(t *testing.T) {
+	scheme := newRBACScheme(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	ctx := context.Background()
+	s := &podtracev1alpha1.PodTraceSession{
+		ObjectMeta: metav1.ObjectMeta{Name: "diag", Namespace: "team-a", UID: "own-1"},
+		Spec: podtracev1alpha1.PodTraceSessionSpec{
+			ReportRef: &podtracev1alpha1.ReportReference{ConfigMap: &corev1.LocalObjectReference{Name: "r"}},
+		},
+	}
+	if err := ensureSessionReportRBAC(ctx, c, s, scheme, "podtrace-system"); err != nil {
+		t.Fatalf("ensureSessionReportRBAC: %v", err)
+	}
+
+	var role rbacv1.Role
+	if err := c.Get(ctx, types.NamespacedName{Name: SessionReportRoleName(s.UID), Namespace: "team-a"}, &role); err != nil {
+		t.Fatalf("role: %v", err)
+	}
+	if !ownedBySession(role.OwnerReferences, s) {
+		t.Errorf("report Role not owned by session: %+v", role.OwnerReferences)
+	}
+	var rb rbacv1.RoleBinding
+	if err := c.Get(ctx, types.NamespacedName{Name: SessionReportRoleBindingName(s.UID), Namespace: "team-a"}, &rb); err != nil {
+		t.Fatalf("rolebinding: %v", err)
+	}
+	if !ownedBySession(rb.OwnerReferences, s) {
+		t.Errorf("report RoleBinding not owned by session: %+v", rb.OwnerReferences)
+	}
+}
+
+func TestEnsureSessionPodReadRBAC_OwnsOnlySameNamespace(t *testing.T) {
+	scheme := newRBACScheme(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	ctx := context.Background()
+	s := &podtracev1alpha1.PodTraceSession{
+		ObjectMeta: metav1.ObjectMeta{Name: "diag", Namespace: "team-a", UID: "own-2"},
+	}
+	if err := ensureSessionPodReadRBAC(ctx, c, s, scheme, []string{"team-a", "team-b"}, "podtrace-system"); err != nil {
+		t.Fatalf("ensureSessionPodReadRBAC: %v", err)
+	}
+
+	var sameRole rbacv1.Role
+	if err := c.Get(ctx, types.NamespacedName{Name: SessionPodReadRoleName(s.UID), Namespace: "team-a"}, &sameRole); err != nil {
+		t.Fatalf("same-ns role: %v", err)
+	}
+	if !ownedBySession(sameRole.OwnerReferences, s) {
+		t.Errorf("same-namespace pod-read Role must be owned: %+v", sameRole.OwnerReferences)
+	}
+
+	var crossRole rbacv1.Role
+	if err := c.Get(ctx, types.NamespacedName{Name: SessionPodReadRoleName(s.UID), Namespace: "team-b"}, &crossRole); err != nil {
+		t.Fatalf("cross-ns role: %v", err)
+	}
+	if len(crossRole.OwnerReferences) != 0 {
+		t.Errorf("cross-namespace pod-read Role must NOT be owned (k8s forbids): %+v", crossRole.OwnerReferences)
 	}
 }
