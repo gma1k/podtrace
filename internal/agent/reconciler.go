@@ -227,13 +227,9 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		r.Enricher.Snapshot(podEntries)
 	}
 
-	r.Router.Publish(rules)
+	drain := r.Router.Publish(rules)
 
-	// Publish holds the router's write lock, and Export holds the read lock
-	// for its whole duration — so once Publish returns, no in-flight Export
-	// references a displaced exporter and they can be flushed and closed.
-	// Done asynchronously: Close blocks on ForceFlush/Shutdown against the
-	// collector, and this reconciler is single-threaded.
+	drain.Wait()
 	r.closeDisplacedExporters()
 
 	if r.CategoryGate != nil {
@@ -284,8 +280,7 @@ func (r *AgentReconciler) enqueueAllPodTraces(ctx context.Context, _ client.Obje
 // enqueueOnBundleChange handles the ConfigMap and Secret bundle watches:
 // only bundle objects (with our managed-by + exporter-bundle labels)
 // produce reconcile requests, and each such event enqueues every
-// PodTrace. Watching the Secret is what lets a credential-only rotation,
-// which never touches the bundle ConfigMap, trigger a reconcile.
+// PodTrace.
 func (r *AgentReconciler) enqueueOnBundleChange(ctx context.Context, obj client.Object) []reconcile.Request {
 	if obj.GetLabels()[operator.LabelManagedBy] != operator.ManagedByValue {
 		return nil
@@ -472,12 +467,19 @@ func identifyContainerCgroup(dir string, statuses map[string]string) (name, id s
 	if trimmed == "" {
 		return "", ""
 	}
+	if cname, ok := statuses[trimmed]; ok {
+		return cname, trimmed
+	}
+	bestName, bestID := "", ""
 	for cid, cname := range statuses {
-		if strings.HasPrefix(cid, trimmed) || strings.HasPrefix(trimmed, cid) {
-			return cname, cid
+		if !strings.HasPrefix(cid, trimmed) && !strings.HasPrefix(trimmed, cid) {
+			continue
+		}
+		if len(cid) > len(bestID) || (len(cid) == len(bestID) && cid < bestID) {
+			bestName, bestID = cname, cid
 		}
 	}
-	return "", ""
+	return bestName, bestID
 }
 
 // mainPIDFromCgroupProcs returns the container's main host PID, the lowest
@@ -538,8 +540,6 @@ func cgroupPathForPod(p *corev1.Pod, root string) string {
 		qos = "besteffort"
 	}
 
-	// The slice-prefix is the leaf of the discovered root with .slice
-	// stripped.
 	leaf := filepath.Base(root)
 	prefix := strings.TrimSuffix(leaf, ".slice")
 

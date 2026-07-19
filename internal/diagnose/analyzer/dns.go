@@ -60,6 +60,49 @@ func AnalyzeDNS(queries, responses []*events.Event) (avgLatency, maxLatency floa
 	return
 }
 
+// DNSRCodeBreakdown counts DNS responses by response-code mnemonic (NXDOMAIN,
+// SERVFAIL, …), excluding successes, sorted most-frequent first. It surfaces
+// WHY lookups failed rather than a bare error total.
+func DNSRCodeBreakdown(responses []*events.Event) []TargetCount {
+	counts := make(map[string]int)
+	for _, e := range responses {
+		if e == nil || e.Error == 0 {
+			continue
+		}
+		counts[e.DNSResponseCode()]++
+	}
+	return sortedNameCounts(counts)
+}
+
+// DNSQueryTypeBreakdown counts DNS responses by query-type mnemonic (A, AAAA,
+// …), sorted most-frequent first.
+func DNSQueryTypeBreakdown(responses []*events.Event) []TargetCount {
+	counts := make(map[string]int)
+	for _, e := range responses {
+		if e == nil {
+			continue
+		}
+		counts[e.DNSQueryType()]++
+	}
+	return sortedNameCounts(counts)
+}
+
+// sortedNameCounts turns a name→count map into a slice ordered by count
+// descending, then name ascending for a deterministic, stable rendering.
+func sortedNameCounts(counts map[string]int) []TargetCount {
+	out := make([]TargetCount, 0, len(counts))
+	for name, count := range counts {
+		out = append(out, TargetCount{Target: name, Count: count})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].Target < out[j].Target
+	})
+	return out
+}
+
 // TargetAddrs pairs a DNS name with the distinct addresses it resolved to.
 type TargetAddrs struct {
 	Target string

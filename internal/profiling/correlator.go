@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/podtrace/podtrace/internal/clock"
 	"github.com/podtrace/podtrace/internal/config"
@@ -115,7 +114,6 @@ func Correlate(
 
 		if e.LatencyNS >= triggerNS && isSlowEventType(e.Type) {
 			result.SlowEvents = append(result.SlowEvents, e)
-			// Build a ±50ms window around the slow event for SchedSwitch correlation.
 			eventWall := clock.BPFTimestampToWall(e.Timestamp)
 			slowWindows = append(slowWindows, window{
 				start: eventWall.Add(-50 * time.Millisecond),
@@ -159,7 +157,6 @@ func Correlate(
 				}
 			}
 			if inWindow {
-				// Aggregate the top 3 frames of the stack (skip innermost runtime frames).
 				for i, addr := range e.Stack {
 					if i >= 3 {
 						break
@@ -349,31 +346,10 @@ func GenerateSection(cr *CorrelatedResult, duration time.Duration) string {
 	return sb.String()
 }
 
-// truncate shortens s to at most maxLen bytes. It never panics for small
-// maxLen and never splits a multi-byte UTF-8 rune.
+// truncate delegates to events.TruncateString, the shared rune-safe and
+// panic-safe truncator, so the logic lives in one place.
 func truncate(s string, maxLen int) string {
-	if maxLen <= 0 || len(s) <= maxLen {
-		return s
-	}
-	if maxLen <= 3 {
-		return cutRunes(s, maxLen)
-	}
-	return cutRunes(s, maxLen-3) + "..."
-}
-
-// cutRunes returns s truncated to at most n bytes, backing off to the nearest
-// rune boundary so the result is always valid UTF-8.
-func cutRunes(s string, n int) string {
-	if n <= 0 {
-		return ""
-	}
-	if n >= len(s) {
-		return s
-	}
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
-	}
-	return s[:n]
+	return events.TruncateString(s, maxLen)
 }
 
 func formatBytes(b int64) string {

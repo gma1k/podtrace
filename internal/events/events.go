@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
-	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -34,13 +33,9 @@ func PeerIP(family uint8, v4 uint32, v6 [16]byte) string {
 	}
 }
 
-func sanitizeString(s string) string {
-	return strings.ReplaceAll(s, "%", "%%")
-}
-
-// truncateString shortens s to at most max bytes without splitting a
+// TruncateString shortens s to at most max bytes without splitting a
 // multi-byte UTF-8 rune, so the result is always valid UTF-8.
-func truncateString(s string, max int) string {
+func TruncateString(s string, max int) string {
 	if max <= 0 || len(s) <= max {
 		return s
 	}
@@ -321,6 +316,14 @@ func dnsServerStr(e *Event) string {
 	}
 	return dnsServerString(e.DNSServerIP)
 }
+
+// DNSQueryType returns the DNS query-type mnemonic (A, AAAA, …) for an
+// EVENT_DNS event; the numeric qtype is carried in TCPState.
+func (e *Event) DNSQueryType() string { return dnsQTypeName(e.TCPState) }
+
+// DNSResponseCode returns the DNS response-code mnemonic (NOERROR, NXDOMAIN, …)
+// for an EVENT_DNS event; the numeric rcode is carried in Error.
+func (e *Event) DNSResponseCode() string { return dnsRCodeName(e.Error) }
 
 // dnsRCodeName maps a DNS response code (carried in Error for EVENT_DNS) to its
 // mnemonic.

@@ -116,6 +116,18 @@ func GenerateDNSSection(d Diagnostician, duration time.Duration) string {
 	report += formatter.LatencyMetrics(avgLatency, maxLatency)
 	report += formatter.Percentiles(p50, p95, p99)
 	report += formatter.ErrorRate(errors, lookupCount)
+	if rcodes := analyzer.DNSRCodeBreakdown(responses); len(rcodes) > 0 {
+		report += "  Response code breakdown:\n"
+		for _, rc := range rcodes {
+			report += fmt.Sprintf("    - %s: %d\n", rc.Target, rc.Count)
+		}
+	}
+	if qtypes := analyzer.DNSQueryTypeBreakdown(responses); len(qtypes) > 0 {
+		report += "  Query type breakdown:\n"
+		for _, qt := range qtypes {
+			report += fmt.Sprintf("    - %s: %d\n", qt.Target, qt.Count)
+		}
+	}
 	report += formatter.TopTargets(topTargets, config.TopTargetsLimit, "targets", "lookups")
 	report += formatter.ResolvedAddresses(analyzer.ResolvedAddresses(responses), config.TopTargetsLimit)
 	report += "\n"
