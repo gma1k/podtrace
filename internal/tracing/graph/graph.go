@@ -3,6 +3,8 @@ package graph
 import (
 	"fmt"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/podtrace/podtrace/internal/diagnose/tracker"
@@ -35,6 +37,7 @@ type Edge struct {
 }
 
 type GraphBuilder struct {
+	mu    sync.Mutex
 	nodes map[string]*Node
 	edges map[string]*Edge
 }
@@ -47,6 +50,9 @@ func NewGraphBuilder() *GraphBuilder {
 }
 
 func (gb *GraphBuilder) BuildFromTraces(traces []*tracker.Trace) *RequestFlowGraph {
+	gb.mu.Lock()
+	defer gb.mu.Unlock()
+
 	gb.reset()
 
 	for _, trace := range traces {
@@ -199,8 +205,8 @@ func (g *RequestFlowGraph) ToDOT() string {
 	buf += "  node [shape=box];\n\n"
 
 	for _, node := range g.Nodes {
-		label := fmt.Sprintf("%s\\nRequests: %d\\nErrors: %d", node.Service, node.RequestCount, node.ErrorCount)
-		buf += fmt.Sprintf("  \"%s\" [label=\"%s\"];\n", node.ID, label)
+		label := dotEscape(node.Service) + fmt.Sprintf("\\nRequests: %d\\nErrors: %d", node.RequestCount, node.ErrorCount)
+		buf += fmt.Sprintf("  \"%s\" [label=\"%s\"];\n", dotEscape(node.ID), label)
 	}
 
 	buf += "\n"
@@ -210,9 +216,24 @@ func (g *RequestFlowGraph) ToDOT() string {
 		if edge.ErrorCount > 0 {
 			label += fmt.Sprintf("\\nErrors: %d", edge.ErrorCount)
 		}
-		buf += fmt.Sprintf("  \"%s\" -> \"%s\" [label=\"%s\"];\n", edge.Source, edge.Target, label)
+		buf += fmt.Sprintf("  \"%s\" -> \"%s\" [label=\"%s\"];\n", dotEscape(edge.Source), dotEscape(edge.Target), label)
 	}
 
 	buf += "}\n"
 	return buf
+}
+
+// dotEscaper makes a string safe to embed inside a double-quoted DOT string:
+// a service or node ID carrying a quote, backslash, or newline can otherwise
+// break the graph or inject arbitrary DOT.
+var dotEscaper = strings.NewReplacer(
+	`\`, `\\`,
+	`"`, `\"`,
+	"\n", `\n`,
+	"\r", `\r`,
+	"\t", `\t`,
+)
+
+func dotEscape(s string) string {
+	return dotEscaper.Replace(s)
 }

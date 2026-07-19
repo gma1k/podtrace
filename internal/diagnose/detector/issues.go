@@ -12,6 +12,9 @@ func DetectIssues(allEvents []*events.Event, errorRateThreshold, rttSpikeThresho
 
 	var connectEvents []*events.Event
 	for _, e := range allEvents {
+		if e == nil {
+			continue
+		}
 		if e.Type == events.EventConnect {
 			connectEvents = append(connectEvents, e)
 		}
@@ -32,6 +35,9 @@ func DetectIssues(allEvents []*events.Event, errorRateThreshold, rttSpikeThresho
 
 	var tcpEvents []*events.Event
 	for _, e := range allEvents {
+		if e == nil {
+			continue
+		}
 		if e.Type == events.EventTCPSend || e.Type == events.EventTCPRecv {
 			tcpEvents = append(tcpEvents, e)
 		}
@@ -52,6 +58,9 @@ func DetectIssues(allEvents []*events.Event, errorRateThreshold, rttSpikeThresho
 
 	var resourceAlerts = make(map[string]int)
 	for _, e := range allEvents {
+		if e == nil {
+			continue
+		}
 		if e.Type == events.EventResourceLimit {
 			// e.Error is int32 carrying the utilization percentage;
 			// negative values are non-physical and skipped.

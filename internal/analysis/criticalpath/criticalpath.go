@@ -57,6 +57,20 @@ type requestWindow struct {
 	lastSeen time.Time
 }
 
+// addSegment appends seg, but once the window reaches maxSegmentsPerWindow it
+// folds further latency into a single trailing overflow segment.
+func (w *requestWindow) addSegment(seg Segment) {
+	if len(w.segments) < maxSegmentsPerWindow-1 {
+		w.segments = append(w.segments, seg)
+		return
+	}
+	if len(w.segments) == maxSegmentsPerWindow-1 {
+		w.segments = append(w.segments, Segment{Label: segmentOverflowLabel})
+	}
+	overflow := &w.segments[maxSegmentsPerWindow-1]
+	overflow.LatencyNS += seg.LatencyNS
+}
+
 // Analyzer correlates events by PID and emits CriticalPath summaries on
 // HTTP / FastCGI / gRPC response boundary events.
 type Analyzer struct {
@@ -83,7 +97,11 @@ func isBoundary(t events.EventType) bool {
 	return t == events.EventHTTPResp || t == events.EventFastCGIResp || t == events.EventGRPCMethod
 }
 
-const maxWindows = 8192
+const (
+	maxWindows           = 8192
+	maxSegmentsPerWindow = 1024
+	segmentOverflowLabel = "other"
+)
 
 // Feed processes one event. It is safe to call from multiple goroutines.
 // The emit callback runs after the analyzer's lock is released, so a slow
@@ -124,7 +142,7 @@ func (a *Analyzer) Feed(e *events.Event) {
 		if e.Details != "" {
 			label = e.Details
 		}
-		w.segments = append(w.segments, Segment{Label: label, LatencyNS: e.LatencyNS})
+		w.addSegment(Segment{Label: label, LatencyNS: e.LatencyNS})
 	}
 	a.mu.Unlock()
 
