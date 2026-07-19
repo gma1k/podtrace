@@ -24,18 +24,18 @@ type Router struct {
 	rules    []CRRule
 	stats    *perCRStats
 	enricher *PodEnricher
+	inflight *sync.WaitGroup
 }
 
-// NewRouter constructs an empty Router. The stats argument is shared
-// with the status writer so per-CR event counts survive Publish calls
-// (rules are replaced, counters are not).
+// NewRouter constructs an empty Router.
 func NewRouter(stats *perCRStats) *Router {
 	if stats == nil {
 		stats = newPerCRStats()
 	}
 	return &Router{
-		rules: nil,
-		stats: stats,
+		rules:    nil,
+		stats:    stats,
+		inflight: &sync.WaitGroup{},
 	}
 }
 
@@ -46,7 +46,9 @@ func (r *Router) WithEnricher(e *PodEnricher) *Router {
 	return r
 }
 
-func (r *Router) Publish(rules []CRRule) {
+// Publish swaps in a new rule set and returns a WaitGroup that completes once
+// every Export in flight against the PREVIOUS rules has finished.
+func (r *Router) Publish(rules []CRRule) *sync.WaitGroup {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -64,6 +66,9 @@ func (r *Router) Publish(rules []CRRule) {
 	}
 
 	r.rules = cp
+	prev := r.inflight
+	r.inflight = &sync.WaitGroup{}
+	return prev
 }
 
 func (r *Router) Snapshot() []uint64 {
@@ -114,9 +119,12 @@ func (r *Router) Name() string { return "cr-router" }
 
 func (r *Router) Export(ctx context.Context, batch []*events.Event) error {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 	rules := r.rules
 	enricher := r.enricher
+	wg := r.inflight
+	wg.Add(1)
+	r.mu.RUnlock()
+	defer wg.Done()
 
 	if len(rules) == 0 || len(batch) == 0 {
 		return nil
@@ -127,8 +135,6 @@ func (r *Router) Export(ctx context.Context, batch []*events.Event) error {
 		filtered[i] = filtered[i][:0]
 	}
 
-	// One lookup per event regardless of how many CRs (and exporters)
-	// claim it.
 	enrichBatch(enricher, batch)
 
 	for _, ev := range batch {
@@ -167,7 +173,11 @@ func (r *Router) Close(ctx context.Context) error {
 	r.mu.Lock()
 	rules := r.rules
 	r.rules = nil
+	drain := r.inflight
+	r.inflight = &sync.WaitGroup{}
 	r.mu.Unlock()
+
+	drain.Wait()
 
 	for _, rule := range rules {
 		if rule.Exporter == nil {

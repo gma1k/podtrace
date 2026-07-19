@@ -26,17 +26,42 @@ func Uint64ToInt64(v uint64) int64 {
 	return int64(v)
 }
 
+// Float64ToInt64 converts a float64 to int64, clamping out-of-range and
+// non-finite values instead of relying on Go's implementation-defined
+// float→int conversion for those.
+func Float64ToInt64(v float64) int64 {
+	switch {
+	case math.IsNaN(v):
+		return 0
+	case v >= math.MaxInt64:
+		return math.MaxInt64
+	case v <= math.MinInt64:
+		return math.MinInt64
+	default:
+		return int64(v)
+	}
+}
+
+// AddInt64 returns a+b, saturating at math.MaxInt64 / math.MinInt64 instead of
+// wrapping on overflow.
+func AddInt64(a, b int64) int64 {
+	switch {
+	case b > 0 && a > math.MaxInt64-b:
+		return math.MaxInt64
+	case b < 0 && a < math.MinInt64-b:
+		return math.MinInt64
+	default:
+		return a + b
+	}
+}
+
 // Uint64BitsToInt64 reinterprets the bit pattern of v as a signed
-// int64 — i.e. values with the high bit set become negative.
+// int64, i.e. values with the high bit set become negative.
 //
 // Use only when the producer (typically a BPF program) has packed an
 // int64 into a uint64 wire field and the consumer needs the original
 // signed value back. Examples: an Event.Bytes field that polymorphically
 // carries either a byte count OR a sentinel-encoded file descriptor.
-//
-// This is NOT a numeric conversion; it is an intentional bit-pattern
-// re-interpretation. Saturation would corrupt the sentinel encoding,
-// which is why this function exists separately from Uint64ToInt64.
 func Uint64BitsToInt64(v uint64) int64 {
 	return int64(v) // #nosec G115 -- bit-preserving reinterpretation is the documented contract
 }
@@ -106,9 +131,7 @@ func IntToInt32(v int) int32 {
 }
 
 // IntToUint32 narrows int to uint32, clamping negatives to 0 and
-// over-large values to math.MaxUint32. Mirrors config.ClampUint32 so
-// we have a single canonical helper for downstream callers that do
-// not depend on the config package.
+// over-large values to math.MaxUint32.
 func IntToUint32(v int) uint32 {
 	if v < 0 {
 		return 0

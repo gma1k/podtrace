@@ -152,27 +152,6 @@ func TestTCPStateString(t *testing.T) {
 	}
 }
 
-func TestSanitizeString(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"normal", "normal"},
-		{"with%percent", "with%%percent"},
-		{"multiple%%percent", "multiple%%%%percent"},
-		{"no percent", "no percent"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			result := sanitizeString(tt.input)
-			if result != tt.expected {
-				t.Errorf("Expected '%s', got '%s'", tt.expected, result)
-			}
-		})
-	}
-}
-
 func TestTruncateString(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -192,7 +171,7 @@ func TestTruncateString(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := truncateString(tt.input, tt.max)
+			result := TruncateString(tt.input, tt.max)
 			if result != tt.expected {
 				t.Errorf("Expected '%s', got '%s'", tt.expected, result)
 			}

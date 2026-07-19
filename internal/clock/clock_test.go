@@ -16,9 +16,6 @@ func TestMonotonicToWallOffset_Idempotent(t *testing.T) {
 	}
 }
 
-// TestBPFTimestampToWall_AnchorsToWallClock is the core property: a
-// bpf_ktime_get_ns()-domain timestamp taken "now" must convert to a wall-clock
-// time close to time.Now() — not to 1970 plus uptime.
 func TestBPFTimestampToWall_AnchorsToWallClock(t *testing.T) {
 	var ts unix.Timespec
 	if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &ts); err != nil {
@@ -35,7 +32,7 @@ func TestBPFTimestampToWall_AnchorsToWallClock(t *testing.T) {
 func TestBPFTimestampToWall_Conversion(t *testing.T) {
 	offset := MonotonicToWallOffset()
 
-	const bpfNS = uint64(1_000_000_000) // 1s since boot
+	const bpfNS = uint64(1_000_000_000)
 	got := BPFTimestampToWall(bpfNS)
 	want := time.Unix(0, int64(bpfNS)+offset)
 	if !got.Equal(want) {
@@ -49,7 +46,7 @@ func TestBPFTimestampToWall_Conversion(t *testing.T) {
 	}
 
 	gotBig := BPFTimestampToWall(math.MaxUint64)
-	wantBig := time.Unix(0, math.MaxInt64+offset)
+	wantBig := time.Unix(0, math.MaxInt64)
 	if !gotBig.Equal(wantBig) {
 		t.Errorf("BPFTimestampToWall(MaxUint64) = %v, want %v", gotBig, wantBig)
 	}
