@@ -39,7 +39,7 @@ func TestEmitCopyFailAlert(t *testing.T) {
 	emitCopyFailAlert(ev)
 }
 
-func TestFirstPIDFromCgroupProcs(t *testing.T) {
+func TestMainPIDFromCgroupProcs(t *testing.T) {
 	base := t.TempDir()
 	origBase := config.CgroupBasePath
 	config.CgroupBasePath = base
@@ -53,12 +53,11 @@ func TestFirstPIDFromCgroupProcs(t *testing.T) {
 	if err := os.MkdirAll(cg, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Leading blank line + entries; first valid PID wins.
-	if err := os.WriteFile(filepath.Join(cg, "cgroup.procs"), []byte("\n4242\n4243\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(cg, "cgroup.procs"), []byte("\n9999\n4242\n4243\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := firstPIDFromCgroupProcs(cg); got != 4242 {
-		t.Errorf("firstPIDFromCgroupProcs = %d, want 4242", got)
+	if got := mainPIDFromCgroupProcs(cg); got != 4242 {
+		t.Errorf("mainPIDFromCgroupProcs = %d, want 4242 (lowest/main PID, not first-listed 9999)", got)
 	}
 
 	// No cgroup.procs -> 0.
@@ -66,7 +65,7 @@ func TestFirstPIDFromCgroupProcs(t *testing.T) {
 	if err := os.MkdirAll(empty, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if got := firstPIDFromCgroupProcs(empty); got != 0 {
+	if got := mainPIDFromCgroupProcs(empty); got != 0 {
 		t.Errorf("missing cgroup.procs should give 0, got %d", got)
 	}
 }

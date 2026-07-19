@@ -420,7 +420,7 @@ func scanPodCgroups(pods []*corev1.Pod) []PodCgroupEntry {
 				Pod:           p,
 				ContainerName: containerName,
 				ContainerID:   containerID,
-				ContainerPID:  firstPIDFromCgroupProcs(child),
+				ContainerPID:  mainPIDFromCgroupProcs(child),
 			})
 		}
 	}
@@ -480,9 +480,10 @@ func identifyContainerCgroup(dir string, statuses map[string]string) (name, id s
 	return "", ""
 }
 
-// firstPIDFromCgroupProcs returns the first host PID listed in a cgroup
-// directory's cgroup.procs, or 0 if none/unreadable.
-func firstPIDFromCgroupProcs(cgroupDir string) uint32 {
+// mainPIDFromCgroupProcs returns the container's main host PID, the lowest
+// (oldest, hence the entrypoint) PID in the cgroup's cgroup.procs, or 0 if
+// none/unreadable.
+func mainPIDFromCgroupProcs(cgroupDir string) uint32 {
 	rel, ok := sysfs.CgroupRelative(cgroupDir)
 	if !ok {
 		return 0
@@ -491,12 +492,17 @@ func firstPIDFromCgroupProcs(cgroupDir string) uint32 {
 	if err != nil {
 		return 0
 	}
+	var main uint32
 	for _, f := range strings.Fields(string(data)) {
-		if pid, err := strconv.ParseUint(f, 10, 32); err == nil && pid > 0 {
-			return uint32(pid)
+		pid, err := strconv.ParseUint(f, 10, 32)
+		if err != nil || pid == 0 {
+			continue
+		}
+		if main == 0 || uint32(pid) < main {
+			main = uint32(pid)
 		}
 	}
-	return 0
+	return main
 }
 
 // kubepodsRootCandidates lists the well-known cgroup directories
