@@ -183,6 +183,12 @@ func (e *sdkEventExporter) Export(ctx context.Context, batch []*events.Event) er
 				attribute.String("podtrace.http.transport", ev.HTTPProtoLabel()),
 			)
 		}
+		if ev.Type == events.EventUSDT && ev.Details != "" {
+			attrs = append(attrs, attribute.String("podtrace.usdt.probe", ev.Details))
+		}
+		if ev.Type == events.EventDNS && ev.Details != "" {
+			attrs = append(attrs, attribute.String("dns.resolved", ev.Details))
+		}
 		if ev.PeerDstIP != "" {
 			attrs = append(attrs,
 				attribute.String("network.peer.address", ev.PeerDstIP),

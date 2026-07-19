@@ -91,6 +91,7 @@ const (
 	EventDNSQuery
 	EventAFALG
 	EventHTTP3
+	EventUSDT
 )
 
 type Event struct {
@@ -233,6 +234,8 @@ func (e *Event) TypeString() string {
 		return "CRYPTO"
 	case EventHTTP3:
 		return "HTTP/3"
+	case EventUSDT:
+		return "USDT"
 	default:
 		return "UNKNOWN"
 	}

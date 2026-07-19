@@ -69,6 +69,37 @@ struct {
 	__type(value, char[MAX_STRING_LEN]);
 } dns_targets SEC(".maps");
 
+#define USDT_PROVIDER_LEN 64
+#define USDT_NAME_LEN 64
+#define USDT_MAX_ARGS 4
+
+#define USDT_ARG_UNSUPPORTED 0
+#define USDT_ARG_REG 1
+#define USDT_ARG_MEM 2
+#define USDT_ARG_CONST 3
+
+struct usdt_arg {
+	s8 size;
+	u8 kind;
+	u16 reg_off;
+	s64 disp;
+};
+
+struct usdt_probe {
+	char provider[USDT_PROVIDER_LEN];
+	char name[USDT_NAME_LEN];
+	u8 nargs;
+	u8 _pad[7];
+	struct usdt_arg args[USDT_MAX_ARGS];
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 4096);
+	__type(key, u64);
+	__type(value, struct usdt_probe);
+} usdt_probes SEC(".maps");
+
 struct dns_flow_key {
 	u64 cgroup_id;
 	u32 txid;
@@ -111,6 +142,48 @@ struct {
 	__type(key, struct dns_v6key);
 	__type(value, char[MAX_STRING_LEN]);
 } dns_resolved6 SEC(".maps");
+
+#define DNS_PAYLOAD_MAX 512
+
+struct dns_payload_record {
+	u64 cgroup_id;
+	u64 timestamp;
+	u64 latency_ns;
+	u32 pid;
+	u32 server_ip;
+	u8  server_ip6[16];
+	u16 txid;
+	u16 qtype;
+	u16 payload_len;
+	u8  transport;
+	u8  is_v6;
+	u8  rcode;
+	u8  _pad[7];
+};
+
+struct dns_payload_scratch {
+	struct dns_payload_record rec;
+	u8 payload[DNS_PAYLOAD_MAX];
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, u32);
+	__type(value, struct dns_payload_scratch);
+} dns_payload_scratch_map SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_RINGBUF);
+	__uint(max_entries, 2 * 1024 * 1024);
+} dns_payload_events SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, u32);
+	__type(value, u32);
+} dns_payload_enabled SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);

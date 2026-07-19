@@ -53,6 +53,48 @@ func TestBuildAgentDaemonSetSpec_OptionalAgentFields(t *testing.T) {
 	}
 }
 
+func TestBuildAgentDaemonSetSpec_CapabilitySwitches(t *testing.T) {
+	on := true
+	spec := buildAgentDaemonSetSpec(tc(func(x *podtracev1alpha1.TracerConfig) {
+		x.Spec.Agent.USDT = &on
+		x.Spec.Agent.DNSFullAnswers = &on
+	}), "podtrace-system")
+	env := spec.Template.Spec.Containers[0].Env
+
+	if v, ok := envValue(env, "PODTRACE_USDT_ENABLED"); !ok || v != "true" {
+		t.Errorf("PODTRACE_USDT_ENABLED=%q ok=%v want true", v, ok)
+	}
+	if v, ok := envValue(env, "PODTRACE_DNS_PAYLOAD_ENABLED"); !ok || v != "true" {
+		t.Errorf("PODTRACE_DNS_PAYLOAD_ENABLED=%q ok=%v want true", v, ok)
+	}
+}
+
+func TestBuildAgentDaemonSetSpec_CapabilityDefaults(t *testing.T) {
+	spec := buildAgentDaemonSetSpec(tc(func(x *podtracev1alpha1.TracerConfig) {}), "podtrace-system")
+	env := spec.Template.Spec.Containers[0].Env
+	if v, ok := envValue(env, "PODTRACE_USDT_ENABLED"); !ok || v != "true" {
+		t.Errorf("PODTRACE_USDT_ENABLED=%q ok=%v want true (default on)", v, ok)
+	}
+	if v, ok := envValue(env, "PODTRACE_DNS_PAYLOAD_ENABLED"); !ok || v != "true" {
+		t.Errorf("PODTRACE_DNS_PAYLOAD_ENABLED=%q ok=%v want true (default on)", v, ok)
+	}
+}
+
+func TestBuildAgentDaemonSetSpec_CapabilityExplicitDisable(t *testing.T) {
+	off := false
+	spec := buildAgentDaemonSetSpec(tc(func(x *podtracev1alpha1.TracerConfig) {
+		x.Spec.Agent.USDT = &off
+		x.Spec.Agent.DNSFullAnswers = &off
+	}), "podtrace-system")
+	env := spec.Template.Spec.Containers[0].Env
+	if v, ok := envValue(env, "PODTRACE_USDT_ENABLED"); !ok || v != "false" {
+		t.Errorf("PODTRACE_USDT_ENABLED=%q ok=%v want false (explicit disable)", v, ok)
+	}
+	if v, ok := envValue(env, "PODTRACE_DNS_PAYLOAD_ENABLED"); !ok || v != "false" {
+		t.Errorf("PODTRACE_DNS_PAYLOAD_ENABLED=%q ok=%v want false (explicit disable)", v, ok)
+	}
+}
+
 func TestBuildAgentDaemonSetSpec_DNSPacketCaptureEnabledOmitsEnv(t *testing.T) {
 	dpcOn := true
 	spec := buildAgentDaemonSetSpec(tc(func(x *podtracev1alpha1.TracerConfig) {

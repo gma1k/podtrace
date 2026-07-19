@@ -117,6 +117,7 @@ func GenerateDNSSection(d Diagnostician, duration time.Duration) string {
 	report += formatter.Percentiles(p50, p95, p99)
 	report += formatter.ErrorRate(errors, lookupCount)
 	report += formatter.TopTargets(topTargets, config.TopTargetsLimit, "targets", "lookups")
+	report += formatter.ResolvedAddresses(analyzer.ResolvedAddresses(responses), config.TopTargetsLimit)
 	report += "\n"
 	return report
 }

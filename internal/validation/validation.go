@@ -88,12 +88,13 @@ func ValidateEventFilter(filter string) error {
 		"cpu":    true,
 		"proc":   true,
 		"crypto": true,
+		"usdt":   true,
 	}
 	filters := strings.Split(strings.ToLower(filter), ",")
 	for _, f := range filters {
 		f = strings.TrimSpace(f)
 		if f != "" && !validFilters[f] {
-			return fmt.Errorf("invalid event filter: %s (valid: dns, net, fs, cpu, proc, crypto)", f)
+			return fmt.Errorf("invalid event filter: %s (valid: dns, net, fs, cpu, proc, crypto, usdt)", f)
 		}
 	}
 	return nil

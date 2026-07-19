@@ -742,6 +742,8 @@ func knownFilterCategories() []string {
 		string(podtracev1alpha1.FilterFS),
 		string(podtracev1alpha1.FilterCPU),
 		string(podtracev1alpha1.FilterProc),
+		string(podtracev1alpha1.FilterCrypto),
+		string(podtracev1alpha1.FilterUSDT),
 	}
 }
 
@@ -784,6 +786,8 @@ func filterToEventTypes(f podtracev1alpha1.EventFilter) []events.EventType {
 		return []events.EventType{events.EventExec, events.EventFork, events.EventOOMKill}
 	case podtracev1alpha1.FilterCrypto:
 		return []events.EventType{events.EventAFALG}
+	case podtracev1alpha1.FilterUSDT:
+		return []events.EventType{events.EventUSDT}
 	default:
 		return nil
 	}

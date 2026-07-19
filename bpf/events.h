@@ -47,6 +47,7 @@ enum event_type {
 	EVENT_DNS_QUERY,
 	EVENT_AF_ALG,
 	EVENT_HTTP3,
+	EVENT_USDT,
 };
 
 struct event {

@@ -64,6 +64,20 @@ func Parse(b []byte) Message {
 	m.QType = binary.BigEndian.Uint16(b[off : off+2])
 	off += 4
 
+	for q := 1; q < int(qdcount); q++ {
+		_, next, ok := decodeName(b, off)
+		if !ok {
+			m.Truncated = true
+			return m
+		}
+		off = next
+		if off+4 > len(b) {
+			m.Truncated = true
+			return m
+		}
+		off += 4
+	}
+
 	limit := int(ancount)
 	if limit > maxAnswers {
 		limit = maxAnswers
