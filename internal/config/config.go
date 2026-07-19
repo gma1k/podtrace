@@ -47,7 +47,7 @@ const (
 	MaxCgroupFilePathLength          = 64
 	MaxContainerIDLength             = 128
 	DefaultCacheEvictionThreshold    = 0.9
-	MaxTraceContextCacheSize = 100000
+	MaxTraceContextCacheSize         = 100000
 )
 
 var (
@@ -58,7 +58,7 @@ var (
 	CircuitBreakerEnabled     = getBoolEnvOrDefault("PODTRACE_CIRCUIT_BREAKER_ENABLED", true)
 	TracingEnabled            = getBoolEnvOrDefault("PODTRACE_TRACING_ENABLED", false)
 	TracingSampleRate         = getFloatEnvOrDefault("PODTRACE_TRACING_SAMPLE_RATE", DefaultTracingSampleRate)
-	SynthesizeSpans = getBoolEnvOrDefault("PODTRACE_TRACING_SYNTHESIZE_SPANS", DefaultSynthesizeSpans)
+	SynthesizeSpans           = getBoolEnvOrDefault("PODTRACE_TRACING_SYNTHESIZE_SPANS", DefaultSynthesizeSpans)
 	OTLPEndpoint              = getEnvOrDefault("PODTRACE_OTLP_ENDPOINT", DefaultOTLPEndpoint)
 	JaegerEndpoint            = os.Getenv("PODTRACE_JAEGER_ENDPOINT")
 	SplunkEndpoint            = os.Getenv("PODTRACE_SPLUNK_ENDPOINT")
@@ -414,11 +414,16 @@ func ClampUint32(v int) uint32 {
 	return uint32(v)
 }
 
+// getInt64EnvOrDefault mirrors getIntEnvOrDefault for 64-bit knobs: the
+// positive-only constraint holds (every consumer is a size or threshold
+// where 0/negative would disable or break the feature), and a set-but-
+// rejected value is reported instead of silently falling back.
 func getInt64EnvOrDefault(key string, defaultValue int64) int64 {
 	if value := os.Getenv(key); value != "" {
 		if i, err := strconv.ParseInt(value, 10, 64); err == nil && i > 0 {
 			return i
 		}
+		warnIgnoredEnv(key, value, "must be a positive integer")
 	}
 	return defaultValue
 }
@@ -439,6 +444,14 @@ func GetMetricsAddress() string {
 		addr = DefaultMetricsHost + ":" + strconv.Itoa(DefaultMetricsPort)
 	}
 	return addr
+}
+
+const EnvArtifactBaseDir = "PODTRACE_ARTIFACT_BASE"
+
+// ArtifactBaseDir returns the directory session artifacts must be written
+// within, or "" when unconstrained.
+func ArtifactBaseDir() string {
+	return os.Getenv(EnvArtifactBaseDir)
 }
 
 func AllowNonLoopbackMetrics() bool {

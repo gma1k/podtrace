@@ -159,9 +159,6 @@ func TestWriteFile_RejectsTraversal(t *testing.T) {
 	}
 }
 
-// TestWriteFile_ModeGuard locks the invariant behind the G306 suppression:
-// group/other read is allowed (0644 handoffs) but group/other write is
-// rejected, regardless of call site.
 func TestWriteFile_ModeGuard(t *testing.T) {
 	dir := t.TempDir()
 
@@ -188,9 +185,36 @@ func TestWriteFile_ModeGuard(t *testing.T) {
 	}
 }
 
-// TestWriteFileAtomic verifies the temp+rename write: the final file has the
-// complete content, the correct perm, and no ".tmp" residue is left behind
-// (the sidecar polls the final path and must never observe a partial file).
+func TestWriteFileWithin(t *testing.T) {
+	base := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(base, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := WriteFileWithin(base, filepath.Join(base, "sub", "ok"), []byte("x"), 0o600); err != nil {
+		t.Errorf("write inside base rejected: %v", err)
+	}
+
+	sibling := base + "-evil"
+	if err := os.MkdirAll(sibling, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(sibling) })
+	if err := WriteFileWithin(base, filepath.Join(sibling, "x"), []byte("x"), 0o600); !errors.Is(err, ErrOutsideBase) {
+		t.Errorf("sibling-prefix path: got %v, want ErrOutsideBase", err)
+	}
+
+	if err := WriteFileWithin(base, "/etc/passwd", []byte("x"), 0o600); !errors.Is(err, ErrOutsideBase) {
+		t.Errorf("escape path: got %v, want ErrOutsideBase", err)
+	}
+	if err := WriteFileWithin(base, base+"/../x", []byte("x"), 0o600); !errors.Is(err, ErrInvalidPath) {
+		t.Errorf("traversal path: got %v, want ErrInvalidPath", err)
+	}
+	if err := WriteFileWithin("relative-base", filepath.Join(base, "x"), []byte("x"), 0o600); !errors.Is(err, ErrInvalidPath) {
+		t.Errorf("relative base: got %v, want ErrInvalidPath", err)
+	}
+}
+
 func TestWriteFileAtomic(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "report.txt")
@@ -219,8 +243,6 @@ func TestWriteFileAtomic(t *testing.T) {
 	}
 }
 
-// TestWriteFileAtomic_Overwrite confirms an existing file is replaced wholesale
-// (rename semantics), not appended to.
 func TestWriteFileAtomic_Overwrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "report.txt")

@@ -87,11 +87,12 @@ func TestSessionPodNamespaces(t *testing.T) {
 }
 
 func TestEnsureSessionPodReadRBAC(t *testing.T) {
-	c := fake.NewClientBuilder().WithScheme(findingsScheme(t)).Build()
+	scheme := findingsScheme(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 	s := newSession(nil)
 	const systemNS = "podtrace-system"
 
-	if err := ensureSessionPodReadRBAC(context.Background(), c, s, []string{"team-a", "team-b"}, systemNS); err != nil {
+	if err := ensureSessionPodReadRBAC(context.Background(), c, s, scheme, []string{"team-a", "team-b"}, systemNS); err != nil {
 		t.Fatal(err)
 	}
 

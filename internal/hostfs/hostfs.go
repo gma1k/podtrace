@@ -18,19 +18,6 @@
 //   - filepath.Walk over a host directory derived from ld.so.conf —
 //     the entries returned by the linker config are themselves under
 //     /usr or /lib and the walker honours symlinks the linker would.
-//
-// gosec rules G304 (file inclusion via variable) and G703 (path
-// traversal via taint) flag these accesses because, in the abstract,
-// the path could be anything. This package surfaces three helpers
-// with the only `// #nosec` annotations in the codebase that admit
-// genuinely-unscoped access — every other callsite was migrated to
-// procfs / sysfs / ldsoconf.
-//
-// Each helper validates that the path is absolute and free of "..",
-// which prevents traversal-via-relative-path even though the
-// destination after symlink resolution is intentionally unconstrained.
-// Callers must continue to treat the result as untrusted (e.g. attach
-// uprobes only after verifying the underlying file is a real ELF).
 package hostfs
 
 import (
@@ -118,7 +105,36 @@ func WriteFile(path string, data []byte, perm os.FileMode) error {
 	if perm&0o022 != 0 {
 		return fmt.Errorf("%w: %#o (%s)", ErrUnsafeMode, perm, path)
 	}
-	return os.WriteFile(path, data, perm) // #nosec G304,G306 -- path validated absolute/no-"..", mode asserted non-group/other-writable above; 0644 read is intended for sidecar/kubelet handoffs.
+	return os.WriteFile(path, data, perm) // #nosec G304,G306 -- path validated absolute/no-"..", mode asserted non-group/other-writable above; some handoffs pass 0644 so a nonroot sidecar can read a root-written file over a pod-private emptyDir.
+}
+
+// ErrOutsideBase is returned by WriteFileWithin when the target path
+// resolves outside the permitted base directory.
+var ErrOutsideBase = errors.New("hostfs: path escapes the permitted base directory")
+
+// WriteFileWithin is WriteFile plus a base-directory jail: it refuses to
+// write anywhere outside baseDir.
+func WriteFileWithin(baseDir, path string, data []byte, perm os.FileMode) error {
+	if err := ensureWithin(baseDir, path); err != nil {
+		return err
+	}
+	return WriteFile(path, data, perm)
+}
+
+// ensureWithin validates baseDir and path (absolute, no "..") and confirms
+// path does not escape baseDir.
+func ensureWithin(baseDir, path string) error {
+	if err := validate(baseDir); err != nil {
+		return err
+	}
+	if err := validate(path); err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(filepath.Clean(baseDir), filepath.Clean(path))
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("%w: %s not under %s", ErrOutsideBase, path, baseDir)
+	}
+	return nil
 }
 
 // WriteFileAtomic writes data via a temp file + rename so a concurrent reader

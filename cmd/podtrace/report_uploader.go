@@ -179,7 +179,7 @@ func uploadToObjectStore(ctx context.Context, opts reportUploaderOptions, report
 	if err := writeResolvedLocation(resolved); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: write resolved location: %v\n", err)
 	}
-	if err := hostfs.WriteFile(terminationLogPath, []byte(resolved), 0o644); err != nil {
+	if err := hostfs.WriteFile(terminationLogPath, []byte(resolved), 0o600); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: write termination message: %v\n", err)
 	}
 	return nil
@@ -248,16 +248,15 @@ func readPersistedKeyHint() (string, bool) {
 }
 
 // persistKeyHint writes the key suffix to the state file. Failures
-// are logged but non-fatal: a sidecar that cannot persist the hint
-// will simply pick a fresh one on restart (duplicate object).
+// are logged but non-fatal.
 func persistKeyHint(hint string) {
-	if err := hostfs.WriteFile(keyHintStateFile, []byte(hint), 0o644); err != nil {
+	if err := hostfs.WriteFile(keyHintStateFile, []byte(hint), 0o600); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: persist key hint: %v\n", err)
 	}
 }
 
 func writeResolvedLocation(uri string) error {
-	if err := hostfs.WriteFile(reportLocationFile, []byte(uri), 0o644); err != nil {
+	if err := hostfs.WriteFile(reportLocationFile, []byte(uri), 0o600); err != nil {
 		return err
 	}
 	return nil

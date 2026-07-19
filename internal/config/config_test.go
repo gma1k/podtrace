@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -403,6 +404,56 @@ func TestGetInt64EnvOrDefault(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetInt64EnvOrDefault_WarnsOnRejectedValue(t *testing.T) {
+	const key = "TEST_INT64_WARN_ENV_VAR"
+	orig := os.Getenv(key)
+	t.Cleanup(func() {
+		if orig != "" {
+			_ = os.Setenv(key, orig)
+		} else {
+			_ = os.Unsetenv(key)
+		}
+	})
+
+	for _, tc := range []struct{ name, value string }{
+		{"malformed", "not-a-number"},
+		{"zero", "0"},
+		{"negative", "-7"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_ = os.Setenv(key, tc.value)
+			stderr := captureStderr(t, func() {
+				if got := getInt64EnvOrDefault(key, 42); got != 42 {
+					t.Errorf("got %d, want default 42 for %q", got, tc.value)
+				}
+			})
+			if !strings.Contains(stderr, "environment variable ignored") || !strings.Contains(stderr, key) {
+				t.Errorf("expected an ignored-env warning for %q, stderr = %q", tc.value, stderr)
+			}
+		})
+	}
+
+	_ = os.Setenv(key, "123")
+	if stderr := captureStderr(t, func() { getInt64EnvOrDefault(key, 42) }); stderr != "" {
+		t.Errorf("valid positive value must not warn, stderr = %q", stderr)
+	}
+}
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stderr = w
+	fn()
+	_ = w.Close()
+	os.Stderr = orig
+	out, _ := io.ReadAll(r)
+	return string(out)
 }
 
 func TestGetDurationEnvOrDefault(t *testing.T) {

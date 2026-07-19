@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	"github.com/podtrace/podtrace/internal/config"
 )
 
 func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alpha1.TracerConfig, node string, targets sessionTargets) batchv1.JobSpec {
@@ -123,6 +124,7 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 		},
 		{Name: "PODTRACE_CRITICAL_PATH", Value: "false"},
 		{Name: "PODTRACE_OTLP_INSECURE", Value: "1"},
+		{Name: config.EnvArtifactBaseDir, Value: "/var/run/podtrace"},
 	}
 	if tc != nil {
 		mainEnv = append(mainEnv, redactionEnv(tc.Spec.Redaction)...)

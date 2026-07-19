@@ -51,6 +51,7 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	var session podtracev1alpha1.PodTraceSession
 	if err := r.Get(ctx, req.NamespacedName, &session); err != nil {
 		if apierrors.IsNotFound(err) {
+			forgetReportObservations(req.Namespace, req.Name)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("get PodTraceSession: %w", err)
@@ -165,12 +166,12 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		_ = r.Status().Update(ctx, &session)
 		return ctrl.Result{}, err
 	}
-	if err := ensureSessionReportRBAC(ctx, r.Client, &session, systemNS); err != nil {
+	if err := ensureSessionReportRBAC(ctx, r.Client, &session, r.Scheme, systemNS); err != nil {
 		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "SessionRBAC", err.Error())
 		_ = r.Status().Update(ctx, &session)
 		return ctrl.Result{}, err
 	}
-	if err := ensureSessionPodReadRBAC(ctx, r.Client, &session, sessionPodNamespaces(&session, targets), systemNS); err != nil {
+	if err := ensureSessionPodReadRBAC(ctx, r.Client, &session, r.Scheme, sessionPodNamespaces(&session, targets), systemNS); err != nil {
 		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "SessionRBAC", err.Error())
 		_ = r.Status().Update(ctx, &session)
 		return ctrl.Result{}, err
@@ -528,8 +529,11 @@ func effectiveMaxConcurrentSessionsPerNode(tc *podtracev1alpha1.TracerConfig) in
 	return tc.Spec.MaxConcurrentSessionsPerNode
 }
 
-// ensureJobs creates-or-updates one Job per target node, owner-ref'd to
-// the session.
+// ensureJobs creates-or-updates one Job per target node in the system
+// namespace. The Jobs cannot carry an ownerReference back to the session
+// (Kubernetes forbids cross-namespace owner refs), so their lifecycle is
+// bounded by TTLSecondsAfterFinished, the podtrace.io/cleanup finalizer, and
+// the orphan sweep (see SessionChildReaper) as a finalizer-bypass backstop.
 func (r *PodTraceSessionReconciler) ensureJobs(ctx context.Context, s *podtracev1alpha1.PodTraceSession, tc *podtracev1alpha1.TracerConfig, targets sessionTargets, completedNodes map[string]struct{}) ([]batchv1.Job, error) {
 	systemNS := systemNamespaceForSession(tc, r.SystemNamespace)
 
