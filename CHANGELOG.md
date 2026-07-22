@@ -9,6 +9,23 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.14.0](https://github.com/gma1k/podtrace/compare/v0.13.10...v0.14.0) (2026-07-22)
+
+
+### Tests
+
+* broaden unit-test coverage across cmd and internal packages ([#342](https://github.com/gma1k/podtrace/issues/342)) ([2fc4626](https://github.com/gma1k/podtrace/commit/2fc4626aa804092cafaa1d93ad235a5d35a845b3))
+* expand unit-test coverage across cmd and internal packages ([#345](https://github.com/gma1k/podtrace/issues/345)) ([414ab25](https://github.com/gma1k/podtrace/commit/414ab2555e314835ea4e1225dba70d710a21c9ce))
+
+
+### Maintenance
+
+* **deps:** update actions/labeler action to v7 ([#341](https://github.com/gma1k/podtrace/issues/341)) ([d2b3745](https://github.com/gma1k/podtrace/commit/d2b374533a78616db5cb86660394bc3415364aac))
+* **deps:** update github actions ([#339](https://github.com/gma1k/podtrace/issues/339)) ([e990afc](https://github.com/gma1k/podtrace/commit/e990afc6952bd3aad692042f58ca5c2e909d9335))
+* **deps:** update github/codeql-action action to v4.37.3 ([#344](https://github.com/gma1k/podtrace/issues/344)) ([1e52cea](https://github.com/gma1k/podtrace/commit/1e52cea2874a372b167cbb1c3db4e4667ad773f6))
+* **deps:** update go modules (non-major) ([#340](https://github.com/gma1k/podtrace/issues/340)) ([03afb4e](https://github.com/gma1k/podtrace/commit/03afb4e044994be5a14d3d975003e665dd9349fd))
+* trigger release 0.14.0 ([#346](https://github.com/gma1k/podtrace/issues/346)) ([7065ee1](https://github.com/gma1k/podtrace/commit/7065ee183c634b85b7065de902fbcfd831fec590))
+
 ## [0.13.10](https://github.com/gma1k/podtrace/compare/v0.13.9...v0.13.10) (2026-07-19)
 
 
