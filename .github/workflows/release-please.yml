@@ -15,6 +15,11 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PLEASE_PAT }}
+
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7  # v5.0.0
         id: release
         with:
@@ -31,3 +36,31 @@ jobs:
           set -euo pipefail
           gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" -f tag_name="${TAG}" --jq .body > notes.md
           gh release edit "${TAG}" --repo "${GITHUB_REPOSITORY}" --notes-file notes.md
+
+      - name: Self-heal — open cleanup PR if a stray release-as override remains
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_PAT }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          if ! jq -e '.packages["."]."release-as"' release-please-config.json >/dev/null 2>&1; then
+            echo "No release-as override in config — nothing to clean up."
+            exit 0
+          fi
+          STALE=$(jq -r '.packages["."]."release-as"' release-please-config.json)
+          echo "::warning::Stale release-as override '${STALE}' still set after releasing ${TAG}; opening a cleanup PR."
+          jq 'del(.packages["."]."release-as")' release-please-config.json > rpc.tmp
+          mv rpc.tmp release-please-config.json
+          BRANCH="chore/clear-release-as-${TAG}"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout -b "${BRANCH}"
+          git add release-please-config.json
+          git commit -m "chore: clear stale release-as override after ${TAG}"
+          git push -u origin "${BRANCH}"
+          gh pr create \
+            --base main \
+            --head "${BRANCH}" \
+            --title "chore: clear stale release-as override after ${TAG}" \
+            --body "release-please cut \`${TAG}\` while a \`release-as\` override was still set in \`release-please-config.json\`. Left in place it makes release-please re-propose the same version indefinitely (the v0.14.0 -> PR #349 loop). This automatically-opened PR removes it. Safe to merge with any strategy."
