@@ -1,19 +1,13 @@
 name: Release-As
 
-# Opens a PR that patches release-please-config.json with the requested
-# release-as version. Once merged, release-please picks up the version
-# override from the file and opens a release PR for that exact version.
-#
-# Why a file edit and not the `Release-As:` commit footer:
-#   commit-message footers can be silently stripped by GitHub's squash-merge
-#   default settings (PR title only, body discarded). A file diff is preserved
-#   by every merge strategy, so this workflow is robust against the merge
-#   button the maintainer happens to click.
+# Triggers a specific release version by landing a one-shot `Release-As:` commit
+# footer on main. release-please consumes the footer on its next run and opens a
+# release PR for that exact version.
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Target version, semver, no leading v (e.g. 0.13.0, 1.0.0, 1.0.0-rc.1)"
+        description: "Target version, semver, no leading v (e.g. 0.14.1, 0.15.0, 1.0.0-rc.1)"
         required: true
         type: string
 
@@ -35,31 +29,20 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
-            echo "::error::Version must be semver without leading v (got: '$VERSION'). Examples: 0.13.0, 1.0.0, 1.0.0-rc.1"
+            echo "::error::Version must be semver without leading v (got: '$VERSION'). Examples: 0.14.1, 0.15.0, 1.0.0-rc.1"
             exit 1
           fi
 
-      - name: Verify release-please-config.json is in the expected shape
-        run: |
-          set -euo pipefail
-          if [[ ! -f release-please-config.json ]]; then
-            echo "::error::release-please-config.json not found in repo root"
-            exit 1
-          fi
-          if ! jq -e '.packages["."]' release-please-config.json >/dev/null; then
-            echo "::error::release-please-config.json has no \".packages[\\\".\\\"]\" entry — this workflow expects a single-package manifest layout"
-            exit 1
-          fi
-
-      - name: Patch release-please-config.json with release-as
+      - name: Guard against footer-stripping squash setting
         env:
-          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_PAT }}
         run: |
           set -euo pipefail
-          jq --arg v "$VERSION" '.packages["."]."release-as" = $v' release-please-config.json > release-please-config.json.tmp
-          mv release-please-config.json.tmp release-please-config.json
-          echo "--- diff after patch ---"
-          git --no-pager diff release-please-config.json
+          MODE=$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.squash_merge_commit_message')
+          if [[ "$MODE" != "COMMIT_MESSAGES" ]]; then
+            echo "::error::squash_merge_commit_message is '$MODE' — a squash merge would drop the Release-As footer. Set it to COMMIT_MESSAGES, or merge the release-as PR with 'Rebase' or 'Create a merge commit'."
+            exit 1
+          fi
 
       - name: Open Release-As PR
         env:
@@ -71,20 +54,21 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git checkout -b "${BRANCH}"
-          git add release-please-config.json
-          git commit -m "chore: trigger release ${VERSION}"
+          git commit --allow-empty \
+            -m "chore: release ${VERSION}" \
+            -m "Forces release-please to cut v${VERSION} on its next run." \
+            -m "Release-As: ${VERSION}"
           git push -u origin "${BRANCH}"
           gh pr create \
             --base main \
             --head "${BRANCH}" \
-            --title "chore: trigger release ${VERSION}" \
-            --body "Sets \`release-as: ${VERSION}\` in [release-please-config.json](../blob/main/release-please-config.json) so the next release-please run cuts \`v${VERSION}\`.
+            --title "chore: release ${VERSION}" \
+            --body "Lands a one-shot \`Release-As: ${VERSION}\` commit footer on \`main\`.
 
           ## What happens after this PR merges
 
-          1. Release-please picks up the \`release-as\` field on its next run (triggered by any push to \`main\`).
-          2. It opens a separate PR titled \`chore(release): release ${VERSION}\` that bumps CHANGELOG / Chart.yaml / manifest.
-          3. When that PR is merged, the \`v${VERSION}\` tag is created and the release pipeline runs (image, chart, Krew, OLM bundle).
-          4. Release-please clears \`release-as\` from the config as part of its own commit, so subsequent commits resume normal patch-bump behaviour.
+          1. release-please sees the \`Release-As:\` footer on its next run (any push to \`main\`).
+          2. It opens \`chore(release): release ${VERSION}\` bumping CHANGELOG / Chart.yaml / manifest to \`${VERSION}\`.
+          3. Merging that PR tags \`v${VERSION}\` and runs the release pipeline (image, chart, Krew, OLM bundle).
 
-          Any merge strategy works for this PR — the version override is in a file diff, not a commit-message footer."
+          The footer is consumed once and lives only in git history, no config field is touched, so there is nothing to clean up and the trigger cannot get stuck. Merge this PR with any strategy (squash is safe on this repo: COMMIT_MESSAGES)."
