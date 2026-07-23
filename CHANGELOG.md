@@ -9,6 +9,19 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.14.1](https://github.com/gma1k/podtrace/compare/v0.14.0...v0.14.1) (2026-07-23)
+
+
+### CI
+
+* replace sticky release-as override with one-shot footer trigger ([#350](https://github.com/gma1k/podtrace/issues/350)) ([0723ca6](https://github.com/gma1k/podtrace/commit/0723ca696e4e39572829e1d3dfe712efd3fad4ca))
+
+
+### Maintenance
+
+* **deps:** update kubernetes ecosystem to v0.36.3 ([#347](https://github.com/gma1k/podtrace/issues/347)) ([4fc9063](https://github.com/gma1k/podtrace/commit/4fc9063a0457f9245b2bc8d888071d1abc37810d))
+* **deps:** update module google.golang.org/api to v0.290.0 ([#348](https://github.com/gma1k/podtrace/issues/348)) ([8c07967](https://github.com/gma1k/podtrace/commit/8c07967d5d931a5159eaf60407fdd01a945cc477))
+
 ## [0.14.0](https://github.com/gma1k/podtrace/compare/v0.13.10...v0.14.0) (2026-07-22)
 
 
