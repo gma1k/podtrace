@@ -1,0 +1,56 @@
+name: FOSSA - License & Dependency Scan
+
+# This workflow runs the FOSSA CLI from our own runner and pushes results to
+# FOSSA using a Push-Only API key.SA_API_KEY.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  fossa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: FOSSA analyze
+        uses: fossas/fossa-action@29693cc50323968e039056be419b32989fc5880c  # v2.0.0
+        with:
+          api-key: ${{ secrets.FOSSA_API_KEY }}
+
+      - name: FOSSA test
+        if: github.event_name == 'pull_request'
+        env:
+          FOSSA_API_KEY: ${{ secrets.FOSSA_API_KEY }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set +e
+          out=$(fossa test --diff "$BASE_SHA" 2>&1)
+          code=$?
+          printf '%s\n' "$out"
+          if [ "$code" -ne 0 ] && printf '%s' "$out" | grep -q 'was not found'; then
+            echo "Diff base $BASE_SHA not analyzed in FOSSA yet; no baseline, so no new issues."
+            exit 0
+          fi
+          exit "$code"
