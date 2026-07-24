@@ -10,8 +10,8 @@
   <a href="https://www.bestpractices.dev/projects/12882"><img src="https://www.bestpractices.dev/projects/12882/badge" alt="OpenSSF Best Practices"/></a>
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0"/></a>
   <a href="https://opensource.org/licenses/GPL-2.0"><img src="https://img.shields.io/badge/BPF%20License-GPL_2.0-blue.svg" alt="BPF License: GPL 2.0"/></a>
-  <a href="https://app.fossa.com/projects/git%2Bgithub.com%2Fgma1k%2Fpodtrace?ref=badge_shield&issueType=license"><img src="https://app.fossa.com/api/projects/git%2Bgithub.com%2Fgma1k%2Fpodtrace.svg?type=shield&issueType=license" alt="FOSSA License Status"/></a>
-  <a href="https://app.fossa.com/projects/git%2Bgithub.com%2Fgma1k%2Fpodtrace?ref=badge_shield&issueType=security"><img src="https://app.fossa.com/api/projects/git%2Bgithub.com%2Fgma1k%2Fpodtrace.svg?type=shield&issueType=security" alt="FOSSA Security Status"/></a>
+  <a href="https://app.fossa.com/projects/custom%2B62379%2Fgithub.com%2Fgma1k%2Fpodtrace?ref=badge_shield&issueType=license"><img src="https://app.fossa.com/api/projects/custom%2B62379%2Fgithub.com%2Fgma1k%2Fpodtrace.svg?type=shield&issueType=license" alt="FOSSA License Status"/></a>
+  <a href="https://app.fossa.com/projects/custom%2B62379%2Fgithub.com%2Fgma1k%2Fpodtrace?ref=badge_shield&issueType=security"><img src="https://app.fossa.com/api/projects/custom%2B62379%2Fgithub.com%2Fgma1k%2Fpodtrace.svg?type=shield&issueType=security" alt="FOSSA Security Status"/></a>
 </p>
 
 A lightweight yet powerful eBPF-driven diagnostic tool for Kubernetes applications. Podtrace delivers full-stack observability from kernel events to application-layer behavior, all activated on demand, with no prior configuration or instrumentation. With a single command, it uncovers insights across the entire lifecycle of a pod, including network flows, TCP/UDP performance, file system activity, memory behavior, latency patterns, system calls, and high-level application events such as HTTP, DNS, and database queries.
@@ -433,5 +433,5 @@ Podtrace is dual-licensed:
 - **Go code** is licensed under the [Apache License 2.0](LICENSE).
 - **eBPF programs** under [`bpf/`](bpf/) are licensed under **GPL-2.0** (declared via `SPDX-License-Identifier: GPL-2.0` headers). The GPL declaration is required for BPF programs to access kernel helpers via the BPF verifier.
 
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fgma1k%2Fpodtrace.svg?type=small)](https://app.fossa.com/projects/git%2Bgithub.com%2Fgma1k%2Fpodtrace?ref=badge_small)
+[![FOSSA Status](https://app.fossa.com/api/projects/custom%2B62379%2Fgithub.com%2Fgma1k%2Fpodtrace.svg?type=small)](https://app.fossa.com/projects/custom%2B62379%2Fgithub.com%2Fgma1k%2Fpodtrace?ref=badge_small)
 
