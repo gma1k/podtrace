@@ -1,0 +1,17 @@
+# FOSSA configuration
+# https://github.com/fossas/fossa-cli/blob/master/docs/references/files/fossa-yml.md
+#
+# Podtrace is intentionally dual-licensed (see README "License" section):
+#   - Go userspace code -> Apache-2.0
+#   - eBPF programs under bpf/ -> GPL-2.0
+#
+# The GPL-2.0 declaration on the eBPF layer is REQUIRED, not incidental:
+# the kernel BPF verifier only permits GPL-only helpers (bpf_probe_read, etc.)
+# when the program declares a GPL-compatible license via
+# `char LICENSE[] SEC("license") = "GPL";`, and bpf/vmlinux.h is generated
+# from kernel BTF and is therefore derived from (GPL-2.0) Linux.
+version: 3
+
+paths:
+  exclude:
+    - ./bpf
