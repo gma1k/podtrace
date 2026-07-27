@@ -91,6 +91,10 @@ data:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.agent.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       agent:
         {{- with .Values.agent.resources }}
         resources:
@@ -105,6 +109,20 @@ data:
         {{- if .Values.agent.statusReportInterval }}
         statusReportInterval: {{ .Values.agent.statusReportInterval | quote }}
         {{- end }}
+        {{- with .Values.agent.logLevel }}
+        logLevel: {{ . | quote }}
+        {{- end }}
+        dnsPacketCapture: {{ .Values.agent.dnsPacketCapture }}
+        dnsFullAnswers: {{ .Values.agent.dnsFullAnswers }}
+        usdt: {{ .Values.agent.usdt }}
+        {{- if .Values.agent.alerting.enabled }}
+        alerting:
+          enabled: true
+          {{- with .Values.agent.alerting.webhookURL }}
+          webhookURL: {{ . | quote }}
+          {{- end }}
+          allowInsecureWebhook: {{ .Values.agent.alerting.allowInsecureWebhook }}
+        {{- end }}
       session:
         {{- with .Values.session.resources }}
         resources:
@@ -114,6 +132,9 @@ data:
         activeDeadlineSecondsOffset: {{ .Values.session.activeDeadlineSecondsOffset }}
         backoffLimit: {{ .Values.session.backoffLimit }}
         sidecarUploader: {{ .Values.tracerConfig.sidecarUploader }}
+        {{- with .Values.session.maxDuration }}
+        maxDuration: {{ . | quote }}
+        {{- end }}
       {{- if .Values.tracerConfig.redaction.enabled }}
       redaction:
         enabled: true
@@ -147,6 +168,12 @@ data:
         endpoint: {{ .Values.examples.exporterconfig.endpoint | quote }}
         protocol: {{ .Values.examples.exporterconfig.protocol | default "http" }}
         insecure: {{ .Values.examples.exporterconfig.insecure }}
+      {{- if .Values.examples.exporterconfig.samplePercent }}
+      samplePercent: {{ .Values.examples.exporterconfig.samplePercent }}
+      {{- end }}
+      {{- if .Values.examples.exporterconfig.synthesizeSpans }}
+      synthesizeSpans: true
+      {{- end }}
   {{- end }}
 ---
 apiVersion: v1

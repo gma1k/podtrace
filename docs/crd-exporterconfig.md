@@ -122,7 +122,7 @@ spec:
 | `otlp.protocol` | enum | `http` / `grpc`. Defaults to `http`. |
 | `otlp.insecure` | bool | Disables TLS. |
 | `otlp.headers[]` | list | Either literal `value` or `valueFrom: SecretKeySelector`. |
-| `otlp.headersFromSecret` | object | Reserved for "every Secret key becomes a header". |
+| `otlp.headersFromSecret` | object | `{name}` reference to a Secret in the same namespace; every key in that Secret becomes an OTLP header. Use for bulk or additional secret-backed headers beyond the single `headers[].valueFrom` credential. |
 | `jaeger.endpoint` | string | Required when `type=jaeger`. |
 | `zipkin.endpoint` | string | Required when `type=zipkin`. |
 | `splunk.endpoint` | string | Splunk HEC URL. |
@@ -143,7 +143,8 @@ operator creates two objects in `podtrace-system`:
    `sample_percent`, and a `bundle.yaml` blob the CLI consumes.
 2. **Secret** with the same name (created only when the exporter
    references credential material). Carries the resolved value under
-   the fixed `credential` key.
+   the fixed `credential` key, plus one `header.<name>` key for each
+   key of the Secret referenced by `otlp.headersFromSecret`.
 
 ## Credential rotation
 

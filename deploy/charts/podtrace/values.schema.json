@@ -7,17 +7,47 @@
         "agent": {
             "type": "object",
             "properties": {
+                "affinity": {
+                    "type": "object"
+                },
+                "alerting": {
+                    "type": "object",
+                    "properties": {
+                        "allowInsecureWebhook": {
+                            "type": "boolean"
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "webhookURL": {
+                            "type": "string"
+                        }
+                    }
+                },
                 "btfMode": {
                     "type": "string"
                 },
+                "dnsFullAnswers": {
+                    "type": "boolean"
+                },
+                "dnsPacketCapture": {
+                    "type": "boolean"
+                },
                 "eventBufferSize": {
                     "type": "integer"
+                },
+                "logLevel": {
+                    "type": "string",
+                    "enum": ["", "debug", "info", "warn", "error"]
                 },
                 "nodeSelector": {
                     "type": "object"
                 },
                 "priorityClassName": {
                     "type": "string"
+                },
+                "usdt": {
+                    "type": "boolean"
                 },
                 "resources": {
                     "type": "object",
@@ -105,6 +135,14 @@
                         },
                         "protocol": {
                             "type": "string"
+                        },
+                        "samplePercent": {
+                            "type": ["integer", "null"],
+                            "minimum": 0,
+                            "maximum": 100
+                        },
+                        "synthesizeSpans": {
+                            "type": "boolean"
                         }
                     }
                 }
@@ -258,6 +296,9 @@
                 },
                 "maxConcurrentSessionsPerNode": {
                     "type": "integer"
+                },
+                "maxDuration": {
+                    "type": "string"
                 },
                 "resources": {
                     "type": "object",
