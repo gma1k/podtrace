@@ -23,10 +23,6 @@ crds:
 
   adopt: true
 
-  # Image for the CRD-labeler / namespace / cr-bootstrap hook Jobs (kubectl).
-  # Empty uses a digest-pinned alpine/k8s default so these cluster-critical
-  # hooks are reproducible and cannot silently change when the upstream tag
-  # moves. Override with your own (ideally digest-pinned) mirror if needed.
   labelerImage: ""
 
   keep: true
@@ -72,16 +68,31 @@ agent:
   tolerations:
     - operator: Exists
       effect: NoSchedule
+  affinity: {}
   priorityClassName: system-node-critical
   eventBufferSize: 10000
   statusReportInterval: 30s
   btfMode: auto
+
+  logLevel: ""
+
+  dnsPacketCapture: true
+
+  dnsFullAnswers: true
+
+  usdt: true
+
+  alerting:
+    enabled: false
+    webhookURL: ""
+    allowInsecureWebhook: false
 
 session:
   ttlSecondsAfterFinished: 300
   activeDeadlineSecondsOffset: 30
   backoffLimit: 0
   maxConcurrentSessionsPerNode: 2
+  maxDuration: ""
   resources:
     requests:
       cpu: 100m
@@ -136,3 +147,5 @@ examples:
     endpoint: otel-collector.observability:4318
     protocol: http
     insecure: true
+    samplePercent: null
+    synthesizeSpans: false

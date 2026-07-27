@@ -29,11 +29,12 @@ podtrace specifically:
 - **Best-effort backward compatibility within a minor release line.** A
   patch release (e.g. `v0.11.0` → `v0.11.1`) will not break existing
   manifests. Minor releases (`v0.11.0` → `v0.12.0`) may.
-- **Reserved-but-rejected fields are forward-compatibility markers, not
-  promises.** Example: `PodTraceSession.spec.reportRef.objectStore` is
-  defined in the schema but rejected by the validating webhook today. It
-  will be enabled in a future version; the field name and shape may still
-  change before that happens.
+- **Reserved fields are forward-compatibility markers, not promises.** A
+  field may appear in the schema before its behavior is fully implemented.
+  Until it is, the validating webhook may reject it, the operator may
+  ignore it, and its name and shape may still change. Such fields are
+  called out as reserved in the reference docs for the resource that
+  defines them.
 - **Production use is allowed but not recommended without pinning.** Pin
   to a specific `v0.x.y` tag and read this changelog before each upgrade.
 

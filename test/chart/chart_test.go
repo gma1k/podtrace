@@ -423,6 +423,71 @@ func TestChart_OperatorClusterRoleHasRoleAndRoleBindingVerbs(t *testing.T) {
 	}
 }
 
+func TestChart_AgentAndSessionKnobsPropagate(t *testing.T) {
+	out := renderChart(t,
+		"operator.enabled=true",
+		"agent.logLevel=warn",
+		"agent.usdt=false",
+		"agent.dnsFullAnswers=false",
+		"agent.dnsPacketCapture=false",
+		"agent.alerting.enabled=true",
+		"agent.alerting.webhookURL=https://alerts.example/hook",
+		"agent.alerting.allowInsecureWebhook=true",
+		"session.maxDuration=45m",
+	)
+	for _, marker := range []string{
+		`logLevel: "warn"`,
+		"usdt: false",
+		"dnsFullAnswers: false",
+		"dnsPacketCapture: false",
+		"alerting:",
+		"enabled: true",
+		`webhookURL: "https://alerts.example/hook"`,
+		"allowInsecureWebhook: true",
+		`maxDuration: "45m"`,
+	} {
+		if !bytes.Contains(out, []byte(marker)) {
+			t.Errorf("rendered TracerConfig missing %q", marker)
+		}
+	}
+}
+
+func TestChart_AgentTracingDefaultsOn(t *testing.T) {
+	out := renderChart(t, "operator.enabled=true")
+	for _, marker := range []string{
+		"usdt: true",
+		"dnsPacketCapture: true",
+		"dnsFullAnswers: true",
+	} {
+		if !bytes.Contains(out, []byte(marker)) {
+			t.Errorf("default TracerConfig missing %q", marker)
+		}
+	}
+	if bytes.Contains(out, []byte(`webhookURL: "`)) {
+		t.Error("default render must not emit an alerting webhookURL")
+	}
+	if bytes.Contains(out, []byte(`logLevel: "`)) {
+		t.Error("default render must not pin a logLevel (agent uses the binary default)")
+	}
+}
+
+func TestChart_ExporterExampleSamplingKnobs(t *testing.T) {
+	out := renderChart(t,
+		"operator.enabled=true",
+		"examples.exporterconfig.enabled=true",
+		"examples.exporterconfig.samplePercent=25",
+		"examples.exporterconfig.synthesizeSpans=true",
+	)
+	for _, marker := range []string{
+		"samplePercent: 25",
+		"synthesizeSpans: true",
+	} {
+		if !bytes.Contains(out, []byte(marker)) {
+			t.Errorf("example ExporterConfig missing %q", marker)
+		}
+	}
+}
+
 func parseKinds(t *testing.T, raw []byte) map[string]int {
 	t.Helper()
 	out := map[string]int{}

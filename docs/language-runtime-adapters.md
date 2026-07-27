@@ -160,8 +160,11 @@ Via Helm, the same is exposed under `tracerConfig.redaction` in `values.yaml`. T
 
 Scans the container binary's ELF `.note.stapsdt` section to discover available userspace tracepoints (USDTs).
 
+USDT scanning is enabled by default. Disable it by setting the environment
+variable to `false` (or `agent.usdt: false` in the Helm chart):
+
 ```bash
-export PODTRACE_USDT_ENABLED=true
+export PODTRACE_USDT_ENABLED=false
 ./bin/podtrace -n production my-pod
 ```
 
@@ -177,7 +180,7 @@ When enabled, Podtrace logs all discovered USDT probes at startup:
 | Variable | Default | Description |
 |---|---|---|
 | `PODTRACE_GRPC_PORT` | `50051` | Destination port used to identify gRPC traffic |
-| `PODTRACE_USDT_ENABLED` | `false` | Enable USDT probe scanning on the container binary |
+| `PODTRACE_USDT_ENABLED` | `true` | Scan the container binary for USDT probes; set `false` to disable |
 | `PODTRACE_REDACT_PII` | `false` | Scrub PII from event Target/Details fields |
 | `PODTRACE_REDACT_CUSTOM_RULES` | `""` | JSON array of additional redaction rules |
 | `PODTRACE_CRITICAL_PATH` | `true` | Emit per-request latency breakdowns |

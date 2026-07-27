@@ -48,7 +48,7 @@ spec:
 | `selector` | LabelSelector | one of selector/podRefs/appSelector | Pods labeled to trace. Empty selector is rejected. |
 | `podRefs` | `[{namespace, name}]` | one of selector/podRefs/appSelector | Explicit pod list. Cross-namespace allowed. |
 | `appSelector` | `{matchSelectors: []LabelSelector}` | one of selector/podRefs/appSelector | Application of several workloads: a pod matching **any** selector is traced (union, de-duplicated). Exactly-one-of is enforced by CEL + webhook. |
-| `namespaceSelector` | LabelSelector | optional | Widens `selector` across namespaces. Field's expressions are not yet evaluated; presence alone enables cluster-wide search. |
+| `namespaceSelector` | LabelSelector | optional | Widens `selector` across namespaces. `matchLabels` and `matchExpressions` are both evaluated against namespace labels; an empty selector (`{}`) matches every namespace. A matched namespace is only traced if it consents via the `podtrace.io/allow-tracing-from` annotation. |
 | `filters` | `[dns,net,fs,cpu,proc,crypto]` | optional | Empty = all categories. Agents enforce the set per-event in userspace and only the listed categories reach the configured exporter. |
 | `exporterRef.name` | string | required | Names an `ExporterConfig` in the same namespace. |
 | `paused` | bool | optional | Stop emitting events without deleting the CR. |
