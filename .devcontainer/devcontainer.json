@@ -1,0 +1,28 @@
+// Dev container for podtrace: Go 1.26 + the eBPF toolchain (clang/LLVM,
+// libbpf, bpftool) required by `make`, plus docker/kubectl/helm for the
+// image-build, chart, and kind/chainsaw e2e workflows.
+{
+  "name": "podtrace",
+  "image": "mcr.microsoft.com/devcontainers/go:1.26-trixie",
+  "runArgs": ["--privileged"],
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/kubectl-helm-minikube:1": {
+      "minikube": "none"
+    }
+  },
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go",
+        "ms-vscode.cpptools",
+        "redhat.vscode-yaml",
+        "ms-kubernetes-tools.vscode-kubernetes-tools"
+      ],
+      "settings": {
+        "go.lintTool": "golangci-lint-v2"
+      }
+    }
+  }
+}

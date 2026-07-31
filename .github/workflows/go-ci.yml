@@ -11,6 +11,7 @@ on:
       - "internal/**"
       - "Makefile"
       - ".github/workflows/go-ci.yml"
+      - ".golangci.yml"
   pull_request:
     branches: ["**"]
     paths:
@@ -21,6 +22,7 @@ on:
       - "internal/**"
       - "Makefile"
       - ".github/workflows/go-ci.yml"
+      - ".golangci.yml"
   workflow_dispatch:
 
 env:
@@ -62,7 +64,6 @@ jobs:
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a  # v9.3.0
         with:
           version: v2.12.2
-          args: --timeout=5m
 
       - name: Run govulncheck
         timeout-minutes: 5
@@ -77,15 +78,13 @@ jobs:
       - name: Run unit tests
         timeout-minutes: 15
         run: |
-          rm -f coverage.out coverage-*.out
+          set -o pipefail
+          rm -f coverage.out coverage-*.out test-report.txt
           GOTOOLCHAIN=auto go test \
-            -short -race -parallel=4 -timeout=10m \
+            -v -short -race -parallel=4 -timeout=10m \
             -coverprofile=coverage.out -covermode=atomic \
-            ./cmd/... ./internal/...
+            ./cmd/... ./internal/... | tee test-report.txt
 
-      # NO -short here: every integration test skips itself in short mode,
-      # so the old invocation was a permanently green, permanently empty
-      # suite.
       - name: Run integration suite
         timeout-minutes: 5
         run: |
@@ -128,10 +127,26 @@ jobs:
           name: codecov-umbrella
           fail_ci_if_error: false
 
+      - name: Append total coverage to test report
+        if: always()
+        run: |
+          if [ -f coverage.out ] && [ -f test-report.txt ]; then
+            GOTOOLCHAIN=auto go tool cover -func=coverage.out | tail -1 >> test-report.txt
+          fi
+
+      - name: Publish test and coverage badges
+        if: >-
+          always()
+          && github.event_name == 'push'
+          && github.ref == 'refs/heads/main'
+          && vars.BADGES_GIST_ID != ''
+          && secrets.GIST_TOKEN != ''
+        uses: gaelgirodon/ci-badges-action@07a65145ff9feb271f426865f940977a94578ad4  # v1.10.0
+        with:
+          gist-id: ${{ vars.BADGES_GIST_ID }}
+          token: ${{ secrets.GIST_TOKEN }}
+
   cross-compile:
-    # Also run on push to main (scoped by `on.push.branches`) so a merged
-    # commit — which may differ from the tested PR head after squash/rebase —
-    # is verified before a release is cut from it.
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -194,10 +209,6 @@ jobs:
           name: benchmark-results
           path: benchmark.txt
 
-  # Drift gate: the Makefile generates CRDs (templates/crds) and the reference
-  # webhook manifest (hack/reference) from the api types + kubebuilder markers.
-  # Without this job a change to a marker or CRD type could merge with stale
-  # committed manifests. Regenerate and fail if anything differs.
   manifests-drift:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     runs-on: ubuntu-latest

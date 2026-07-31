@@ -31,8 +31,14 @@ Thumbs.db
 # Build artifacts
 *.a
 
+# Environment
+.env
+.env.local
+
 # Test coverage
 coverage.out
+coverage.html
 *.coverprofile
 *.out
 test_output.log
+test-report.txt

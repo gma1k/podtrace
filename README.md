@@ -7,6 +7,10 @@
 <p align="center">
   <a href="https://artifacthub.io/packages/search?repo=podtrace"><img src="https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/podtrace" alt="Artifact Hub"/></a>
   <a href="https://ebpf.io/applications/"><img src="https://img.shields.io/badge/eBPF%20Landscape-podtrace-blue" alt="eBPF Landscape"/></a>
+  <a href="https://github.com/gma1k/podtrace/releases/latest"><img src="https://img.shields.io/github/v/release/gma1k/podtrace?label=version&sort=semver" alt="Version"/></a>
+  <a href="https://github.com/gma1k/podtrace/actions/workflows/go-ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/gma1k/podtrace/go-ci.yml?branch=main&label=build" alt="Build"/></a>
+  <a href="https://github.com/gma1k/podtrace/actions/workflows/go-ci.yml"><img src="https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/gma1k/61f3f2eb7136ae42e4f0ead66966d0c6/raw/podtrace-go-tests.json" alt="Tests"/></a>
+  <a href="https://github.com/gma1k/podtrace/actions/workflows/go-ci.yml"><img src="https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/gma1k/61f3f2eb7136ae42e4f0ead66966d0c6/raw/podtrace-go-coverage.json" alt="Coverage"/></a>  
   <a href="https://www.bestpractices.dev/projects/12882"><img src="https://www.bestpractices.dev/projects/12882/badge" alt="OpenSSF Best Practices"/></a>
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0"/></a>
   <a href="https://opensource.org/licenses/GPL-2.0"><img src="https://img.shields.io/badge/BPF%20License-GPL_2.0-blue.svg" alt="BPF License: GPL 2.0"/></a>

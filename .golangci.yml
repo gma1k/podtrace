@@ -1,0 +1,8 @@
+# golangci-lint configuration (v2 schema).
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
