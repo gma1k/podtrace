@@ -112,6 +112,7 @@ func TestResolveContainer_EmptyInfo(t *testing.T) {
 	}
 	if info == nil {
 		t.Fatal("expected non-nil info")
+		return
 	}
 	// No cgroup path in info → CgroupsPath stays empty.
 	if info.CgroupsPath != "" {

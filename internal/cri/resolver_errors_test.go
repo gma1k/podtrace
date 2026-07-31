@@ -52,6 +52,7 @@ func TestResolveContainer_ContainerStatusErrorWrapped(t *testing.T) {
 	_, err := r.ResolveContainer(context.Background(), "abc123")
 	if err == nil {
 		t.Fatal("expected an error when ContainerStatus fails")
+		return
 	}
 	if !strings.Contains(err.Error(), "ContainerStatus failed") {
 		t.Errorf("error = %v, want it to wrap the ContainerStatus failure", err)

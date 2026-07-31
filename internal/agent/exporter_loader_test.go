@@ -143,6 +143,7 @@ func TestLoadBundle_MissingConfigMap(t *testing.T) {
 	_, err := LoadBundle(context.Background(), c, "podtrace-system", types.UID("missing"))
 	if err == nil {
 		t.Fatal("expected NotFound error for missing ConfigMap")
+		return
 	}
 	if !strings.Contains(err.Error(), "ConfigMap") {
 		t.Errorf("error does not mention ConfigMap: %v", err)
@@ -162,6 +163,7 @@ func TestBuildExporter_OTLP(t *testing.T) {
 	}
 	if exp == nil {
 		t.Fatal("nil exporter")
+		return
 	}
 	ctx, cancel := contextWithTimeout(1)
 	defer cancel()
@@ -180,6 +182,7 @@ func TestBuildExporter_Jaeger(t *testing.T) {
 	}
 	if exp == nil {
 		t.Fatal("nil exporter")
+		return
 	}
 	if !strings.Contains(exp.Name(), "jaeger") {
 		t.Errorf("Name() = %q; expected to contain %q", exp.Name(), "jaeger")
@@ -204,6 +207,7 @@ func TestBuildExporter_DataDog(t *testing.T) {
 	}
 	if exp == nil {
 		t.Fatal("nil exporter")
+		return
 	}
 	if !strings.Contains(exp.Name(), "datadog") {
 		t.Errorf("Name() = %q; expected to contain %q", exp.Name(), "datadog")
@@ -227,6 +231,7 @@ func TestBuildExporter_Splunk(t *testing.T) {
 	}
 	if exp == nil {
 		t.Fatal("nil exporter")
+		return
 	}
 	if !strings.Contains(exp.Name(), "splunk") {
 		t.Errorf("Name() = %q; expected to contain %q", exp.Name(), "splunk")
@@ -240,6 +245,7 @@ func TestBuildExporter_ZipkinReturnsHelpfulError(t *testing.T) {
 	_, err := BuildExporter(&BundlePayload{Type: bundle.TypeZipkin, Endpoint: "zipkin:9411"}, CRKey{"ns", "n"})
 	if err == nil {
 		t.Fatal("expected error from zipkin exporter")
+		return
 	}
 	if !strings.Contains(err.Error(), "OpenTelemetry Collector") {
 		t.Errorf("error should point at OTel Collector; got: %v", err)
@@ -255,6 +261,7 @@ func TestBuildExporter_EmptyEndpointRejected(t *testing.T) {
 			_, err := BuildExporter(&BundlePayload{Type: ty}, CRKey{"ns", "n"})
 			if err == nil {
 				t.Fatalf("expected error for empty endpoint on %q", ty)
+				return
 			}
 			if !strings.Contains(err.Error(), "endpoint") {
 				t.Errorf("error should mention endpoint; got: %v", err)

@@ -53,6 +53,7 @@ func TestNewEventsCorrelator(t *testing.T) {
 	
 	if correlator == nil {
 		t.Fatal("NewEventsCorrelator returned nil")
+		return
 	}
 	if correlator.clientset != clientset {
 		t.Error("Expected clientset to be set")

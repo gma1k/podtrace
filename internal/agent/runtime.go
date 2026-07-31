@@ -98,7 +98,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme: scheme,
+		Scheme:         scheme,
 		LeaderElection: false,
 		Cache: cache.Options{
 			ByObject: map[client.Object]cache.ByObject{
@@ -117,6 +117,13 @@ func Run(ctx context.Context, opts Options) error {
 	})
 	if err != nil {
 		return fmt.Errorf("build manager: %w", err)
+	}
+
+	if config.AlertingEnabled && config.AlertEventsEnabled {
+		if am := alerting.GetGlobalManager(); am != nil {
+			am.EnsureEnabledWithSender(newAlertEventSender(mgr.GetClient()))
+			logger.Info("kubernetes-event alert sink enabled (flight recorder trigger source)")
+		}
 	}
 
 	stats := newPerCRStats()

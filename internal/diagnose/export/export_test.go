@@ -273,6 +273,7 @@ func TestBuildDNSExportData_ZeroEvents(t *testing.T) {
 	)
 	if data == nil {
 		t.Fatal("expected non-nil map")
+		return
 	}
 	if rate, ok := data["error_rate"]; !ok || rate.(float64) != 0.0 {
 		t.Errorf("expected error_rate=0.0, got %v", rate)

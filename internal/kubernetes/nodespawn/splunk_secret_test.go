@@ -41,6 +41,7 @@ func TestBuildPodSpec_SplunkTokenViaSecretRef(t *testing.T) {
 	env, podName := splunkTokenEnvVar(t, o)
 	if env == nil {
 		t.Fatalf("%s env not present when a token is set", "PODTRACE_SPLUNK_TOKEN")
+		return
 	}
 	if env.Value != "" {
 		t.Errorf("%s carried a plaintext value %q; must use a SecretKeyRef", "PODTRACE_SPLUNK_TOKEN", env.Value)

@@ -17,6 +17,7 @@ func TestNewDataDogExporter(t *testing.T) {
 	}
 	if exporter == nil {
 		t.Fatal("NewDataDogExporter() returned nil")
+		return
 	}
 	if exporter.endpoint != config.DefaultDataDogEndpoint {
 		t.Errorf("Expected endpoint %s, got %s", config.DefaultDataDogEndpoint, exporter.endpoint)

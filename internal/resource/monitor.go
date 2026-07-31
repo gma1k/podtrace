@@ -592,6 +592,7 @@ func (rm *ResourceMonitor) checkAlerts() {
 				event := &events.Event{
 					Type:        events.EventResourceLimit,
 					PID:         0,
+					CgroupID:    rm.cgroupInode,
 					ProcessName: "cgroup",
 					LatencyNS:   limit.LimitBytes,
 					Error:       safeconv.Uint64ToInt32(utilization),

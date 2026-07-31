@@ -36,6 +36,7 @@ func TestParseURI(t *testing.T) {
 			if tc.wantErr != "" {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil (parsed %+v)", tc.wantErr, got)
+					return
 				}
 				if !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("error = %q, want substring %q", err, tc.wantErr)

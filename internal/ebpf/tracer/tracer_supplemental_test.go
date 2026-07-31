@@ -89,6 +89,7 @@ func TestSetContainerIDs_AllEmpty(t *testing.T) {
 	err := tr.SetContainerIDs([]string{"", "", ""})
 	if err == nil {
 		t.Fatal("expected error for all-blank container IDs")
+		return
 	}
 	if !strings.Contains(err.Error(), "all container IDs are empty") {
 		t.Errorf("unexpected error: %v", err)

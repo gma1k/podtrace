@@ -35,6 +35,7 @@ func TestStartPortForward_UnreachableFailsToBecomeReady(t *testing.T) {
 	err := StartPortForward(ctx, cfg, cs, pod, 0, 80, &out, &errBuf)
 	if err == nil {
 		t.Fatalf("expected a portforward error against an unreachable host")
+		return
 	}
 	if !strings.Contains(err.Error(), "did not become ready") &&
 		!strings.Contains(err.Error(), "connection refused") &&

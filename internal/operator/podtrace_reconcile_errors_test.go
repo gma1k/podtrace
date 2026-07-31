@@ -178,6 +178,7 @@ func TestPodTraceReconcile_DegradedNodeStatus(t *testing.T) {
 	deg := findCondition(got.Status.Conditions, ConditionDegraded)
 	if deg == nil || deg.Status != metav1.ConditionTrue {
 		t.Fatalf("expected Degraded=True from tombstoned node, got %+v", deg)
+		return
 	}
 	if deg.Reason != "AgentNodeStatus" {
 		t.Errorf("expected default reason AgentNodeStatus, got %q", deg.Reason)

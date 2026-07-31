@@ -139,6 +139,7 @@ func TestResolveTargetNodes_AllUnscheduled_Errors(t *testing.T) {
 	_, err := ResolveTargetNodes(context.Background(), cs, sel)
 	if err == nil {
 		t.Fatalf("expected error when all pods unscheduled")
+		return
 	}
 	if !strings.Contains(err.Error(), "not yet scheduled") {
 		t.Errorf("error %q does not mention scheduling state", err)

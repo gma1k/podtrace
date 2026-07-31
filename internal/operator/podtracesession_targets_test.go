@@ -50,6 +50,7 @@ func TestResolveTracerConfig_PresentAbsentError(t *testing.T) {
 		got, err := r.resolveTracerConfig(context.Background())
 		if err != nil || got == nil {
 			t.Fatalf("resolveTracerConfig present: got=%v err=%v", got, err)
+			return
 		}
 		if got.Spec.SystemNamespace != "custom-ns" {
 			t.Errorf("wrong TracerConfig returned: %+v", got.Spec)

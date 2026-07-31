@@ -33,6 +33,7 @@ func TestUploadToObjectStore_UnsupportedScheme(t *testing.T) {
 	}, []byte("report body"))
 	if err == nil {
 		t.Fatal("expected error for unsupported scheme, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "object-store sink") {
 		t.Fatalf("expected wrapped object-store sink error, got %v", err)

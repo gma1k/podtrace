@@ -1,0 +1,74 @@
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: fr-otlp
+spec:
+  type: otlp
+  otlp:
+    endpoint: otel-collector.observability:4318
+    protocol: http
+    insecure: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memhog
+  labels:
+    app: memhog
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: memhog
+  template:
+    metadata:
+      labels:
+        app: memhog
+    spec:
+      containers:
+        - name: stress
+          image: polinux/stress:latest
+          imagePullPolicy: IfNotPresent
+          command: ["stress"]
+          args: ["--vm", "1", "--vm-bytes", "58M", "--vm-hang", "0"]
+          resources:
+            limits:
+              memory: 64Mi
+            requests:
+              memory: 64Mi
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTrace
+metadata:
+  name: memhog-watch
+spec:
+  selector:
+    matchLabels:
+      app: memhog
+  exporterRef:
+    name: fr-otlp
+---
+apiVersion: podtrace.io/v1alpha1
+kind: PodTraceSchedule
+metadata:
+  name: memhog-flight-recorder
+spec:
+  trigger:
+    sources:
+      - kind: ResourceAlert
+        minSeverity: warning
+    selector:
+      matchLabels:
+        app: memhog
+    cooldown: 30s
+    maxSessionsPerHour: 10
+    concurrencyPolicy: Forbid
+  sessionTemplate:
+    spec:
+      selector:
+        matchLabels:
+          app: memhog
+      duration: 20s
+      filters: [cpu, fs, net]
+      exporterRef:
+        name: fr-otlp

@@ -170,6 +170,7 @@ func TestCreateAlertFromLog_WithManager(t *testing.T) {
 	alert := CreateAlertFromLog(warnLevel, "warning msg", nil, "mypod", "mynamespace")
 	if alert == nil {
 		t.Fatal("expected non-nil alert for warn level")
+		return
 	}
 	if alert.Severity != SeverityWarning {
 		t.Errorf("expected SeverityWarning, got %v", alert.Severity)
@@ -182,6 +183,7 @@ func TestCreateAlertFromLog_WithManager(t *testing.T) {
 	alertErr := CreateAlertFromLog(errLevel, "error msg", nil, "", "")
 	if alertErr == nil {
 		t.Fatal("expected non-nil alert for error level")
+		return
 	}
 	if alertErr.Severity != SeverityError {
 		t.Errorf("expected SeverityError, got %v", alertErr.Severity)
@@ -191,6 +193,7 @@ func TestCreateAlertFromLog_WithManager(t *testing.T) {
 	alertFatal := CreateAlertFromLog(fatalLevel, "fatal msg", nil, "", "")
 	if alertFatal == nil {
 		t.Fatal("expected non-nil alert for fatal level")
+		return
 	}
 	if alertFatal.Severity != SeverityFatal {
 		t.Errorf("expected SeverityFatal, got %v", alertFatal.Severity)
@@ -434,6 +437,7 @@ func TestNewManager_WithSlackWebhookURL(t *testing.T) {
 	}
 	if m == nil {
 		t.Fatal("NewManager returned nil")
+		return
 	}
 	// If Slack sender was created, manager should be enabled.
 	if m.IsEnabled() {
@@ -485,6 +489,7 @@ func TestNewManager_WithSplunk(t *testing.T) {
 	}
 	if m == nil {
 		t.Fatal("NewManager returned nil")
+		return
 	}
 	if m.IsEnabled() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

@@ -39,6 +39,7 @@ func TestReadlink_RootOpenFails(t *testing.T) {
 	_, err := Readlink("self/exe")
 	if err == nil {
 		t.Fatal("expected error when root cannot be opened")
+		return
 	}
 	if !strings.Contains(err.Error(), "procfs") {
 		t.Errorf("error should be wrapped with procfs prefix, got %v", err)

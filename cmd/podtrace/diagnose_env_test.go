@@ -91,6 +91,7 @@ func TestNewDiagnoseEnvCmd(t *testing.T) {
 	cmd := newDiagnoseEnvCmd()
 	if cmd == nil {
 		t.Fatal("expected non-nil command")
+		return
 	}
 	if cmd.Use != "diagnose-env" {
 		t.Errorf("expected Use=%q, got %q", "diagnose-env", cmd.Use)
@@ -153,6 +154,7 @@ func TestMockPodResolver_Default(t *testing.T) {
 	}
 	if info == nil {
 		t.Fatal("expected non-nil PodInfo")
+		return
 	}
 	if info.PodName != "mypod" {
 		t.Errorf("expected PodName=mypod, got %q", info.PodName)
@@ -171,6 +173,7 @@ func TestMockPodResolver_CustomFunc(t *testing.T) {
 	}
 	if info == nil {
 		t.Fatal("expected non-nil default info")
+		return
 	}
 	if info.ContainerName != "container2" {
 		t.Errorf("expected ContainerName=container2, got %q", info.ContainerName)

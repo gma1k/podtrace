@@ -66,6 +66,7 @@ func TestAttachToPod_StreamErrorReturned(t *testing.T) {
 	warn, err := AttachToPod(ctx, cfg, cs, pod, genericiooptions.IOStreams{Out: out, ErrOut: errOut})
 	if err == nil {
 		t.Fatalf("expected a stream error when the apiserver is unreachable")
+		return
 	}
 	if warn {
 		t.Errorf("a non-forbidden stream error must not request the degraded (log-follow) fallback")

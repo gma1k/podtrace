@@ -1,0 +1,91 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: trigger-flight-recorder
+spec:
+  namespace: trigger-flight-recorder-test
+  description: |
+    End-to-end verification — the "flight recorder": a PodTraceSchedule in
+    trigger mode creates a PodTraceSession in response to an agent-detected
+    resource-limit alert, targeting the pod that alerted.
+
+    Setup:
+      1. Enable agent alerting on the cluster TracerConfig so alerts are
+         produced and the Kubernetes-Event sink is active, and wait for the
+         agent DaemonSet to roll to the new configuration.
+      2. Deploy a memory-hog workload sitting near its memory limit, a
+         lightweight continuous PodTrace over it (alert detection only runs
+         for traced pods), and a PodTraceSchedule whose trigger fires on a
+         ResourceAlert of at least warning severity for that pod.
+
+    Exercise:
+      3. The agent's resource monitor detects the breach, raises an alert,
+         and the event sink records it as a PodtraceAlert Event on the pod.
+         The operator watches that Event and materialises a session.
+
+    Assertions:
+      4. A PodTraceSession owned by the schedule exists, annotated
+         podtrace.io/triggered-by=ResourceAlert, targeting the memhog pod
+         via podRefs (the template selector is narrowed to the alerting pod).
+
+    Requires the polinux/stress image to be pullable or preloaded on the
+    nodes. Trigger mode requires agent alerting; this test enables it and
+    restores the default on cleanup.
+  timeouts:
+    apply: 60s
+    assert: 240s
+    delete: 60s
+    cleanup: 120s
+  steps:
+    - name: enable-alerting
+      try:
+        - patch:
+            resource:
+              apiVersion: podtrace.io/v1alpha1
+              kind: TracerConfig
+              metadata:
+                name: default
+              spec:
+                agent:
+                  alerting:
+                    enabled: true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: podtrace-agent
+                namespace: podtrace-system
+              status:
+                (numberReady == desiredNumberScheduled && updatedNumberScheduled == desiredNumberScheduled && desiredNumberScheduled > `0`): true
+
+    - name: deploy-workload-and-trigger
+      try:
+        - apply:
+            file: ./resources.yaml
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: memhog
+              status:
+                readyReplicas: 1
+
+    - name: assert-triggered-session
+      try:
+        - assert:
+            file: ./assert-triggered.yaml
+
+    - name: restore-alerting-default
+      try:
+        - patch:
+            resource:
+              apiVersion: podtrace.io/v1alpha1
+              kind: TracerConfig
+              metadata:
+                name: default
+              spec:
+                agent:
+                  alerting:
+                    enabled: false

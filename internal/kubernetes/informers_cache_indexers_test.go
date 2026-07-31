@@ -25,6 +25,7 @@ func TestInformerCache_IndexersAndLookups_Deterministic(t *testing.T) {
 	ic.mu.RUnlock()
 	if podInf == nil || esInf == nil {
 		t.Skip("informers not initialized")
+		return
 	}
 
 	pod := &corev1.Pod{
@@ -90,6 +91,7 @@ func TestGetServiceByEndpoint_NoServiceNameLabel(t *testing.T) {
 	ic.mu.RUnlock()
 	if esInf == nil {
 		t.Skip("endpointslice informer not initialized")
+		return
 	}
 	port := int32(7000)
 	es := &discoveryv1.EndpointSlice{

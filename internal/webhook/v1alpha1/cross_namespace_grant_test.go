@@ -91,6 +91,7 @@ func TestPodTraceSessionValidator_CrossNamespaceGrant(t *testing.T) {
 			}
 			if err == nil {
 				t.Fatalf("expected error containing %q, got nil", tc.wantError)
+				return
 			}
 			if !strings.Contains(err.Error(), tc.wantError) {
 				t.Fatalf("expected error to contain %q, got %q", tc.wantError, err.Error())

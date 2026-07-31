@@ -12,6 +12,7 @@ func TestNewErrorRateLimiter(t *testing.T) {
 	limiter := newErrorRateLimiter()
 	if limiter == nil {
 		t.Fatal("Expected non-nil error rate limiter")
+		return
 	}
 	if limiter.backoffFactor != 1 {
 		t.Errorf("Expected backoffFactor 1, got %d", limiter.backoffFactor)
@@ -53,6 +54,7 @@ func TestNewSlidingWindow(t *testing.T) {
 	window := newSlidingWindow(5*time.Second, 10)
 	if window == nil {
 		t.Fatal("Expected non-nil sliding window")
+		return
 	}
 	if window.window != 5*time.Second {
 		t.Errorf("Expected window %v, got %v", 5*time.Second, window.window)
@@ -99,6 +101,7 @@ func TestNewCircuitBreaker(t *testing.T) {
 	cb := newCircuitBreaker(100, 30*time.Second)
 	if cb == nil {
 		t.Fatal("Expected non-nil circuit breaker")
+		return
 	}
 	if cb.threshold != 100 {
 		t.Errorf("Expected threshold 100, got %d", cb.threshold)

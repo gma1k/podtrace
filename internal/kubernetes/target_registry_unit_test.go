@@ -82,6 +82,7 @@ func TestResolvePodInfoFromObject_SuccessExtractsFields(t *testing.T) {
 	}
 	if info == nil {
 		t.Fatal("expected non-nil PodInfo")
+		return
 	}
 	if info.PodName != "api-0" {
 		t.Errorf("PodName: got %q want %q", info.PodName, "api-0")

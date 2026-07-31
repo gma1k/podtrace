@@ -53,6 +53,7 @@ func TestMatchPodTraceAgainstPods_PropagatesSelectorError(t *testing.T) {
 	_, err := MatchPodTraceAgainstPods(pt, pods, nil)
 	if err == nil {
 		t.Fatal("expected selector-build error to propagate from MatchPodTraceAgainstPods")
+		return
 	}
 	if !strings.Contains(err.Error(), "operator") {
 		t.Errorf("error should describe the invalid operator, got: %v", err)

@@ -194,6 +194,7 @@ func TestRunOneNode_CreateForbiddenPodSecurity(t *testing.T) {
 	err := runOneNode(context.Background(), opts, spec, false, &wmu, "")
 	if err == nil || !strings.Contains(err.Error(), "PodSecurity") {
 		t.Fatalf("expected PodSecurity remediation error, got %v", err)
+		return
 	}
 	if !strings.Contains(err.Error(), "pod-security.kubernetes.io/enforce=privileged") {
 		t.Errorf("error should carry the remediation command, got %v", err)

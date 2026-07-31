@@ -59,6 +59,7 @@ func TestStartServer_RejectNonLoopback(t *testing.T) {
 	srv := StartServer()
 	if srv == nil {
 		t.Fatalf("expected non-nil server")
+		return
 	}
 	defer srv.Shutdown()
 
@@ -77,6 +78,7 @@ func TestStartServer_WithPprof(t *testing.T) {
 	srv := StartServer()
 	if srv == nil {
 		t.Fatalf("expected non-nil server")
+		return
 	}
 	defer srv.Shutdown()
 

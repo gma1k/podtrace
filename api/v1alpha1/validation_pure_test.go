@@ -56,6 +56,7 @@ func TestValidateObjectStoreReference(t *testing.T) {
 			}
 			if err == nil {
 				t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				return
 			}
 			if !strings.Contains(err.Error(), tt.wantErr) {
 				t.Errorf("error %q does not contain %q", err.Error(), tt.wantErr)

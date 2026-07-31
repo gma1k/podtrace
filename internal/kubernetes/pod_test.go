@@ -230,6 +230,7 @@ func TestResolvePod_Success_WithoutContainerName(t *testing.T) {
 	}
 	if info == nil {
 		t.Fatal("expected PodInfo, got nil")
+		return
 	}
 	if info.PodName != "test-pod" {
 		t.Errorf("expected PodName 'test-pod', got %q", info.PodName)
@@ -301,6 +302,7 @@ func TestResolvePod_Success_WithContainerName(t *testing.T) {
 	}
 	if info == nil {
 		t.Fatal("expected PodInfo, got nil")
+		return
 	}
 	if info.ContainerName != "second-container" {
 		t.Errorf("expected ContainerName 'second-container', got %q", info.ContainerName)
@@ -314,6 +316,7 @@ func TestResolvePod_PodNotFound(t *testing.T) {
 	_, err := resolver.ResolvePod(context.Background(), "nonexistent-pod", "default", "")
 	if err == nil {
 		t.Fatal("expected error for nonexistent pod")
+		return
 	}
 	if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
 		if !strings.Contains(err.Error(), "failed to get pod") {
@@ -342,6 +345,7 @@ func TestResolvePod_NoContainers(t *testing.T) {
 	_, err := resolver.ResolvePod(context.Background(), "test-pod", "default", "")
 	if err == nil {
 		t.Fatal("expected error for pod with no containers")
+		return
 	}
 	if !strings.Contains(err.Error(), "pod has no containers") {
 		t.Errorf("expected error about no containers, got: %v", err)
@@ -378,6 +382,7 @@ func TestResolvePod_ContainerNotFound(t *testing.T) {
 	_, err := resolver.ResolvePod(context.Background(), "test-pod", "default", "nonexistent-container")
 	if err == nil {
 		t.Fatal("expected error for nonexistent container")
+		return
 	}
 	if !strings.Contains(err.Error(), "container") && !strings.Contains(err.Error(), "not found") {
 		t.Errorf("expected error about container not found, got: %v", err)
@@ -414,6 +419,7 @@ func TestResolvePod_InvalidContainerIDFormat(t *testing.T) {
 	_, err := resolver.ResolvePod(context.Background(), "test-pod", "default", "")
 	if err == nil {
 		t.Fatal("expected error for invalid container ID format")
+		return
 	}
 	if !strings.Contains(err.Error(), "invalid container ID format") {
 		t.Errorf("expected error about invalid container ID format, got: %v", err)
@@ -455,6 +461,7 @@ func TestResolvePod_InvalidContainerID(t *testing.T) {
 	_, err := resolver.ResolvePod(context.Background(), "test-pod", "default", "")
 	if err == nil {
 		t.Fatal("expected error for invalid container ID")
+		return
 	}
 	if !strings.Contains(err.Error(), "invalid container ID") {
 		t.Errorf("expected error about invalid container ID, got: %v", err)
@@ -496,6 +503,7 @@ func TestResolvePod_CgroupPathNotFound(t *testing.T) {
 	_, err := resolver.ResolvePod(context.Background(), "test-pod", "default", "")
 	if err == nil {
 		t.Fatal("expected error for cgroup path not found")
+		return
 	}
 	if !strings.Contains(err.Error(), "cgroup path") {
 		t.Errorf("expected error about cgroup path, got: %v", err)
@@ -848,6 +856,7 @@ func TestResolvePod_ContainerID_EmptyString(t *testing.T) {
 	_, err := resolver.ResolvePod(context.Background(), "test-pod", "default", "")
 	if err == nil {
 		t.Fatal("expected error for empty container ID")
+		return
 	}
 	if !strings.Contains(err.Error(), "not found in pod") {
 		t.Errorf("expected container-not-found error, got: %v", err)
@@ -884,6 +893,7 @@ func TestResolvePod_ContainerID_NoSeparator(t *testing.T) {
 	_, err := resolver.ResolvePod(context.Background(), "test-pod", "default", "")
 	if err == nil {
 		t.Fatal("expected error for container ID without separator")
+		return
 	}
 	if !strings.Contains(err.Error(), "invalid container ID format") {
 		t.Errorf("expected error about invalid container ID format, got: %v", err)
@@ -1637,6 +1647,7 @@ func TestResolveCgroupPathCRI_Disabled(t *testing.T) {
 	_, err := resolveCgroupPathCRI(context.Background(), "abc123")
 	if err == nil {
 		t.Fatal("expected error when CRI resolution is disabled")
+		return
 	}
 	if !strings.Contains(err.Error(), "disabled") {
 		t.Errorf("expected 'disabled' in error, got %v", err)

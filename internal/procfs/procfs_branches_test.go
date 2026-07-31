@@ -10,6 +10,7 @@ func TestStat_RootOpenFails(t *testing.T) {
 	_, err := Stat("self/stat")
 	if err == nil {
 		t.Fatal("expected error when root cannot be opened")
+		return
 	}
 	if !strings.Contains(err.Error(), "procfs") {
 		t.Errorf("error should be wrapped with procfs prefix, got %v", err)
@@ -28,6 +29,7 @@ func TestOpen_RootOpenFails(t *testing.T) {
 	_, err := Open("self/maps")
 	if err == nil {
 		t.Fatal("expected error when root cannot be opened")
+		return
 	}
 	if !strings.Contains(err.Error(), "procfs") {
 		t.Errorf("error should be wrapped with procfs prefix, got %v", err)

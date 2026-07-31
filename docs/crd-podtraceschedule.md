@@ -1,14 +1,22 @@
 # PodTraceSchedule — recurring diagnose CR
 
-`PodTraceSchedule` is the cron analogue of [`PodTraceSession`](crd-podtracesession.md):
-it runs a fresh `PodTraceSession` on a recurring schedule. Use it for
-nightly diagnose sweeps, hourly probes against a flaky deployment, or
-on-call SRE workflows where someone should always have the last minute
-of eBPF events ready to look at.
+`PodTraceSchedule` creates `PodTraceSession` resources automatically. It
+has two mutually exclusive modes — set exactly one, enforced at admission:
+
+- **`schedule`** (cron): the cron analogue of
+  [`PodTraceSession`](crd-podtracesession.md). Runs a fresh session on a
+  recurring clock. Use it for nightly diagnose sweeps, hourly probes
+  against a flaky deployment, or keeping the last few minutes of eBPF
+  events always ready.
+- **`trigger`** (event-driven, the "flight recorder"): runs a session in
+  response to an agent-detected alert — a resource-limit breach, an OOM
+  kill, or an error-rate spike — targeting the pod that alerted. Use it
+  so the incident is already captured by the time someone looks, instead
+  of arriving after it has passed.
 
 A schedule does not run any eBPF itself. The controller materialises one
-`PodTraceSession` per scheduled run; the session then runs the same per-node Job
-diagnose path as if it had been created by hand.
+`PodTraceSession`; the session then runs the same per-node Job diagnose
+path as if it had been created by hand.
 
 ## Minimal example
 
@@ -50,8 +58,9 @@ spec:
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `schedule` | string | yes | Cron expression. Accepts the standard 5-field form (`*/5 * * * *`), the 6-field form with leading seconds (`0 */5 * * * *`), and descriptors (`@hourly`, `@daily`, `@every 5m`). Validated at admission. |
-| `timeZone` | string | no | IANA name (`Europe/Amsterdam`). Defaults to the operator's local timezone. |
+| `schedule` | string | one-of | Cron expression. Accepts the standard 5-field form (`*/5 * * * *`), the 6-field form with leading seconds (`0 */5 * * * *`), and descriptors (`@hourly`, `@daily`, `@every 5m`). Validated at admission. Mutually exclusive with `trigger`. |
+| `trigger` | object | one-of | Event-driven session creation. Mutually exclusive with `schedule`. See "Trigger mode" below. |
+| `timeZone` | string | no | IANA name (`Europe/Amsterdam`). Defaults to the operator's local timezone. Cron mode only. |
 | `concurrencyPolicy` | enum | no | `Allow` (default), `Forbid`, or `Replace`. See below. |
 | `startingDeadlineSeconds` | int | no | If the controller is late by more than this many seconds, the missed run is skipped. Unset = no deadline. |
 | `successfulSessionsHistoryLimit` | int | no | Max completed children kept. Default 3. |
@@ -80,11 +89,88 @@ spec:
 > valve — when the cap is hit the next run is skipped and the
 > Reconciled condition records `ActiveLimitReached`.
 
+## Trigger mode (flight recorder)
+
+In trigger mode the controller creates a session when the per-node agent
+reports a matching alert for a pod, targeting that specific pod. It is
+pure glue over existing pieces: the agent's alert detection, the session
+Job, and (optionally) object-store report upload.
+
+```yaml
+apiVersion: podtrace.io/v1alpha1
+kind: PodTraceSchedule
+metadata:
+  name: checkout-flight-recorder
+  namespace: my-app
+spec:
+  trigger:
+    sources:
+      - kind: ResourceAlert       # ResourceAlert | OOMKill | ErrorRate
+        minSeverity: critical     # warning | critical | fatal (default critical)
+      - kind: OOMKill
+    selector:                     # optional; empty = every pod in scope
+      matchLabels:
+        app: checkout
+    cooldown: 10m                 # min time between sessions for the same pod
+    maxSessionsPerHour: 4         # fleet-wide cap across all pods
+    concurrencyPolicy: Forbid     # default; the safe choice for privileged Jobs
+  sessionTemplate:
+    spec:
+      duration: 60s
+      filters: [net, fs, cpu]
+      exporterRef:
+        name: prod-otlp
+```
+
+### Trigger fields
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `trigger.sources` | list | yes | One or more `{kind, minSeverity}`. A session fires when an observed alert matches ANY source. `kind` is `ResourceAlert`, `OOMKill`, or `ErrorRate`. `minSeverity` (`warning`/`critical`/`fatal`) defaults to `critical`, so noisy warnings do not spawn Jobs unless opted in. |
+| `trigger.selector` | LabelSelector | no | Narrows which pods' alerts arm the trigger. Empty selects every pod in scope. |
+| `trigger.namespaceSelector` | LabelSelector | no | Widens matching across namespaces, subject to the same `podtrace.io/allow-tracing-from` consent model as `PodTrace`. |
+| `trigger.cooldown` | duration | no | Minimum time after a session fires for a pod before another may fire for that same pod. Bounds a flapping alert to one session per window. Default 10m. |
+| `trigger.maxSessionsPerHour` | int | no | Rolling-hour cap on triggered sessions across all pods — the fleet-wide backstop against an alert storm. Default 6. |
+| `trigger.concurrencyPolicy` | enum | no | `Forbid` (default), `Allow`, or `Replace`, applied to already-active triggered sessions. `Forbid` is the safe default because sessions run privileged Jobs. |
+
+### How it works
+
+The agent turns each matching alert into a Kubernetes `Event` on the
+pod (reason `PodtraceAlert`). The operator both watches those Events
+(fast path) and re-lists them on each reconcile (durable backstop, so a
+dropped watch delivery is still caught while the Event lives in etcd).
+Because resource alerts recur each interval, a briefly-missed Event
+self-heals on the next tick.
+
+Each fired session is annotated with `podtrace.io/triggered-by`,
+`podtrace.io/trigger-severity`, and `podtrace.io/trigger-pod` so the
+reader sees why it ran, and targets the alerting pod via `podRefs`
+(overriding any selector in the template).
+
+### Requirements
+
+Trigger mode needs two things in place:
+
+1. **Agent alerting enabled** so alerts are produced: set
+   `tracerConfig.agent.alerting.enabled: true` (Helm) or
+   `PODTRACE_ALERTING_ENABLED=true`. The Kubernetes-Event sink is on by
+   default when alerting is enabled (`PODTRACE_ALERT_EVENTS_ENABLED`,
+   default true); no external webhook/Slack/Splunk configuration is
+   required.
+2. **A continuous trace on the target pods** — a lightweight `PodTrace`
+   (or `ApplicationTrace`) selecting them, with an `exporterRef`. Alert
+   detection (resource utilization, OOM, error-rate) runs only for pods
+   the agent is already tracing, so the trigger escalates an existing
+   lightweight watch into a deep session rather than watching untracked
+   pods. Pattern: a low-overhead continuous `PodTrace` for detection,
+   plus this `PodTraceSchedule` trigger for the deep capture.
+
 ## Status
 
 | Field | Notes |
 |---|---|
 | `active` | List of currently-active child sessions. |
+| `trigger.recentFirings` | Trigger mode only. Bounded, time-ordered log of `{podName, namespace, time, sessionName}` used to enforce cooldown and the rolling-hour cap; pruned past the retention horizon. |
 | `lastScheduleTime` | The scheduled-run time the controller most recently acted on. |
 | `lastSuccessfulTime` | Completion time of the most recent successful child. |
 | `conditions` | `Reconciled`, `Degraded`, `Paused`. |

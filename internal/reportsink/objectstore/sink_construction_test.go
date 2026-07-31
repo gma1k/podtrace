@@ -63,6 +63,7 @@ func TestGCSSink_UploadAbortsOnCopyFailure(t *testing.T) {
 	_, err = sink.Upload(context.Background(), "sess-1.txt", "text/plain", failingReader{})
 	if err == nil {
 		t.Fatal("expected Upload to fail when the body reader errors mid-stream")
+		return
 	}
 	if !strings.Contains(err.Error(), "stream to") {
 		t.Errorf("error = %v, want a 'stream to' wrap", err)

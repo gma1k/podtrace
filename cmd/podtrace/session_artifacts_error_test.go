@@ -25,6 +25,7 @@ func TestEmitSessionArtifacts_AggregatesSinkErrors(t *testing.T) {
 	err := emitSessionArtifacts(ctx, SessionSummary{TotalEvents: 1}, "report body")
 	if err == nil {
 		t.Fatal("expected an aggregated error when both file sinks fail")
+		return
 	}
 	if !strings.Contains(err.Error(), "summary-file:") {
 		t.Errorf("expected summary-file failure in aggregated error, got %v", err)

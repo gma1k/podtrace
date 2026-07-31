@@ -143,6 +143,7 @@ func TestFromYAML_MissingTypeRejected(t *testing.T) {
 	_, err := FromYAML([]byte("endpoint: otel:4318\n"))
 	if err == nil {
 		t.Fatal("expected error for missing type")
+		return
 	}
 	if !strings.Contains(err.Error(), "type") {
 		t.Errorf("error does not mention type: %v", err)
@@ -347,6 +348,7 @@ func TestTargetNamespaces_AgentRejectV1BundleAfterV2Migration(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("FromConfigMapData should reject unknown future version")
+		return
 	}
 	if !contains(err.Error(), "v3-future") {
 		t.Errorf("error %q should name the unknown version", err.Error())

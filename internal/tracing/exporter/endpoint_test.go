@@ -37,6 +37,7 @@ func TestValidateExporterEndpoint(t *testing.T) {
 			}
 			if err == nil {
 				t.Fatalf("expected error containing %q, got nil (normalized=%q)", tc.wantErr, got)
+				return
 			}
 			if !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErr)

@@ -23,6 +23,7 @@ func TestDeletePod_WrapsNonNotFoundError(t *testing.T) {
 	err := DeletePod(context.Background(), cs, "ns1", "stuck")
 	if err == nil {
 		t.Fatalf("expected wrapped error for non-NotFound delete failure")
+		return
 	}
 	if !strings.Contains(err.Error(), "delete ns1/stuck") {
 		t.Errorf("error should identify the pod, got %q", err.Error())

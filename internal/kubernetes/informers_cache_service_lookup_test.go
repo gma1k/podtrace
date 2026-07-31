@@ -43,6 +43,7 @@ func TestGetServiceByEndpoint_WhitespaceServiceNameReturnsNil(t *testing.T) {
 	ic.mu.RUnlock()
 	if esInf == nil {
 		t.Skip("endpointslice informer not initialized")
+		return
 	}
 
 	port := int32(9000)

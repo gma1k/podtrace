@@ -8,6 +8,7 @@ func TestNewTraceContext(t *testing.T) {
 	tc := NewTraceContext()
 	if tc == nil {
 		t.Fatal("NewTraceContext returned nil")
+		return
 	}
 	if tc.TraceID == "" {
 		t.Error("TraceID is empty")
@@ -88,6 +89,7 @@ func TestTraceContext_CreateChild(t *testing.T) {
 	child := parent.CreateChild()
 	if child == nil {
 		t.Fatal("CreateChild returned nil")
+		return
 	}
 	if child.TraceID != parent.TraceID {
 		t.Errorf("Child TraceID = %s, want %s", child.TraceID, parent.TraceID)
@@ -191,6 +193,7 @@ func TestTraceContext_ToB3Headers(t *testing.T) {
 	headers := tc.ToB3Headers()
 	if headers == nil {
 		t.Fatal("ToB3Headers() returned nil")
+		return
 	}
 	if headers["X-B3-TraceId"] != tc.TraceID {
 		t.Errorf("X-B3-TraceId = %s, want %s", headers["X-B3-TraceId"], tc.TraceID)
@@ -241,6 +244,7 @@ func TestParseB3TraceContext_FlagsOne(t *testing.T) {
 	tc := ParseB3TraceContext(headers)
 	if tc == nil {
 		t.Fatal("expected non-nil context")
+		return
 	}
 	if !tc.IsSampled() {
 		t.Error("expected sampled when x-b3-flags=1")
@@ -257,6 +261,7 @@ func TestParseB3TraceContext_SampledTrue(t *testing.T) {
 	tc := ParseB3TraceContext(headers)
 	if tc == nil {
 		t.Fatal("expected non-nil context")
+		return
 	}
 	if !tc.IsSampled() {
 		t.Error("expected sampled when x-b3-sampled=true")
@@ -272,6 +277,7 @@ func TestParseB3TraceContext_WithParentSpanID(t *testing.T) {
 	tc := ParseB3TraceContext(headers)
 	if tc == nil {
 		t.Fatal("expected non-nil context")
+		return
 	}
 	if tc.ParentSpanID != "def456" {
 		t.Errorf("expected ParentSpanID=def456 (caller span), got %q", tc.ParentSpanID)
@@ -308,6 +314,7 @@ func TestToB3Headers_NoParentSpanID_NotSampled(t *testing.T) {
 	headers := tc.ToB3Headers()
 	if headers == nil {
 		t.Fatal("expected non-nil headers for valid context")
+		return
 	}
 	if _, ok := headers["X-B3-ParentSpanID"]; ok {
 		t.Error("expected no X-B3-ParentSpanID when ParentSpanID is empty")

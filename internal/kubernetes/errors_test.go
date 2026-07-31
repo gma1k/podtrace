@@ -11,6 +11,7 @@ func TestNewKubeconfigError(t *testing.T) {
 	
 	if err == nil {
 		t.Fatal("NewKubeconfigError returned nil")
+		return
 	}
 	if err.Code != ErrCodeKubeconfigFailed {
 		t.Errorf("Expected error code %d, got %d", ErrCodeKubeconfigFailed, err.Code)
@@ -29,6 +30,7 @@ func TestNewClientsetError(t *testing.T) {
 	
 	if err == nil {
 		t.Fatal("NewClientsetError returned nil")
+		return
 	}
 	if err.Code != ErrCodeClientsetFailed {
 		t.Errorf("Expected error code %d, got %d", ErrCodeClientsetFailed, err.Code)

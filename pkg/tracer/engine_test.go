@@ -290,6 +290,41 @@ func TestEngine_EventDispatch(t *testing.T) {
 	}
 }
 
+func TestEngine_PartialBatchFlushedOnInterval(t *testing.T) {
+	backend := &mockBackend{}
+	exporter := &recordingExporter{name: "rec"}
+	eng, err := tracer.NewEngine(backend, []tracer.Exporter{exporter}, tracer.Config{
+		EventBufferSize:     16,
+		ExportBatchSize:     100,
+		ExportFlushInterval: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	targets := make(chan tracer.TargetSet, 1)
+	targets <- tracer.TargetSet{{CgroupPath: "/c"}}
+
+	done := make(chan error, 1)
+	go func() { done <- eng.Run(ctx, targets) }()
+
+	waitUntil(t, 2*time.Second, func() bool { return len(backend.attachedPaths()) == 1 })
+
+	for i := 0; i < 3; i++ {
+		backend.emit(t, &events.Event{Type: events.EventResourceLimit})
+	}
+
+	waitUntil(t, 2*time.Second, func() bool { return exporter.totalEvents() == 3 })
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run returned: %v", err)
+	}
+}
+
 func TestEngine_ErrorsOnBackendStartFailure(t *testing.T) {
 	backend := &mockBackend{startErr: errors.New("boom")}
 	eng, err := tracer.NewEngine(backend, []tracer.Exporter{&recordingExporter{name: "x"}}, tracer.Config{})
@@ -300,6 +335,7 @@ func TestEngine_ErrorsOnBackendStartFailure(t *testing.T) {
 	err = eng.Run(context.Background(), targets)
 	if err == nil {
 		t.Fatal("expected error when backend.Start fails")
+		return
 	}
 	if !containsSub(err.Error(), "backend start") {
 		t.Errorf("unexpected error: %v", err)

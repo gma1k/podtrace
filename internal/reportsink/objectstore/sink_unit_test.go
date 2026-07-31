@@ -26,6 +26,7 @@ func TestNew_UnsupportedScheme(t *testing.T) {
 	_, err := New(context.Background(), Config{URI: "ftp://host/key"})
 	if err == nil {
 		t.Fatal("expected error for unsupported scheme")
+		return
 	}
 	if !strings.Contains(err.Error(), "unsupported URI scheme") {
 		t.Errorf("unexpected error: %v", err)
@@ -36,6 +37,7 @@ func TestNew_EmptyURI(t *testing.T) {
 	_, err := New(context.Background(), Config{URI: ""})
 	if err == nil {
 		t.Fatal("expected error for empty URI")
+		return
 	}
 	if !strings.Contains(err.Error(), "empty URI") {
 		t.Errorf("unexpected error: %v", err)
@@ -47,6 +49,7 @@ func TestNew_MalformedURI(t *testing.T) {
 	_, err := New(context.Background(), Config{URI: "s3://bucket/\x7f"})
 	if err == nil {
 		t.Fatal("expected parse error for malformed URI")
+		return
 	}
 	if !strings.Contains(err.Error(), "parse URI") {
 		t.Errorf("unexpected error: %v", err)
@@ -96,6 +99,7 @@ func TestNewAzureSink_BadAccountKey(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for invalid shared-key credential")
+		return
 	}
 	if !strings.Contains(err.Error(), "shared key credential") {
 		t.Errorf("unexpected error: %v", err)
@@ -145,6 +149,7 @@ func TestNewGCSSink_BadServiceAccountJSON(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for malformed service account JSON")
+		return
 	}
 	if !strings.Contains(err.Error(), "service account JSON") {
 		t.Errorf("unexpected error: %v", err)

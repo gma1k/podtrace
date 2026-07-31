@@ -19,6 +19,7 @@ func TestBundleViewFromData_ValidData(t *testing.T) {
 	})
 	if got == nil {
 		t.Fatal("expected non-nil payload for valid data")
+		return
 	}
 	if string(got.Type) != "otlp" {
 		t.Errorf("Type = %q, want otlp", got.Type)

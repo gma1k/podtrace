@@ -20,6 +20,7 @@ func TestNewDiagnostician(t *testing.T) {
 
 	if d == nil {
 		t.Fatal("NewDiagnostician returned nil")
+		return
 	}
 
 	events := d.GetEvents()
@@ -1380,6 +1381,7 @@ func TestNewReportGenerationError(t *testing.T) {
 	de := NewReportGenerationError(err)
 	if de == nil {
 		t.Fatal("expected non-nil DiagnoseError")
+		return
 	}
 	if de.Code != ErrCodeReportGenerationFailed {
 		t.Errorf("unexpected code: %v", de.Code)
@@ -1397,6 +1399,7 @@ func TestNewStackResolveError(t *testing.T) {
 	de := NewStackResolveError(1234, 0xdeadbeef, inner)
 	if de == nil || de.Code != ErrCodeStackResolveFailed {
 		t.Fatal("unexpected NewStackResolveError result")
+		return
 	}
 	if de.Unwrap() != inner {
 		t.Error("Unwrap() should return original error")
@@ -1414,6 +1417,7 @@ func TestNewNoEventsError(t *testing.T) {
 	de := NewNoEventsError()
 	if de == nil || de.Code != ErrCodeNoEvents {
 		t.Fatal("unexpected NewNoEventsError result")
+		return
 	}
 	if de.Error() == "" {
 		t.Error("Error() must return non-empty string")
@@ -1426,6 +1430,7 @@ func TestNewDiagnosticianWithK8s(t *testing.T) {
 	d := NewDiagnosticianWithK8s("mypod", "mynamespace")
 	if d == nil {
 		t.Fatal("expected non-nil Diagnostician")
+		return
 	}
 	if d.sourcePod != "mypod" || d.sourceNamespace != "mynamespace" {
 		t.Errorf("unexpected sourcePod/ns: %q/%q", d.sourcePod, d.sourceNamespace)
@@ -1439,6 +1444,7 @@ func TestNewDiagnosticianWithK8sAndThresholds(t *testing.T) {
 	d := NewDiagnosticianWithK8sAndThresholds("pod1", "ns1", 0.05, 100, 50)
 	if d == nil {
 		t.Fatal("expected non-nil Diagnostician")
+		return
 	}
 	if d.sourcePod != "pod1" || d.sourceNamespace != "ns1" {
 		t.Errorf("unexpected sourcePod/ns: %q/%q", d.sourcePod, d.sourceNamespace)

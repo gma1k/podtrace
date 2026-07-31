@@ -9,6 +9,7 @@ func TestNewOperatorCmd_Metadata(t *testing.T) {
 	cmd := newOperatorCmd()
 	if cmd == nil {
 		t.Fatal("newOperatorCmd returned nil")
+		return
 	}
 	if cmd.Use != "operator" {
 		t.Errorf("Use=%q, want %q", cmd.Use, "operator")

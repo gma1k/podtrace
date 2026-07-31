@@ -11,6 +11,7 @@ func TestExtractSplunk_SameRequestIDCorrelates(t *testing.T) {
 
 	if a == nil || b == nil || c == nil {
 		t.Fatal("expected a trace context for each x-splunk-requestid header")
+		return
 	}
 	if a.TraceID != b.TraceID {
 		t.Fatalf("same request id produced different traces: %s vs %s", a.TraceID, b.TraceID)

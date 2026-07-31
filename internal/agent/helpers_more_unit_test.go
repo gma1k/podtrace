@@ -19,6 +19,7 @@ func TestMetricsEngineObserver_AttachDetach(t *testing.T) {
 	obs := m.EngineObserver()
 	if obs == nil {
 		t.Fatal("EngineObserver returned nil")
+		return
 	}
 
 	obs.OnCgroupsAttached(0)

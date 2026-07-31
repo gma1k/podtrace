@@ -18,6 +18,7 @@ func TestFeed_SegmentsBoundedPerWindow(t *testing.T) {
 	a.mu.Unlock()
 	if w == nil {
 		t.Fatal("expected a window for the fed PID")
+		return
 	}
 	if len(w.segments) > maxSegmentsPerWindow {
 		t.Errorf("window segments = %d, want <= %d", len(w.segments), maxSegmentsPerWindow)

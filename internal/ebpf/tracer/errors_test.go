@@ -72,6 +72,7 @@ func TestNewCollectionError(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("Expected non-nil error")
+		return
 	}
 
 	if err.Code != ErrCodeCollectionFailed {
@@ -93,6 +94,7 @@ func TestNewRingBufferError(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("Expected non-nil error")
+		return
 	}
 
 	if err.Code != ErrCodeRingBufferFailed {
@@ -115,6 +117,7 @@ func TestNewMapLookupError(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("Expected non-nil error")
+		return
 	}
 
 	if err.Code != ErrCodeMapLookupFailed {
@@ -137,6 +140,7 @@ func TestNewInvalidEventError(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("Expected non-nil error")
+		return
 	}
 
 	if err.Code != ErrCodeInvalidEvent {

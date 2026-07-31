@@ -145,6 +145,7 @@ func TestFin_CleanupSessionChildren_ListError(t *testing.T) {
 	err := cleanupPodTraceSessionChildren(context.Background(), c, s, finTestSysNS)
 	if err == nil {
 		t.Fatal("expected error from list failure, got nil")
+		return
 	}
 	if got := err.Error(); !contains(got, "list session Jobs") {
 		t.Errorf("error = %q, want it to mention list session Jobs", got)
@@ -170,6 +171,7 @@ func TestFin_CleanupSessionChildren_JobDeleteError(t *testing.T) {
 	err := cleanupPodTraceSessionChildren(context.Background(), c, s, finTestSysNS)
 	if err == nil {
 		t.Fatal("expected error from Job delete failure, got nil")
+		return
 	}
 	if got := err.Error(); !contains(got, "delete Job") {
 		t.Errorf("error = %q, want it to mention delete Job", got)
@@ -196,6 +198,7 @@ func TestFin_CleanupSessionChildren_RBACError(t *testing.T) {
 	err := cleanupPodTraceSessionChildren(context.Background(), c, s, finTestSysNS)
 	if err == nil {
 		t.Fatal("expected error from RBAC delete failure, got nil")
+		return
 	}
 	if got := err.Error(); !contains(got, "session RBAC") {
 		t.Errorf("error = %q, want it to mention session RBAC", got)
@@ -220,6 +223,7 @@ func TestFin_ScheduleReconcile_GetError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error from Get failure, got nil")
+		return
 	}
 	if got := err.Error(); !contains(got, "get PodTraceSchedule") {
 		t.Errorf("error = %q, want it to mention get PodTraceSchedule", got)

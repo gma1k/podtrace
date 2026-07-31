@@ -115,6 +115,14 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1alpha1.TracerConfigSpecApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("TracerConfigStatus"):
 		return &apiv1alpha1.TracerConfigStatusApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("TriggerFiring"):
+		return &apiv1alpha1.TriggerFiringApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("TriggerSource"):
+		return &apiv1alpha1.TriggerSourceApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("TriggerSpec"):
+		return &apiv1alpha1.TriggerSpecApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("TriggerStatus"):
+		return &apiv1alpha1.TriggerStatusApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("ZipkinExporter"):
 		return &apiv1alpha1.ZipkinExporterApplyConfiguration{}
 

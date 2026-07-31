@@ -142,6 +142,7 @@ func (r *Router) Export(ctx context.Context, batch []*events.Event) error {
 			continue
 		}
 		emitCopyFailAlert(ev)
+		emitTriggerAlert(ev)
 		for i := range rules {
 			if rules[i].Err != nil || rules[i].Exporter == nil {
 				continue

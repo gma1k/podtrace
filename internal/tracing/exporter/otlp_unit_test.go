@@ -52,6 +52,7 @@ func TestNormalizeOTLPHTTPEndpoint_MalformedURL(t *testing.T) {
 	_, _, err := normalizeOTLPHTTPEndpoint("http://\x7f/bad")
 	if err == nil {
 		t.Fatal("expected parse error for malformed URL")
+		return
 	}
 	if !strings.Contains(err.Error(), "parse OTLP endpoint") {
 		t.Errorf("unexpected error: %v", err)
@@ -62,6 +63,7 @@ func TestNormalizeOTLPHTTPEndpoint_BadScheme(t *testing.T) {
 	_, _, err := normalizeOTLPHTTPEndpoint("ftp://collector.example:4318")
 	if err == nil {
 		t.Fatal("expected error for non-http(s) scheme")
+		return
 	}
 	if !strings.Contains(err.Error(), "scheme") {
 		t.Errorf("unexpected error: %v", err)
@@ -72,6 +74,7 @@ func TestNormalizeOTLPHTTPEndpoint_RemoteCleartextRejected(t *testing.T) {
 	_, _, err := normalizeOTLPHTTPEndpoint("http://collector.example:4318")
 	if err == nil {
 		t.Fatal("expected error refusing cleartext http to non-loopback host")
+		return
 	}
 	if !strings.Contains(err.Error(), "cleartext") {
 		t.Errorf("unexpected error: %v", err)

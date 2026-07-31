@@ -32,6 +32,7 @@ func TestMaxStreamsPerConn(t *testing.T) {
 	cs := a.conns[ConnKey{TGID: 42, Conn: conn}]
 	if cs == nil {
 		t.Fatal("connection state missing")
+		return
 	}
 	if len(cs.streams) != maxStreamsPerConn {
 		t.Fatalf("streams = %d, want cap %d", len(cs.streams), maxStreamsPerConn)
