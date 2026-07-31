@@ -31,7 +31,7 @@ Thanks for opening a PR! A few quick conventions before you submit:
 - [ ] `make test` (unit) green
 - [ ] `make test-integration` green (or n/a for docs/chore)
 - [ ] `make chainsaw` green on a local kind cluster (or n/a)
-- [ ] `golangci-lint run ./...` clean
+- [ ] `make lint` clean (pinned golangci-lint; see CONTRIBUTING.md § Code style)
 - [ ] `make manifests` / `make generate` / `make clientset` re-run if
       `api/v1alpha1/` types changed; regenerated files committed
 - [ ] User-facing change → `docs/` updated

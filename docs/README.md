@@ -8,6 +8,7 @@ Welcome to the `Podtrace` documentation. This directory contains comprehensive g
 - **[Architecture](architecture.md)** - System architecture, components, and data flow
 - **[Installation](installation.md)** - Installation guide, prerequisites, and troubleshooting
 - **[Usage Guide](usage.md)** - CLI usage examples, command-line options, and tips
+- **[Configuration Reference](configuration.md)** - Every environment variable, its default, and how values are parsed
 - **[Viewing Events](viewing-events.md)** - Where the captured events live and how to read them (ConfigMap, ObjectStore, OTLP, live CLI)
 - **[eBPF Internals](ebpf-internals.md)** - Deep dive into eBPF programs and tracing mechanisms
 - **[Event Schema](event-schema.md)** - Binary wire format for BPF ring buffer events

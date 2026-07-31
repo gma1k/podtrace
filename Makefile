@@ -1,5 +1,6 @@
 .PHONY: all build clean test check-go test-unit test-integration test-bench coverage \
         generate manifests clientset envtest docker-build helm-lint helm-template operator-tools \
+        lint lint-version fmt fmt-check \
         chainsaw chainsaw-tools \
         e2e-kind e2e-kind-cleanup \
         bundle bundle-validate bundle-build bundle-push bundle-clean
@@ -315,6 +316,43 @@ envtest:
 	  $(GO) test -tags=envtest -count=1 -timeout 300s \
 	    ./api/v1alpha1/... ./internal/operator/... ./internal/agent/...
 
+GOLANGCI_LINT_VERSION ?= 2.12.2
+GOLANGCI_LINT ?= bin/golangci-lint
+
+$(GOLANGCI_LINT):
+	@mkdir -p $(dir $(GOLANGCI_LINT))
+	@tmp=$$(mktemp -d) && \
+	os=$$($(GO) env GOOS) && arch=$$($(GO) env GOARCH) && \
+	pkg="golangci-lint-$(GOLANGCI_LINT_VERSION)-$$os-$$arch" && \
+	base="https://github.com/golangci/golangci-lint/releases/download/v$(GOLANGCI_LINT_VERSION)" && \
+	echo "Downloading golangci-lint v$(GOLANGCI_LINT_VERSION) ($$os/$$arch)..." && \
+	curl -sSfL "$$base/$$pkg.tar.gz" -o "$$tmp/$$pkg.tar.gz" && \
+	curl -sSfL "$$base/golangci-lint-$(GOLANGCI_LINT_VERSION)-checksums.txt" -o "$$tmp/checksums.txt" && \
+	(cd $$tmp && grep " $$pkg.tar.gz$$" checksums.txt | sha256sum -c -) && \
+	tar -xzf "$$tmp/$$pkg.tar.gz" -C $$tmp && \
+	mv "$$tmp/$$pkg/golangci-lint" $(GOLANGCI_LINT) && \
+	rm -rf $$tmp && \
+	$(GOLANGCI_LINT) --version
+
+lint: $(GOLANGCI_LINT)
+	$(GOLANGCI_LINT) run ./...
+
+lint-version:
+	@$(GOLANGCI_LINT) --version 2>/dev/null || echo "not installed; run 'make lint'"
+
+fmt:
+	$(GO) fmt ./...
+
+fmt-check:
+	@out=$$(gofmt -l $$(git ls-files '*.go')) && \
+	if [ -n "$$out" ]; then \
+		echo "These files are not gofmt-clean. Run 'make fmt':"; \
+		echo "$$out"; \
+		exit 1; \
+	else \
+		echo "All Go files are gofmt-clean."; \
+	fi
+
 helm-lint:
 	helm lint deploy/charts/podtrace
 
@@ -384,3 +422,8 @@ help:
 	@echo "  test-bench       - Run benchmark tests"
 	@echo "  test-all         - Run all tests"
 	@echo "  coverage         - Generate test coverage report"
+	@echo "  lint             - Run golangci-lint v$(GOLANGCI_LINT_VERSION) (same version as CI)"
+	@echo "  lint-version     - Print the installed golangci-lint version"
+	@echo "  fmt              - Format all Go code with gofmt"
+	@echo "  fmt-check        - Report Go files that are not gofmt-clean"
+	@echo "  helm-lint        - Lint the Helm chart"
