@@ -132,7 +132,7 @@ jobs:
 
       - name: Publish test and coverage badges
         if: always() && github.ref == 'refs/heads/main' && vars.BADGES_GIST_ID != ''
-        uses: gaelgirodon/ci-badges-action@ade7dfae5c1e1c1250714dcb2f9710357e0f6504  # v1.10.0
+        uses: gaelgirodon/ci-badges-action@07a65145ff9feb271f426865f940977a94578ad4  # v1.10.0
         with:
           gist-id: ${{ vars.BADGES_GIST_ID }}
           token: ${{ secrets.GIST_TOKEN }}
