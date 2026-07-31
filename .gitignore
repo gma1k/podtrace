@@ -36,3 +36,4 @@ coverage.out
 *.coverprofile
 *.out
 test_output.log
+test-report.txt

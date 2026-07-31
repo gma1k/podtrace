@@ -77,11 +77,12 @@ jobs:
       - name: Run unit tests
         timeout-minutes: 15
         run: |
-          rm -f coverage.out coverage-*.out
-          GOTOOLCHAIN=auto go test \
+          set -o pipefail
+          rm -f coverage.out coverage-*.out test-report.txt
+          GOTOOLCHAIN=auto go test -v \
             -short -race -parallel=4 -timeout=10m \
             -coverprofile=coverage.out -covermode=atomic \
-            ./cmd/... ./internal/...
+            ./cmd/... ./internal/... | tee test-report.txt
 
       # NO -short here: every integration test skips itself in short mode,
       # so the old invocation was a permanently green, permanently empty
@@ -89,16 +90,17 @@ jobs:
       - name: Run integration suite
         timeout-minutes: 5
         run: |
-          GOTOOLCHAIN=auto go test \
+          set -o pipefail
+          GOTOOLCHAIN=auto go test -v \
             -tags=integration -timeout=5m \
-            ./test/...
+            ./test/... | tee -a test-report.txt
 
       - name: Generate coverage report
         if: always()
         run: |
           if [ -f coverage.out ]; then
             GOTOOLCHAIN=auto go tool cover -html=coverage.out -o coverage.html || true
-            GOTOOLCHAIN=auto go tool cover -func=coverage.out | tail -1
+            GOTOOLCHAIN=auto go tool cover -func=coverage.out | tail -1 | tee -a test-report.txt
           else
             echo "::warning::Coverage file not found, skipping coverage report"
           fi
@@ -127,6 +129,13 @@ jobs:
           flags: unittests
           name: codecov-umbrella
           fail_ci_if_error: false
+
+      - name: Publish test and coverage badges
+        if: always() && github.ref == 'refs/heads/main' && vars.BADGES_GIST_ID != ''
+        uses: gaelgirodon/ci-badges-action@ade7dfae5c1e1c1250714dcb2f9710357e0f6504  # v1.10.0
+        with:
+          gist-id: ${{ vars.BADGES_GIST_ID }}
+          token: ${{ secrets.GIST_TOKEN }}
 
   cross-compile:
     # Also run on push to main (scoped by `on.push.branches`) so a merged
