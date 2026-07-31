@@ -1,0 +1,17 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or usage help
+    url: https://github.com/gma1k/podtrace/discussions/categories/q-a
+    about: Ask how to use podtrace, why an event is missing, or whether a kernel is supported. Answers stay searchable for the next person.
+  - name: Idea or design discussion
+    url: https://github.com/gma1k/podtrace/discussions/categories/ideas
+    about: Float a direction before it is concrete enough for a feature request.
+  - name: Report a security vulnerability
+    url: https://github.com/gma1k/podtrace/blob/main/SECURITY.md
+    about: Report privately, never as a public issue. SECURITY.md covers the disclosure process and response times.
+  - name: Getting help
+    url: https://github.com/gma1k/podtrace/blob/main/SUPPORT.md
+    about: Which channel to use, what to check before opening a bug, and what we cannot help with.
+  - name: Documentation
+    url: https://github.com/gma1k/podtrace/tree/main/docs
+    about: Installation, usage, CRD reference, eBPF internals, and per-platform guides.

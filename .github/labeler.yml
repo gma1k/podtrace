@@ -44,6 +44,10 @@ area/docs:
           - 'docs/**'
           - 'README.md'
           - 'CONTRIBUTING.md'
+          - 'SUPPORT.md'
+          - 'GOVERNANCE.md'
+          - 'MAINTAINERS.md'
+          - 'ADOPTERS.md'
 
 area/tests:
   - changed-files:

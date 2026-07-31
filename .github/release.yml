@@ -2,8 +2,12 @@
 changelog:
   exclude:
     authors:
+      - renovate
+      - renovate[bot]
       - dependabot
+      - dependabot[bot]
       - github-actions
+      - github-actions[bot]
     labels:
       - ignore-for-release
   categories:

@@ -1,0 +1,68 @@
+name: Epic
+description: Track a multi-step initiative that spans several PRs
+title: "epic: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for work too large for a single PR, a new protocol adapter, a
+        new CRD, a platform port. Link the child issues under **Stories** so the
+        epic stays the single place to check progress.
+
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: What should be true when this epic is done? Write it as user-visible outcomes.
+      placeholder: |
+        - [ ] An operator can trace Kafka producer latency without editing the workload
+        - [ ] The events surface in `podtrace events` and in the Prometheus exporter
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Verification
+      description: How will we confirm it works end to end?
+      placeholder: |
+        1. Deploy the chart with the new adapter enabled
+        2. Run the librdkafka sample workload in `examples/`
+        3. Confirm EVENT_KAFKA_PRODUCE events appear with non-zero latency
+        4. Confirm the chainsaw suite covers the new path
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is explicitly in and out of scope? Out-of-scope notes prevent the epic from growing without bound.
+      placeholder: |
+        In scope: producer and consumer paths on amd64
+        Out of scope: arm64 uprobe offsets, TLS-wrapped brokers
+    validations:
+      required: false
+
+  - type: textarea
+    id: stories
+    attributes:
+      label: Stories
+      description: Child issues or PRs. Leave them unchecked and tick them off as they merge.
+      placeholder: |
+        - [ ] #123 Add the BPF program and event type
+        - [ ] #124 Wire probe attachment and the config flag
+        - [ ] #125 Docs + chainsaw coverage
+        - [ ] **stretch:** expose per-topic breakdown in the CLI
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: action-items
+    attributes:
+      label: Checklist
+      options:
+        - label: Scope is small enough to land incrementally without long-lived branches
+          required: true
+        - label: Docs and test coverage are part of the plan, not a follow-up
+          required: false

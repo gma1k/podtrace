@@ -2,8 +2,16 @@ name: Feature Request
 description: Suggest an idea for this project
 title: "feature: "
 labels:
-  - kind/feature
+  - enhancement
 body:
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched [existing issues](https://github.com/gma1k/podtrace/issues?q=is%3Aissue) and this is not a duplicate.
+          required: true
+
   - type: textarea
     id: problem
     attributes:

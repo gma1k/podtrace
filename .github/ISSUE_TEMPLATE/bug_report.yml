@@ -1,0 +1,170 @@
+name: Bug Report
+description: Report something that is broken or behaves unexpectedly
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a report.
+
+        **Do not use this form for security vulnerabilities.** Report those
+        privately, see [SECURITY.md](https://github.com/gma1k/podtrace/blob/main/SECURITY.md).
+
+        Have a question rather than a bug? Try
+        [Discussions](https://github.com/gma1k/podtrace/discussions/categories/q-a).
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched [existing issues](https://github.com/gma1k/podtrace/issues?q=is%3Aissue) and this is not a duplicate.
+          required: true
+        - label: I read the troubleshooting steps in [SUPPORT.md](https://github.com/gma1k/podtrace/blob/main/SUPPORT.md).
+          required: false
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: Please provide a clear and concise description of the bug.
+      placeholder: |
+        Add screenshots if any. Put logs in the "Relevant logs" field below.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproducing
+    attributes:
+      label: Steps To Reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. Run 'podtrace -n <namespace> <pod-name> ...'
+        2. Execute '...'
+        3. Observe the error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behaviour
+      description: A clear and concise description of what you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: >
+        Output from the CLI, or `kubectl logs` from the agent/operator pod. eBPF
+        verifier rejections and probe-attachment failures are especially useful.
+      render: shell
+    validations:
+      required: false
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which component is affected? Mirrors the repository `area/*` labels.
+      options:
+        - eBPF programs (area/bpf)
+        - Agent / event collection (area/agent)
+        - Operator / CRDs (area/operator)
+        - CLI (area/cli)
+        - Helm chart (area/helm)
+        - OLM / OperatorHub (area/olm)
+        - Metrics / tracing exporters
+        - Documentation (area/docs)
+        - Other or not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Install method
+      description: How was podtrace installed?
+      options:
+        - krew
+        - Release tarball / binary
+        - Helm chart
+        - OLM / OperatorHub
+        - Container image
+        - Built from source
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: podtrace_version
+    attributes:
+      label: podtrace version
+      description: Output of `podtrace --version`.
+      placeholder: e.g., v0.14.0
+    validations:
+      required: true
+
+  - type: input
+    id: kubernetes_version
+    attributes:
+      label: Kubernetes version
+      description: Server version from `kubectl version`. Use `n/a` if running outside Kubernetes.
+      placeholder: e.g., v1.34.0
+    validations:
+      required: true
+
+  - type: input
+    id: kernel_version
+    attributes:
+      label: Kernel version
+      description: Output of `uname -r` on the node where podtrace runs.
+      placeholder: e.g., 6.12.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: arch
+    attributes:
+      label: Architecture
+      options:
+        - amd64
+        - arm64
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: btf
+    attributes:
+      label: BTF available?
+      description: >
+        Result of `ls /sys/kernel/btf/vmlinux` on the node. Several probes are
+        CO-RE/BTF-only, so this distinguishes a bug from an unsupported kernel.
+      options:
+        - "Yes - /sys/kernel/btf/vmlinux exists"
+        - "No - the file is absent"
+        - Unknown
+    validations:
+      required: false
+
+  - type: input
+    id: platform
+    attributes:
+      label: Platform / distribution
+      description: Where the cluster runs — see the platform guides in `docs/`.
+      placeholder: e.g., EKS 1.34, GKE, AKS, OpenShift 4.18, Talos, kind, bare metal
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Anything else that helps — failing CR YAML, workload shape, when it started.
+    validations:
+      required: false

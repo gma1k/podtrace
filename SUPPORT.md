@@ -8,11 +8,12 @@ answers help the next person too.
 
 | What you want | Where to go |
 |---|---|
-| **Bug report** — something is broken or behaves unexpectedly | Open an issue with the [bug report template](https://github.com/gma1k/podtrace/issues/new?template=bug_report.yaml). Include `kubectl version`, kernel version (`uname -r`), the failing CR YAML, and operator/agent logs. |
-| **Feature request** — you want podtrace to do something new | Open an issue with the [feature request template](https://github.com/gma1k/podtrace/issues/new?template=feature_request.yaml). Describe the use case first, the proposed shape second. |
-| **Epic** — multi-step initiative spanning several PRs | Open an issue with the [epic template](https://github.com/gma1k/podtrace/issues/new?template=epic.yaml). |
-| **Are you using podtrace?** | Tell us via the [adopters template](https://github.com/gma1k/podtrace/issues/new?template=adopters.yaml). |
-| **Question / general discussion** — "how do I…", "is X the right approach…" | Open an issue with a `[discussion]` prefix in the title. Per [CONTRIBUTING.md](CONTRIBUTING.md), this is the project's lightweight discussion channel until a separate Discussions tab is enabled. |
+| **Bug report** — something is broken or behaves unexpectedly | Open an issue with the [bug report template](https://github.com/gma1k/podtrace/issues/new?template=bug_report.yml). Include `kubectl version`, kernel version (`uname -r`), the failing CR YAML, and operator/agent logs. |
+| **Feature request** — you want podtrace to do something new | Open an issue with the [feature request template](https://github.com/gma1k/podtrace/issues/new?template=feature_request.yml). Describe the use case first, the proposed shape second. |
+| **Epic** — multi-step initiative spanning several PRs | Open an issue with the [epic template](https://github.com/gma1k/podtrace/issues/new?template=epic.yml). |
+| **Are you using podtrace?** | Tell us via the [adopters template](https://github.com/gma1k/podtrace/issues/new?template=adopters.yml). |
+| **Question** — "how do I…", "why is this event missing…" | Ask in [Discussions → Q&A](https://github.com/gma1k/podtrace/discussions/categories/q-a). Answered threads stay searchable, so please ask there rather than opening an issue. |
+| **Idea / design discussion** — "is X the right approach…" | Start a thread in [Discussions → Ideas](https://github.com/gma1k/podtrace/discussions/categories/ideas). Once it firms up, open a feature request. |
 | **Security vulnerability** | **Do not open a public issue.** Follow the disclosure process in [SECURITY.md](SECURITY.md). |
 
 ## Before opening a bug
