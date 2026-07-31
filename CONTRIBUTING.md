@@ -105,12 +105,79 @@ unit tests.
 Recommended pre-PR:
 
 ```bash
-make test-unit && make helm-lint && make build
+make test-unit && make lint && make helm-lint && make build
 ```
 
 If your change touches BPF probes, RBAC, or the operator reconcilers, run
 `make chainsaw` too — these are the bug classes that only surface in a
 real cluster.
+
+## Code style
+
+Formatting and linting are enforced by tooling, not by review comments. Run
+them locally and you will not be surprised by CI.
+
+| What | Command | Enforced by |
+|---|---|---|
+| Go lint | `make lint` | `go-ci.yml` (blocks merge) |
+| Go format | `make fmt` (check only: `make fmt-check`) | Not gated in CI — see the note below |
+| Shell | `shellcheck --enable=all -x $(git ls-files '*.sh')` | `bash-checks.yml` (blocks merge) |
+| Shell format | `shfmt -d .` (fix: `shfmt -w .`) | `bash-checks.yml` (blocks merge) |
+| Shell portability | `checkbashisms $(git ls-files '*.sh')` | `bash-checks.yml` (blocks merge) |
+| Helm chart | `make helm-lint` | Chart changes |
+| Whitespace / EOL | `.editorconfig` | Your editor |
+
+### Go
+
+`make lint` runs **golangci-lint v2.12.2** — the same version CI pins — against
+[`.golangci.yml`](.golangci.yml), which selects the v2 `standard` linter set:
+`errcheck`, `govet`, `ineffassign`, `staticcheck`, `unused`. Because both the
+version and the linter set are pinned in-repo, a clean `make lint` locally means
+a clean lint job in CI.
+
+> **Do not install golangci-lint with `go install`.** golangci-lint v2.12.2
+> declares `go 1.25.0`, so `go install` builds it with a Go 1.25 toolchain, and
+> the resulting binary refuses to run against this module:
+> `the Go language version (go1.25) used to build golangci-lint is lower than
+> the targeted Go version (1.26.5)`. It fails with or without a config file.
+> `make lint` avoids this by downloading the official prebuilt release binary
+> (built with Go 1.26) into `bin/`, checksum-verified against the release's
+> `checksums.txt`.
+
+Formatting is plain `gofmt` — `make fmt` is `go fmt ./...`. It is deliberately
+**not** a CI gate: enabling gofmt as a linter would fail the build on
+pre-existing files rather than on your change. Keep the files you touch
+gofmt-clean; `make fmt-check` lists everything currently non-conforming.
+
+If your editor strips the final newline on save, gofmt will flag the file. Make
+sure "insert final newline" is enabled — `.editorconfig` already requests it
+(`insert_final_newline = true`).
+
+### eBPF C
+
+The code under `bpf/` follows Linux kernel style: tabs, 8-column indent width,
+as encoded in `.editorconfig`. There is no automated C formatter in CI, so match
+the surrounding file. Keep helpers `static __always_inline`, and remember the
+verifier reads your control flow — see
+[docs/ebpf-internals.md](docs/ebpf-internals.md).
+
+### Shell
+
+`bash-checks.yml` runs `shellcheck --enable=all`, which turns on optional checks
+most projects leave off, plus `checkbashisms` and `shfmt -d`, over every tracked
+`*.sh`. Run all three before pushing a script — this job blocks merges and
+`--enable=all` will flag things a default shellcheck run does not.
+
+### Everything else
+
+[`.editorconfig`](.editorconfig) is the cross-editor baseline: UTF-8, LF endings,
+final newline, trailing whitespace trimmed. Markdown is the one exception —
+trailing whitespace is preserved there, because two trailing spaces is a hard
+line break.
+
+Comments should explain *why*, not restate *what*. Public functions get doc
+comments; non-obvious kernel or Kubernetes behavior gets a sentence explaining
+the constraint that forced the code into its shape.
 
 ## Commit conventions
 

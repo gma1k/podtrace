@@ -397,7 +397,22 @@ go test ./test/... -v
 
 ## Code Style
 
-- **Go**: Follow standard Go formatting (`go fmt`)
+Formatting and lint rules are documented once in
+[CONTRIBUTING.md](../CONTRIBUTING.md#code-style), including the pinned
+golangci-lint version, the enabled linter set, and the shell checks. This
+section is a quick reference only.
+
+| Task | Command |
+|---|---|
+| Lint Go (same version CI pins) | `make lint` |
+| Format Go | `make fmt` |
+| List files that are not gofmt-clean | `make fmt-check` |
+| Lint the Helm chart | `make helm-lint` |
+
+`make lint` downloads the pinned golangci-lint release binary into `bin/` on
+first use. Do not install it with `go install`, which builds it against an older
+Go toolchain and produces a binary that refuses to run on this module.
+
 - **C**: Follow kernel coding style for eBPF
 - **Comments**: Document public functions and complex logic
 - **Error handling**: Always handle errors explicitly
