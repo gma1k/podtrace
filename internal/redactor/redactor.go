@@ -3,9 +3,9 @@ package redactor
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"regexp"
 
+	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/events"
 )
 
@@ -34,7 +34,7 @@ type Redactor struct {
 func Default() *Redactor {
 	return &Redactor{
 		rules:          defaultRules(),
-		redactDNSNames: os.Getenv("PODTRACE_REDACT_DNS_NAMES") == "true",
+		redactDNSNames: config.RedactDNSNames(),
 	}
 }
 

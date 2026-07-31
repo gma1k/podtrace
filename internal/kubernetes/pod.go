@@ -374,7 +374,7 @@ func statCgroupDirHasProcs(path string) bool {
 }
 
 func resolveCgroupPathCRI(ctx context.Context, containerID string) (string, error) {
-	if os.Getenv("PODTRACE_CRI_RESOLVE") == "false" {
+	if !config.CRIResolveEnabled() {
 		return "", errors.New("podtrace: CRI resolution disabled")
 	}
 	r, err := cri.NewResolver()

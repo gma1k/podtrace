@@ -537,6 +537,35 @@ func AllowCgroupFilterAutoDisable() bool {
 	return getBoolEnvOrDefault("PODTRACE_ALLOW_CGROUP_FILTER_DISABLE", false)
 }
 
+// RedactDNSNames reports whether DNS names are stripped from captured events.
+func RedactDNSNames() bool {
+	return getBoolEnvOrDefault("PODTRACE_REDACT_DNS_NAMES", false)
+}
+
+// DNSPacketCaptureEnabled reports whether the packet-based DNS capture path is
+// active. Enabled unless explicitly disabled.
+func DNSPacketCaptureEnabled() bool {
+	return getBoolEnvOrDefault("PODTRACE_DNS_PACKET_CAPTURE", true)
+}
+
+// K8sEnrichmentEnabled reports whether events are enriched with pod metadata.
+// Enabled unless explicitly disabled.
+func K8sEnrichmentEnabled() bool {
+	return getBoolEnvOrDefault("PODTRACE_K8S_ENRICHMENT_ENABLED", true)
+}
+
+// K8sUseInformers reports whether pod metadata comes from informers rather than
+// direct API calls. Enabled unless explicitly disabled.
+func K8sUseInformers() bool {
+	return getBoolEnvOrDefault("PODTRACE_K8S_USE_INFORMERS", true)
+}
+
+// CRIResolveEnabled reports whether cgroup paths may be resolved via the CRI
+// socket. Enabled unless explicitly disabled.
+func CRIResolveEnabled() bool {
+	return getBoolEnvOrDefault("PODTRACE_CRI_RESOLVE", true)
+}
+
 const MaxCaptureHeaders = 4
 
 const MaxCaptureHeaderNameLen = 32

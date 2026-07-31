@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 
+	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/logger"
 	"go.uber.org/zap"
 )
@@ -44,7 +45,7 @@ func NewInformerCache(clientset kubernetes.Interface) *InformerCache {
 
 func (ic *InformerCache) Enabled() bool {
 	// Default enabled; can be disabled explicitly.
-	return os.Getenv("PODTRACE_K8S_USE_INFORMERS") != "false"
+	return config.K8sUseInformers()
 }
 
 func (ic *InformerCache) Start(ctx context.Context) {
