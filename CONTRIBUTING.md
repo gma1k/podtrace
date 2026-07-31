@@ -283,6 +283,8 @@ Before opening a PR:
 
 ## Where to ask
 
-- **Issues**: [github.com/gma1k/podtrace/issues](https://github.com/gma1k/podtrace/issues) — bugs, feature requests, design discussions
+- **Issues**: [github.com/gma1k/podtrace/issues](https://github.com/gma1k/podtrace/issues) — bugs, feature requests, epics. Blank issues are disabled; pick a template.
+- **Questions**: [Discussions → Q&A](https://github.com/gma1k/podtrace/discussions/categories/q-a) — usage, kernel support, "why no events"
+- **Ideas**: [Discussions → Ideas](https://github.com/gma1k/podtrace/discussions/categories/ideas) — design direction before it is a concrete request
 - **Vulnerabilities**: see [SECURITY.md](SECURITY.md) for the private reporting flow
-- **General**: open a `[discussion]`-prefixed issue
+- **Governance**: see [GOVERNANCE.md](GOVERNANCE.md) for how decisions get made and how to become a maintainer

@@ -1,0 +1,31 @@
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas are for shaping direction. Once an idea has a clear scope, open a
+        [feature request](https://github.com/gma1k/podtrace/issues/new?template=feature_request.yml)
+        so it can be tracked and closed.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Start with the operator-facing problem. Solutions are easier to judge against a concrete pain point.
+    validations:
+      required: true
+
+  - type: textarea
+    id: shape
+    attributes:
+      label: Rough shape
+      description: How might it work? A sketch is fine, this is not a design doc.
+    validations:
+      required: false
+
+  - type: textarea
+    id: prior_art
+    attributes:
+      label: Prior art
+      description: Does another tool do this? Link it. Knowing what exists usually shortens the discussion.
+    validations:
+      required: false

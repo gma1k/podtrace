@@ -2,7 +2,7 @@ name: Register as adopter
 description: If your organization is using podtrace, we would be delighted to add you to our list of adopters. Please report how you use podtrace and we will take care of adding it to our adopters list.
 title: "adopter: COMPANY_NAME"
 labels:
-  - kind/documentation
+  - documentation
 body:
   - type: input
     id: contact

@@ -1,0 +1,36 @@
+labels:
+  - question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Found a bug rather than a question? Use the
+        [bug report form](https://github.com/gma1k/podtrace/issues/new?template=bug_report.yml)
+        instead. Suspect a vulnerability? See
+        [SECURITY.md](https://github.com/gma1k/podtrace/blob/main/SECURITY.md) — never post it here.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: What are you trying to do?
+      description: Describe the goal, not only the command that failed — it often changes the answer.
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What have you tried?
+      description: Commands run, docs read, and what happened instead.
+      render: shell
+    validations:
+      required: false
+
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: podtrace, Kubernetes, and kernel version — most "no events" questions come down to kernel support.
+      placeholder: e.g., podtrace v0.14.0, k8s v1.34.0, kernel 6.12.0
+    validations:
+      required: false
