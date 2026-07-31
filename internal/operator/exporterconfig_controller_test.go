@@ -243,6 +243,7 @@ func TestExporterConfigReconciler_ReadyConditions(t *testing.T) {
 			cond := ecCondition(got, ConditionReady)
 			if cond == nil {
 				t.Fatalf("Ready condition missing")
+				return
 			}
 			if cond.Reason != tc.wantReason {
 				t.Errorf("Reason: got %q, want %q", cond.Reason, tc.wantReason)
@@ -363,6 +364,7 @@ func TestExporterConfigReconciler_ReferenceCounts(t *testing.T) {
 			cond := ecCondition(got, ConditionReferenced)
 			if cond == nil {
 				t.Fatalf("Referenced condition missing")
+				return
 			}
 			if cond.Status != tc.wantStatus {
 				t.Errorf("Referenced status: got %q, want %q", cond.Status, tc.wantStatus)

@@ -17,6 +17,7 @@ func TestNewZipkinExporter(t *testing.T) {
 	}
 	if exporter == nil {
 		t.Fatal("NewZipkinExporter() returned nil")
+		return
 	}
 	if exporter.endpoint != config.DefaultZipkinEndpoint {
 		t.Errorf("Expected endpoint %s, got %s", config.DefaultZipkinEndpoint, exporter.endpoint)

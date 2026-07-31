@@ -70,6 +70,7 @@ var (
 	MaxSpanIDLength           = 16
 	MaxTraceStateLength       = 512
 	AlertingEnabled           = getBoolEnvOrDefault("PODTRACE_ALERTING_ENABLED", false)
+	AlertEventsEnabled        = getBoolEnvOrDefault("PODTRACE_ALERT_EVENTS_ENABLED", true)
 	AlertWebhookURL           = getEnvOrDefault("PODTRACE_ALERT_WEBHOOK_URL", "")
 	AlertSlackWebhookURL      = getEnvOrDefault("PODTRACE_ALERT_SLACK_WEBHOOK_URL", "")
 	AlertSlackChannel         = getEnvOrDefault("PODTRACE_ALERT_SLACK_CHANNEL", "#alerts")

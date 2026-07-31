@@ -14,8 +14,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
@@ -77,6 +79,10 @@ func (r *PodTraceScheduleReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{RequeueAfter: scheduleResyncCeiling}, nil
 	}
 	r.setCondition(&sch, ConditionPaused, metav1.ConditionFalse, "NotSuspended", "")
+
+	if sch.Spec.Trigger != nil {
+		return r.reconcileTrigger(ctx, &sch, active, succeeded, failed, now)
+	}
 
 	cronSched, loc, err := r.parseSchedule(&sch)
 	if err != nil {
@@ -250,6 +256,9 @@ func (r *PodTraceScheduleReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Named("podtraceschedule").
 		For(&podtracev1alpha1.PodTraceSchedule{}).
 		Owns(&podtracev1alpha1.PodTraceSession{}).
+		Watches(&corev1.Event{},
+			handler.EnqueueRequestsFromMapFunc(r.mapEventToTriggerSchedules),
+			builder.WithPredicates(alertEventPredicate())).
 		WithOptions(defaultControllerOptions()).
 		Complete(r)
 }

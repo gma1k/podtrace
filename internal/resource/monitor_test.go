@@ -115,6 +115,7 @@ func TestNewResourceMonitor(t *testing.T) {
 
 	if monitor == nil {
 		t.Fatal("NewResourceMonitor() returned nil")
+		return
 	}
 
 	if monitor.cgroupPath != cgroupPath {

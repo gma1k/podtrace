@@ -91,6 +91,7 @@ func TestLoadBundle_SecretGetNonNotFoundErrorPropagates(t *testing.T) {
 	_, err := LoadBundle(context.Background(), c, systemNS, uid)
 	if err == nil {
 		t.Fatal("expected LoadBundle to surface a non-NotFound Secret error")
+		return
 	}
 	if !strings.Contains(err.Error(), "bundle Secret") {
 		t.Errorf("error should be wrapped as a Secret load failure, got: %v", err)

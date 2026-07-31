@@ -104,6 +104,7 @@ func TestNewProbeServer_DefaultStallWindow(t *testing.T) {
 	s := NewProbeServer(addr, 0)
 	if s == nil {
 		t.Fatal("NewProbeServer returned nil")
+		return
 	}
 	if s.Addr != addr {
 		t.Errorf("Addr = %q, want %q", s.Addr, addr)

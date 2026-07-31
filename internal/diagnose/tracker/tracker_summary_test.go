@@ -102,6 +102,7 @@ func TestProcessEvent_CorrelationIDAttribute(t *testing.T) {
 	trace := tt.GetTrace("t-corr")
 	if trace == nil || len(trace.Spans) != 1 {
 		t.Fatalf("expected one span in trace t-corr, got %+v", trace)
+		return
 	}
 	if got := trace.Spans[0].Attributes["podtrace.correlation_id"]; got != "987654321" {
 		t.Errorf("correlation_id attribute = %q, want 987654321", got)
@@ -119,6 +120,7 @@ func TestProcessEvent_NonMapContextIgnored(t *testing.T) {
 	trace := tt.GetTrace("t-ctx")
 	if trace == nil || len(trace.Spans) != 1 {
 		t.Fatalf("expected one span in trace t-ctx, got %+v", trace)
+		return
 	}
 	if len(trace.Services) != 0 {
 		t.Errorf("a non-map context must not populate services, got %+v", trace.Services)

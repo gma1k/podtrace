@@ -17,6 +17,15 @@ type Config struct {
 
 	ExportBatchSize int
 
+	// ExportFlushInterval bounds how long a partial batch waits before it is
+	// flushed to exporters even when it has not reached ExportBatchSize.
+	// Without it, a low-traffic pod (e.g. one emitting only periodic
+	// resource-limit events) would never fill a batch, so its events — and
+	// anything that depends on their timely delivery, like alert-triggered
+	// sessions — would be delayed until the batch happened to fill or the
+	// engine shut down. Defaults to 1s.
+	ExportFlushInterval time.Duration
+
 	// ShutdownFlushTimeout bounds the final flush + drain on shutdown so
 	// a hung exporter cannot block engine teardown. Defaults to 10s.
 	ShutdownFlushTimeout time.Duration
@@ -90,6 +99,9 @@ func NewEngine(backend TracerBackend, exporters []Exporter, cfg Config) (Engine,
 	}
 	if cfg.ExportBatchSize <= 0 {
 		cfg.ExportBatchSize = 256
+	}
+	if cfg.ExportFlushInterval <= 0 {
+		cfg.ExportFlushInterval = time.Second
 	}
 	if cfg.ShutdownFlushTimeout <= 0 {
 		cfg.ShutdownFlushTimeout = 10 * time.Second
@@ -331,11 +343,19 @@ func (e *engine) dispatchLoop(ctx context.Context, eventCh <-chan *events.Event)
 		flush(flushCtx)
 	}
 
+	ticker := time.NewTicker(e.cfg.ExportFlushInterval)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			shutdownFlush()
 			return
+		case <-ticker.C:
+			// Time-based flush so a partial batch from a low-traffic pod
+			// is delivered promptly instead of waiting to reach
+			// ExportBatchSize.
+			flush(ctx)
 		case ev, ok := <-eventCh:
 			if !ok {
 				shutdownFlush()

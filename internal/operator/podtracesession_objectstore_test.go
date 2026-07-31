@@ -234,6 +234,7 @@ func TestHarvestReportLocation(t *testing.T) {
 			}
 			if got == nil {
 				t.Fatal("ReportUploaded condition not set")
+				return
 			}
 			if got.Status != tc.wantCondStat {
 				t.Errorf("condition status = %q, want %q", got.Status, tc.wantCondStat)
@@ -333,6 +334,7 @@ func TestPodTraceSessionReconciler_RejectsBadObjectStoreURI(t *testing.T) {
 	}
 	if deg == nil {
 		t.Fatal("Degraded condition not set")
+		return
 	}
 	if deg.Status != metav1.ConditionTrue || deg.Reason != "ObjectStoreURIInvalid" {
 		t.Errorf("Degraded = (%s, %s); want (True, ObjectStoreURIInvalid). Message: %q", deg.Status, deg.Reason, deg.Message)

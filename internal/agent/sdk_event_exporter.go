@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
+	"github.com/podtrace/podtrace/internal/alerting"
 	"github.com/podtrace/podtrace/internal/config"
 	"github.com/podtrace/podtrace/internal/events"
 	"github.com/podtrace/podtrace/internal/logger"
@@ -295,10 +296,32 @@ func (e *sdkEventExporter) appendThresholdAttributes(attrs []attribute.KeyValue,
 				attrs = append(attrs,
 					attribute.Bool("podtrace.threshold.error_rate.breached", true),
 				)
+				e.raiseTriggerAlert(ev, alerting.AlertSourceErrorRate, alerting.SeverityCritical, "error-rate threshold breached")
 			}
 		}
 	}
 	return attrs
+}
+
+// raiseTriggerAlert publishes an alert (via the global alert manager) that
+// the Kubernetes-Event sink turns into a flight-recorder trigger Event.
+func (e *sdkEventExporter) raiseTriggerAlert(ev *events.Event, source string, severity alerting.AlertSeverity, title string) {
+	if ev.K8s == nil || ev.K8s.PodName == "" || ev.K8s.Namespace == "" {
+		return
+	}
+	mgr := alerting.GetGlobalManager()
+	if mgr == nil {
+		return
+	}
+	mgr.SendAlert(&alerting.Alert{
+		Severity:  severity,
+		Title:     title,
+		Message:   title,
+		Timestamp: time.Now(),
+		Source:    source,
+		PodName:   ev.K8s.PodName,
+		Namespace: ev.K8s.Namespace,
+	})
 }
 
 func (e *sdkEventExporter) recordTrip(kind string) {

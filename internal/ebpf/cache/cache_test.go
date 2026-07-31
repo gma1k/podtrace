@@ -430,6 +430,7 @@ func TestNewPathCache(t *testing.T) {
 	pc := NewPathCache()
 	if pc == nil {
 		t.Fatal("NewPathCache returned nil")
+		return
 	}
 	if pc.cache == nil {
 		t.Fatal("NewPathCache cache is nil")

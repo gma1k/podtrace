@@ -14,6 +14,7 @@ func TestGetDockerContainerRootfs_CleanPathTraversal(t *testing.T) {
 	_, err := GetDockerContainerRootfs("abc123")
 	if err == nil {
 		t.Fatal("expected an error for a base path that resolves to a traversal, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "traversal sequence") {
 		t.Errorf("error = %v, want it to mention the traversal sequence guard", err)

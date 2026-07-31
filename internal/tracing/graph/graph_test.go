@@ -12,6 +12,7 @@ func TestNewGraphBuilder(t *testing.T) {
 	gb := NewGraphBuilder()
 	if gb == nil {
 		t.Fatal("NewGraphBuilder() returned nil")
+		return
 	}
 	if gb.nodes == nil {
 		t.Error("nodes map should be initialized")
@@ -26,6 +27,7 @@ func TestGraphBuilder_BuildFromTraces_Empty(t *testing.T) {
 	graph := gb.BuildFromTraces([]*tracker.Trace{})
 	if graph == nil {
 		t.Fatal("BuildFromTraces() returned nil")
+		return
 	}
 	if len(graph.Nodes) != 0 {
 		t.Errorf("Expected 0 nodes, got %d", len(graph.Nodes))
@@ -89,6 +91,7 @@ func TestGraphBuilder_BuildFromTraces_WithSpans(t *testing.T) {
 	graph := gb.BuildFromTraces([]*tracker.Trace{trace})
 	if graph == nil {
 		t.Fatal("BuildFromTraces() returned nil")
+		return
 	}
 	if len(graph.Nodes) == 0 {
 		t.Error("Expected at least 1 node")
@@ -187,6 +190,7 @@ func TestGraphBuilder_ensureNode(t *testing.T) {
 	node := gb.nodes["key1"]
 	if node == nil {
 		t.Fatal("Node not found")
+		return
 	}
 	if node.Service != "service1" {
 		t.Errorf("Node Service = %s, want service1", node.Service)
@@ -236,6 +240,7 @@ func TestGraphBuilder_updateEdge(t *testing.T) {
 	edge := gb.edges["source->target"]
 	if edge == nil {
 		t.Fatal("Edge not found")
+		return
 	}
 	if edge.RequestCount != 1 {
 		t.Errorf("RequestCount = %d, want 1", edge.RequestCount)

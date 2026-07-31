@@ -29,6 +29,7 @@ func TestSmall_NewScheme_RegistersPodtraceTypes(t *testing.T) {
 	}
 	if s == nil {
 		t.Fatal("NewScheme returned nil scheme")
+		return
 	}
 	gvk := podtracev1alpha1.GroupVersion.WithKind("PodTrace")
 	if !s.Recognizes(gvk) {

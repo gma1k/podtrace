@@ -21,6 +21,7 @@ func TestReadV1ControllerFile_NoControllers(t *testing.T) {
 	_, err := readV1ControllerFile(nil, "kubepods/pod1", "cpu.cfs_quota_us")
 	if err == nil {
 		t.Fatal("expected an error when no controllers are supplied")
+		return
 	}
 	if !strings.Contains(err.Error(), "no controller mount found") {
 		t.Errorf("error = %v, want it to mention no controller mount found", err)
@@ -63,6 +64,7 @@ func TestSyncCPUQuota_DeleteError(t *testing.T) {
 	err := rm.syncCPUQuota()
 	if err == nil {
 		t.Fatal("expected an error when clearing the quota entry fails")
+		return
 	}
 	if !strings.Contains(err.Error(), "clear CPU quota") {
 		t.Errorf("error = %v, want it to mention clear CPU quota", err)
@@ -78,6 +80,7 @@ func TestSyncCPUQuota_PutError(t *testing.T) {
 	err := rm.syncCPUQuota()
 	if err == nil {
 		t.Fatal("expected an error when writing the quota entry fails")
+		return
 	}
 	if !strings.Contains(err.Error(), "put CPU quota") {
 		t.Errorf("error = %v, want it to mention put CPU quota", err)
@@ -228,6 +231,7 @@ func TestReadLimitsV1_BlkioWriteExceedsRead(t *testing.T) {
 	io := monitor.GetLimits()[ResourceIO]
 	if io == nil {
 		t.Fatal("expected an IO limit derived from the blkio throttles")
+		return
 	}
 	if io.LimitBytes != 4194304 {
 		t.Errorf("IO limit = %d, want 4194304 (the larger write throttle)", io.LimitBytes)

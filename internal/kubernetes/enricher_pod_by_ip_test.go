@@ -40,6 +40,7 @@ func TestResolvePodByIP_InformerCacheHit(t *testing.T) {
 	ce.informerCache.mu.RUnlock()
 	if inf == nil {
 		t.Skip("informer not initialized")
+		return
 	}
 	if err := inf.GetIndexer().Add(pod); err != nil {
 		t.Fatalf("add pod to indexer: %v", err)
@@ -48,6 +49,7 @@ func TestResolvePodByIP_InformerCacheHit(t *testing.T) {
 	meta := ce.resolvePodByIP(ctx, "10.9.9.9")
 	if meta == nil {
 		t.Fatal("expected pod metadata from informer cache")
+		return
 	}
 	if meta.Name != "target" || meta.Namespace != "prod" {
 		t.Errorf("unexpected metadata: %+v", meta)
@@ -76,6 +78,7 @@ func TestEnrichEvent_ExternalIP(t *testing.T) {
 	enriched := ce.EnrichEvent(context.Background(), ev)
 	if enriched == nil {
 		t.Fatal("expected enriched event")
+		return
 	}
 	if !enriched.KubernetesContext.IsExternal {
 		t.Errorf("expected public IP to be flagged external, got %+v", enriched.KubernetesContext)

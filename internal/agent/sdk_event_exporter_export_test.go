@@ -99,6 +99,7 @@ func TestSDKEventExporter_Export_StampsProtocolAndNetworkAttributes(t *testing.T
 
 	if httpAttrs == nil {
 		t.Fatal("no http.req span captured")
+		return
 	}
 	if httpAttrs["http.scheme"] != "https" {
 		t.Errorf("http.scheme = %q, want https", httpAttrs["http.scheme"])

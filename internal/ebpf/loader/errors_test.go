@@ -71,6 +71,7 @@ func TestNewLoadError(t *testing.T) {
 	
 	if loaderErr == nil {
 		t.Fatal("NewLoadError returned nil")
+		return
 	}
 	if loaderErr.Code != ErrCodeLoadFailed {
 		t.Errorf("Expected error code %d, got %d", ErrCodeLoadFailed, loaderErr.Code)

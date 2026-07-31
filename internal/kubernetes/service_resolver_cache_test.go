@@ -38,6 +38,7 @@ func TestResolveService_NilClientsetInformerFallback(t *testing.T) {
 	ic.mu.RUnlock()
 	if esInf == nil {
 		t.Skip("endpointslice informer not initialized")
+		return
 	}
 	port := int32(9090)
 	es := &discoveryv1.EndpointSlice{

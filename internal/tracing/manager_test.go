@@ -25,6 +25,7 @@ func TestNewManager_Disabled(t *testing.T) {
 	}
 	if manager == nil {
 		t.Fatal("NewManager() returned nil")
+		return
 	}
 	if manager.enabled {
 		t.Error("Manager should be disabled when TracingEnabled is false")
@@ -148,6 +149,7 @@ func TestManager_Shutdown_Enabled(t *testing.T) {
 	}
 	if manager == nil {
 		t.Fatal("NewManager() returned nil")
+		return
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -727,6 +729,7 @@ func TestNewManager_WithAllExporters(t *testing.T) {
 	}
 	if manager == nil {
 		t.Fatal("NewManager() returned nil")
+		return
 	}
 	if !manager.enabled {
 		t.Error("Manager should be enabled when TracingEnabled is true")

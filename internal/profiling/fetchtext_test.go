@@ -38,6 +38,7 @@ func TestFetchText_NonOKStatus(t *testing.T) {
 	_, _, err := p.fetchText(context.Background(), srv.URL)
 	if err == nil {
 		t.Fatal("expected error on HTTP 500")
+		return
 	}
 	if !strings.Contains(err.Error(), "500") {
 		t.Errorf("error %q should mention status 500", err.Error())

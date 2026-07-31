@@ -48,6 +48,7 @@ func TestStructByNameAndMembers(t *testing.T) {
 	m := findMember(g, "m")
 	if m == nil {
 		t.Fatal("runtime.g.m member not found")
+		return
 	}
 	if m.ByteOffset != 48 {
 		t.Errorf("runtime.g.m offset = %d, want 48", m.ByteOffset)

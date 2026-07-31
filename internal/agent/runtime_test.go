@@ -133,6 +133,7 @@ func TestNewNoopBackend_ExportedConstructor(t *testing.T) {
 	b := NewNoopBackend()
 	if b == nil {
 		t.Fatal("NewNoopBackend returned nil")
+		return
 	}
 	if err := b.AttachToCgroup("/x"); err != nil {
 		t.Errorf("AttachToCgroup on exported noop: %v", err)
@@ -667,6 +668,7 @@ func TestMakeCategoryGate_BackendImplementsGateable(t *testing.T) {
 	gate := makeCategoryGate(b)
 	if gate == nil {
 		t.Fatal("gate must be non-nil for gateable backend")
+		return
 	}
 	if err := gate([]string{"dns", "net"}); err != nil {
 		t.Fatalf("gate: %v", err)

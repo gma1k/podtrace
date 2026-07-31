@@ -236,6 +236,7 @@ func TestEvaluateLockdown_ConfidentialityProducesActionableError(t *testing.T) {
 	err := evaluateLockdown(LockdownConfidentiality)
 	if err == nil {
 		t.Fatal("expected non-nil error for confidentiality mode")
+		return
 	}
 	msg := err.Error()
 	for _, want := range []string{

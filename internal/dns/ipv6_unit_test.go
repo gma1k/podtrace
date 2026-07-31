@@ -38,6 +38,7 @@ func TestIPv6String(t *testing.T) {
 			parsed := net.ParseIP(tt.want)
 			if parsed == nil {
 				t.Fatalf("net.ParseIP(%q) returned nil", tt.want)
+				return
 			}
 			if to16 := parsed.To16(); !equalBytes(to16, tt.in) {
 				t.Errorf("net.ParseIP(%q).To16() = %v, want %v", tt.want, to16, tt.in)

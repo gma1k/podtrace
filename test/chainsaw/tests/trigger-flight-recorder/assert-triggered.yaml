@@ -1,0 +1,10 @@
+apiVersion: podtrace.io/v1alpha1
+kind: PodTraceSession
+metadata:
+  labels:
+    podtrace.io/schedule: memhog-flight-recorder
+  annotations:
+    podtrace.io/triggered-by: ResourceAlert
+spec:
+  podRefs:
+    - (starts_with(name, 'memhog-')): true

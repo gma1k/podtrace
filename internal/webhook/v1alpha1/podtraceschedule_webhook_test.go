@@ -122,6 +122,7 @@ func TestPodTraceScheduleValidator(t *testing.T) {
 			}
 			if err == nil {
 				t.Fatalf("expected error containing %q, got nil", tc.wantError)
+				return
 			}
 			if !strings.Contains(err.Error(), tc.wantError) {
 				t.Fatalf("error %q did not contain %q", err.Error(), tc.wantError)

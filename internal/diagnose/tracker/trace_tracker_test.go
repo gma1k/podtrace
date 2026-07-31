@@ -12,6 +12,7 @@ func TestNewTraceTracker(t *testing.T) {
 	tt := NewTraceTracker()
 	if tt == nil {
 		t.Fatal("NewTraceTracker returned nil")
+		return
 	}
 	if tt.GetTraceCount() != 0 {
 		t.Error("New tracker should have 0 traces")
@@ -40,6 +41,7 @@ func TestTraceTracker_ProcessEvent(t *testing.T) {
 	trace := tt.GetTrace("trace123")
 	if trace == nil {
 		t.Fatal("Trace not found")
+		return
 	}
 	if len(trace.Spans) != 1 {
 		t.Errorf("Expected 1 span, got %d", len(trace.Spans))
@@ -69,6 +71,7 @@ func TestTraceTracker_ProcessEvent_WithK8sContext(t *testing.T) {
 	trace := tt.GetTrace("trace123")
 	if trace == nil {
 		t.Fatal("Trace not found")
+		return
 	}
 
 	if len(trace.Services) == 0 {
@@ -210,6 +213,7 @@ func TestTraceTracker_ProcessEvent_ErrorEvent(t *testing.T) {
 	trace := tt.GetTrace("trace-err")
 	if trace == nil || len(trace.Spans) == 0 {
 		t.Fatal("expected trace with one span")
+		return
 	}
 	if !trace.Spans[0].Error {
 		t.Error("expected span.Error = true for error event")
@@ -242,6 +246,7 @@ func TestTraceTracker_ProcessEvent_EarlierTimestamp(t *testing.T) {
 	trace := tt.GetTrace("t1")
 	if trace == nil {
 		t.Fatal("expected trace to exist")
+		return
 	}
 	if !trace.StartTime.Before(baseTime) {
 		t.Errorf("expected StartTime before base %v, got %v", baseTime, trace.StartTime)
@@ -273,6 +278,7 @@ func TestTraceTracker_ProcessEvent_LaterTimestamp(t *testing.T) {
 	trace := tt.GetTrace("t2")
 	if trace == nil {
 		t.Fatal("expected trace to exist")
+		return
 	}
 	if !trace.EndTime.After(baseTime) {
 		t.Errorf("expected EndTime after base %v, got %v", baseTime, trace.EndTime)
@@ -294,6 +300,7 @@ func TestTraceTracker_ProcessEvent_ExistingSpan(t *testing.T) {
 	trace := tt.GetTrace("t3")
 	if trace == nil {
 		t.Fatal("expected trace to exist")
+		return
 	}
 	if len(trace.Spans) != 1 {
 		t.Errorf("expected 1 span (same SpanID reused), got %d", len(trace.Spans))
@@ -320,6 +327,7 @@ func TestTraceTracker_ProcessEvent_WithPIDAndDetails(t *testing.T) {
 	trace := tt.GetTrace("t4")
 	if trace == nil || len(trace.Spans) == 0 {
 		t.Fatal("expected trace with one span")
+		return
 	}
 	span := trace.Spans[0]
 	if span.Attributes["details"] != "some detail" {
@@ -349,6 +357,7 @@ func TestTraceTracker_UpdateServiceInfo_NoPodNoService(t *testing.T) {
 	trace := tt.GetTrace("t5")
 	if trace == nil {
 		t.Fatal("expected trace")
+		return
 	}
 	if len(trace.Services) != 0 {
 		t.Errorf("expected no services when pod and service are empty, got %d", len(trace.Services))
@@ -375,6 +384,7 @@ func TestTraceTracker_UpdateServiceInfo_PodOnlyKey(t *testing.T) {
 	trace := tt.GetTrace("t6")
 	if trace == nil {
 		t.Fatal("expected trace")
+		return
 	}
 	if len(trace.Services) == 0 {
 		t.Error("expected service entry for pod-only context")

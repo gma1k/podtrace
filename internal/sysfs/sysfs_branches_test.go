@@ -12,6 +12,7 @@ func TestCgroupOpen_RootOpenFails(t *testing.T) {
 	_, err := CgroupOpen("cgroup.procs")
 	if err == nil {
 		t.Fatal("expected error when cgroup root cannot be opened")
+		return
 	}
 	if !strings.Contains(err.Error(), "sysfs") {
 		t.Errorf("error should be wrapped with sysfs prefix, got %v", err)
@@ -36,6 +37,7 @@ func TestCgroupStat_RootOpenFails(t *testing.T) {
 	_, err := CgroupStat("cgroup.procs")
 	if err == nil {
 		t.Fatal("expected error when cgroup root cannot be opened")
+		return
 	}
 	if !strings.Contains(err.Error(), "sysfs") {
 		t.Errorf("error should be wrapped with sysfs prefix, got %v", err)

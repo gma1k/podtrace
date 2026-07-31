@@ -186,6 +186,7 @@ func TestAgentEnvtest_TwoOverlappingCRs_ProduceScopedStreams(t *testing.T) {
 	recB := recorders[CRKey{Namespace: ns, Name: "cr-b"}]
 	if recA == nil || recB == nil {
 		t.Fatalf("recorders missing: a=%v b=%v", recA != nil, recB != nil)
+		return
 	}
 	if recA.count() != 2 {
 		t.Errorf("CR-A events=%d want 2", recA.count())

@@ -303,6 +303,7 @@ func TestSess_ReadTerminationSummaryParsesMessage(t *testing.T) {
 	}
 	if summary == nil {
 		t.Fatal("expected a decoded summary, got nil")
+		return
 	}
 	if summary.TotalEvents != 42 || summary.NetEvents != 7 || summary.Node != "n1" {
 		t.Fatalf("summary not parsed correctly: %+v", summary)
@@ -433,6 +434,7 @@ func TestSess_ApplyHistoryLimitsSuccessfulDeleteError(t *testing.T) {
 	err := r.applyHistoryLimits(context.Background(), sch, succeeded, nil)
 	if err == nil {
 		t.Fatal("expected applyHistoryLimits to surface successful-history gc error")
+		return
 	}
 	if got := err.Error(); !contains(got, "gc successful") {
 		t.Fatalf("expected wrapped 'gc successful' error, got %q", got)
@@ -467,6 +469,7 @@ func TestSess_ApplyHistoryLimitsFailedDeleteError(t *testing.T) {
 	err := r.applyHistoryLimits(context.Background(), sch, nil, failed)
 	if err == nil {
 		t.Fatal("expected applyHistoryLimits to surface failed-history gc error")
+		return
 	}
 	if got := err.Error(); !contains(got, "gc failed") {
 		t.Fatalf("expected wrapped 'gc failed' error, got %q", got)
@@ -480,6 +483,7 @@ func TestSess_NewSchemeRegistersTypes(t *testing.T) {
 	}
 	if sc == nil {
 		t.Fatal("NewScheme returned nil scheme")
+		return
 	}
 	if !sc.Recognizes(podtracev1alpha1.GroupVersion.WithKind("PodTraceSession")) {
 		t.Fatal("scheme does not recognize PodTraceSession")

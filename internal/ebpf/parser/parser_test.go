@@ -71,6 +71,7 @@ func TestParseEvent_V8_CorrelationID(t *testing.T) {
 	event := ParseEvent(buf.Bytes())
 	if event == nil {
 		t.Fatal("ParseEvent returned nil for a V8 record")
+		return
 	}
 	if event.CorrelationID != raw.CorrelationID {
 		t.Errorf("CorrelationID = %#x, want %#x", event.CorrelationID, raw.CorrelationID)
@@ -101,6 +102,7 @@ func TestParseEvent_ValidEvent(t *testing.T) {
 	event := ParseEvent(buf.Bytes())
 	if event == nil {
 		t.Fatal("ParseEvent returned nil for valid event")
+		return
 	}
 
 	if event.Timestamp != raw.Timestamp {
@@ -167,6 +169,7 @@ func TestParseEvent_ValidEventV2_WithCgroupID(t *testing.T) {
 	event := ParseEvent(buf.Bytes())
 	if event == nil {
 		t.Fatal("ParseEvent returned nil for valid v2 event")
+		return
 	}
 	if event.CgroupID != raw.CgroupID {
 		t.Errorf("Expected cgroup ID %d, got %d", raw.CgroupID, event.CgroupID)
@@ -245,6 +248,7 @@ func TestParseEvent_AllEventTypes(t *testing.T) {
 			event := ParseEvent(buf.Bytes())
 			if event == nil {
 				t.Fatalf("ParseEvent returned nil for event type %d", et)
+				return
 			}
 			if event.Type != et {
 				t.Errorf("Expected type %d, got %d", et, event.Type)
@@ -269,6 +273,7 @@ func TestParseEvent_TargetTruncation(t *testing.T) {
 	event := ParseEvent(buf.Bytes())
 	if event == nil {
 		t.Fatal("ParseEvent returned nil")
+		return
 	}
 	if len(event.Target) > 128 {
 		t.Errorf("Target should be truncated to 128 bytes, got %d", len(event.Target))
@@ -288,6 +293,7 @@ func TestParseEvent_NullTerminatedStrings(t *testing.T) {
 	event := ParseEvent(buf.Bytes())
 	if event == nil {
 		t.Fatal("ParseEvent returned nil")
+		return
 	}
 	// bytes.TrimRight removes trailing nulls only
 	if event.Target != "test" {
@@ -425,6 +431,7 @@ func TestParseEvent_ValidEventV3_WithComm(t *testing.T) {
 	event := ParseEvent(buf.Bytes())
 	if event == nil {
 		t.Fatal("ParseEvent returned nil for V3 event")
+		return
 	}
 	if event.CgroupID != raw.CgroupID {
 		t.Errorf("CgroupID: got %d, want %d", event.CgroupID, raw.CgroupID)
@@ -509,6 +516,7 @@ func TestParseEvent_ValidEventV4_WithNetNsID(t *testing.T) {
 	event := ParseEvent(buf.Bytes())
 	if event == nil {
 		t.Fatal("ParseEvent returned nil for V4 event")
+		return
 	}
 	if event.NetNsID != raw.NetNsID {
 		t.Errorf("NetNsID: got %d, want %d", event.NetNsID, raw.NetNsID)
@@ -538,6 +546,7 @@ func TestParseEvent_EventUnlink_EventRename(t *testing.T) {
 			event := ParseEvent(buf.Bytes())
 			if event == nil {
 				t.Fatalf("ParseEvent returned nil for %v", et)
+				return
 			}
 			if event.Type != et {
 				t.Errorf("Type: got %v, want %v", event.Type, et)
@@ -639,6 +648,7 @@ func TestParseEvent_V5_DNSFields(t *testing.T) {
 	e := ParseEvent(buf.Bytes())
 	if e == nil {
 		t.Fatal("ParseEvent returned nil for V5 event")
+		return
 	}
 	if e.DNSServerIP != 0x0a00600a {
 		t.Errorf("DNSServerIP = %#x, want 0x0a00600a", e.DNSServerIP)
@@ -689,6 +699,7 @@ func TestParseEvent_V6_DNSServerIP6(t *testing.T) {
 	e := ParseEvent(buf.Bytes())
 	if e == nil {
 		t.Fatal("ParseEvent returned nil for V6 event")
+		return
 	}
 	if e.DNSServerIP6 != want {
 		t.Errorf("DNSServerIP6 = %v, want %v", e.DNSServerIP6, want)
@@ -720,6 +731,7 @@ func TestParseEvent_HTTPSocketEndpoint(t *testing.T) {
 	event := ParseEvent(buf.Bytes())
 	if event == nil {
 		t.Fatal("ParseEvent returned nil")
+		return
 	}
 	if event.Target != "GET /api/users" {
 		t.Errorf("Target = %q, want \"GET /api/users\"", event.Target)

@@ -35,6 +35,7 @@ func TestDoProfile_HeapAvailable_MergesResult(t *testing.T) {
 	res := h.GetResult()
 	if res == nil {
 		t.Fatal("expected non-nil result after heap doProfile")
+		return
 	}
 	if res.HeapProfile == nil || !res.HeapProfile.Available {
 		t.Error("expected available heap profile to be stored")
@@ -69,6 +70,7 @@ runtime.gopark()
 	res := h.GetResult()
 	if res == nil {
 		t.Fatal("expected non-nil result after goroutine doProfile")
+		return
 	}
 	if res.GoroutineProfile == nil || !res.GoroutineProfile.Available {
 		t.Error("expected available goroutine profile to be stored")
@@ -88,6 +90,7 @@ func TestDoProfile_HeapFetchError_NoEndpoint(t *testing.T) {
 	res := h.GetResult()
 	if res == nil {
 		t.Fatal("expected non-nil result even on fetch error")
+		return
 	}
 	if res.HeapProfile == nil {
 		t.Fatal("expected heap profile struct to be stored")
@@ -110,6 +113,7 @@ func TestDoProfile_GoroutineFetchError_NoEndpoint(t *testing.T) {
 	res := h.GetResult()
 	if res == nil {
 		t.Fatal("expected non-nil result even on goroutine fetch error")
+		return
 	}
 	if res.GoroutineProfile == nil || res.GoroutineProfile.Available {
 		t.Error("expected unavailable goroutine profile to be stored")
@@ -132,6 +136,7 @@ func TestDoProfile_CPU_SetsMetadataOnly(t *testing.T) {
 	res := h.GetResult()
 	if res == nil {
 		t.Fatal("expected non-nil result after CPU doProfile")
+		return
 	}
 	if !res.PprofAvailable {
 		t.Error("expected PprofAvailable=true after successful CPU fetch")
@@ -148,6 +153,7 @@ func TestDoProfile_CPU_FetchError_NoEndpoint(t *testing.T) {
 	res := h.GetResult()
 	if res == nil {
 		t.Fatal("expected non-nil result even on CPU fetch error")
+		return
 	}
 	if res.PprofAvailable {
 		t.Error("expected PprofAvailable=false when CPU fetch failed")

@@ -10,6 +10,7 @@ func TestNewAgentCmd_Metadata(t *testing.T) {
 	cmd := newAgentCmd()
 	if cmd == nil {
 		t.Fatal("newAgentCmd returned nil")
+		return
 	}
 	if cmd.Use != "agent" {
 		t.Errorf("Use=%q, want %q", cmd.Use, "agent")

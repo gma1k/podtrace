@@ -52,6 +52,7 @@ func TestSetupWithManager_DefaultExporterBuilderInvokable(t *testing.T) {
 	}
 	if exp == nil {
 		t.Fatal("defaulted ExporterBuilder returned a nil exporter")
+		return
 	}
 	_ = exp.Close(context.Background())
 }

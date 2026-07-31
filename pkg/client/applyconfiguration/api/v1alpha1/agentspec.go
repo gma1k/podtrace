@@ -33,6 +33,8 @@ type AgentSpecApplyConfiguration struct {
 	EventBufferSize      *int32                               `json:"eventBufferSize,omitempty"`
 	StatusReportInterval *metav1.Duration                     `json:"statusReportInterval,omitempty"`
 	DNSPacketCapture     *bool                                `json:"dnsPacketCapture,omitempty"`
+	DNSFullAnswers       *bool                                `json:"dnsFullAnswers,omitempty"`
+	USDT                 *bool                                `json:"usdt,omitempty"`
 	Alerting             *AgentAlertingSpecApplyConfiguration `json:"alerting,omitempty"`
 }
 
@@ -90,9 +92,22 @@ func (b *AgentSpecApplyConfiguration) WithDNSPacketCapture(value bool) *AgentSpe
 	return b
 }
 
+// WithDNSFullAnswers sets the DNSFullAnswers field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+func (b *AgentSpecApplyConfiguration) WithDNSFullAnswers(value bool) *AgentSpecApplyConfiguration {
+	b.DNSFullAnswers = &value
+	return b
+}
+
+// WithUSDT sets the USDT field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+func (b *AgentSpecApplyConfiguration) WithUSDT(value bool) *AgentSpecApplyConfiguration {
+	b.USDT = &value
+	return b
+}
+
 // WithAlerting sets the Alerting field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Alerting field is set to the value of the last call.
 func (b *AgentSpecApplyConfiguration) WithAlerting(value *AgentAlertingSpecApplyConfiguration) *AgentSpecApplyConfiguration {
 	b.Alerting = value
 	return b

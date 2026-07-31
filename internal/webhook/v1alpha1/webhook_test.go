@@ -137,6 +137,7 @@ func TestPodTraceValidator_Create(t *testing.T) {
 			}
 			if err == nil {
 				t.Fatalf("expected error containing %q, got nil", tc.wantError)
+				return
 			}
 			if !strings.Contains(err.Error(), tc.wantError) {
 				t.Fatalf("expected error to contain %q, got %q", tc.wantError, err.Error())
@@ -218,6 +219,7 @@ func TestPodTraceSessionValidator_Create(t *testing.T) {
 			}
 			if err == nil {
 				t.Fatalf("expected error containing %q, got nil", tc.wantError)
+				return
 			}
 			if !strings.Contains(err.Error(), tc.wantError) {
 				t.Fatalf("expected error to contain %q, got %q", tc.wantError, err.Error())
@@ -429,6 +431,7 @@ func TestExporterConfigValidator_Create(t *testing.T) {
 			}
 			if err == nil {
 				t.Fatalf("expected error containing %q, got nil", tc.wantError)
+				return
 			}
 			if !strings.Contains(err.Error(), tc.wantError) {
 				t.Fatalf("expected error to contain %q, got %q", tc.wantError, err.Error())
@@ -516,6 +519,7 @@ func TestExporterConfigValidator_EmptyType(t *testing.T) {
 	_, err := v.ValidateCreate(context.Background(), obj)
 	if err == nil {
 		t.Fatal("expected rejection of empty spec.type with populated variant")
+		return
 	}
 	if !strings.Contains(err.Error(), "does not match") {
 		t.Errorf("unexpected error: %v", err)

@@ -34,6 +34,7 @@ func TestContextEnricher_EnrichEvent(t *testing.T) {
 	enriched := enricher.EnrichEvent(context.Background(), event)
 	if enriched == nil {
 		t.Fatal("expected enriched event, got nil")
+		return
 	}
 
 	if enriched.KubernetesContext == nil {
@@ -62,6 +63,7 @@ func TestContextEnricher_EnrichEvent_NonNetwork(t *testing.T) {
 	enriched := enricher.EnrichEvent(context.Background(), event)
 	if enriched == nil {
 		t.Fatal("expected enriched event, got nil")
+		return
 	}
 
 	if enriched.KubernetesContext.SourceNamespace != "default" {
@@ -309,6 +311,7 @@ func TestContextEnricher_EnrichEvent_ExternalIP(t *testing.T) {
 	enriched := ce.EnrichEvent(t.Context(), event)
 	if enriched == nil {
 		t.Fatal("expected enriched event")
+		return
 	}
 	if !enriched.KubernetesContext.IsExternal {
 		t.Error("expected IsExternal=true for public IP 8.8.8.8")
@@ -328,6 +331,7 @@ func TestContextEnricher_EnrichEvent_PrivateIP(t *testing.T) {
 	enriched := ce.EnrichEvent(t.Context(), event)
 	if enriched == nil {
 		t.Fatal("expected enriched event")
+		return
 	}
 	if enriched.KubernetesContext.IsExternal {
 		t.Error("expected IsExternal=false for private IP 10.0.0.1")
@@ -357,6 +361,7 @@ func TestContextEnricher_EnrichEvent_PodMatch(t *testing.T) {
 	enriched := ce.EnrichEvent(t.Context(), event)
 	if enriched == nil {
 		t.Fatal("expected enriched event")
+		return
 	}
 	// The informer cache won't have it (not started), but the direct API lookup should work.
 	// Either the pod name is found or not depending on whether the direct fetch is tried.
@@ -398,6 +403,7 @@ func TestResolvePodByIP_CacheHit(t *testing.T) {
 	got := ce.resolvePodByIP(context.Background(), ip)
 	if got == nil {
 		t.Fatal("expected cache hit, got nil")
+		return
 	}
 	if got.Name != "cached-pod" {
 		t.Errorf("expected Name=cached-pod, got %q", got.Name)
@@ -491,6 +497,7 @@ func TestFetchPodByIP_PodFound(t *testing.T) {
 	got := ce.fetchPodByIP(context.Background(), "10.50.1.1")
 	if got == nil {
 		t.Fatal("expected pod metadata, got nil")
+		return
 	}
 	if got.Name != "mypod" {
 		t.Errorf("expected Name=mypod, got %q", got.Name)
@@ -591,6 +598,7 @@ func TestEnrichNetworkTarget_ServiceFoundViaInformer(t *testing.T) {
 	enriched := ce.EnrichEvent(ctx, event)
 	if enriched == nil {
 		t.Fatal("expected enriched event")
+		return
 	}
 	// If informer has synced, ServiceName should be "my-svc".
 	if enriched.KubernetesContext.ServiceName != "" {

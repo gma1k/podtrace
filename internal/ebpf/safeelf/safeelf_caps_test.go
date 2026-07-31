@@ -17,6 +17,7 @@ func TestOpen_RealExecutable(t *testing.T) {
 	}
 	if f == nil {
 		t.Fatal("Open returned a nil file with no error")
+		return
 	}
 	_ = f.Close()
 }
@@ -52,6 +53,7 @@ func TestSectionData_ReadsRealSection(t *testing.T) {
 	sec := smallReadableSection(f)
 	if sec == nil {
 		t.Skip("no small in-file section available")
+		return
 	}
 	data, err := SectionData(sec)
 	if err != nil {

@@ -12,6 +12,7 @@ func TestNewPoolTracker(t *testing.T) {
 	tracker := NewPoolTracker()
 	if tracker == nil {
 		t.Fatal("NewPoolTracker() returned nil")
+		return
 	}
 	if tracker.pools == nil {
 		t.Fatal("NewPoolTracker() pools map is nil")

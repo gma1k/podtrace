@@ -23,6 +23,7 @@ func TestParseEventPeerV7(t *testing.T) {
 	ev := ParseEvent(data)
 	if ev == nil {
 		t.Fatal("ParseEvent returned nil")
+		return
 	}
 	if ev.PeerSrcIP != "192.168.0.5" || ev.PeerDstIP != "192.168.0.1" {
 		t.Errorf("peer IPs = %q -> %q, want 192.168.0.5 -> 192.168.0.1", ev.PeerSrcIP, ev.PeerDstIP)

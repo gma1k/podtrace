@@ -37,15 +37,24 @@ type PodTraceSessionTemplateMetadata struct {
 	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
-// PodTraceScheduleSpec describes a recurring PodTraceSession schedule.
+// PodTraceScheduleSpec describes a PodTraceSession source. Exactly one of
+// Schedule (recurring, cron-driven) or Trigger (event-driven, fired by an
+// agent-detected alert) must be set; the validating webhook enforces this.
 type PodTraceScheduleSpec struct {
 	// Schedule is the cron expression that triggers session creation.
 	// Accepts the standard 5-field form ("*/5 * * * *") and the 6-field
 	// form with leading seconds ("0 */5 * * * *"). Descriptors such as
 	// "@hourly", "@daily" and "@every 5m" are also accepted.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	Schedule string `json:"schedule"`
+	//
+	// Mutually exclusive with Trigger; exactly one of the two must be set.
+	// +optional
+	Schedule string `json:"schedule,omitempty"`
+
+	// Trigger fires a session in response to an agent-detected alert
+	// (resource-limit breach, OOM kill, error-rate spike) rather than on a
+	// clock — the "flight recorder" mode. Mutually exclusive with Schedule.
+	// +optional
+	Trigger *TriggerSpec `json:"trigger,omitempty"`
 
 	// TimeZone is an IANA time-zone name (e.g. "Europe/Amsterdam") used
 	// to interpret Schedule.
@@ -81,9 +90,106 @@ type PodTraceScheduleSpec struct {
 	SessionTemplate PodTraceSessionTemplateSpec `json:"sessionTemplate"`
 }
 
+// +kubebuilder:validation:Enum=ResourceAlert;OOMKill;ErrorRate
+type TriggerSourceKind string
+
+const (
+	TriggerSourceResourceAlert TriggerSourceKind = "ResourceAlert"
+
+	TriggerSourceOOMKill TriggerSourceKind = "OOMKill"
+
+	TriggerSourceErrorRate TriggerSourceKind = "ErrorRate"
+)
+
+// TriggerSource selects one alert category and the minimum severity that
+// arms the trigger.
+type TriggerSource struct {
+	// TriggerSourceKind names an agent-detected alert category that can fire a
+	// triggered session.
+	// +kubebuilder:validation:Required
+	Kind TriggerSourceKind `json:"kind"`
+
+	// MinSeverity is the minimum alert severity that fires, ordered
+	// warning < critical < fatal. Defaults to critical so noisy warnings
+	// do not spawn privileged Jobs unless explicitly opted into.
+	// +kubebuilder:validation:Enum=warning;critical;fatal
+	// +optional
+	MinSeverity string `json:"minSeverity,omitempty"`
+}
+
+// TriggerSpec configures event-driven ("flight recorder") session creation.
+type TriggerSpec struct {
+	// Sources are the alert categories that fire a session. A session fires
+	// when an observed alert matches ANY listed source (its Kind and at
+	// least its MinSeverity).
+	// +kubebuilder:validation:MinItems=1
+	// +listType=atomic
+	Sources []TriggerSource `json:"sources"`
+
+	// Selector narrows which pods' alerts arm the trigger. An empty
+	// selector matches every pod in scope (subject to NamespaceSelector).
+	// +optional
+	Selector *metav1.LabelSelector `json:"selector,omitempty"`
+
+	// NamespaceSelector widens matching across namespaces, subject to the
+	// same target-namespace consent model as PodTrace.
+	// +optional
+	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
+
+	// Cooldown is the minimum time after a session fires for a given pod
+	// before another session may fire for that same pod.
+	// +optional
+	Cooldown *metav1.Duration `json:"cooldown,omitempty"`
+
+	// MaxSessionsPerHour caps how many triggered sessions this schedule may
+	// create per rolling hour across all pods, a fleet-wide backstop against
+	// a broad alert storm.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	MaxSessionsPerHour *int32 `json:"maxSessionsPerHour,omitempty"`
+
+	// ConcurrencyPolicy governs overlap with already-active triggered
+	// sessions. Defaults to Forbid, the safe default for the privileged
+	// Jobs a session runs.
+	// +kubebuilder:default=Forbid
+	// +optional
+	ConcurrencyPolicy ConcurrencyPolicy `json:"concurrencyPolicy,omitempty"`
+}
+
+// TriggerFiring records a single triggered-session creation, used to enforce
+// per-pod cooldown and the rolling-hour rate cap idempotently across
+// reconciles.
+type TriggerFiring struct {
+	// +kubebuilder:validation:Required
+	PodName string `json:"podName"`
+
+	// +kubebuilder:validation:Required
+	Namespace string `json:"namespace"`
+
+	// +kubebuilder:validation:Required
+	Time metav1.Time `json:"time"`
+
+	// +optional
+	SessionName string `json:"sessionName,omitempty"`
+}
+
+// TriggerStatus records trigger firing history. Present only for
+// trigger-mode schedules.
+type TriggerStatus struct {
+	// RecentFirings is a bounded, time-ordered log (oldest first) of the
+	// sessions this trigger created. The controller prunes entries older
+	// than the cooldown and the rate window so it cannot grow unbounded.
+	// +optional
+	// +listType=atomic
+	RecentFirings []TriggerFiring `json:"recentFirings,omitempty"`
+}
+
 // PodTraceScheduleStatus reflects the observed state of a
 // PodTraceSchedule.
 type PodTraceScheduleStatus struct {
+	// +optional
+	Trigger *TriggerStatus `json:"trigger,omitempty"`
+
 	// +optional
 	Active []corev1.ObjectReference `json:"active,omitempty"`
 

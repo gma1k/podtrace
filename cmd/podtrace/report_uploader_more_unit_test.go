@@ -55,6 +55,7 @@ func TestLoadObjectStoreCredentials_PopulatedDir(t *testing.T) {
 	}
 	if creds == nil {
 		t.Fatal("expected populated credentials map, got nil")
+		return
 	}
 	if len(creds) != 2 {
 		t.Fatalf("expected 2 credential entries, got %d: %v", len(creds), keysOf(creds))

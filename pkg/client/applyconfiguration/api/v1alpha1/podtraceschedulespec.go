@@ -24,13 +24,16 @@ import (
 // PodTraceScheduleSpecApplyConfiguration represents a declarative configuration of the PodTraceScheduleSpec type for use
 // with apply.
 //
-// PodTraceScheduleSpec describes a recurring PodTraceSession schedule.
+// PodTraceScheduleSpec describes a PodTraceSession source.
 type PodTraceScheduleSpecApplyConfiguration struct {
 	// Schedule is the cron expression that triggers session creation.
 	// Accepts the standard 5-field form ("*/5 * * * *") and the 6-field
 	// form with leading seconds ("0 */5 * * * *"). Descriptors such as
 	// "@hourly", "@daily" and "@every 5m" are also accepted.
-	Schedule *string `json:"schedule,omitempty"`
+	//
+	// Mutually exclusive with Trigger; exactly one of the two must be set.
+	Schedule *string                        `json:"schedule,omitempty"`
+	Trigger  *TriggerSpecApplyConfiguration `json:"trigger,omitempty"`
 	// TimeZone is an IANA time-zone name (e.g. "Europe/Amsterdam") used
 	// to interpret Schedule.
 	TimeZone                       *string                                        `json:"timeZone,omitempty"`
@@ -54,6 +57,13 @@ func PodTraceScheduleSpec() *PodTraceScheduleSpecApplyConfiguration {
 // If called multiple times, the Schedule field is set to the value of the last call.
 func (b *PodTraceScheduleSpecApplyConfiguration) WithSchedule(value string) *PodTraceScheduleSpecApplyConfiguration {
 	b.Schedule = &value
+	return b
+}
+
+// WithTrigger sets the Trigger field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+func (b *PodTraceScheduleSpecApplyConfiguration) WithTrigger(value *TriggerSpecApplyConfiguration) *PodTraceScheduleSpecApplyConfiguration {
+	b.Trigger = value
 	return b
 }
 

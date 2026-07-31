@@ -17,6 +17,7 @@ func TestNewSplunkExporter(t *testing.T) {
 	}
 	if exporter == nil {
 		t.Fatal("NewSplunkExporter() returned nil")
+		return
 	}
 	if exporter.endpoint != config.DefaultSplunkEndpoint {
 		t.Errorf("Expected endpoint %s, got %s", config.DefaultSplunkEndpoint, exporter.endpoint)

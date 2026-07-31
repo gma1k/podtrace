@@ -30,6 +30,7 @@ func TestAlert_Clone_DeepCopiesContextAndRecommendations(t *testing.T) {
 	cp := orig.Clone()
 	if cp == nil {
 		t.Fatal("Clone returned nil for a non-nil alert")
+		return
 	}
 	cp.Context["k"] = "mutated"
 	cp.Recommendations[0] = "mutated"

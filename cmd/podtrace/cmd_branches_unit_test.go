@@ -141,6 +141,7 @@ func TestStartWorkstationEventCorrelation_NilClientset(t *testing.T) {
 		[]nodespawn.PodRef{{Namespace: "default", Name: "web-0"}}, io.Discard)
 	if finish == nil {
 		t.Fatal("expected a non-nil no-op finish closure")
+		return
 	}
 	finish()
 }
@@ -150,6 +151,7 @@ func TestStartWorkstationEventCorrelation_EmptyPods(t *testing.T) {
 		fake.NewSimpleClientset(), nil, io.Discard)
 	if finish == nil {
 		t.Fatal("expected a non-nil no-op finish closure")
+		return
 	}
 	finish()
 }
@@ -169,6 +171,7 @@ func TestStartWorkstationEventCorrelation_DedupAndStart(t *testing.T) {
 	finish := startWorkstationEventCorrelation(ctx, fake.NewSimpleClientset(), pods, &sb)
 	if finish == nil {
 		t.Fatal("expected non-nil finish closure")
+		return
 	}
 	finish()
 }
@@ -439,6 +442,7 @@ func TestLoadObjectStoreCredentials_UnreadableFile(t *testing.T) {
 	_, err := loadObjectStoreCredentials()
 	if err == nil {
 		t.Fatal("expected a read error for the unreadable credential file, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "read credential file") {
 		t.Fatalf("expected 'read credential file' error, got %v", err)

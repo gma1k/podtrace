@@ -65,8 +65,10 @@ spec:
           metadata:
             type: object
           spec:
-            description: PodTraceScheduleSpec describes a recurring PodTraceSession
-              schedule.
+            description: |-
+              PodTraceScheduleSpec describes a PodTraceSession source. Exactly one of
+              Schedule (recurring, cron-driven) or Trigger (event-driven, fired by an
+              agent-detected alert) must be set; the validating webhook enforces this.
             properties:
               concurrencyPolicy:
                 default: Allow
@@ -93,7 +95,8 @@ spec:
                   Accepts the standard 5-field form ("*/5 * * * *") and the 6-field
                   form with leading seconds ("0 */5 * * * *"). Descriptors such as
                   "@hourly", "@daily" and "@every 5m" are also accepted.
-                minLength: 1
+
+                  Mutually exclusive with Trigger; exactly one of the two must be set.
                 type: string
               sessionTemplate:
                 description: |-
@@ -395,8 +398,171 @@ spec:
                   TimeZone is an IANA time-zone name (e.g. "Europe/Amsterdam") used
                   to interpret Schedule.
                 type: string
+              trigger:
+                description: |-
+                  Trigger fires a session in response to an agent-detected alert
+                  (resource-limit breach, OOM kill, error-rate spike) rather than on a
+                  clock — the "flight recorder" mode. Mutually exclusive with Schedule.
+                properties:
+                  concurrencyPolicy:
+                    default: Forbid
+                    description: |-
+                      ConcurrencyPolicy governs overlap with already-active triggered
+                      sessions. Defaults to Forbid, the safe default for the privileged
+                      Jobs a session runs.
+                    enum:
+                    - Allow
+                    - Forbid
+                    - Replace
+                    type: string
+                  cooldown:
+                    description: |-
+                      Cooldown is the minimum time after a session fires for a given pod
+                      before another session may fire for that same pod.
+                    type: string
+                  maxSessionsPerHour:
+                    description: |-
+                      MaxSessionsPerHour caps how many triggered sessions this schedule may
+                      create per rolling hour across all pods, a fleet-wide backstop against
+                      a broad alert storm.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  namespaceSelector:
+                    description: |-
+                      NamespaceSelector widens matching across namespaces, subject to the
+                      same target-namespace consent model as PodTrace.
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  selector:
+                    description: |-
+                      Selector narrows which pods' alerts arm the trigger. An empty
+                      selector matches every pod in scope (subject to NamespaceSelector).
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  sources:
+                    description: |-
+                      Sources are the alert categories that fire a session. A session fires
+                      when an observed alert matches ANY listed source (its Kind and at
+                      least its MinSeverity).
+                    items:
+                      description: |-
+                        TriggerSource selects one alert category and the minimum severity that
+                        arms the trigger.
+                      properties:
+                        kind:
+                          description: |-
+                            TriggerSourceKind names an agent-detected alert category that can fire a
+                            triggered session.
+                          enum:
+                          - ResourceAlert
+                          - OOMKill
+                          - ErrorRate
+                          type: string
+                        minSeverity:
+                          description: |-
+                            MinSeverity is the minimum alert severity that fires, ordered
+                            warning < critical < fatal. Defaults to critical so noisy warnings
+                            do not spawn privileged Jobs unless explicitly opted into.
+                          enum:
+                          - warning
+                          - critical
+                          - fatal
+                          type: string
+                      required:
+                      - kind
+                      type: object
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: atomic
+                required:
+                - sources
+                type: object
             required:
-            - schedule
             - sessionTemplate
             type: object
           status:
@@ -518,6 +684,39 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
+              trigger:
+                description: |-
+                  TriggerStatus records trigger firing history. Present only for
+                  trigger-mode schedules.
+                properties:
+                  recentFirings:
+                    description: |-
+                      RecentFirings is a bounded, time-ordered log (oldest first) of the
+                      sessions this trigger created. The controller prunes entries older
+                      than the cooldown and the rate window so it cannot grow unbounded.
+                    items:
+                      description: |-
+                        TriggerFiring records a single triggered-session creation, used to enforce
+                        per-pod cooldown and the rolling-hour rate cap idempotently across
+                        reconciles.
+                      properties:
+                        namespace:
+                          type: string
+                        podName:
+                          type: string
+                        sessionName:
+                          type: string
+                        time:
+                          format: date-time
+                          type: string
+                      required:
+                      - namespace
+                      - podName
+                      - time
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                type: object
             type: object
         type: object
     served: true

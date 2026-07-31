@@ -286,6 +286,7 @@ func TestParseSchedule(t *testing.T) {
 	}
 	if parsed == nil || loc == nil {
 		t.Fatalf("parseSchedule(valid) returned nil sched/loc")
+		return
 	}
 	if next := parsed.Next(fixedScheduleNow); !next.After(fixedScheduleNow) {
 		t.Errorf("parsed schedule Next = %v, want after %v", next, fixedScheduleNow)

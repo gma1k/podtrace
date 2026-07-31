@@ -785,6 +785,7 @@ func TestResolveTracerConfig_FoundReturnsObject(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatal("expected non-nil")
+		return
 	}
 	if got.Spec.SystemNamespace != "x" {
 		t.Errorf("got.SystemNamespace = %q", got.Spec.SystemNamespace)

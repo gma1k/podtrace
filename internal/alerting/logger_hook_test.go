@@ -32,6 +32,7 @@ func TestCreateAlertFromLog_FieldTypes(t *testing.T) {
 	alert := CreateAlertFromLog(zapcore.ErrorLevel, "test message", fields, "pod-1", "default")
 	if alert == nil {
 		t.Fatal("expected non-nil alert for error level with enabled manager")
+		return
 	}
 	if alert.ErrorCode != "E001" {
 		t.Errorf("expected ErrorCode=E001, got %q", alert.ErrorCode)
@@ -66,6 +67,7 @@ func TestCreateAlertFromLog_ErrorType_NilInterface(t *testing.T) {
 	alert := CreateAlertFromLog(zapcore.ErrorLevel, "nil error test", fields, "pod-2", "ns")
 	if alert == nil {
 		t.Fatal("expected non-nil alert")
+		return
 	}
 	if _, ok := alert.Context["err_nil"]; ok {
 		t.Error("expected err_nil NOT to be in context when interface is nil")
@@ -90,6 +92,7 @@ func TestCreateAlertFromLog_CodeKeyAlias(t *testing.T) {
 	alert := CreateAlertFromLog(zapcore.WarnLevel, "warn with code", fields, "pod-3", "ns")
 	if alert == nil {
 		t.Fatal("expected non-nil alert")
+		return
 	}
 	if alert.ErrorCode != "CODE42" {
 		t.Errorf("expected ErrorCode=CODE42 via 'code' key, got %q", alert.ErrorCode)
@@ -114,6 +117,7 @@ func TestCreateAlertFromLog_Int32Type(t *testing.T) {
 	alert := CreateAlertFromLog(zapcore.ErrorLevel, "int32 test", fields, "pod-4", "ns")
 	if alert == nil {
 		t.Fatal("expected non-nil alert")
+		return
 	}
 	if v, ok := alert.Context["retry"]; !ok || v != int64(3) {
 		t.Errorf("expected context[retry]=3, got %v", alert.Context["retry"])

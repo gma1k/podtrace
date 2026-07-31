@@ -29,6 +29,7 @@ import (
 // PodTraceScheduleStatus reflects the observed state of a
 // PodTraceSchedule.
 type PodTraceScheduleStatusApplyConfiguration struct {
+	Trigger            *TriggerStatusApplyConfiguration                        `json:"trigger,omitempty"`
 	Active             []v1.ObjectReference                                    `json:"active,omitempty"`
 	LastScheduleTime   *metav1.Time                                            `json:"lastScheduleTime,omitempty"`
 	LastSuccessfulTime *metav1.Time                                            `json:"lastSuccessfulTime,omitempty"`
@@ -40,6 +41,13 @@ type PodTraceScheduleStatusApplyConfiguration struct {
 // apply.
 func PodTraceScheduleStatus() *PodTraceScheduleStatusApplyConfiguration {
 	return &PodTraceScheduleStatusApplyConfiguration{}
+}
+
+// WithTrigger sets the Trigger field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+func (b *PodTraceScheduleStatusApplyConfiguration) WithTrigger(value *TriggerStatusApplyConfiguration) *PodTraceScheduleStatusApplyConfiguration {
+	b.Trigger = value
+	return b
 }
 
 // WithActive adds the given value to the Active field in the declarative configuration

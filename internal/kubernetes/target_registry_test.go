@@ -105,6 +105,7 @@ func TestNewTargetRegistry_AppliesDefaults(t *testing.T) {
 	})
 	if tr == nil {
 		t.Fatal("expected non-nil registry")
+		return
 	}
 	if tr.maxTargets != 256 {
 		t.Fatalf("default maxTargets: got %d want 256", tr.maxTargets)

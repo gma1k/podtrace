@@ -153,6 +153,7 @@ func TestServiceResolver_BulkPopulatesFromSingleList(t *testing.T) {
 	sr := NewServiceResolver(clientset)
 	if svc := sr.ResolveService(context.Background(), "10.0.0.1", 80); svc == nil || svc.Name != "svc-a" {
 		t.Fatalf("svc-a lookup = %+v", svc)
+		return
 	}
 	if svc := sr.ResolveService(context.Background(), "10.0.0.2", 443); svc == nil || svc.Name != "svc-b" {
 		t.Fatalf("svc-b lookup = %+v", svc)

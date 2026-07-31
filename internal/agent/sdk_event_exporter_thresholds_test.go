@@ -23,6 +23,7 @@ func TestPolicyThresholdsFromBundle_AllFields(t *testing.T) {
 	got := policyThresholdsFromBundle(in)
 	if got == nil {
 		t.Fatal("expected non-nil result")
+		return
 	}
 	if got.ErrorRatePercent == nil || *got.ErrorRatePercent != 5 {
 		t.Errorf("ErrorRatePercent = %v, want 5", got.ErrorRatePercent)
@@ -44,6 +45,7 @@ func TestPolicyThresholdsFromBundle_PartialFields(t *testing.T) {
 	got := policyThresholdsFromBundle(in)
 	if got == nil {
 		t.Fatal("expected non-nil result")
+		return
 	}
 	if got.ErrorRatePercent != nil {
 		t.Errorf("ErrorRatePercent should be nil, got %v", *got.ErrorRatePercent)
