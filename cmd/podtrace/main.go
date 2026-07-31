@@ -555,7 +555,7 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	}
 
 	var enricher *kubernetes.ContextEnricher
-	enrichmentEnabled := os.Getenv("PODTRACE_K8S_ENRICHMENT_ENABLED") != "false"
+	enrichmentEnabled := config.K8sEnrichmentEnabled()
 	if enrichmentEnabled {
 		if clientsetProvider, ok := resolver.(kubernetes.ClientsetProvider); ok {
 			clientset := clientsetProvider.GetClientset()

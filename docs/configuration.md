@@ -19,25 +19,20 @@ where one exists. See [operator.md](operator.md) and
 
 ## How values are parsed
 
-This matters more than usual, because podtrace uses **four different boolean
-conventions** depending on the call site. None of them trim whitespace or
-normalize case except the first.
+Podtrace uses **two boolean conventions**. Convention 1 covers everything except
+the escape hatches, and it is the only one that trims whitespace and normalizes
+case.
 
 1. **`strconv.ParseBool`**, used by everything in `internal/config`. Accepts
    `true`, `TRUE`, `True`, `1`, `t` and their negatives. This is the common case.
 2. **Exactly `"1"`**, used by the escape hatches listed under
    [Escape hatches](#escape-hatches). Setting one of those to `true` does
    nothing at all; only the literal `1` enables it.
-3. **Anything except `"false"`**, used by a few features that default to on.
-   Only the lowercase literal `false` disables them. `0`, `off`, and `FALSE`
-   all leave the feature **enabled**.
-4. **Exactly `"true"`**, used only by `PODTRACE_REDACT_DNS_NAMES`. `1` and
-   `TRUE` do **not** enable it.
 
-Conventions 2 to 4 are compared against raw strings with no warning, so a value
-they do not recognize is silently ignored. Only convention 1 reports the
-mismatch. Where a variable below follows anything other than convention 1, its
-row says so.
+Convention 2 compares against a raw string with no warning, so a value it does
+not recognize is silently ignored. Only convention 1 reports the mismatch. Every
+variable below follows convention 1 unless its row says otherwise, and the only
+exceptions are in the escape hatches section.
 
 Other rules:
 
@@ -83,7 +78,7 @@ Other rules:
 | `PODTRACE_BPF_LOG_SIZE` | `65536` when verbose | Verifier log buffer size in bytes |
 | `PODTRACE_USDT_ENABLED` | `true` | USDT probe discovery |
 | `PODTRACE_DNS_PAYLOAD_ENABLED` | `true` | Parse DNS payloads |
-| `PODTRACE_DNS_PACKET_CAPTURE` | on | Convention 3: only `false` disables |
+| `PODTRACE_DNS_PACKET_CAPTURE` | `true` | Parse DNS via packets rather than libc uprobes |
 | `PODTRACE_CRITICAL_PATH` | `true` | Sliding-window latency breakdown |
 | `PODTRACE_CRITICAL_PATH_WINDOW_MS` | `500` | Critical-path window |
 | `PODTRACE_CAPTURE_HEADERS` | unset | Comma-separated HTTP header allowlist, max 4 |
@@ -111,8 +106,8 @@ container with a remapped root.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `PODTRACE_K8S_ENRICHMENT_ENABLED` | on | Convention 3: only `false` disables |
-| `PODTRACE_K8S_USE_INFORMERS` | on | Convention 3: only `false` disables |
+| `PODTRACE_K8S_ENRICHMENT_ENABLED` | `true` | Enrich events with pod metadata |
+| `PODTRACE_K8S_USE_INFORMERS` | `true` | Use informers instead of direct API calls |
 | `PODTRACE_K8S_INFORMERS_SYNC_TIMEOUT_SEC` | built-in | Informer cache sync timeout, in seconds |
 | `PODTRACE_K8S_API_TIMEOUT` | `500ms` | Per-call API server timeout |
 | `PODTRACE_K8S_CACHE_TTL` | `300` | Pod metadata cache TTL, in seconds |
@@ -127,7 +122,7 @@ container with a remapped root.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `PODTRACE_CRI_RESOLVE` | on | Convention 3: only `false` disables |
+| `PODTRACE_CRI_RESOLVE` | `true` | Resolve cgroup paths via the CRI socket |
 | `PODTRACE_CRI_ENDPOINT` | autodetected | Explicit CRI socket path |
 | `PODTRACE_CRI_CGROUP_FIELDS` | unset | Extra comma-separated JSON fields to search for the cgroup path |
 | `PODTRACE_CRI_ALLOW_PODMAN` | off | Convention 2: exactly `1` |
@@ -256,7 +251,7 @@ These only affect how much detail the CLI prints. They do not change collection.
 |---|---|---|
 | `PODTRACE_REDACT_PII` | `false` | Redacts passwords, bearer tokens, emails, card numbers |
 | `PODTRACE_REDACT_CUSTOM_RULES` | unset | Additional redaction patterns |
-| `PODTRACE_REDACT_DNS_NAMES` | unset | Convention 4: **only the literal `true` works**. `1` and `TRUE` leave DNS names unredacted. Set correctly by the operator |
+| `PODTRACE_REDACT_DNS_NAMES` | `false` | Strip DNS names from captured events. Also set by the operator |
 
 ## Object store
 

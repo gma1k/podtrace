@@ -285,7 +285,7 @@ func AttachDNSProbes(coll *ebpf.Collection, containerID string) []link.Link {
 // packetDNSCaptureEnabled reports whether the libc-independent, packet-based
 // DNS capture path is active.
 func packetDNSCaptureEnabled() bool {
-	return os.Getenv("PODTRACE_DNS_PACKET_CAPTURE") != "false"
+	return config.DNSPacketCaptureEnabled()
 }
 
 // AttachDNSPacketProbes attaches the cgroup_skb DNS program to each target pod
