@@ -9,6 +9,49 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.14.1](https://github.com/gma1k/podtrace/compare/v0.14.0...v0.14.1) (2026-08-01)
+
+
+### Features
+
+* surface agent, session and exporter config knobs in the Helm chart ([#355](https://github.com/gma1k/podtrace/issues/355)) ([7b7422a](https://github.com/gma1k/podtrace/commit/7b7422a6e3b0345033017e830203c095da7ba977))
+* trigger diagnostic sessions on agent-detected alerts ([#362](https://github.com/gma1k/podtrace/issues/362)) ([6c0896e](https://github.com/gma1k/podtrace/commit/6c0896edfc52daeee60684be0891abe7e41d7158))
+
+
+### Bug Fixes
+
+* parse boolean env vars via ParseBool so redaction cannot fail open ([#368](https://github.com/gma1k/podtrace/issues/368)) ([4c80a88](https://github.com/gma1k/podtrace/commit/4c80a88d000828fbb0f2dee9f7bf2f561b4cde0b))
+
+
+### Documentation
+
+* point FOSSA badges at the CI project locator ([#354](https://github.com/gma1k/podtrace/issues/354)) ([3be291b](https://github.com/gma1k/podtrace/commit/3be291b7e507c0034a8c8da9a7dbaa65aa9beb2d))
+
+
+### CI
+
+* add version, build, tests and coverage badges to README ([#363](https://github.com/gma1k/podtrace/issues/363)) ([eafa076](https://github.com/gma1k/podtrace/commit/eafa0760e9246f954d358b588db04c35325f5e09))
+* replace sticky release-as override with one-shot footer trigger ([#350](https://github.com/gma1k/podtrace/issues/350)) ([0723ca6](https://github.com/gma1k/podtrace/commit/0723ca696e4e39572829e1d3dfe712efd3fad4ca))
+* scan licenses and dependencies with the FOSSA CLI and exclude the intentional GPL-2.0 bpf/ ([#353](https://github.com/gma1k/podtrace/issues/353)) ([fdad95d](https://github.com/gma1k/podtrace/commit/fdad95d7670d25087a04baa0d2e70dd661310b67))
+
+
+### Maintenance
+
+* **deps:** update docker/dockerfile docker tag to v1.26 ([#366](https://github.com/gma1k/podtrace/issues/366)) ([d9d1280](https://github.com/gma1k/podtrace/commit/d9d1280e8d8b715d4c109e8be6b28474c9861557))
+* **deps:** update docker/login-action action to v4.5.1 ([#352](https://github.com/gma1k/podtrace/issues/352)) ([d997eec](https://github.com/gma1k/podtrace/commit/d997eec95aa5e56d4437c1b1a6cf6cb4ff062e63))
+* **deps:** update docker/login-action action to v4.5.2 ([#356](https://github.com/gma1k/podtrace/issues/356)) ([69f7297](https://github.com/gma1k/podtrace/commit/69f7297dbab9ac664c5d0a8a8d633867911c80c1))
+* **deps:** update docker/login-action action to v4.6.0 ([#358](https://github.com/gma1k/podtrace/issues/358)) ([df71585](https://github.com/gma1k/podtrace/commit/df71585efc56d3b627d8cac50b87e4566f12fb08))
+* **deps:** update gaelgirodon/ci-badges-action digest to 07a6514 ([#365](https://github.com/gma1k/podtrace/issues/365)) ([39c2172](https://github.com/gma1k/podtrace/commit/39c2172ab797ec4523378a822f0ce2ad4451d53a))
+* **deps:** update github/codeql-action action to v4.37.4 ([#359](https://github.com/gma1k/podtrace/issues/359)) ([dd3b5ed](https://github.com/gma1k/podtrace/commit/dd3b5ed79eaca1d040c9adc311e8ec4ba4108555))
+* **deps:** update go modules (non-major) ([#357](https://github.com/gma1k/podtrace/issues/357)) ([7fffff3](https://github.com/gma1k/podtrace/commit/7fffff34fe2c030f896d58832b97e20490eba82d))
+* **deps:** update go modules (non-major) ([#360](https://github.com/gma1k/podtrace/issues/360)) ([aa36654](https://github.com/gma1k/podtrace/commit/aa366547e4411408fb1dc96a430f72bfac272346))
+* **deps:** update go modules (non-major) ([#369](https://github.com/gma1k/podtrace/issues/369)) ([d672e48](https://github.com/gma1k/podtrace/commit/d672e48f067b12547f94a47f40405a1e9c0c26d9))
+* **deps:** update kubernetes ecosystem to v0.36.3 ([#347](https://github.com/gma1k/podtrace/issues/347)) ([4fc9063](https://github.com/gma1k/podtrace/commit/4fc9063a0457f9245b2bc8d888071d1abc37810d))
+* **deps:** update module github.com/prometheus/client_golang to v1.24.1 ([#351](https://github.com/gma1k/podtrace/issues/351)) ([ea4b0cc](https://github.com/gma1k/podtrace/commit/ea4b0cc8e8fce0ec473069fe65f8e3b6ea175fee))
+* **deps:** update module google.golang.org/api to v0.290.0 ([#348](https://github.com/gma1k/podtrace/issues/348)) ([8c07967](https://github.com/gma1k/podtrace/commit/8c07967d5d931a5159eaf60407fdd01a945cc477))
+* fix issue-form labels, add config.yml and community docs ([#364](https://github.com/gma1k/podtrace/issues/364)) ([6a8efa0](https://github.com/gma1k/podtrace/commit/6a8efa083303dd17ddbc84ee2b7a77ebc1b79be4))
+* pin golangci-lint, document code style and config reference ([#367](https://github.com/gma1k/podtrace/issues/367)) ([349bd0f](https://github.com/gma1k/podtrace/commit/349bd0ffdf4d430d74682b68a9407a173a3194e6))
+
 ## [0.14.0](https://github.com/gma1k/podtrace/compare/v0.13.10...v0.14.0) (2026-07-22)
 
 
