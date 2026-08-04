@@ -8,6 +8,7 @@ Thanks for opening a PR! A few quick conventions before you submit:
         docs: ...        docs only
         test: ...        test-only
   • Subject ≤ 72 chars, imperative present tense, no trailing period.
+  • Sign off every commit: git commit -s (DCO, enforced by CI).
   • Avoid Co-Authored-By trailers (project convention).
 -->
 
@@ -28,6 +29,7 @@ Thanks for opening a PR! A few quick conventions before you submit:
 <!-- Tick every box that applies. Strike-through (~~text~~) the ones
      that genuinely don't, with a one-line reason. -->
 
+- [ ] All commits signed off (`git commit -s`)
 - [ ] `make test` (unit) green
 - [ ] `make test-integration` green (or n/a for docs/chore)
 - [ ] `make chainsaw` green on a local kind cluster (or n/a)

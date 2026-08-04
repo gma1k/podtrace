@@ -126,6 +126,7 @@ them locally and you will not be surprised by CI.
 | Shell portability | `checkbashisms $(git ls-files '*.sh')` | `bash-checks.yml` (blocks merge) |
 | Helm chart | `make helm-lint` | Chart changes |
 | Whitespace / EOL | `.editorconfig` | Your editor |
+| DCO sign-off | `git commit -s` | `dco.yml` (blocks merge) |
 
 ### Go
 
@@ -268,6 +269,60 @@ mapping kicks in (`feat:` → minor, `BREAKING CHANGE:` → major). See
 [STABILITY.md](STABILITY.md) for the full versioning policy and the
 graduation criteria from `v0.x` to `v1.0.0`.
 
+## Developer Certificate of Origin
+
+Every commit must carry a Developer Certificate of Origin (DCO) sign-off.
+The DCO is a short assertion, reproduced in full at
+[developercertificate.org](https://developercertificate.org/), that you have
+the right to submit the code under this project's Apache-2.0 licence. There
+is no CLA, no account to create, and nothing to sign out of band: the
+sign-off lives in the commit message itself.
+
+Add it with `-s`:
+
+```bash
+git commit -s -m "fix(loader): handle missing BTF file gracefully"
+```
+
+Git appends a trailer built from your `user.name` and `user.email`:
+
+```
+Signed-off-by: Jane Developer <jane@example.com>
+```
+
+By adding it you are asserting three things:
+
+- You wrote the code, or you have the right to submit it under Apache-2.0
+- If your employer owns the copyright in your work, you have their
+  permission to contribute it
+- You understand the commit, including the name and email in the trailer,
+  is public and permanent
+
+So make sure your identity is set before you start:
+
+```bash
+git config user.name "Jane Developer"
+git config user.email "jane@example.com"
+```
+
+### Forgot the sign-off
+
+The trailer must match the commit author's email, so amend rather than add a
+separate commit:
+
+```bash
+git commit --amend -s --no-edit          # most recent commit
+git rebase --signoff origin/main         # every commit on the branch
+git push --force-with-lease
+```
+
+`dco.yml` checks every commit in a pull request and blocks the merge until
+they all pass. Sign-offs survive the squash merge, because squash commit
+bodies are built from the individual commit messages. Machine-generated
+commits from bot accounts (renovate, `github-actions`) are exempt: a bot
+cannot make the DCO assertion, and release-please branches skip the job
+entirely.
+
 ## How releases happen
 
 The release pipeline is fully automated once a release-worthy commit
@@ -342,6 +397,7 @@ test tags.
 
 Before opening a PR:
 
+- [ ] Every commit is signed off (`git commit -s`) per the DCO section above
 - [ ] Commit message follows Conventional Commits (drives release-please)
 - [ ] Tests pass: at minimum `make test-unit`; `make chainsaw` for BPF/operator/agent changes
 - [ ] Updated relevant docs in `docs/` if you changed user-visible behavior
