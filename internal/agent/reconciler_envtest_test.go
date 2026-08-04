@@ -358,7 +358,7 @@ func TestAgentEnvtest_TombstoneSurfacesOnNodeStatus(t *testing.T) {
 	}
 
 	router := NewRouter(nil)
-	var buildShouldFail bool = true
+	buildShouldFail := true
 	r := &AgentReconciler{
 		Client:          c,
 		NodeName:        node,
