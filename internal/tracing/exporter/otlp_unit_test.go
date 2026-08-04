@@ -22,6 +22,33 @@ func TestNormalizeOTLPHTTPEndpoint_EmptyUsesDefault(t *testing.T) {
 	}
 }
 
+func TestNormalizeOTLPHTTPEndpoint_TracesPath(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"", "http://localhost:4318/v1/traces"},
+		{"localhost:4318", "http://localhost:4318/v1/traces"},
+		{"http://localhost:4318", "http://localhost:4318/v1/traces"},
+		{"http://localhost:4318/", "http://localhost:4318/v1/traces"},
+		{"http://localhost:4318/v1/traces", "http://localhost:4318/v1/traces"},
+		{"http://localhost:4318/otlp/v1/traces", "http://localhost:4318/otlp/v1/traces"},
+		{"https://collector.example:4318", "https://collector.example:4318/v1/traces"},
+		{"https://collector.example:4318/v1/traces", "https://collector.example:4318/v1/traces"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			got, _, err := normalizeOTLPHTTPEndpoint(tc.in)
+			if err != nil {
+				t.Fatalf("normalizeOTLPHTTPEndpoint(%q) error: %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Errorf("normalizeOTLPHTTPEndpoint(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeOTLPHTTPEndpoint_SchemelessHostPort(t *testing.T) {
 	urlStr, insecure, err := normalizeOTLPHTTPEndpoint("localhost:4318")
 	if err != nil {

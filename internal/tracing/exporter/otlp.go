@@ -31,6 +31,9 @@ type OTLPExporter struct {
 	sampleRate float64
 }
 
+// otlpTracesPath is the OTLP/HTTP trace ingest path every collector serves.
+const otlpTracesPath = "/v1/traces"
+
 func isLoopbackHost(host string) bool {
 	h := strings.ToLower(host)
 	return h == "localhost" || h == "127.0.0.1" || h == "::1"
@@ -54,6 +57,9 @@ func normalizeOTLPHTTPEndpoint(endpoint string) (endpointURL string, useInsecure
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return "", false, fmt.Errorf("otlp endpoint scheme must be http or https")
+	}
+	if u.Path == "" || u.Path == "/" {
+		u.Path = otlpTracesPath
 	}
 	host := u.Hostname()
 	if u.Scheme == "http" {
