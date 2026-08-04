@@ -37,6 +37,7 @@ spec:
               status:
                 readyReplicas: 1
         - script:
+            timeout: 330s
             content: |
               set -eu
               for attempt in $(seq 1 60); do
@@ -68,6 +69,7 @@ spec:
             selector: app=h3curl
             tail: 20
         - script:
+            timeout: 60s
             content: |
               kubectl -n podtrace-system get pods -o wide
               for p in $(kubectl -n podtrace-system get pods -o name | grep pts-); do
