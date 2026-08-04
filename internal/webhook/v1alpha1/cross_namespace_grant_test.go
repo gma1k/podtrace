@@ -167,3 +167,85 @@ func TestPodTraceScheduleValidator_CrossNamespaceGrant(t *testing.T) {
 		t.Fatalf("expected schedule template grant rejection, got %v", err)
 	}
 }
+
+func triggerScheduleWithNamespaceSelector(sel *metav1.LabelSelector) *podtracev1alpha1.PodTraceSchedule {
+	return &podtracev1alpha1.PodTraceSchedule{
+		ObjectMeta: metav1.ObjectMeta{Name: "sched", Namespace: "default"},
+		Spec: podtracev1alpha1.PodTraceScheduleSpec{
+			Trigger: &podtracev1alpha1.TriggerSpec{
+				Sources: []podtracev1alpha1.TriggerSource{
+					{Kind: podtracev1alpha1.TriggerSourceResourceAlert, MinSeverity: "critical"},
+				},
+				NamespaceSelector: sel,
+			},
+			SessionTemplate: podtracev1alpha1.PodTraceSessionTemplateSpec{
+				Spec: podtracev1alpha1.PodTraceSessionSpec{
+					Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
+					Duration:    metav1.Duration{Duration: 30 * time.Second},
+					ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+				},
+			},
+		},
+	}
+}
+
+func labelledGrantNS(name, grant string, labels map[string]string) *corev1.Namespace {
+	ns := grantNS(name, grant)
+	ns.Labels = labels
+	return ns
+}
+
+func TestPodTraceScheduleValidator_TriggerNamespaceSelectorGrantWarns(t *testing.T) {
+	prod := map[string]string{"tier": "prod"}
+	c := newClientWithExporter(t, "default", "prod-otlp",
+		labelledGrantNS("granted", "default", prod),
+		labelledGrantNS("ungranted", "", prod),
+		labelledGrantNS("unmatched", "", map[string]string{"tier": "dev"}),
+	)
+	v := &webhookv1alpha1.PodTraceScheduleCustomValidator{Client: c}
+	obj := triggerScheduleWithNamespaceSelector(&metav1.LabelSelector{MatchLabels: prod})
+
+	warnings, err := v.ValidateCreate(context.Background(), obj)
+	if err != nil {
+		t.Fatalf("trigger namespaceSelector grant gap must warn, not error: %v", err)
+	}
+	joined := strings.Join([]string(warnings), " ")
+	if !strings.Contains(joined, "ungranted") {
+		t.Errorf("expected warning naming the ungranted namespace, got %q", joined)
+	}
+	if strings.Contains(joined, "unmatched") {
+		t.Errorf("namespace outside the selector must not be reported: %q", joined)
+	}
+}
+
+func TestPodTraceScheduleValidator_TriggerNamespaceSelectorFullyGrantedIsSilent(t *testing.T) {
+	prod := map[string]string{"tier": "prod"}
+	c := newClientWithExporter(t, "default", "prod-otlp",
+		labelledGrantNS("granted", "default", prod),
+		labelledGrantNS("wildcard", podtracev1alpha1.AllowTracingFromWildcard, prod),
+	)
+	v := &webhookv1alpha1.PodTraceScheduleCustomValidator{Client: c}
+	obj := triggerScheduleWithNamespaceSelector(&metav1.LabelSelector{MatchLabels: prod})
+
+	warnings, err := v.ValidateCreate(context.Background(), obj)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("fully granted selector must produce no warnings, got %v", warnings)
+	}
+}
+
+func TestPodTraceScheduleValidator_TriggerWithoutNamespaceSelectorIsSilent(t *testing.T) {
+	c := newClientWithExporter(t, "default", "prod-otlp", grantNS("team-b", ""))
+	v := &webhookv1alpha1.PodTraceScheduleCustomValidator{Client: c}
+	obj := triggerScheduleWithNamespaceSelector(nil)
+
+	warnings, err := v.ValidateCreate(context.Background(), obj)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("same-namespace trigger must produce no warnings, got %v", warnings)
+	}
+}

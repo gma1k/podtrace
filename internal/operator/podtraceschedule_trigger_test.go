@@ -135,6 +135,94 @@ func TestCountFiringsInWindowAndPrune(t *testing.T) {
 	}
 }
 
+func TestPruneFirings_CooldownLongerThanRateWindowExtendsRetention(t *testing.T) {
+	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	firings := []podtracev1alpha1.TriggerFiring{
+		{PodName: "a", Time: metav1.NewTime(now.Add(-90 * time.Minute))},
+		{PodName: "b", Time: metav1.NewTime(now.Add(-5 * time.Hour))},
+	}
+	if kept := pruneFirings(firings, now, 10*time.Minute); len(kept) != 0 {
+		t.Errorf("with a short cooldown the 1h window governs, kept %d, want 0", len(kept))
+	}
+	kept := pruneFirings(firings, now, 4*time.Hour)
+	if len(kept) != 1 || kept[0].PodName != "a" {
+		t.Errorf("a cooldown longer than the rate window must retain within it, kept %+v", kept)
+	}
+}
+
+func TestSeverityRank(t *testing.T) {
+	cases := map[string]int{
+		string(alerting.SeverityFatal):    3,
+		string(alerting.SeverityCritical): 2,
+		string(alerting.SeverityWarning):  1,
+		string(alerting.SeverityError):    0,
+		"":                                0,
+		"nonsense":                        0,
+	}
+	for severity, want := range cases {
+		if got := severityRank(severity); got != want {
+			t.Errorf("severityRank(%q) = %d, want %d", severity, got, want)
+		}
+	}
+	if severityRank(string(alerting.SeverityError)) >= severityRank(string(alerting.SeverityWarning)) {
+		t.Error("error must rank below warning so it never satisfies a warning-or-higher gate")
+	}
+}
+
+func TestEventTime_PrefersMostRecentObservation(t *testing.T) {
+	last := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	event := time.Date(2026, 7, 27, 11, 0, 0, 0, time.UTC)
+	created := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
+
+	all := &corev1.Event{
+		ObjectMeta:    metav1.ObjectMeta{CreationTimestamp: metav1.NewTime(created)},
+		LastTimestamp: metav1.NewTime(last),
+		EventTime:     metav1.NewMicroTime(event),
+	}
+	if got := eventTime(all); !got.Equal(last) {
+		t.Errorf("eventTime = %v, want lastTimestamp %v", got, last)
+	}
+
+	noLast := &corev1.Event{
+		ObjectMeta: metav1.ObjectMeta{CreationTimestamp: metav1.NewTime(created)},
+		EventTime:  metav1.NewMicroTime(event),
+	}
+	if got := eventTime(noLast); !got.Equal(event) {
+		t.Errorf("eventTime = %v, want eventTime %v", got, event)
+	}
+
+	onlyCreated := &corev1.Event{
+		ObjectMeta: metav1.ObjectMeta{CreationTimestamp: metav1.NewTime(created)},
+	}
+	if got := eventTime(onlyCreated); !got.Equal(created) {
+		t.Errorf("eventTime = %v, want creationTimestamp %v", got, created)
+	}
+}
+
+func TestParseAlertEvent_FallsBackToEventNamespace(t *testing.T) {
+	at := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	ev := &corev1.Event{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "prod",
+			Annotations: map[string]string{
+				alerting.AnnotationAlertSource:   alerting.AlertSourceOOM,
+				alerting.AnnotationAlertSeverity: "fatal",
+			},
+		},
+		Reason:         alerting.EventReasonAlert,
+		InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: "checkout-7f"},
+		LastTimestamp:  metav1.NewTime(at),
+	}
+	got, ok := parseAlertEvent(ev)
+	if !ok {
+		t.Fatal("an Event without involvedObject.namespace should still parse")
+		return
+	}
+	if got.Namespace != "prod" {
+		t.Errorf("namespace = %q, want the Event's own namespace %q", got.Namespace, "prod")
+	}
+}
+
 func TestLastFiringForPod(t *testing.T) {
 	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
 	firings := []podtracev1alpha1.TriggerFiring{

@@ -26,6 +26,22 @@ func validScheduleSpec(exporter string) podtracev1alpha1.PodTraceScheduleSpec {
 	}
 }
 
+func validTriggerSpec() *podtracev1alpha1.TriggerSpec {
+	return &podtracev1alpha1.TriggerSpec{
+		Sources: []podtracev1alpha1.TriggerSource{
+			{Kind: podtracev1alpha1.TriggerSourceResourceAlert, MinSeverity: "critical"},
+		},
+	}
+}
+
+func malformedSelector() *metav1.LabelSelector {
+	return &metav1.LabelSelector{
+		MatchExpressions: []metav1.LabelSelectorRequirement{
+			{Key: "app", Operator: "Bogus", Values: []string{"x"}},
+		},
+	}
+}
+
 func TestPodTraceScheduleValidator(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -100,6 +116,104 @@ func TestPodTraceScheduleValidator(t *testing.T) {
 			},
 			exporter:  "prod-otlp",
 			wantError: "mutually exclusive",
+		},
+		{
+			name: "happy-path-trigger-mode",
+			mutate: func(s *podtracev1alpha1.PodTraceSchedule) {
+				s.Spec.Schedule = ""
+				s.Spec.Trigger = validTriggerSpec()
+			},
+			exporter: "prod-otlp",
+		},
+		{
+			name: "happy-path-trigger-every-source-kind",
+			mutate: func(s *podtracev1alpha1.PodTraceSchedule) {
+				s.Spec.Schedule = ""
+				s.Spec.Trigger = &podtracev1alpha1.TriggerSpec{
+					Sources: []podtracev1alpha1.TriggerSource{
+						{Kind: podtracev1alpha1.TriggerSourceResourceAlert, MinSeverity: "warning"},
+						{Kind: podtracev1alpha1.TriggerSourceOOMKill},
+						{Kind: podtracev1alpha1.TriggerSourceErrorRate, MinSeverity: "fatal"},
+					},
+					ConcurrencyPolicy: podtracev1alpha1.ForbidConcurrent,
+				}
+			},
+			exporter: "prod-otlp",
+		},
+		{
+			name: "schedule-and-trigger-both-set",
+			mutate: func(s *podtracev1alpha1.PodTraceSchedule) {
+				s.Spec.Trigger = validTriggerSpec()
+			},
+			exporter:  "prod-otlp",
+			wantError: "set exactly one of schedule or trigger, not both",
+		},
+		{
+			name: "neither-schedule-nor-trigger-set",
+			mutate: func(s *podtracev1alpha1.PodTraceSchedule) {
+				s.Spec.Schedule = ""
+			},
+			exporter:  "prod-otlp",
+			wantError: "exactly one of schedule or trigger is required",
+		},
+		{
+			name: "trigger-without-sources",
+			mutate: func(s *podtracev1alpha1.PodTraceSchedule) {
+				s.Spec.Schedule = ""
+				s.Spec.Trigger = &podtracev1alpha1.TriggerSpec{}
+			},
+			exporter:  "prod-otlp",
+			wantError: "spec.trigger.sources",
+		},
+		{
+			name: "trigger-invalid-concurrency-policy",
+			mutate: func(s *podtracev1alpha1.PodTraceSchedule) {
+				s.Spec.Schedule = ""
+				s.Spec.Trigger = validTriggerSpec()
+				s.Spec.Trigger.ConcurrencyPolicy = "Bogus"
+			},
+			exporter:  "prod-otlp",
+			wantError: "spec.trigger.concurrencyPolicy",
+		},
+		{
+			name: "trigger-malformed-selector",
+			mutate: func(s *podtracev1alpha1.PodTraceSchedule) {
+				s.Spec.Schedule = ""
+				s.Spec.Trigger = validTriggerSpec()
+				s.Spec.Trigger.Selector = malformedSelector()
+			},
+			exporter:  "prod-otlp",
+			wantError: "spec.trigger.selector",
+		},
+		{
+			name: "trigger-malformed-namespace-selector",
+			mutate: func(s *podtracev1alpha1.PodTraceSchedule) {
+				s.Spec.Schedule = ""
+				s.Spec.Trigger = validTriggerSpec()
+				s.Spec.Trigger.NamespaceSelector = malformedSelector()
+			},
+			exporter:  "prod-otlp",
+			wantError: "spec.trigger.namespaceSelector",
+		},
+		{
+			name: "trigger-mode-still-validates-session-template",
+			mutate: func(s *podtracev1alpha1.PodTraceSchedule) {
+				s.Spec.Schedule = ""
+				s.Spec.Trigger = validTriggerSpec()
+				s.Spec.SessionTemplate.Spec.ExporterRef.Name = "does-not-exist"
+			},
+			exporter:  "prod-otlp",
+			wantError: "ExporterConfig not found",
+		},
+		{
+			name: "trigger-mode-ignores-cron-only-fields",
+			mutate: func(s *podtracev1alpha1.PodTraceSchedule) {
+				s.Spec.Schedule = ""
+				s.Spec.Trigger = validTriggerSpec()
+				tz := "Not/A/Zone"
+				s.Spec.TimeZone = &tz
+			},
+			exporter: "prod-otlp",
 		},
 	}
 	for _, tc := range cases {

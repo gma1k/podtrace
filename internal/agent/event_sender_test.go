@@ -2,12 +2,15 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/podtrace/podtrace/internal/alerting"
 )
@@ -84,5 +87,65 @@ func TestAlertEventSender_ThrottlesDuplicates(t *testing.T) {
 	_ = s.Send(context.Background(), alert)
 	if n := countEvents(t, c); n != 2 {
 		t.Errorf("after throttle window a new Event should emit, got %d", n)
+	}
+}
+
+func TestAlertEventSender_Name(t *testing.T) {
+	if got := newAlertEventSender(newFakeClient()).Name(); got != "kubernetes-event" {
+		t.Errorf("Name() = %q, want kubernetes-event", got)
+	}
+}
+
+func TestAlertEventSender_CreateFailureIsReported(t *testing.T) {
+	c := fake.NewClientBuilder().
+		WithInterceptorFuncs(interceptor.Funcs{
+			Create: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+				return errors.New("apiserver down")
+			},
+		}).Build()
+	s := newAlertEventSender(c)
+
+	err := s.Send(context.Background(), &alerting.Alert{
+		Severity:  alerting.SeverityFatal,
+		Source:    alerting.AlertSourceOOM,
+		Title:     "OOM killed",
+		PodName:   "checkout-7f",
+		Namespace: "prod",
+	})
+	if err == nil {
+		t.Fatal("a failed Event create must be reported to the alert manager")
+		return
+	}
+	if !strings.Contains(err.Error(), "prod/checkout-7f") {
+		t.Errorf("error %q should name the pod the Event was for", err.Error())
+	}
+}
+
+func TestAlertEventSender_PrunesStaleThrottleKeys(t *testing.T) {
+	c := newFakeClient()
+	s := newAlertEventSender(c)
+	base := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	s.nowFn = func() time.Time { return base }
+
+	if err := s.Send(context.Background(), &alerting.Alert{
+		Severity: alerting.SeverityFatal, Source: alerting.AlertSourceOOM,
+		Title: "x", PodName: "stale-pod", Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if len(s.last) != 1 {
+		t.Fatalf("throttle map should hold 1 key, got %d", len(s.last))
+		return
+	}
+
+	s.nowFn = func() time.Time { return base.Add(11 * s.throttle) }
+	if err := s.Send(context.Background(), &alerting.Alert{
+		Severity: alerting.SeverityFatal, Source: alerting.AlertSourceOOM,
+		Title: "x", PodName: "fresh-pod", Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if len(s.last) != 1 {
+		t.Errorf("keys older than 10x the throttle window must be pruned, map holds %d", len(s.last))
 	}
 }

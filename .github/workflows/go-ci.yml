@@ -84,9 +84,6 @@ jobs:
             -coverprofile=coverage.out -covermode=atomic \
             ./cmd/... ./internal/... | tee test-report.txt
 
-      # NO -short here: every integration test skips itself in short mode,
-      # so the old invocation was a permanently green, permanently empty
-      # suite.
       - name: Run integration suite
         timeout-minutes: 5
         run: |
@@ -137,10 +134,37 @@ jobs:
           gist-id: ${{ vars.BADGES_GIST_ID }}
           token: ${{ secrets.GIST_TOKEN }}
 
+  envtest:
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install dependencies
+        run: GOTOOLCHAIN=auto go mod download
+
+      - name: Cache envtest control-plane assets
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/go/envtest-assets
+          key: envtest-assets-${{ runner.os }}-${{ hashFiles('Makefile') }}
+          restore-keys: |
+            envtest-assets-${{ runner.os }}-
+
+      - name: Run envtest suite
+        timeout-minutes: 15
+        run: GOTOOLCHAIN=auto make envtest
+
   cross-compile:
-    # Also run on push to main (scoped by `on.push.branches`) so a merged
-    # commit — which may differ from the tested PR head after squash/rebase —
-    # is verified before a release is cut from it.
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -203,10 +227,6 @@ jobs:
           name: benchmark-results
           path: benchmark.txt
 
-  # Drift gate: the Makefile generates CRDs (templates/crds) and the reference
-  # webhook manifest (hack/reference) from the api types + kubebuilder markers.
-  # Without this job a change to a marker or CRD type could merge with stale
-  # committed manifests. Regenerate and fail if anything differs.
   manifests-drift:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     runs-on: ubuntu-latest
