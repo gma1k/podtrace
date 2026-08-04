@@ -1,0 +1,50 @@
+name: Preload kind node image
+description: |
+  Pull the kind node image with retries before `kind create cluster` runs.
+
+  helm/kind-action pulls the node image from inside `kind create cluster`,
+  where a Docker Hub hiccup has no retry and fails the whole job:
+
+    ERROR: failed to create cluster: failed to pull image "kindest/node:..."
+    Get "https://registry-1.docker.io/v2/": net/http: request canceled
+    (Client.Timeout exceeded while awaiting headers)
+
+  Pulling here first means the action finds the image locally and never
+  reaches the registry.
+
+  Single source of truth for the node image so the chainsaw and
+  quickstart-smoke jobs cannot drift on it. Keep KIND_NODE_IMAGE in step
+  with the `version:` pinned for helm/kind-action — the digest is the one
+  kind v0.24.0 pins for Kubernetes v1.31.0.
+
+inputs:
+  image:
+    description: Fully qualified kind node image, tag pinned by digest.
+    required: false
+    default: "kindest/node:v1.31.0@sha256:53df588e04085fd41ae12de0c3fe4c72f7013bba32a20e7325357a1ac94ba865"
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        image="${{ inputs.image }}"
+        tag="${image%@*}"
+
+        pulled=0
+        for attempt in 1 2 3; do
+          if docker pull "${image}"; then
+            pulled=1
+            break
+          fi
+          echo "::warning::kind node image pull attempt ${attempt}/3 failed; retrying in 15s"
+          sleep 15
+        done
+        if [ "${pulled}" -ne 1 ]; then
+          echo "::error::could not pull ${image} after 3 attempts"
+          exit 1
+        fi
+
+        docker tag "${image}" "${tag}"
+        docker image inspect "${tag}" >/dev/null

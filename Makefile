@@ -364,6 +364,8 @@ e2e-kind-cleanup:
 
 CHAINSAW ?= $(shell command -v chainsaw 2>/dev/null)
 CHAINSAW_VERSION ?= latest
+
+CHAINSAW_PARALLEL ?= 2
 chainsaw-tools:
 	@if [ -z "$(CHAINSAW)" ] && ! command -v chainsaw >/dev/null 2>&1 && [ ! -x "$$($(GO) env GOPATH)/bin/chainsaw" ]; then \
 	  echo "Installing chainsaw@$(CHAINSAW_VERSION)..."; \
@@ -374,7 +376,7 @@ chainsaw: chainsaw-tools
 	@CHAINSAW_BIN="$(CHAINSAW)"; \
 	[ -n "$$CHAINSAW_BIN" ] || CHAINSAW_BIN="$$(command -v chainsaw 2>/dev/null)"; \
 	[ -n "$$CHAINSAW_BIN" ] || CHAINSAW_BIN="$$($(GO) env GOPATH)/bin/chainsaw"; \
-	"$$CHAINSAW_BIN" test --test-dir test/chainsaw/tests
+	"$$CHAINSAW_BIN" test --test-dir test/chainsaw/tests --parallel $(CHAINSAW_PARALLEL)
 
 helm-template:
 	helm template podtrace deploy/charts/podtrace

@@ -28,9 +28,9 @@ spec:
          podtrace.io/triggered-by=ResourceAlert, targeting the memhog pod
          via podRefs (the template selector is narrowed to the alerting pod).
 
-    Requires the polinux/stress image to be pullable or preloaded on the
-    nodes. Trigger mode requires agent alerting; this test enables it and
-    restores the default on cleanup.
+    The polinux/stress image is preloaded into the kind nodes by the
+    chainsaw workflow. Trigger mode requires agent alerting; this test
+    enables it and restores the default on cleanup.
   timeouts:
     apply: 60s
     assert: 240s

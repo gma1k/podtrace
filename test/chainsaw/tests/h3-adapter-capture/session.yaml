@@ -6,7 +6,7 @@ spec:
   selector:
     matchLabels:
       app: h3curl
-  duration: 30s
+  duration: 90s
   filters: [net]
   exporterRef:
     name: h3-otlp
