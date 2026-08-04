@@ -30,8 +30,9 @@ concurrency:
 
 jobs:
   chainsaw:
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -47,6 +48,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Preload kind node image
+        uses: ./.github/actions/preload-kind-node
 
       - name: Install kind
         uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc  # v1.14.0
@@ -96,14 +100,24 @@ jobs:
           kind load docker-image podtrace-h3curl:ci --name podtrace-chainsaw
           kind load docker-image nginx:1.29 --name podtrace-chainsaw
 
-      - name: Preload hook-job image into kind
+      - name: Preload hook-job and workload images into kind
         run: |
-          for i in 1 2 3; do
-            docker pull alpine/k8s:1.30.4 && break
-            echo "pull attempt $i failed; retrying in 15s" >&2
-            sleep 15
+          for image in alpine/k8s:1.30.4 polinux/stress:1.0.4; do
+            pulled=0
+            for i in 1 2 3; do
+              if docker pull "$image"; then
+                pulled=1
+                break
+              fi
+              echo "::warning::pull attempt $i/3 for $image failed; retrying in 15s"
+              sleep 15
+            done
+            if [ "$pulled" -ne 1 ]; then
+              echo "::error::could not pull $image after 3 attempts"
+              exit 1
+            fi
+            kind load docker-image "$image" --name podtrace-chainsaw
           done
-          kind load docker-image alpine/k8s:1.30.4 --name podtrace-chainsaw
 
       - name: Install operator via Helm
         run: |
@@ -143,6 +157,7 @@ jobs:
           kubectl -n podtrace-system logs deploy/podtrace-operator --tail=200 || true
 
   quickstart-smoke:
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -155,6 +170,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Preload kind node image
+        uses: ./.github/actions/preload-kind-node
 
       - name: Install kind
         uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc  # v1.14.0

@@ -137,5 +137,5 @@ spec:
               exec curl --http3-only -sk https://h3demo/slow/big -o /dev/null \
                 --max-time 3500 --limit-rate 300
           resources:
-            requests: { cpu: 10m, memory: 16Mi }
-            limits: { cpu: 200m, memory: 64Mi }
+            requests: { cpu: 50m, memory: 16Mi }
+            limits: { cpu: "1", memory: 128Mi }

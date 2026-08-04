@@ -12,7 +12,24 @@ runs:
     - shell: bash
       run: |
         set -euo pipefail
-        sudo apt-get update
+
+        sudo rm -f /etc/apt/sources.list.d/*google-chrome* \
+                   /etc/apt/sources.list.d/*google-cloud* || true
+
+        updated=0
+        for attempt in 1 2 3; do
+          if sudo apt-get -o Acquire::Retries=3 update; then
+            updated=1
+            break
+          fi
+          echo "::warning::apt-get update attempt ${attempt}/3 failed; retrying in 15s"
+          sleep 15
+        done
+        if [ "${updated}" -ne 1 ]; then
+          echo "::error::apt-get update failed after 3 attempts"
+          exit 1
+        fi
+
         sudo apt-get install -y --no-install-recommends \
           clang llvm libbpf-dev libelf-dev make pkg-config curl ca-certificates
 

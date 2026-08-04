@@ -20,7 +20,7 @@ spec:
     the HTTP/3 adapter probes are no-ops.
   timeouts:
     apply: 30s
-    assert: 150s
+    assert: 300s
     delete: 60s
     cleanup: 120s
   steps:
@@ -36,8 +36,24 @@ spec:
                 name: h3curl
               status:
                 readyReplicas: 1
-        - sleep:
-            duration: 15s
+        - script:
+            timeout: 330s
+            content: |
+              set -eu
+              for attempt in $(seq 1 60); do
+                seen=$(kubectl -n "$NAMESPACE" logs -l app=h3curl \
+                  --all-containers --tail=-1 2>/dev/null \
+                  | grep -c "status=200" || true)
+                if [ "${seen:-0}" -ge 3 ]; then
+                  echo "h3 client completed ${seen} requests; opening capture window"
+                  exit 0
+                fi
+                sleep 5
+              done
+              echo "h3 client never completed 3 requests in 300s" >&2
+              kubectl -n "$NAMESPACE" logs -l app=h3curl \
+                --all-containers --tail=50 >&2 || true
+              exit 1
     - name: apply-session
       try:
         - apply:
@@ -53,6 +69,7 @@ spec:
             selector: app=h3curl
             tail: 20
         - script:
+            timeout: 60s
             content: |
               kubectl -n podtrace-system get pods -o wide
               for p in $(kubectl -n podtrace-system get pods -o name | grep pts-); do
