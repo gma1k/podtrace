@@ -9,6 +9,7 @@
   <a href="https://ebpf.io/applications/"><img src="https://img.shields.io/badge/eBPF%20Landscape-podtrace-blue" alt="eBPF Landscape"/></a>
   <a href="https://www.bestpractices.dev/projects/12882"><img src="https://www.bestpractices.dev/projects/12882/badge" alt="OpenSSF Best Practices"/></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/gma1k/podtrace"><img src="https://img.shields.io/ossf-scorecard/github.com/gma1k/podtrace?label=openssf%20scorecard" alt="OpenSSF Scorecard"/></a>
+  <a href="https://pkg.go.dev/github.com/gma1k/podtrace"><img src="https://pkg.go.dev/badge/github.com/gma1k/podtrace.svg" alt="Go Reference"/></a>  
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0"/></a>
   <a href="https://opensource.org/licenses/GPL-2.0"><img src="https://img.shields.io/badge/BPF%20License-GPL_2.0-blue.svg" alt="BPF License: GPL 2.0"/></a>
   <a href="https://app.fossa.com/projects/custom%2B62379%2Fgithub.com%2Fgma1k%2Fpodtrace?ref=badge_shield&issueType=license"><img src="https://app.fossa.com/api/projects/custom%2B62379%2Fgithub.com%2Fgma1k%2Fpodtrace.svg?type=shield&issueType=license" alt="FOSSA License Status"/></a>

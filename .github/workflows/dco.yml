@@ -14,7 +14,6 @@ concurrency:
 
 jobs:
   dco-check:
-    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -28,6 +27,7 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
           set -euo pipefail
 
@@ -35,6 +35,13 @@ jobs:
             echo "Not a pull_request event, nothing to verify."
             exit 0
           fi
+
+          case "${HEAD_REF}" in
+            release-please--*)
+              echo "release-please branch, DCO not applicable."
+              exit 0
+              ;;
+          esac
 
           failed=0
 
