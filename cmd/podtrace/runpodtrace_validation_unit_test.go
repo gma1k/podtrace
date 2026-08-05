@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/podtrace/podtrace/internal/kubernetes"
+	"github.com/gma1k/podtrace/internal/kubernetes"
 )
 
 func TestRunPodtrace_TracingSampleRateFlagError(t *testing.T) {

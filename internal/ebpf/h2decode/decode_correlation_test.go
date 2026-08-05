@@ -3,7 +3,7 @@ package h2decode
 import (
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 func TestIngestNil(t *testing.T) {

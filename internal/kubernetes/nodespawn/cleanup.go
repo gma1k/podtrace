@@ -14,7 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/podtrace/podtrace/internal/logger"
+	"github.com/gma1k/podtrace/internal/logger"
 )
 
 // MachineBootID returns this machine's kernel boot ID, or "" when it

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 type secMock struct{ evs []*events.Event }

@@ -13,7 +13,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/podtrace/podtrace/internal/logger"
+	"github.com/gma1k/podtrace/internal/logger"
 )
 
 // ProfileType identifies the kind of profile to collect.

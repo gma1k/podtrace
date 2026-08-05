@@ -3,8 +3,8 @@ package agent
 import (
 	"fmt"
 
-	"github.com/podtrace/podtrace/internal/alerting"
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/alerting"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 // emitCopyFailAlert raises a warning when an AF_ALG "aead" socket is bound by

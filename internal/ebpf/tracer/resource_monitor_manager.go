@@ -7,9 +7,9 @@ import (
 	"github.com/cilium/ebpf"
 	"go.uber.org/zap"
 
-	"github.com/podtrace/podtrace/internal/events"
-	"github.com/podtrace/podtrace/internal/logger"
-	"github.com/podtrace/podtrace/internal/resource"
+	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/logger"
+	"github.com/gma1k/podtrace/internal/resource"
 )
 
 // resourceMonitorManager keeps one resource.ResourceMonitor per target cgroup

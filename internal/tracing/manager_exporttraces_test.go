@@ -3,9 +3,9 @@ package tracing
 import (
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/alerting"
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/alerting"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 // TestManager_ExportTraces_AllFiveExporters_Populated drives a populated batch

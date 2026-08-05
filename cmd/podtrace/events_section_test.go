@@ -13,8 +13,8 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
-	pkgkube "github.com/podtrace/podtrace/internal/kubernetes"
-	"github.com/podtrace/podtrace/internal/kubernetes/nodespawn"
+	pkgkube "github.com/gma1k/podtrace/internal/kubernetes"
+	"github.com/gma1k/podtrace/internal/kubernetes/nodespawn"
 )
 
 func TestFormatK8sEventsSection_Empty(t *testing.T) {

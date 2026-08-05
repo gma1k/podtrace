@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/kubernetes"
+	"github.com/gma1k/podtrace/internal/kubernetes"
 )
 
 func TestChannelTargetSource_StartEmitsEmptyOnInitialState(t *testing.T) {

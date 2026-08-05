@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/config"
 )
 
 // TestCgroupRootCandidates_KubeletAbsPath covers the `filepath.IsAbs(kcp)` true

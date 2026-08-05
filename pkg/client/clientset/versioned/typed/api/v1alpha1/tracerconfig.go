@@ -20,9 +20,9 @@ package v1alpha1
 import (
 	context "context"
 
-	apiv1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
-	applyconfigurationapiv1alpha1 "github.com/podtrace/podtrace/pkg/client/applyconfiguration/api/v1alpha1"
-	scheme "github.com/podtrace/podtrace/pkg/client/clientset/versioned/scheme"
+	apiv1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	applyconfigurationapiv1alpha1 "github.com/gma1k/podtrace/pkg/client/applyconfiguration/api/v1alpha1"
+	scheme "github.com/gma1k/podtrace/pkg/client/clientset/versioned/scheme"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"

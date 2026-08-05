@@ -12,11 +12,11 @@ import (
 	"github.com/cilium/ebpf/link"
 	"go.uber.org/zap"
 
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/hostfs"
-	"github.com/podtrace/podtrace/internal/ldsoconf"
-	"github.com/podtrace/podtrace/internal/logger"
-	"github.com/podtrace/podtrace/internal/procfs"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/hostfs"
+	"github.com/gma1k/podtrace/internal/ldsoconf"
+	"github.com/gma1k/podtrace/internal/logger"
+	"github.com/gma1k/podtrace/internal/procfs"
 )
 
 // mandatoryProbes must all attach successfully; failure returns an actionable error.

@@ -14,8 +14,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
-	"github.com/podtrace/podtrace/internal/operator"
-	"github.com/podtrace/podtrace/pkg/exporter/bundle"
+	"github.com/gma1k/podtrace/internal/operator"
+	"github.com/gma1k/podtrace/pkg/exporter/bundle"
 )
 
 func TestLoadBundle_SecretHeadersDecoded(t *testing.T) {

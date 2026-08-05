@@ -7,8 +7,8 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"github.com/podtrace/podtrace/internal/ebpf/qpackdecode"
-	"github.com/podtrace/podtrace/internal/safeconv"
+	"github.com/gma1k/podtrace/internal/ebpf/qpackdecode"
+	"github.com/gma1k/podtrace/internal/safeconv"
 )
 
 // ConnKey identifies one HTTP/3 connection of one traced process.

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/diagnose/tracker"
+	"github.com/gma1k/podtrace/internal/diagnose/tracker"
 )
 
 func TestValidateExporterEndpoint_ParseErrors(t *testing.T) {

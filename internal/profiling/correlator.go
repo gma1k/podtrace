@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/clock"
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/events"
-	"github.com/podtrace/podtrace/internal/sanitize"
+	"github.com/gma1k/podtrace/internal/clock"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/sanitize"
 )
 
 func safeInt64(v uint64) int64 {

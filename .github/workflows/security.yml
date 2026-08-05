@@ -13,6 +13,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+
 jobs:
   analyze:
     permissions:
@@ -56,7 +59,7 @@ jobs:
       - name: Run gosec security scanner
         if: matrix.language == 'go'
         run: |
-          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
           gosec -fmt sarif -out gosec-results.sarif -exclude-dir=test ./... || true
           python3 - <<'EOF'
           import json, sys
@@ -109,4 +112,4 @@ jobs:
           cache: true
 
       - name: Run govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...

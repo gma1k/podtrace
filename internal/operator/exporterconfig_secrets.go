@@ -2,7 +2,7 @@ package operator
 
 import (
 	"context"
-	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 

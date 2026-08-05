@@ -10,8 +10,8 @@ import (
 	"github.com/cilium/ebpf/link"
 	"go.uber.org/zap"
 
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/logger"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/logger"
 )
 
 // quicheRustSendRequestPattern matches quiche::h3::Connection::send_request

@@ -8,9 +8,9 @@ import (
 
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
-	"github.com/podtrace/podtrace/internal/events"
-	"github.com/podtrace/podtrace/internal/tracing/extractor"
-	"github.com/podtrace/podtrace/pkg/exporter/bundle"
+	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/tracing/extractor"
+	"github.com/gma1k/podtrace/pkg/exporter/bundle"
 )
 
 const (

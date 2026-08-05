@@ -18,7 +18,7 @@ limitations under the License.
 package v1alpha1
 
 import (
-	apiv1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	apiv1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 )
 
 // PodTraceScheduleSpecApplyConfiguration represents a declarative configuration of the PodTraceScheduleSpec type for use

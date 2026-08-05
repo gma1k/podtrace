@@ -5,7 +5,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 func TestPercentile(t *testing.T) {

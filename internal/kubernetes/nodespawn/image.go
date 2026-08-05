@@ -4,7 +4,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/podtrace/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/config"
 )
 
 // ResolveImageOptions feed ResolveImage.

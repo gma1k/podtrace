@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 // AnalyzeDNS aggregates DNS activity. Names and per-name lookup counts come

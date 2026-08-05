@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/podtrace/podtrace/internal/ebpf"
-	"github.com/podtrace/podtrace/internal/kubernetes"
+	"github.com/gma1k/podtrace/internal/ebpf"
+	"github.com/gma1k/podtrace/internal/kubernetes"
 )
 
 func saveRunPodtraceGlobals(t *testing.T) {

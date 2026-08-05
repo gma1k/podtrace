@@ -3,8 +3,8 @@ package main
 import (
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/events"
-	"github.com/podtrace/podtrace/internal/kubernetes"
+	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/kubernetes"
 )
 
 func TestTargetAttachSets_FansOutAllContainers(t *testing.T) {

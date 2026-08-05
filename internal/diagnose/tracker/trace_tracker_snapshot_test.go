@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/clock"
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/clock"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 func snapshotEvent(traceID, spanID string) *events.Event {

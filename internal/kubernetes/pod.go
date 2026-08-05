@@ -14,13 +14,13 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/cri"
-	"github.com/podtrace/podtrace/internal/hostfs"
-	"github.com/podtrace/podtrace/internal/logger"
-	"github.com/podtrace/podtrace/internal/procfs"
-	"github.com/podtrace/podtrace/internal/sysfs"
-	"github.com/podtrace/podtrace/internal/validation"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/cri"
+	"github.com/gma1k/podtrace/internal/hostfs"
+	"github.com/gma1k/podtrace/internal/logger"
+	"github.com/gma1k/podtrace/internal/procfs"
+	"github.com/gma1k/podtrace/internal/sysfs"
+	"github.com/gma1k/podtrace/internal/validation"
 	"go.uber.org/zap"
 )
 

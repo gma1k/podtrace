@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/ebpf"
-	"github.com/podtrace/podtrace/internal/events"
-	"github.com/podtrace/podtrace/internal/kubernetes"
+	"github.com/gma1k/podtrace/internal/ebpf"
+	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/kubernetes"
 	k8s "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	"github.com/spf13/cobra"

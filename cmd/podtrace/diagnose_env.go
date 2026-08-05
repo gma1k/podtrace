@@ -11,10 +11,10 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sys/unix"
 
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/cri"
-	"github.com/podtrace/podtrace/internal/ebpf/embedded"
-	"github.com/podtrace/podtrace/internal/ebpf/loader"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/cri"
+	"github.com/gma1k/podtrace/internal/ebpf/embedded"
+	"github.com/gma1k/podtrace/internal/ebpf/loader"
 )
 
 type envReport struct {

@@ -1,4 +1,4 @@
-module github.com/podtrace/podtrace
+module github.com/gma1k/podtrace
 
 go 1.26.5
 

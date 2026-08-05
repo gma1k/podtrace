@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 // Reporter is the report-generation subset shared by the single-pod Handler and

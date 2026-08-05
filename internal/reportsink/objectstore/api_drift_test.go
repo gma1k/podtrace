@@ -3,8 +3,8 @@ package objectstore_test
 import (
 	"testing"
 
-	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
-	"github.com/podtrace/podtrace/internal/reportsink/objectstore"
+	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	"github.com/gma1k/podtrace/internal/reportsink/objectstore"
 )
 
 func TestAPIValidatorAndParserAgree(t *testing.T) {

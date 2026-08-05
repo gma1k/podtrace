@@ -12,7 +12,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
-	pkgkube "github.com/podtrace/podtrace/internal/kubernetes"
+	pkgkube "github.com/gma1k/podtrace/internal/kubernetes"
 )
 
 func TestPreResolved_SkipsEmptyContainerID(t *testing.T) {

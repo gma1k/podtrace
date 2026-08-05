@@ -6,7 +6,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 )
 
 // +kubebuilder:webhook:path=/validate-podtrace-io-v1alpha1-exporterconfig,mutating=false,failurePolicy=fail,sideEffects=None,groups=podtrace.io,resources=exporterconfigs,verbs=create;update,versions=v1alpha1,name=vexporterconfig.podtrace.io,admissionReviewVersions=v1

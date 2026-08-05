@@ -3,7 +3,7 @@ package parser
 import (
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 func TestDecodeTarget_RenameRejoinsHalves(t *testing.T) {

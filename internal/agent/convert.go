@@ -1,6 +1,6 @@
 package agent
 
-import "github.com/podtrace/podtrace/internal/safeconv"
+import "github.com/gma1k/podtrace/internal/safeconv"
 
 // safeUint64ToInt64 saturates a uint64 at math.MaxInt64. Thin
 // re-export of safeconv.Uint64ToInt64 kept only so existing call sites

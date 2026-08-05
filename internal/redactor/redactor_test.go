@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/events"
-	"github.com/podtrace/podtrace/internal/redactor"
+	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/redactor"
 )
 
 func makeEvent(target, details string) *events.Event {

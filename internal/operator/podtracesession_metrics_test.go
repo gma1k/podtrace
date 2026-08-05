@@ -6,7 +6,7 @@ import (
 
 	dto "github.com/prometheus/client_model/go"
 
-	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 )
 
 func TestObserveReportUploadMetrics_DedupesAcrossReconciles(t *testing.T) {

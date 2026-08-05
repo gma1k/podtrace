@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 func TestMultiHandler_Run_CtxCancel(t *testing.T) {

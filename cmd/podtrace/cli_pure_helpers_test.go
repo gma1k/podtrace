@@ -7,10 +7,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/events"
-	"github.com/podtrace/podtrace/internal/kubernetes"
-	"github.com/podtrace/podtrace/internal/kubernetes/nodespawn"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/kubernetes"
+	"github.com/gma1k/podtrace/internal/kubernetes/nodespawn"
 )
 
 func TestFilterEvents_CryptoFilter(t *testing.T) {

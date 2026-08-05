@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/podtrace/podtrace/internal/procfs"
+	"github.com/gma1k/podtrace/internal/procfs"
 )
 
 // ProcessCPUTime is a snapshot of /proc/<pid>/stat's utime+stime, captured at

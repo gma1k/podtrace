@@ -9,7 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/podtrace/podtrace/internal/logger"
+	"github.com/gma1k/podtrace/internal/logger"
 )
 
 // h3FieldOffsets mirrors struct h3_field_offsets in bpf/events.h: the offsets of

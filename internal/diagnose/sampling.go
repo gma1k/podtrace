@@ -1,8 +1,8 @@
 package diagnose
 
 import (
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 var eventTypeSamplingRates = map[events.EventType]int{

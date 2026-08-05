@@ -5,7 +5,7 @@ import (
 
 	"github.com/cilium/ebpf/link"
 
-	"github.com/podtrace/podtrace/internal/ebpf/probes"
+	"github.com/gma1k/podtrace/internal/ebpf/probes"
 )
 
 func TestSamePIDSet_Comparisons(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	"github.com/podtrace/podtrace/pkg/tracer"
+	"github.com/gma1k/podtrace/pkg/tracer"
 )
 
 // TestAgentSetup_SetupWithManager builds a non-connecting manager (the

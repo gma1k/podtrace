@@ -8,7 +8,7 @@ import (
 
 	"golang.org/x/net/http2/hpack"
 
-	"github.com/podtrace/podtrace/internal/safeconv"
+	"github.com/gma1k/podtrace/internal/safeconv"
 )
 
 // HeaderField is one decoded name/value pair.

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/redactor"
+	"github.com/gma1k/podtrace/internal/redactor"
 )
 
 func TestDefaultWithCustomRules_Empty(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/podtrace/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/config"
 )
 
 func TestResolvePod_SuccessWithLabelsAndOwner(t *testing.T) {

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/ebpf"
-	"github.com/podtrace/podtrace/internal/kubernetes"
+	"github.com/gma1k/podtrace/internal/ebpf"
+	"github.com/gma1k/podtrace/internal/kubernetes"
 )
 
 func TestRunPodtrace_PreResolvedNoneResolvable(t *testing.T) {

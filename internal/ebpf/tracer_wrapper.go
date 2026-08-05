@@ -1,7 +1,7 @@
 package ebpf
 
 import (
-	"github.com/podtrace/podtrace/internal/ebpf/tracer"
+	"github.com/gma1k/podtrace/internal/ebpf/tracer"
 )
 
 type TracerInterface = tracer.TracerInterface

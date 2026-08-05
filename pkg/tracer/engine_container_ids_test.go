@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/podtrace/podtrace/pkg/tracer"
+	"github.com/gma1k/podtrace/pkg/tracer"
 )
 
 type containerIDsBackend struct {

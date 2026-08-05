@@ -7,7 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/podtrace/podtrace/internal/ebpf/safeelf"
+	"github.com/gma1k/podtrace/internal/ebpf/safeelf"
 )
 
 // Probe represents a single USDT probe found in an ELF binary.

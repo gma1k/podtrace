@@ -15,9 +15,9 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 
-	"github.com/podtrace/podtrace/internal/events"
-	pkgkube "github.com/podtrace/podtrace/internal/kubernetes"
-	"github.com/podtrace/podtrace/internal/kubernetes/nodespawn"
+	"github.com/gma1k/podtrace/internal/events"
+	pkgkube "github.com/gma1k/podtrace/internal/kubernetes"
+	"github.com/gma1k/podtrace/internal/kubernetes/nodespawn"
 )
 
 func saveDiagnoseGlobals(t *testing.T) {

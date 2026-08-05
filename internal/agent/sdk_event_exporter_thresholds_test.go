@@ -3,7 +3,7 @@ package agent
 import (
 	"testing"
 
-	bundlepkg "github.com/podtrace/podtrace/pkg/exporter/bundle"
+	bundlepkg "github.com/gma1k/podtrace/pkg/exporter/bundle"
 )
 
 func i32p(v int32) *int32 { return &v }

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/diagnose/tracker"
+	"github.com/gma1k/podtrace/internal/diagnose/tracker"
 )
 
 func newTestTrace() *tracker.Trace {

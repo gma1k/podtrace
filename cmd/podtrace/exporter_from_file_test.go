@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/pkg/exporter/bundle"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/pkg/exporter/bundle"
 )
 
 func TestApplyPayloadToConfig_OTLP(t *testing.T) {

@@ -3,8 +3,8 @@ package detector
 import (
 	"fmt"
 
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 func DetectIssues(allEvents []*events.Event, errorRateThreshold, rttSpikeThreshold float64) []string {

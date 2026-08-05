@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/config"
 )
 
 func TestAlert_Clone_Nil(t *testing.T) {

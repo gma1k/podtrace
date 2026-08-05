@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/diagnose"
+	"github.com/gma1k/podtrace/internal/diagnose"
 )
 
 // saveSinkGlobals snapshots the package-level sink destination globals

@@ -3,7 +3,7 @@ package ldsoconf
 import (
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/config"
 )
 
 func TestOpenRoot_CachesAcrossCalls(t *testing.T) {

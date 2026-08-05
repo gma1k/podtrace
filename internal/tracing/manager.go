@@ -9,14 +9,14 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/podtrace/podtrace/internal/alerting"
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/diagnose/tracker"
-	"github.com/podtrace/podtrace/internal/events"
-	"github.com/podtrace/podtrace/internal/logger"
-	"github.com/podtrace/podtrace/internal/tracing/exporter"
-	"github.com/podtrace/podtrace/internal/tracing/extractor"
-	"github.com/podtrace/podtrace/internal/tracing/graph"
+	"github.com/gma1k/podtrace/internal/alerting"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/diagnose/tracker"
+	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/logger"
+	"github.com/gma1k/podtrace/internal/tracing/exporter"
+	"github.com/gma1k/podtrace/internal/tracing/extractor"
+	"github.com/gma1k/podtrace/internal/tracing/graph"
 )
 
 type Manager struct {

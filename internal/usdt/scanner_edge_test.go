@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/usdt"
+	"github.com/gma1k/podtrace/internal/usdt"
 )
 
 // buildNoteEntry constructs a single ELF note entry with the given type, name, and descriptor.

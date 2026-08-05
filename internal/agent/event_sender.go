@@ -8,7 +8,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/podtrace/podtrace/internal/alerting"
+	"github.com/gma1k/podtrace/internal/alerting"
 )
 
 // alertEventSender is an alerting.Sender that records each alert as a

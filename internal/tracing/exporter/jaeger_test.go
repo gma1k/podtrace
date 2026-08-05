@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/diagnose/tracker"
+	"github.com/gma1k/podtrace/internal/diagnose/tracker"
 )
 
 func TestNewJaegerExporter_DefaultEndpointTranslatesToOTLP(t *testing.T) {

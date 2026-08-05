@@ -10,10 +10,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	pkgkube "github.com/podtrace/podtrace/internal/kubernetes"
-	"github.com/podtrace/podtrace/internal/kubernetes/nodespawn"
+	pkgkube "github.com/gma1k/podtrace/internal/kubernetes"
+	"github.com/gma1k/podtrace/internal/kubernetes/nodespawn"
 
-	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 

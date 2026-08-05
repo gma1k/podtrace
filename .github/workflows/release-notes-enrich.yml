@@ -15,11 +15,13 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   enrich:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'release' &&

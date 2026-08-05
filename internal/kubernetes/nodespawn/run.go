@@ -19,8 +19,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
-	pkgkube "github.com/podtrace/podtrace/internal/kubernetes"
-	"github.com/podtrace/podtrace/internal/logger"
+	pkgkube "github.com/gma1k/podtrace/internal/kubernetes"
+	"github.com/gma1k/podtrace/internal/logger"
 )
 
 // RunOptions drives the per-CLI-invocation orchestration: figure out which

@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/analysis/criticalpath"
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/analysis/criticalpath"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 // TestEmit_ReentrantCallbackDoesNotDeadlock: the emit callback used to run

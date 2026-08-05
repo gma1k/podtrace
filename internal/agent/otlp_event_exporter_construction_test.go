@@ -3,7 +3,7 @@ package agent
 import (
 	"testing"
 
-	"github.com/podtrace/podtrace/pkg/exporter/bundle"
+	"github.com/gma1k/podtrace/pkg/exporter/bundle"
 )
 
 func TestNewOTLPSpanExporter_URLPathSchemeAndSecretHeaders(t *testing.T) {

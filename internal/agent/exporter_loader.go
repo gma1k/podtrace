@@ -10,9 +10,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/podtrace/podtrace/internal/operator"
-	"github.com/podtrace/podtrace/pkg/exporter/bundle"
-	"github.com/podtrace/podtrace/pkg/tracer"
+	"github.com/gma1k/podtrace/internal/operator"
+	"github.com/gma1k/podtrace/pkg/exporter/bundle"
+	"github.com/gma1k/podtrace/pkg/tracer"
 )
 
 // BundlePayload is an alias for bundle.Payload so existing agent callers

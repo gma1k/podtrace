@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/podtrace/podtrace/internal/tracing/context"
+	"github.com/gma1k/podtrace/internal/tracing/context"
 )
 
 const (

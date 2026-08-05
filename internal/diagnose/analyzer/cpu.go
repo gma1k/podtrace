@@ -3,8 +3,8 @@ package analyzer
 import (
 	"sort"
 
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 func AnalyzeCPU(events []*events.Event) (avgBlock, maxBlock float64, p50, p95, p99 float64) {

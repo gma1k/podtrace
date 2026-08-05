@@ -3,7 +3,7 @@ package profiling
 import (
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 func TestMinEventTimestamp_Branches(t *testing.T) {

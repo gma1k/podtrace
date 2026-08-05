@@ -12,7 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
-	"github.com/podtrace/podtrace/internal/alerting"
+	"github.com/gma1k/podtrace/internal/alerting"
 )
 
 func newFakeClient() client.Client {

@@ -7,16 +7,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/alerting"
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/diagnose/analyzer"
-	"github.com/podtrace/podtrace/internal/diagnose/detector"
-	"github.com/podtrace/podtrace/internal/diagnose/formatter"
-	"github.com/podtrace/podtrace/internal/diagnose/profiling"
-	"github.com/podtrace/podtrace/internal/diagnose/tracker"
-	"github.com/podtrace/podtrace/internal/events"
-	"github.com/podtrace/podtrace/internal/safeconv"
-	"github.com/podtrace/podtrace/internal/sanitize"
+	"github.com/gma1k/podtrace/internal/alerting"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/diagnose/analyzer"
+	"github.com/gma1k/podtrace/internal/diagnose/detector"
+	"github.com/gma1k/podtrace/internal/diagnose/formatter"
+	"github.com/gma1k/podtrace/internal/diagnose/profiling"
+	"github.com/gma1k/podtrace/internal/diagnose/tracker"
+	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/safeconv"
+	"github.com/gma1k/podtrace/internal/sanitize"
 )
 
 type Diagnostician interface {

@@ -20,8 +20,8 @@ package v1alpha1
 import (
 	http "net/http"
 
-	apiv1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
-	scheme "github.com/podtrace/podtrace/pkg/client/clientset/versioned/scheme"
+	apiv1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	scheme "github.com/gma1k/podtrace/pkg/client/clientset/versioned/scheme"
 	rest "k8s.io/client-go/rest"
 )
 

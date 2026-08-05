@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/config"
 )
 
 func enableAlerting(t *testing.T) {

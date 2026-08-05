@@ -11,8 +11,8 @@ import (
 	"github.com/cilium/ebpf/link"
 	"go.uber.org/zap"
 
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/logger"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/logger"
 )
 
 // elfIsRust reports whether an ELF was produced by rustc, detected via the

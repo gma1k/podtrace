@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/cri"
-	"github.com/podtrace/podtrace/internal/diagnose"
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/cri"
+	"github.com/gma1k/podtrace/internal/diagnose"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 func TestDiagnostician_RealWorldScenario(t *testing.T) {

@@ -10,12 +10,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/events"
-	"github.com/podtrace/podtrace/internal/hostfs"
-	"github.com/podtrace/podtrace/internal/procfs"
-	"github.com/podtrace/podtrace/internal/safeconv"
-	"github.com/podtrace/podtrace/internal/sanitize"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/hostfs"
+	"github.com/gma1k/podtrace/internal/procfs"
+	"github.com/gma1k/podtrace/internal/safeconv"
+	"github.com/gma1k/podtrace/internal/sanitize"
 )
 
 type Diagnostician interface {

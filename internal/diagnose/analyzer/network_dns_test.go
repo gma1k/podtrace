@@ -3,7 +3,7 @@ package analyzer
 import (
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 // A connect to an IP that podtrace resolved from a name (carried in Details)

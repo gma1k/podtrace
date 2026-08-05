@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 // TestAddEventWithContext_Overflow covers the sampling path in AddEventWithContext

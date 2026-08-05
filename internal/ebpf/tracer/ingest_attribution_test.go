@@ -8,10 +8,10 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/podtrace/podtrace/internal/attribution"
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/ebpf/cache"
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/attribution"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/ebpf/cache"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 // deadPID is a syntactically valid pid that is overwhelmingly unlikely to

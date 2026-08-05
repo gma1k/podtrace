@@ -3,7 +3,7 @@ package analyzer
 import (
 	"fmt"
 
-	"github.com/podtrace/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/config"
 )
 
 // Percentile returns the p-th percentile (0-100) of an ascending-sorted slice
