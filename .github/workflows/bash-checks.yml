@@ -34,7 +34,8 @@ jobs:
             devscripts \
             shfmt \
             python3-pip
-          pip3 install bashate==2.1.1 || echo "bashate installation failed, will skip bashate checks"
+          pip3 install --require-hashes -r .github/requirements-bashate.txt \
+            || echo "bashate installation failed, will skip bashate checks"
 
       - name: Syntax Check
         run: |
