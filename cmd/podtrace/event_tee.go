@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 // teeEvents fans every event from source out to one primary channel plus

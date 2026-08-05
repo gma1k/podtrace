@@ -9,7 +9,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"go.uber.org/zap"
 
-	"github.com/podtrace/podtrace/internal/logger"
+	"github.com/gma1k/podtrace/internal/logger"
 )
 
 // attachUprobeSymbols attaches uprobe+uretprobe pairs for the given symbols

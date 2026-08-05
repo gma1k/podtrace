@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/diagnose/analyzer"
+	"github.com/gma1k/podtrace/internal/diagnose/analyzer"
 )
 
 func TestSectionHeader(t *testing.T) {

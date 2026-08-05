@@ -6,7 +6,7 @@ import (
 
 	"github.com/cilium/ebpf/link"
 
-	"github.com/podtrace/podtrace/internal/ebpf/probes"
+	"github.com/gma1k/podtrace/internal/ebpf/probes"
 )
 
 // fakeLink counts Close calls so the tests can assert single-close

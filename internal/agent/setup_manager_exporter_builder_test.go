@@ -9,7 +9,7 @@ import (
 	crconfig "sigs.k8s.io/controller-runtime/pkg/config"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	"github.com/podtrace/podtrace/pkg/exporter/bundle"
+	"github.com/gma1k/podtrace/pkg/exporter/bundle"
 )
 
 func TestSetupWithManager_DefaultExporterBuilderInvokable(t *testing.T) {

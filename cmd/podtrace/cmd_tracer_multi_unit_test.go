@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/ebpf"
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/ebpf"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 type multiTracer struct {

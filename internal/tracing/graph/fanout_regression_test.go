@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/diagnose/tracker"
+	"github.com/gma1k/podtrace/internal/diagnose/tracker"
 )
 
 // TestBuildFromTraces_FanOutEdges: edges were only created between spans

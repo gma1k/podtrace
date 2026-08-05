@@ -18,10 +18,10 @@ limitations under the License.
 package fake
 
 import (
-	applyconfiguration "github.com/podtrace/podtrace/pkg/client/applyconfiguration"
-	clientset "github.com/podtrace/podtrace/pkg/client/clientset/versioned"
-	podtracev1alpha1 "github.com/podtrace/podtrace/pkg/client/clientset/versioned/typed/api/v1alpha1"
-	fakepodtracev1alpha1 "github.com/podtrace/podtrace/pkg/client/clientset/versioned/typed/api/v1alpha1/fake"
+	applyconfiguration "github.com/gma1k/podtrace/pkg/client/applyconfiguration"
+	clientset "github.com/gma1k/podtrace/pkg/client/clientset/versioned"
+	podtracev1alpha1 "github.com/gma1k/podtrace/pkg/client/clientset/versioned/typed/api/v1alpha1"
+	fakepodtracev1alpha1 "github.com/gma1k/podtrace/pkg/client/clientset/versioned/typed/api/v1alpha1/fake"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"

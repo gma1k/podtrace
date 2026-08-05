@@ -5,8 +5,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/podtrace/podtrace/internal/ebpf/safeelf"
-	"github.com/podtrace/podtrace/internal/logger"
+	"github.com/gma1k/podtrace/internal/ebpf/safeelf"
+	"github.com/gma1k/podtrace/internal/logger"
 )
 
 // The safe-ELF caps and primitives live in internal/ebpf/safeelf, the single

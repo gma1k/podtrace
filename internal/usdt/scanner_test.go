@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/usdt"
+	"github.com/gma1k/podtrace/internal/usdt"
 )
 
 // buildSyntheticELF creates a minimal ELF64 LE binary with a .note.stapsdt

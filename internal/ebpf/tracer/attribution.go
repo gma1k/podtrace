@@ -1,8 +1,8 @@
 package tracer
 
 import (
-	"github.com/podtrace/podtrace/internal/events"
-	"github.com/podtrace/podtrace/internal/metricsexporter"
+	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/metricsexporter"
 )
 
 // Attribution sources reported to podtrace_attribution_total.

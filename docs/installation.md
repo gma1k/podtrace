@@ -218,13 +218,13 @@ Trust chain: sigstore bundle → checksums file → tarball.
 cd $(mktemp -d)
 
 # Pull checksums + sigstore bundle
-for f in checksums.txt checksums.txt.bundle.json; do
+for f in checksums.txt checksums.txt.sigstore.json; do
   curl -fsSLO https://github.com/gma1k/podtrace/releases/latest/download/$f
 done
 
 # Verify the signature was produced by a workflow in gma1k/podtrace
 cosign verify-blob \
-  --bundle checksums.txt.bundle.json \
+  --bundle checksums.txt.sigstore.json \
   --certificate-identity-regexp 'https://github.com/gma1k/podtrace/.+' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   checksums.txt

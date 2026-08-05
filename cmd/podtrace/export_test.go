@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/diagnose"
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/diagnose"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 func TestExportReport_JSON(t *testing.T) {

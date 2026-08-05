@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 // TestDefaultRules_CredentialForms: the default rule set only caught

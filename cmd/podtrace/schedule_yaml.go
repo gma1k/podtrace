@@ -3,7 +3,7 @@ package main
 import (
 	sigsyaml "sigs.k8s.io/yaml"
 
-	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 )
 
 // marshalSessionYAML renders a PodTraceSession to the same shape

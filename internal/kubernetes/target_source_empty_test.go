@@ -3,7 +3,7 @@ package kubernetes_test
 import (
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/kubernetes"
+	"github.com/gma1k/podtrace/internal/kubernetes"
 )
 
 func TestToTracerTargets_EmptyInputReturnsNil(t *testing.T) {

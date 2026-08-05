@@ -7,8 +7,8 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
-	versionedfake "github.com/podtrace/podtrace/pkg/client/clientset/versioned/fake"
+	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	versionedfake "github.com/gma1k/podtrace/pkg/client/clientset/versioned/fake"
 )
 
 // TestClientset_CreateListGet_RoundTrip smoke-tests the generated typed

@@ -5,8 +5,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/ebpf"
-	"github.com/podtrace/podtrace/internal/kubernetes"
+	"github.com/gma1k/podtrace/internal/ebpf"
+	"github.com/gma1k/podtrace/internal/kubernetes"
 )
 
 // TestMain installs fail-closed default factories so no test can ever

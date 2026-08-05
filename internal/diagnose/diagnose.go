@@ -9,15 +9,15 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/diagnose/correlator"
-	"github.com/podtrace/podtrace/internal/diagnose/export"
-	"github.com/podtrace/podtrace/internal/diagnose/profiling"
-	"github.com/podtrace/podtrace/internal/diagnose/report"
-	"github.com/podtrace/podtrace/internal/diagnose/stacktrace"
-	"github.com/podtrace/podtrace/internal/diagnose/tracker"
-	"github.com/podtrace/podtrace/internal/events"
-	"github.com/podtrace/podtrace/internal/logger"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/diagnose/correlator"
+	"github.com/gma1k/podtrace/internal/diagnose/export"
+	"github.com/gma1k/podtrace/internal/diagnose/profiling"
+	"github.com/gma1k/podtrace/internal/diagnose/report"
+	"github.com/gma1k/podtrace/internal/diagnose/stacktrace"
+	"github.com/gma1k/podtrace/internal/diagnose/tracker"
+	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/logger"
 )
 
 func (d *Diagnostician) ExportJSON() ExportData {

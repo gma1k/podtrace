@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/diagnose/analyzer"
-	"github.com/podtrace/podtrace/internal/diagnose/formatter"
-	"github.com/podtrace/podtrace/internal/diagnose/report"
-	"github.com/podtrace/podtrace/internal/diagnose/stacktrace"
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/diagnose/analyzer"
+	"github.com/gma1k/podtrace/internal/diagnose/formatter"
+	"github.com/gma1k/podtrace/internal/diagnose/report"
+	"github.com/gma1k/podtrace/internal/diagnose/stacktrace"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 func TestNewDiagnostician(t *testing.T) {

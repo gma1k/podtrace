@@ -6,7 +6,7 @@ package tracer
 import (
 	"context"
 
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 // Target describes one pod whose traffic the tracer should observe.

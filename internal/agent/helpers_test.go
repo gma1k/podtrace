@@ -3,8 +3,8 @@ package agent
 import (
 	"testing"
 
-	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
-	"github.com/podtrace/podtrace/internal/events"
+	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 // TestFiltersToSet_ExpansionsAreStable is a change-detector for the

@@ -3,7 +3,7 @@ package diagnose
 import (
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 func TestAddEvent_BoundedPastCap(t *testing.T) {

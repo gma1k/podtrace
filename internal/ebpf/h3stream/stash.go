@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/ebpf/h3decode"
+	"github.com/gma1k/podtrace/internal/ebpf/h3decode"
 )
 
 // SectionKey identifies the stream a decoded section belongs to.

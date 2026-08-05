@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/config"
 )
 
 func withBase(t *testing.T, base string) {

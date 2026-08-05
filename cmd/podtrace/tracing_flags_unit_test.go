@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/config"
 	"github.com/spf13/cobra"
 )
 

@@ -14,8 +14,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/podtrace/podtrace/internal/hostfs"
-	"github.com/podtrace/podtrace/internal/reportsink/objectstore"
+	"github.com/gma1k/podtrace/internal/hostfs"
+	"github.com/gma1k/podtrace/internal/reportsink/objectstore"
 )
 
 const envObjectStoreCredentialsDir = "PODTRACE_OBJECTSTORE_CREDENTIALS_DIR"

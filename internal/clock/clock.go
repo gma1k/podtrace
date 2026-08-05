@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/safeconv"
+	"github.com/gma1k/podtrace/internal/safeconv"
 	"golang.org/x/sys/unix"
 )
 

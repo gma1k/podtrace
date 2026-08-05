@@ -3,7 +3,7 @@ package tracer
 import (
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/ebpf/filter"
+	"github.com/gma1k/podtrace/internal/ebpf/filter"
 )
 
 func TestSetContainerIDs_AttachesPerContainer(t *testing.T) {

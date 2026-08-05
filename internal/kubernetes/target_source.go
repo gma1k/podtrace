@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/podtrace/podtrace/pkg/tracer"
+	"github.com/gma1k/podtrace/pkg/tracer"
 )
 
 // TargetSource is a producer of PodInfo snapshots.

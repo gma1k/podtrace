@@ -3,7 +3,7 @@ package agent
 import (
 	"fmt"
 
-	"github.com/podtrace/podtrace/pkg/tracer"
+	"github.com/gma1k/podtrace/pkg/tracer"
 )
 
 // newZipkinEventExporter does not implement direct export to Zipkin's

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/clock"
+	"github.com/gma1k/podtrace/internal/clock"
 )
 
 func TestEvent_Latency(t *testing.T) {

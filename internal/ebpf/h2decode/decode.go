@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/events"
-	"github.com/podtrace/podtrace/internal/safeconv"
+	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/safeconv"
 )
 
 // recordHeaderSize is the fixed prefix of struct h2_hdr_record incl. the

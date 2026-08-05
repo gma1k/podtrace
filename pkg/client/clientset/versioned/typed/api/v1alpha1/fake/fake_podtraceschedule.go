@@ -18,9 +18,9 @@ limitations under the License.
 package fake
 
 import (
-	v1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
-	apiv1alpha1 "github.com/podtrace/podtrace/pkg/client/applyconfiguration/api/v1alpha1"
-	typedapiv1alpha1 "github.com/podtrace/podtrace/pkg/client/clientset/versioned/typed/api/v1alpha1"
+	v1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	apiv1alpha1 "github.com/gma1k/podtrace/pkg/client/applyconfiguration/api/v1alpha1"
+	typedapiv1alpha1 "github.com/gma1k/podtrace/pkg/client/clientset/versioned/typed/api/v1alpha1"
 	gentype "k8s.io/client-go/gentype"
 )
 

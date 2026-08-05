@@ -3,7 +3,7 @@ package resource
 import (
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/config"
 )
 
 // TestParseBlkioThrottleBps_RealKernelFormat: the v1 throttle files are

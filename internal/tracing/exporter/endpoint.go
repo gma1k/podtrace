@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/podtrace/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/config"
 )
 
 func validateExporterEndpoint(endpoint, defaultEndpoint string) (string, error) {

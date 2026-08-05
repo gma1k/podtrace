@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 // correlationKey identifies one L7 request across its request and response

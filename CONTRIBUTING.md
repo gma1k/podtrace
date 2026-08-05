@@ -39,15 +39,27 @@ test/                     Integration tests + chainsaw e2e suite
 
 ## Module path vs GitHub repo location
 
-A small but important distinction for contributors:
+The Go module path and the GitHub repo location must agree. `github.com` is one of a
+handful of hosts with a resolution rule built into the go command, so
+`github.com/<owner>/<repo>` always resolves to literally that repository. The
+`go-import` meta tag, the only mechanism that can point an import path elsewhere,
+applies solely to custom domains. There is no way to alias one GitHub path to another.
 
 | Concept | Value | Why it has this value |
 |---|---|---|
-| **Go module path** | `github.com/podtrace/podtrace` | Declared in `go.mod`. Used as the import prefix in every `.go` file. Frozen — changing it would require updating every import statement across the codebase. |
-| **GitHub repo location** | `github.com/gma1k/podtrace` | Where the project actually lives today. Tracks the maintainer's account. |
+| **Go module path** | `github.com/gma1k/podtrace` | Declared in `go.mod` and used as the import prefix in every `.go` file. Must match the repo location, or the module cannot be fetched by `go get`, `go install`, or pkg.go.dev. |
+| **GitHub repo location** | `github.com/gma1k/podtrace` | Where the project lives. |
 | **Container/chart registry** | `ghcr.io/gma1k/podtrace`, `ghcr.io/gma1k/charts/podtrace` | Tracks the GitHub org. |
 
-If/when podtrace migrates to a `podtrace` GitHub org (or any other location), the GitHub URLs and registry paths change but the **Go module path stays the same**. This is intentional: import statements are stable, repo URLs are not. Don't be surprised when you see `import "github.com/podtrace/podtrace/..."` in code that lives at `github.com/gma1k/podtrace` — they're two different identifiers serving two different purposes.
+If podtrace ever moves to a `podtrace` GitHub org, the module path has to move with
+it: `go.mod`, every import statement, `MODULE` in the `Makefile`, and the `-ldflags`
+paths in the `Dockerfile`. Because that rename breaks every external importer, it
+also needs a major version bump once the project is past v1.
+
+If you want an import path that survives relocation, the only supported way is a
+vanity path such as `podtrace.io/podtrace`, served by a `go-import` meta tag on a
+domain the project controls. That decouples the import path from the host
+permanently, at the cost of the domain becoming load-bearing for every build.
 
 ## Local development
 

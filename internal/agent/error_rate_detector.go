@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/safeconv"
+	"github.com/gma1k/podtrace/internal/safeconv"
 )
 
 // Tunables for the per-CR rolling error-rate detector.

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/diagnose/tracker"
+	"github.com/gma1k/podtrace/internal/diagnose/tracker"
 )
 
 func recordPostPath(t *testing.T) (*httptest.Server, func() string) {

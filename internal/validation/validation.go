@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	config "github.com/podtrace/podtrace/internal/config"
+	config "github.com/gma1k/podtrace/internal/config"
 )
 
 var (

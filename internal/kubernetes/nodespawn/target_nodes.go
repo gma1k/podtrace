@@ -10,8 +10,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	pkgkube "github.com/podtrace/podtrace/internal/kubernetes"
-	"github.com/podtrace/podtrace/internal/logger"
+	pkgkube "github.com/gma1k/podtrace/internal/kubernetes"
+	"github.com/gma1k/podtrace/internal/logger"
 	"go.uber.org/zap"
 )
 

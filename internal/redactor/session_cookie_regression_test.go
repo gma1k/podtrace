@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 func TestDefaultRules_SessionAndAuthHeaders(t *testing.T) {

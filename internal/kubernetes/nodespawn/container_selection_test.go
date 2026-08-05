@@ -9,7 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
-	pkgkube "github.com/podtrace/podtrace/internal/kubernetes"
+	pkgkube "github.com/gma1k/podtrace/internal/kubernetes"
 )
 
 func multiContainerPod() *corev1.Pod {

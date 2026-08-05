@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/events"
-	"github.com/podtrace/podtrace/pkg/tracer"
+	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/pkg/tracer"
 )
 
 // recExp is a per-test exporter that records each event it receives.

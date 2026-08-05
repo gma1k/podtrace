@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/ebpf/cache"
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/ebpf/cache"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 func TestGetProcessCPUTime_TooFewFieldsAfterParen(t *testing.T) {

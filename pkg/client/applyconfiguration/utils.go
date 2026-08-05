@@ -18,9 +18,9 @@ limitations under the License.
 package applyconfiguration
 
 import (
-	v1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
-	apiv1alpha1 "github.com/podtrace/podtrace/pkg/client/applyconfiguration/api/v1alpha1"
-	internal "github.com/podtrace/podtrace/pkg/client/applyconfiguration/internal"
+	v1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	apiv1alpha1 "github.com/gma1k/podtrace/pkg/client/applyconfiguration/api/v1alpha1"
+	internal "github.com/gma1k/podtrace/pkg/client/applyconfiguration/internal"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	managedfields "k8s.io/apimachinery/pkg/util/managedfields"

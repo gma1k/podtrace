@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/hostfs"
-	"github.com/podtrace/podtrace/pkg/exporter/bundle"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/hostfs"
+	"github.com/gma1k/podtrace/pkg/exporter/bundle"
 )
 
 // applyExporterFromFile parses a bundle YAML (typically mounted from an

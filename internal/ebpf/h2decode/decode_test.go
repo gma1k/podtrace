@@ -8,7 +8,7 @@ import (
 
 	"golang.org/x/net/http2/hpack"
 
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 type blockEncoder struct {

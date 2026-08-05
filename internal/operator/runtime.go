@@ -14,8 +14,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
-	webhookv1alpha1 "github.com/podtrace/podtrace/internal/webhook/v1alpha1"
+	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	webhookv1alpha1 "github.com/gma1k/podtrace/internal/webhook/v1alpha1"
 )
 
 type Options struct {

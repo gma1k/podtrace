@@ -9,7 +9,7 @@ import (
 	"github.com/cilium/ebpf/features"
 	"go.uber.org/zap"
 
-	"github.com/podtrace/podtrace/internal/logger"
+	"github.com/gma1k/podtrace/internal/logger"
 )
 
 // skStorageCrossContextResult holds the outcome of the one-shot

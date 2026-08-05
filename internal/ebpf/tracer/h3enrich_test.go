@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/ebpf/h3decode"
-	"github.com/podtrace/podtrace/internal/ebpf/h3stream"
+	"github.com/gma1k/podtrace/internal/ebpf/h3decode"
+	"github.com/gma1k/podtrace/internal/ebpf/h3stream"
 )
 
 func TestH3EnrichOrParkStreamZero(t *testing.T) {

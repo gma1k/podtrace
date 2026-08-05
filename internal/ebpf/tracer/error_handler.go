@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/config"
 )
 
 type ErrorCategory int

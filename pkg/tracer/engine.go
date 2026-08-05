@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 // Config tunes Engine behaviour. Defaults are applied by NewEngine when a

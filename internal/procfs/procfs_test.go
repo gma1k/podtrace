@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/config"
 )
 
 // withProcBase swaps config.ProcBasePath to a tmp tree for the duration

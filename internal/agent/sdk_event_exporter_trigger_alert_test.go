@@ -5,8 +5,8 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/podtrace/podtrace/internal/alerting"
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/alerting"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 func errorRateExporter(threshold int32) *sdkEventExporter {

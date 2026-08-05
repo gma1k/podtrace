@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/kubernetes"
+	"github.com/gma1k/podtrace/internal/kubernetes"
 )
 
 func TestBuildK8sContextMap_NamespaceFromResolvedSource(t *testing.T) {

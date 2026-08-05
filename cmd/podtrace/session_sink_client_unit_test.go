@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/config"
 )
 
 func TestBuildInClusterClient_NoInClusterNoKubeconfig(t *testing.T) {

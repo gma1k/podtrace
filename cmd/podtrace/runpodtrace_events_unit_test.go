@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/ebpf"
-	"github.com/podtrace/podtrace/internal/events"
-	"github.com/podtrace/podtrace/internal/kubernetes"
-	"github.com/podtrace/podtrace/internal/system"
+	"github.com/gma1k/podtrace/internal/ebpf"
+	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/kubernetes"
+	"github.com/gma1k/podtrace/internal/system"
 )
 
 type eventEmittingTracer struct {

@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/config"
 )
 
 func TestLoadPodtrace_ExplicitPathIsStrict(t *testing.T) {

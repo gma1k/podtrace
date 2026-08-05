@@ -8,7 +8,7 @@ import (
 
 	"github.com/cilium/ebpf"
 
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 func TestStackTracesMapDeclaredLRU(t *testing.T) {

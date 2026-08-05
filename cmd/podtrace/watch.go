@@ -18,11 +18,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	sigsyaml "sigs.k8s.io/yaml"
 
-	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/kubernetes"
-	"github.com/podtrace/podtrace/internal/operator"
-	"github.com/podtrace/podtrace/internal/validation"
+	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/kubernetes"
+	"github.com/gma1k/podtrace/internal/operator"
+	"github.com/gma1k/podtrace/internal/validation"
 )
 
 // appNameLabel is the Kubernetes-recommended label that --app targets.

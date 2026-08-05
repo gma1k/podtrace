@@ -28,10 +28,7 @@ on:
         required: false
 
 permissions:
-  contents: write
-  packages: write
-  id-token: write
-  attestations: write
+  contents: read
 
 env:
   REGISTRY: ghcr.io
@@ -45,6 +42,8 @@ env:
 jobs:
   bpf-objects:
     if: ${{ !inputs.olm_bundle_only }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: true
       matrix:
@@ -83,6 +82,11 @@ jobs:
     needs: bpf-objects
     if: (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') && !inputs.olm_bundle_only
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
     outputs:
       digest: ${{ steps.build.outputs.digest }}
       tags: ${{ steps.meta.outputs.tags }}
@@ -157,6 +161,10 @@ jobs:
     if: (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') && !inputs.olm_bundle_only
     runs-on: ubuntu-latest
     needs: image
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     outputs:
       version: ${{ steps.package.outputs.version }}
     steps:
@@ -216,6 +224,8 @@ jobs:
     if: (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') && !inputs.olm_bundle_only
     runs-on: ubuntu-latest
     needs: chart
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
@@ -308,7 +318,7 @@ jobs:
         working-directory: release
         run: |
           cosign sign-blob --yes \
-            --bundle checksums.txt.bundle.json \
+            --bundle checksums.txt.sigstore.json \
             checksums.txt
 
       - name: Attach tarballs + checksums + signature to GitHub Release
@@ -317,7 +327,7 @@ jobs:
           files: |
             release/podtrace_*.tar.gz
             release/checksums.txt
-            release/checksums.txt.bundle.json
+            release/checksums.txt.sigstore.json
           fail_on_unmatched_files: true
           prerelease: ${{ startsWith(github.ref_name, 'test') || contains(github.ref_name, '-') }}
 
@@ -353,6 +363,8 @@ jobs:
         || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') && !startsWith(github.ref_name, 'test'))
       )
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       VERSION: ${{ (github.event_name == 'workflow_dispatch' && inputs.olm_bundle_only) && inputs.version || github.ref_name }}
     steps:

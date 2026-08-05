@@ -11,7 +11,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 
-	pkgkube "github.com/podtrace/podtrace/internal/kubernetes"
+	pkgkube "github.com/gma1k/podtrace/internal/kubernetes"
 )
 
 func newPodForDynamic(ns, name, node string, labels map[string]string) *corev1.Pod {

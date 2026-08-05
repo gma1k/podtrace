@@ -5,8 +5,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/diagnose/tracker"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/diagnose/tracker"
 )
 
 // JaegerExporter ships traces to Jaeger over OTLP/HTTP.

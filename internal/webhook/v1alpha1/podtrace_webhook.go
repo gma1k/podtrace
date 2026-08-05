@@ -7,7 +7,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 )
 
 // +kubebuilder:webhook:path=/validate-podtrace-io-v1alpha1-podtrace,mutating=false,failurePolicy=fail,sideEffects=None,groups=podtrace.io,resources=podtraces,verbs=create;update,versions=v1alpha1,name=vpodtrace.podtrace.io,admissionReviewVersions=v1

@@ -8,7 +8,7 @@ import (
 
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/podtrace/podtrace/internal/kubernetes/nodespawn"
+	"github.com/gma1k/podtrace/internal/kubernetes/nodespawn"
 )
 
 func TestStartWorkstationEventCorrelation_NilClientsetIsNoop(t *testing.T) {

@@ -16,12 +16,12 @@ import (
 	"time"
 
 	"github.com/cilium/ebpf/link"
-	"github.com/podtrace/podtrace/internal/config"
-	"github.com/podtrace/podtrace/internal/ebpf/cache"
-	"github.com/podtrace/podtrace/internal/ebpf/filter"
-	"github.com/podtrace/podtrace/internal/ebpf/probes"
-	"github.com/podtrace/podtrace/internal/events"
-	"github.com/podtrace/podtrace/internal/sysfs"
+	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/ebpf/cache"
+	"github.com/gma1k/podtrace/internal/ebpf/filter"
+	"github.com/gma1k/podtrace/internal/ebpf/probes"
+	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/sysfs"
 )
 
 func useCgroupBase(t *testing.T, dir string) {

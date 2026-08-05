@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"github.com/podtrace/podtrace/pkg/tracer"
+	"github.com/gma1k/podtrace/pkg/tracer"
 )
 
 // newJaegerEventExporter builds a tracer.Exporter that ships per-event

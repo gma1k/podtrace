@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/podtrace/podtrace/internal/events"
-	"github.com/podtrace/podtrace/internal/safeconv"
+	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/safeconv"
 )
 
 // Offsets mirror struct h3_txn_record in bpf/events.h.

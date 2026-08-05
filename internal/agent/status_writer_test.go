@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	podtracev1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
-	"github.com/podtrace/podtrace/internal/events"
+	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 func TestComputeNodeReport_DedupsCgroups(t *testing.T) {

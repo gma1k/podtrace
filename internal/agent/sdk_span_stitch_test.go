@@ -3,8 +3,8 @@ package agent
 import (
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/events"
-	"github.com/podtrace/podtrace/internal/tracing/extractor"
+	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/tracing/extractor"
 )
 
 // newStitchExporter builds a minimal sdkEventExporter exercising only the

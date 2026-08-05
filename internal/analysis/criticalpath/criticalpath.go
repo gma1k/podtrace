@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/events"
-	"github.com/podtrace/podtrace/internal/safeconv"
+	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/safeconv"
 )
 
 // Segment is one contribution to a request's total latency.

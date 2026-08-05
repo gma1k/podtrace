@@ -5,9 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/podtrace/podtrace/internal/events"
-	"github.com/podtrace/podtrace/internal/procfs"
-	"github.com/podtrace/podtrace/internal/validation"
+	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/procfs"
+	"github.com/gma1k/podtrace/internal/validation"
 )
 
 type PidInfo struct {

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/alerting"
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/alerting"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 type failingBPFMap struct{}

@@ -80,12 +80,12 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     go build \
       -trimpath \
       -tags embed_bpf \
-      -ldflags "-s -w -X github.com/podtrace/podtrace/internal/config.Version=${VERSION} -X github.com/podtrace/podtrace/internal/config.Commit=${COMMIT} -X github.com/podtrace/podtrace/internal/config.Image=${IMAGE_REPO}" \
+      -ldflags "-s -w -X github.com/gma1k/podtrace/internal/config.Version=${VERSION} -X github.com/gma1k/podtrace/internal/config.Commit=${COMMIT} -X github.com/gma1k/podtrace/internal/config.Image=${IMAGE_REPO}" \
       -o /out/podtrace \
       ./cmd/podtrace
 
 
-FROM gcr.io/distroless/static-debian12:nonroot AS runtime
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:f5b485ea962d9bd1186b2f6b3a061191539b905b82ec395de78cbfae51f20e35 AS runtime
 
 LABEL org.opencontainers.image.title="podtrace" \
       org.opencontainers.image.description="eBPF-based troubleshooting tool for Kubernetes pods (CLI, agent, operator)" \

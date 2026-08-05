@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/podtrace/podtrace/internal/diagnose/tracker"
+	"github.com/gma1k/podtrace/internal/diagnose/tracker"
 )
 
 // TestJaegerLive_IngestsAndPreservesStructure runs against a REAL Jaeger

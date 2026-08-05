@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/podtrace/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 func TestRouter_Export_EmptyBatchIsNoop(t *testing.T) {

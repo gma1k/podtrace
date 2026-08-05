@@ -67,7 +67,7 @@ jobs:
       - name: Run govulncheck
         timeout-minutes: 5
         run: |
-          GOTOOLCHAIN=auto go install golang.org/x/vuln/cmd/govulncheck@latest
+          GOTOOLCHAIN=auto go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
           GOTOOLCHAIN=auto govulncheck ./...
 
       - name: Build

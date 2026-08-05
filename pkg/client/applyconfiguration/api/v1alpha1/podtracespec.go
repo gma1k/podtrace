@@ -18,7 +18,7 @@ limitations under the License.
 package v1alpha1
 
 import (
-	apiv1alpha1 "github.com/podtrace/podtrace/api/v1alpha1"
+	apiv1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 

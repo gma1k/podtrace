@@ -128,7 +128,7 @@ build: $(BPF_OBJ)
 RELEASE_DIR ?= release
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
-MODULE = github.com/podtrace/podtrace
+MODULE = github.com/gma1k/podtrace
 RELEASE_TARGETS = linux-amd64 linux-arm64 darwin-amd64 darwin-arm64
 
 .PHONY: release release-bpf-objects
@@ -271,16 +271,16 @@ clientset:
 	$(APPLYCONFIGURATION_GEN) \
 	  --go-header-file=$(BOILERPLATE) \
 	  --output-dir=pkg/client/applyconfiguration \
-	  --output-pkg=github.com/podtrace/podtrace/pkg/client/applyconfiguration \
-	  github.com/podtrace/podtrace/api/v1alpha1
+	  --output-pkg=$(MODULE)/pkg/client/applyconfiguration \
+	  $(MODULE)/api/v1alpha1
 	$(CLIENT_GEN) \
 	  --go-header-file=$(BOILERPLATE) \
 	  --clientset-name=versioned \
 	  --input-base="" \
-	  --input=github.com/podtrace/podtrace/api/v1alpha1 \
-	  --apply-configuration-package=github.com/podtrace/podtrace/pkg/client/applyconfiguration \
+	  --input=$(MODULE)/api/v1alpha1 \
+	  --apply-configuration-package=$(MODULE)/pkg/client/applyconfiguration \
 	  --output-dir=pkg/client/clientset \
-	  --output-pkg=github.com/podtrace/podtrace/pkg/client/clientset
+	  --output-pkg=$(MODULE)/pkg/client/clientset
 
 manifests: operator-tools
 	$(CONTROLLER_GEN) crd paths=./api/v1alpha1/... output:crd:artifacts:config=$(CRD_OUT_DIR)
