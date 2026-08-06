@@ -1,0 +1,25 @@
+# Vulnerability exceptions for the Go module in this directory (go.mod).
+#
+# osv-scanner reads this file from the same directory as the manifest it is
+# scanning, and it does not propagate to child directories. The chainsaw test
+# workloads under test/ carry their own go.mod files and are scanned separately.
+
+[[IgnoredVulns]]
+id = "GO-2026-5932"
+ignoreUntil = 2028-08-05
+reason = """
+Advisory that golang.org/x/crypto/openpgp is unmaintained and unsafe by design.
+It has no fixed version (introduced: 0, no fix event), so it cannot be resolved
+by upgrading, and it is raised against the whole golang.org/x/crypto module
+rather than the affected packages.
+
+podtrace does not use any of it. Every import listed on the advisory is under
+golang.org/x/crypto/openpgp, and `go mod why golang.org/x/crypto/openpgp`
+reports "main module does not need package golang.org/x/crypto/openpgp".
+x/crypto is an indirect dependency pulled in for unrelated packages, which is
+why govulncheck, which resolves reachability, reports no finding.
+
+Expires so that the reachability claim gets re-verified rather than assumed
+permanently. Before extending, re-run `go mod why golang.org/x/crypto/openpgp`
+and confirm it still reports that the package is not needed.
+"""

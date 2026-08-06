@@ -1,0 +1,17 @@
+# Hash-pinned install for the bashate linter used by bash-checks.yml.
+#
+# pip's --require-hashes mode demands that every requirement, including
+# transitive ones, is pinned with == and carries a hash. bashate's only
+# dependency is pbr, so the full tree is two entries. Both wheel and sdist
+# hashes are listed so pip can satisfy either.
+#
+# Renovate does not currently watch this file. See the Pinned-Dependencies
+# notes in CONTRIBUTING.md before bumping by hand.
+
+bashate==2.1.1 \
+    --hash=sha256:3104d565a7a0f7ee2cf4028cc584c723a202f52a8ddffe4a39b8cbb0ac5d3e94 \
+    --hash=sha256:4bab6e977f8305a720535f8f93f1fb42c521fcbc4a6c2b3d3d7671f42f221f4c
+
+pbr==7.0.3 \
+    --hash=sha256:ff223894eb1cd271a98076b13d3badff3bb36c424074d26334cd25aebeecea6b \
+    --hash=sha256:b46004ec30a5324672683ec848aed9e8fc500b0d261d40a3229c2d2bbfcedc29
