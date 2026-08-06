@@ -45,19 +45,16 @@ func TestTracerConfigReconciler_EnvtestLifecycle(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() {
-		// Best-effort cleanup for cluster-scoped resources envtest does
-		// not garbage-collect automatically.
-		_ = c.Delete(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: AgentClusterRoleBindingName()}})
-		_ = c.Delete(ctx, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: AgentClusterRoleName()}})
+		_ = c.Delete(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: AgentClusterRoleBindingName(DefaultTracerConfigName)}})
+		_ = c.Delete(ctx, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: AgentClusterRoleName(DefaultTracerConfigName)}})
 	})
 
 	r := &TracerConfigReconciler{Client: c, Scheme: scheme, SystemNamespace: systemNS}
 
-	// --- create ----------------------------------------------------
 	reconcileUntil(t, 10*time.Second,
 		func() error {
 			var ds appsv1.DaemonSet
-			return c.Get(ctx, types.NamespacedName{Name: AgentDaemonSetName(), Namespace: systemNS}, &ds)
+			return c.Get(ctx, types.NamespacedName{Name: AgentDaemonSetName(DefaultTracerConfigName), Namespace: systemNS}, &ds)
 		},
 		func() error {
 			_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: tcObj.Name}})
@@ -66,7 +63,7 @@ func TestTracerConfigReconciler_EnvtestLifecycle(t *testing.T) {
 	)
 
 	var ds appsv1.DaemonSet
-	if err := c.Get(ctx, types.NamespacedName{Name: AgentDaemonSetName(), Namespace: systemNS}, &ds); err != nil {
+	if err := c.Get(ctx, types.NamespacedName{Name: AgentDaemonSetName(DefaultTracerConfigName), Namespace: systemNS}, &ds); err != nil {
 		t.Fatalf("DaemonSet missing: %v", err)
 	}
 	if !ownedByTracerConfig(&ds.ObjectMeta, tcObj.Name) {
@@ -77,7 +74,7 @@ func TestTracerConfigReconciler_EnvtestLifecycle(t *testing.T) {
 	}
 
 	var cr rbacv1.ClusterRole
-	if err := c.Get(ctx, types.NamespacedName{Name: AgentClusterRoleName()}, &cr); err != nil {
+	if err := c.Get(ctx, types.NamespacedName{Name: AgentClusterRoleName(DefaultTracerConfigName)}, &cr); err != nil {
 		t.Fatalf("ClusterRole missing: %v", err)
 	}
 	if !hasRule(&cr, "podtrace.io", "podtraces") {
@@ -85,10 +82,10 @@ func TestTracerConfigReconciler_EnvtestLifecycle(t *testing.T) {
 	}
 
 	var crb rbacv1.ClusterRoleBinding
-	if err := c.Get(ctx, types.NamespacedName{Name: AgentClusterRoleBindingName()}, &crb); err != nil {
+	if err := c.Get(ctx, types.NamespacedName{Name: AgentClusterRoleBindingName(DefaultTracerConfigName)}, &crb); err != nil {
 		t.Fatalf("ClusterRoleBinding missing: %v", err)
 	}
-	if len(crb.Subjects) != 1 || crb.Subjects[0].Name != AgentServiceAccountName() {
+	if len(crb.Subjects) != 1 || crb.Subjects[0].Name != AgentServiceAccountName(DefaultTracerConfigName) {
 		t.Errorf("ClusterRoleBinding subjects wrong: %+v", crb.Subjects)
 	}
 
@@ -97,7 +94,7 @@ func TestTracerConfigReconciler_EnvtestLifecycle(t *testing.T) {
 	}
 
 	var bundleRole rbacv1.Role
-	if err := c.Get(ctx, types.NamespacedName{Name: AgentBundleRoleName(), Namespace: systemNS}, &bundleRole); err != nil {
+	if err := c.Get(ctx, types.NamespacedName{Name: AgentBundleRoleName(DefaultTracerConfigName), Namespace: systemNS}, &bundleRole); err != nil {
 		t.Fatalf("agent bundle Role missing in %s: %v", systemNS, err)
 	}
 	if !ruleHas(bundleRole.Rules, "", "configmaps") || !ruleHas(bundleRole.Rules, "", "secrets") {
@@ -105,22 +102,20 @@ func TestTracerConfigReconciler_EnvtestLifecycle(t *testing.T) {
 	}
 
 	var bundleRB rbacv1.RoleBinding
-	if err := c.Get(ctx, types.NamespacedName{Name: AgentBundleRoleBindingName(), Namespace: systemNS}, &bundleRB); err != nil {
+	if err := c.Get(ctx, types.NamespacedName{Name: AgentBundleRoleBindingName(DefaultTracerConfigName), Namespace: systemNS}, &bundleRB); err != nil {
 		t.Fatalf("agent bundle RoleBinding missing: %v", err)
 	}
-	if bundleRB.RoleRef.Kind != "Role" || bundleRB.RoleRef.Name != AgentBundleRoleName() {
+	if bundleRB.RoleRef.Kind != "Role" || bundleRB.RoleRef.Name != AgentBundleRoleName(DefaultTracerConfigName) {
 		t.Errorf("bundle RoleBinding.roleRef wrong: %+v", bundleRB.RoleRef)
 	}
-	if len(bundleRB.Subjects) != 1 || bundleRB.Subjects[0].Name != AgentServiceAccountName() ||
+	if len(bundleRB.Subjects) != 1 || bundleRB.Subjects[0].Name != AgentServiceAccountName(DefaultTracerConfigName) ||
 		bundleRB.Subjects[0].Namespace != systemNS {
 		t.Errorf("bundle RoleBinding.subjects wrong: %+v", bundleRB.Subjects)
 	}
 
-	// --- delete ---------------------------------------------------
 	if err := c.Delete(ctx, tcObj); err != nil {
 		t.Fatalf("delete TracerConfig: %v", err)
 	}
-	// Post-delete reconcile should be a clean no-op (not-found path).
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: tcObj.Name}}); err != nil {
 		t.Fatalf("post-delete reconcile should be nil: %v", err)
 	}

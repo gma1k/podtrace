@@ -21,12 +21,6 @@ import (
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 )
 
-// These tests drive the error-return branches of the reconcilers and
-// their status helpers — branches a plain fake client can't reach
-// because it never fails. controller-runtime's interceptor support lets
-// us inject a synthetic error from a single client method while
-// delegating every other call to the real underlying WithWatch client.
-
 func errInternal() error {
 	return apierrors.NewInternalError(errors.New("synthetic interceptor failure"))
 }
@@ -39,13 +33,6 @@ func errConflict(resource, name string) error {
 	)
 }
 
-// ─── PodTraceScheduleReconciler ──────────────────────────────────────
-
-// patchStatus conflict: Status().Update returns Conflict -> patchStatus
-// retries it with a fresh read instead of silently dropping the computed
-// status (the old swallow-and-forget behavior lost status.lastScheduleTime,
-// and under ReplaceConcurrent the re-derived tick first deleted the session
-// it had just created).
 func TestErrPath_Schedule_PatchStatusConflictRetried(t *testing.T) {
 	sch := scheduleForErrPaths()
 	s := newOperatorScheme(t)
@@ -84,8 +71,6 @@ func TestErrPath_Schedule_PatchStatusConflictRetried(t *testing.T) {
 	}
 }
 
-// patchStatus non-conflict: Status().Update returns a generic error ->
-// patchStatus wraps it -> Reconcile returns the error.
 func TestErrPath_Schedule_PatchStatusError(t *testing.T) {
 	sch := scheduleForErrPaths()
 	s := newOperatorScheme(t)
@@ -108,8 +93,6 @@ func TestErrPath_Schedule_PatchStatusError(t *testing.T) {
 	}
 }
 
-// listOwnedSessions error: List of child sessions fails -> Reconcile
-// returns the wrapped error early.
 func TestErrPath_Schedule_ListOwnedSessionsError(t *testing.T) {
 	sch := scheduleForErrPaths()
 	s := newOperatorScheme(t)
@@ -139,8 +122,6 @@ func TestErrPath_Schedule_ListOwnedSessionsError(t *testing.T) {
 	}
 }
 
-// gcOldest Delete error: applyHistoryLimits -> gcOldest -> Delete fails
-// with a non-NotFound error -> wrapped error returned.
 func TestErrPath_Schedule_GcOldestDeleteError(t *testing.T) {
 	s := newOperatorScheme(t)
 	c := fake.NewClientBuilder().
@@ -163,8 +144,6 @@ func TestErrPath_Schedule_GcOldestDeleteError(t *testing.T) {
 	}
 }
 
-// Reconcile Get error: a non-NotFound Get failure must propagate as a
-// wrapped error (the NotFound short-circuit is already covered).
 func TestErrPath_Schedule_ReconcileGetError(t *testing.T) {
 	s := newOperatorScheme(t)
 	c := fake.NewClientBuilder().
@@ -185,9 +164,6 @@ func TestErrPath_Schedule_ReconcileGetError(t *testing.T) {
 	}
 }
 
-// ─── PodTraceSessionReconciler ───────────────────────────────────────
-
-// Reconcile Get error: non-NotFound Get failure -> wrapped error.
 func TestErrPath_Session_ReconcileGetError(t *testing.T) {
 	s := newOperatorScheme(t)
 	c := fake.NewClientBuilder().
@@ -208,8 +184,6 @@ func TestErrPath_Session_ReconcileGetError(t *testing.T) {
 	}
 }
 
-// Final Status().Update conflict: a fully-resolving session reaches the
-// terminal Status().Update; a Conflict there must requeue (no error).
 func TestErrPath_Session_FinalStatusUpdateConflictRequeues(t *testing.T) {
 	s := newOperatorScheme(t)
 	session := runnableSession()
@@ -239,7 +213,6 @@ func TestErrPath_Session_FinalStatusUpdateConflictRequeues(t *testing.T) {
 	}
 }
 
-// Final Status().Update generic error: wrapped and returned.
 func TestErrPath_Session_FinalStatusUpdateError(t *testing.T) {
 	s := newOperatorScheme(t)
 	session := runnableSession()
@@ -265,9 +238,6 @@ func TestErrPath_Session_FinalStatusUpdateError(t *testing.T) {
 	}
 }
 
-// nodesAtCapacity List error fans into Reconcile: listing session Jobs
-// fails -> Reconcile returns the wrapped error. Requires a TracerConfig
-// with a non-zero per-node cap so the capacity branch executes.
 func TestErrPath_Session_NodesAtCapacityListError(t *testing.T) {
 	s := newOperatorScheme(t)
 	session := runnableSession()
@@ -300,8 +270,6 @@ func TestErrPath_Session_NodesAtCapacityListError(t *testing.T) {
 	}
 }
 
-// ExporterConfig Get error (non-NotFound) inside session Reconcile ->
-// wrapped error returned.
 func TestErrPath_Session_ExporterGetError(t *testing.T) {
 	s := newOperatorScheme(t)
 	session := runnableSession()
@@ -329,9 +297,6 @@ func TestErrPath_Session_ExporterGetError(t *testing.T) {
 	}
 }
 
-// ─── PodTraceReconciler ──────────────────────────────────────────────
-
-// Reconcile Get error: non-NotFound Get -> wrapped error.
 func TestErrPath_PodTrace_ReconcileGetError(t *testing.T) {
 	s := newOperatorScheme(t)
 	c := fake.NewClientBuilder().
@@ -352,8 +317,6 @@ func TestErrPath_PodTrace_ReconcileGetError(t *testing.T) {
 	}
 }
 
-// syncExporterBundle error: the bundle ConfigMap CreateOrUpdate fails ->
-// Reconcile records BundleSync degraded and requeues (no error, 60s).
 func TestErrPath_PodTrace_SyncExporterBundleError(t *testing.T) {
 	s := newOperatorScheme(t)
 	pt := podTraceWithFinalizer()
@@ -385,7 +348,6 @@ func TestErrPath_PodTrace_SyncExporterBundleError(t *testing.T) {
 	}
 }
 
-// Final Status().Update conflict on the happy path -> requeue, no error.
 func TestErrPath_PodTrace_FinalStatusUpdateConflictRequeues(t *testing.T) {
 	s := newOperatorScheme(t)
 	pt := podTraceWithFinalizer()
@@ -414,7 +376,6 @@ func TestErrPath_PodTrace_FinalStatusUpdateConflictRequeues(t *testing.T) {
 	}
 }
 
-// Final Status().Update generic error -> wrapped error returned.
 func TestErrPath_PodTrace_FinalStatusUpdateError(t *testing.T) {
 	s := newOperatorScheme(t)
 	pt := podTraceWithFinalizer()
@@ -439,9 +400,6 @@ func TestErrPath_PodTrace_FinalStatusUpdateError(t *testing.T) {
 	}
 }
 
-// ─── ExporterConfigReconciler ────────────────────────────────────────
-
-// Reconcile Get error: non-NotFound Get -> wrapped error.
 func TestErrPath_ExporterConfig_ReconcileGetError(t *testing.T) {
 	s := newOperatorScheme(t)
 	c := fake.NewClientBuilder().
@@ -462,8 +420,6 @@ func TestErrPath_ExporterConfig_ReconcileGetError(t *testing.T) {
 	}
 }
 
-// Status().Patch conflict: the EC reconciler uses Status().Patch (not
-// Update); a Conflict there requeues after 1s with no error.
 func TestErrPath_ExporterConfig_StatusPatchConflictRequeues(t *testing.T) {
 	s := newOperatorScheme(t)
 	ec := otlpExporter("ec", "team-a")
@@ -490,7 +446,6 @@ func TestErrPath_ExporterConfig_StatusPatchConflictRequeues(t *testing.T) {
 	}
 }
 
-// Status().Patch generic error -> wrapped error returned.
 func TestErrPath_ExporterConfig_StatusPatchError(t *testing.T) {
 	s := newOperatorScheme(t)
 	ec := otlpExporter("ec", "team-a")
@@ -513,11 +468,6 @@ func TestErrPath_ExporterConfig_StatusPatchError(t *testing.T) {
 	}
 }
 
-// ─── ApplicationTraceReconciler ──────────────────────────────────────
-
-// patchStatus conflict: a transient Conflict is retried with a fresh read
-// and the computed status is persisted — the old behavior swallowed the
-// conflict and silently dropped the entire computed status.
 func TestErrPath_ApplicationTrace_PatchStatusConflictRetried(t *testing.T) {
 	s := newOperatorScheme(t)
 	app := mkApp()
@@ -555,7 +505,6 @@ func TestErrPath_ApplicationTrace_PatchStatusConflictRetried(t *testing.T) {
 	}
 }
 
-// patchStatus generic error -> wrapped error from Reconcile.
 func TestErrPath_ApplicationTrace_PatchStatusError(t *testing.T) {
 	s := newOperatorScheme(t)
 	app := mkApp()
@@ -578,7 +527,6 @@ func TestErrPath_ApplicationTrace_PatchStatusError(t *testing.T) {
 	}
 }
 
-// Reconcile Get error: non-NotFound Get -> wrapped error.
 func TestErrPath_ApplicationTrace_ReconcileGetError(t *testing.T) {
 	s := newOperatorScheme(t)
 	c := fake.NewClientBuilder().
@@ -599,9 +547,6 @@ func TestErrPath_ApplicationTrace_ReconcileGetError(t *testing.T) {
 	}
 }
 
-// ensureChildPodTrace error path: the child-PodTrace CreateOrUpdate fails
-// -> Reconcile sets ChildPodTrace degraded, patches status, then returns
-// the original error.
 func TestErrPath_ApplicationTrace_EnsureChildError(t *testing.T) {
 	s := newOperatorScheme(t)
 	app := mkApp()
@@ -627,9 +572,6 @@ func TestErrPath_ApplicationTrace_EnsureChildError(t *testing.T) {
 	}
 }
 
-// ─── TracerConfigReconciler ──────────────────────────────────────────
-
-// Reconcile Get error: non-NotFound Get -> wrapped error.
 func TestErrPath_TracerConfig_ReconcileGetError(t *testing.T) {
 	s := newOperatorScheme(t)
 	c := fake.NewClientBuilder().
@@ -650,8 +592,6 @@ func TestErrPath_TracerConfig_ReconcileGetError(t *testing.T) {
 	}
 }
 
-// ensureAgentRBAC error: the first Create (ServiceAccount) fails ->
-// Reconcile sets RBACError degraded and returns the error.
 func TestErrPath_TracerConfig_RBACCreateError(t *testing.T) {
 	s := newOperatorScheme(t)
 	tc := &podtracev1alpha1.TracerConfig{
@@ -680,8 +620,6 @@ func TestErrPath_TracerConfig_RBACCreateError(t *testing.T) {
 	}
 }
 
-// ensureAgentDaemonSet error: RBAC succeeds, but the DaemonSet Create
-// fails -> DaemonSetError degraded and error returned.
 func TestErrPath_TracerConfig_DaemonSetCreateError(t *testing.T) {
 	s := newOperatorScheme(t)
 	tc := &podtracev1alpha1.TracerConfig{
@@ -710,9 +648,6 @@ func TestErrPath_TracerConfig_DaemonSetCreateError(t *testing.T) {
 	}
 }
 
-// ensureAgentDaemonSet conflict: a Conflict from the DaemonSet
-// CreateOrUpdate requeues silently (no error). We inject the conflict on
-// the DaemonSet Create so RBAC creation still succeeds first.
 func TestErrPath_TracerConfig_DaemonSetConflictRequeues(t *testing.T) {
 	s := newOperatorScheme(t)
 	tc := &podtracev1alpha1.TracerConfig{
@@ -726,7 +661,7 @@ func TestErrPath_TracerConfig_DaemonSetConflictRequeues(t *testing.T) {
 		WithInterceptorFuncs(interceptor.Funcs{
 			Create: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
 				if _, ok := obj.(*appsv1.DaemonSet); ok {
-					return errConflict("daemonsets", AgentDaemonSetName())
+					return errConflict("daemonsets", AgentDaemonSetName(DefaultTracerConfigName))
 				}
 				return cl.Create(ctx, obj, opts...)
 			},
@@ -745,8 +680,6 @@ func TestErrPath_TracerConfig_DaemonSetConflictRequeues(t *testing.T) {
 	}
 }
 
-// Final Status().Update conflict: RBAC + DaemonSet succeed, the terminal
-// status update conflicts -> requeue, no error.
 func TestErrPath_TracerConfig_FinalStatusUpdateConflictRequeues(t *testing.T) {
 	s := newOperatorScheme(t)
 	tc := &podtracev1alpha1.TracerConfig{
@@ -776,7 +709,6 @@ func TestErrPath_TracerConfig_FinalStatusUpdateConflictRequeues(t *testing.T) {
 	}
 }
 
-// Final Status().Update generic error -> wrapped error returned.
 func TestErrPath_TracerConfig_FinalStatusUpdateError(t *testing.T) {
 	s := newOperatorScheme(t)
 	tc := &podtracev1alpha1.TracerConfig{
@@ -802,10 +734,6 @@ func TestErrPath_TracerConfig_FinalStatusUpdateError(t *testing.T) {
 	}
 }
 
-// ─── shared builders for these error-path tests ──────────────────────
-
-// scheduleForErrPaths returns a valid schedule that, with fixedScheduleNow,
-// reaches the create-session + patchStatus path of Reconcile.
 func scheduleForErrPaths() *podtracev1alpha1.PodTraceSchedule {
 	return &podtracev1alpha1.PodTraceSchedule{
 		ObjectMeta: metav1.ObjectMeta{
@@ -835,9 +763,6 @@ func completedSession(name string, completedAt time.Time) podtracev1alpha1.PodTr
 	}
 }
 
-// runnableSession returns a session past the finalizer-set requeue (the
-// cleanup finalizer is already present) so Reconcile proceeds to the
-// fan-out and final status update.
 func runnableSession() *podtracev1alpha1.PodTraceSession {
 	return &podtracev1alpha1.PodTraceSession{
 		ObjectMeta: metav1.ObjectMeta{
@@ -873,8 +798,6 @@ func otlpExporter(name, ns string) *podtracev1alpha1.ExporterConfig {
 	}
 }
 
-// podTraceWithFinalizer returns a PodTrace past the finalizer-set
-// requeue so Reconcile proceeds to syncExporterBundle + status update.
 func podTraceWithFinalizer() *podtracev1alpha1.PodTrace {
 	return &podtracev1alpha1.PodTrace{
 		ObjectMeta: metav1.ObjectMeta{

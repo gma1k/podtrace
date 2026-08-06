@@ -120,8 +120,9 @@ type SessionRuntimeSpec struct {
 	SidecarUploader bool `json:"sidecarUploader,omitempty"`
 }
 
-// TracerConfigSpec configures the tracer infrastructure. It is cluster-scoped
-// because it governs a fleet-wide DaemonSet and the Jobs the operator spawns.
+// MaxTracerConfigNameLength bounds a TracerConfig's metadata.name.
+const MaxTracerConfigNameLength = 63
+
 type TracerConfigSpec struct {
 	// +kubebuilder:validation:Required
 	Image string `json:"image"`
@@ -162,6 +163,9 @@ type TracerConfigSpec struct {
 
 	// +optional
 	SystemNamespace string `json:"systemNamespace,omitempty"`
+
+	// +optional
+	Priority int32 `json:"priority,omitempty"`
 }
 
 // TracerConfigStatus reflects the observed state of a TracerConfig.
@@ -171,6 +175,10 @@ type TracerConfigStatus struct {
 	ReadyAgents int32 `json:"readyAgents,omitempty"`
 
 	ActiveSessions int32 `json:"activeSessions,omitempty"`
+
+	MatchedNodes int32 `json:"matchedNodes,omitempty"`
+
+	ContestedNodes int32 `json:"contestedNodes,omitempty"`
 
 	// +optional
 	// +patchMergeKey=type
@@ -191,11 +199,12 @@ type TracerConfigStatus struct {
 // +kubebuilder:printcolumn:name="Desired",type=integer,JSONPath=`.status.desiredAgents`
 // +kubebuilder:printcolumn:name="Ready",type=integer,JSONPath=`.status.readyAgents`
 // +kubebuilder:printcolumn:name="Sessions",type=integer,JSONPath=`.status.activeSessions`
+// +kubebuilder:printcolumn:name="Contested",type=integer,priority=1,JSONPath=`.status.contestedNodes`
 // +kubebuilder:printcolumn:name="Image",type=string,priority=1,JSONPath=`.spec.image`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// TracerConfig is the cluster-wide infrastructure configuration for the
-// podtrace operator.
+// TracerConfig is the infrastructure configuration for one podtrace agent
+// fleet.
 type TracerConfig struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

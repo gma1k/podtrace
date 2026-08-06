@@ -54,7 +54,7 @@ Three reconcilers, each owning one CRD:
 
 | CRD | Scope | Purpose | Doc |
 |---|---|---|---|
-| [`TracerConfig`](crd-tracerconfig.md) | Cluster | Image, agent runtime defaults, session caps. One per cluster, named `default`. | crd-tracerconfig.md |
+| [`TracerConfig`](crd-tracerconfig.md) | Cluster | Image, agent runtime defaults, session caps. One agent fleet each; usually a single `default`, optionally one per node pool. | crd-tracerconfig.md |
 | [`ExporterConfig`](crd-exporterconfig.md) | Namespace | Reusable exporter destination (OTLP, Jaeger, Zipkin, Splunk, DataDog). | crd-exporterconfig.md |
 | [`PodTrace`](crd-podtrace.md) | Namespace | Continuous tracing of pods matching a selector. | crd-podtrace.md |
 | [`PodTraceSession`](crd-podtracesession.md) | Namespace | Bounded diagnose-mode trace producing a report artifact. | crd-podtracesession.md |

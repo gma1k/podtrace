@@ -16,6 +16,7 @@ import (
 type Metrics struct {
 	registry *prometheus.Registry
 
+	AgentInfo       *prometheus.GaugeVec
 	EventsExported  *prometheus.CounterVec
 	EventsDropped   *prometheus.CounterVec
 	ActiveCgroups   *prometheus.GaugeVec
@@ -65,6 +66,13 @@ func NewMetrics() *Metrics {
 	reg := prometheus.NewRegistry()
 	m := &Metrics{
 		registry: reg,
+		AgentInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: "podtrace_agent",
+			Name:      "info",
+			Help: "Constant 1, labelled with the node this agent runs on and the TracerConfig whose fleet it belongs to. " +
+				"A cluster may run several agent fleets; `count by (node) (podtrace_agent_info) > 1` means two fleets " +
+				"claim the same node, so every event there is exported once per fleet.",
+		}, []string{"node", "tracer_config"}),
 		EventsExported: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "podtrace_agent",
 			Name:      "events_exported_total",
@@ -176,6 +184,7 @@ func NewMetrics() *Metrics {
 		exporterInitLastOK: map[CRKey]bool{},
 	}
 	reg.MustRegister(
+		m.AgentInfo,
 		m.EventsExported, m.EventsDropped, m.ActiveCgroups, m.ActiveCRs,
 		m.ReconcileTotal, m.BackendDegraded, m.CgroupsAttached, m.CgroupsDetached,
 		m.EnrichmentLookups, m.EnrichmentCacheSize, m.EnrichmentSnapshots,
@@ -186,6 +195,15 @@ func NewMetrics() *Metrics {
 		m.SpansBatched, m.SpansDelivered,
 	)
 	return m
+}
+
+// SetIdentity publishes which node this agent runs on and which fleet it
+// belongs to, so a scrape can tell two overlapping fleets apart.
+func (m *Metrics) SetIdentity(node, tracerConfig string) {
+	if m == nil || m.AgentInfo == nil {
+		return
+	}
+	m.AgentInfo.WithLabelValues(node, tracerConfig).Set(1)
 }
 
 // ObserveExportDelivery records the outcome of one exporter ExportSpans

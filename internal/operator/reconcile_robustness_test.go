@@ -6,8 +6,10 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -116,7 +118,7 @@ func TestSessionValidationFailureIsTerminalAndGCable(t *testing.T) {
 	}
 }
 
-func TestNonDefaultTracerConfigIsInert(t *testing.T) {
+func TestNonDefaultTracerConfigBuildsItsOwnFleet(t *testing.T) {
 	scheme := newOperatorScheme(t)
 	tc := &podtracev1alpha1.TracerConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "secondary"},
@@ -133,18 +135,35 @@ func TestNonDefaultTracerConfigIsInert(t *testing.T) {
 		t.Fatalf("non-default TracerConfig must reconcile without error, got %v", err)
 	}
 
+	ctx := context.Background()
+	var ds appsv1.DaemonSet
+	if err := c.Get(ctx, types.NamespacedName{
+		Name: "podtrace-agent-secondary", Namespace: "podtrace-system",
+	}, &ds); err != nil {
+		t.Fatalf("non-default TracerConfig must own a suffixed DaemonSet: %v", err)
+	}
+	if got := ds.Labels[LabelTracerConfig]; got != "secondary" {
+		t.Errorf("DaemonSet %s label = %q, want %q", LabelTracerConfig, got, "secondary")
+	}
+	if got := ds.Spec.Template.Spec.ServiceAccountName; got != "podtrace-agent-secondary" {
+		t.Errorf("serviceAccountName = %q, want podtrace-agent-secondary", got)
+	}
+
+	var legacy appsv1.DaemonSet
+	if err := c.Get(ctx, types.NamespacedName{
+		Name: "podtrace-agent", Namespace: "podtrace-system",
+	}, &legacy); !apierrors.IsNotFound(err) {
+		t.Errorf("a non-default config must not claim the legacy unsuffixed name, got err=%v", err)
+	}
+
 	var got podtracev1alpha1.TracerConfig
-	if err := c.Get(context.Background(), types.NamespacedName{Name: "secondary"}, &got); err != nil {
+	if err := c.Get(ctx, types.NamespacedName{Name: "secondary"}, &got); err != nil {
 		t.Fatal(err)
 	}
-	found := false
 	for _, cond := range got.Status.Conditions {
-		if cond.Type == ConditionDegraded && cond.Reason == "NotDefaultTracerConfig" {
-			found = true
+		if cond.Type == ConditionDegraded && cond.Status == metav1.ConditionTrue {
+			t.Errorf("non-default config must not be Degraded: %+v", cond)
 		}
-	}
-	if !found {
-		t.Errorf("expected Degraded/NotDefaultTracerConfig condition, got %+v", got.Status.Conditions)
 	}
 }
 

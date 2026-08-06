@@ -60,19 +60,19 @@ func TestTC_CleanupStaleAgentNamespaces_DeletesOtherNamespaces(t *testing.T) {
 	const current, stale = "podtrace-system", "old-ns"
 
 	staleObjs := []client.Object{
-		&appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: AgentDaemonSetName(), Namespace: stale, Labels: agentLabels}},
-		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: AgentServiceAccountName(), Namespace: stale, Labels: agentLabels}},
-		&rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: AgentBundleRoleName(), Namespace: stale, Labels: agentLabels}},
-		&rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: AgentBundleRoleBindingName(), Namespace: stale, Labels: agentLabels}},
+		&appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: AgentDaemonSetName(DefaultTracerConfigName), Namespace: stale, Labels: agentLabels}},
+		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: AgentServiceAccountName(DefaultTracerConfigName), Namespace: stale, Labels: agentLabels}},
+		&rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: AgentBundleRoleName(DefaultTracerConfigName), Namespace: stale, Labels: agentLabels}},
+		&rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: AgentBundleRoleBindingName(DefaultTracerConfigName), Namespace: stale, Labels: agentLabels}},
 	}
 	currentObjs := []client.Object{
-		&appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: AgentDaemonSetName(), Namespace: current, Labels: agentLabels}},
-		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: AgentServiceAccountName(), Namespace: current, Labels: agentLabels}},
+		&appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: AgentDaemonSetName(DefaultTracerConfigName), Namespace: current, Labels: agentLabels}},
+		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: AgentServiceAccountName(DefaultTracerConfigName), Namespace: current, Labels: agentLabels}},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(append(staleObjs, currentObjs...)...).Build()
 	r := &TracerConfigReconciler{Client: c, Scheme: scheme, SystemNamespace: current}
 
-	if err := r.cleanupStaleAgentNamespaces(context.Background(), current); err != nil {
+	if err := r.cleanupStaleAgentObjects(context.Background(), DefaultTracerConfigName, current); err != nil {
 		t.Fatalf("cleanupStaleAgentNamespaces: %v", err)
 	}
 
@@ -84,7 +84,7 @@ func TestTC_CleanupStaleAgentNamespaces_DeletesOtherNamespaces(t *testing.T) {
 	}
 
 	var ds appsv1.DaemonSet
-	if err := c.Get(ctx, types.NamespacedName{Name: AgentDaemonSetName(), Namespace: current}, &ds); err != nil {
+	if err := c.Get(ctx, types.NamespacedName{Name: AgentDaemonSetName(DefaultTracerConfigName), Namespace: current}, &ds); err != nil {
 		t.Errorf("current DaemonSet must survive: %v", err)
 	}
 }
@@ -112,7 +112,7 @@ func TestTC_CleanupStaleAgentNamespaces_ListErrors(t *testing.T) {
 					},
 				}).Build()
 			r := &TracerConfigReconciler{Client: c, Scheme: scheme}
-			if err := r.cleanupStaleAgentNamespaces(context.Background(), "podtrace-system"); err == nil {
+			if err := r.cleanupStaleAgentObjects(context.Background(), DefaultTracerConfigName, "podtrace-system"); err == nil {
 				t.Fatalf("expected error when listing %s fails", tc.name)
 			}
 		})
@@ -179,7 +179,7 @@ func TestTC_Reconcile_BTFModeEmbedded(t *testing.T) {
 		t.Errorf("ObservedGeneration = %d, want 3", got.Status.ObservedGeneration)
 	}
 	var ds appsv1.DaemonSet
-	if err := c.Get(context.Background(), types.NamespacedName{Name: AgentDaemonSetName(), Namespace: "podtrace-system"}, &ds); err != nil {
+	if err := c.Get(context.Background(), types.NamespacedName{Name: AgentDaemonSetName(DefaultTracerConfigName), Namespace: "podtrace-system"}, &ds); err != nil {
 		t.Errorf("agent DaemonSet not created: %v", err)
 	}
 }
