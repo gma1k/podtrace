@@ -44,6 +44,8 @@ jobs:
     if: ${{ !inputs.olm_bundle_only }}
     permissions:
       contents: read
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: true
       matrix:
@@ -71,10 +73,23 @@ jobs:
             echo "ERROR: ${{ matrix.goarch }} object fell back to the stub (vmlinux.h=$lines lines); a native runner must have full BTF" >&2
             exit 1
           fi
+      - name: Attest the BPF object
+        id: attest_bpf
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: internal/ebpf/embedded/podtrace.${{ matrix.goarch }}.bpf.o
+
+      - name: Stage the bundle beside the object
+        run: |
+          cp "${{ steps.attest_bpf.outputs.bundle-path }}" \
+            "internal/ebpf/embedded/podtrace.${{ matrix.goarch }}.bpf.o.sigstore.json"
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: bpf-object-${{ matrix.goarch }}
-          path: internal/ebpf/embedded/podtrace.${{ matrix.goarch }}.bpf.o
+          path: |
+            internal/ebpf/embedded/podtrace.${{ matrix.goarch }}.bpf.o
+            internal/ebpf/embedded/podtrace.${{ matrix.goarch }}.bpf.o.sigstore.json
           if-no-files-found: error
           retention-days: 1
 
@@ -109,6 +124,9 @@ jobs:
           pattern: bpf-object-*
           path: internal/ebpf/embedded
           merge-multiple: true
+
+      - name: Verify the staged BPF objects
+        uses: ./.github/actions/verify-bpf-objects
 
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
         with:
@@ -157,6 +175,13 @@ jobs:
             cosign sign --yes "${t}@${DIGEST}"
           done
 
+      - name: Attest the image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
   chart:
     if: (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') && !inputs.olm_bundle_only
     runs-on: ubuntu-latest
@@ -165,6 +190,7 @@ jobs:
       contents: read
       packages: write
       id-token: write
+      attestations: write
     outputs:
       version: ${{ steps.package.outputs.version }}
     steps:
@@ -207,6 +233,13 @@ jobs:
           cosign sign --yes \
             "${{ env.CHART_REPO }}/podtrace@${{ steps.package.outputs.digest }}"
 
+      - name: Attest the chart
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-name: ${{ env.CHART_REPO }}/podtrace
+          subject-digest: ${{ steps.package.outputs.digest }}
+          push-to-registry: true
+
       - uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d  # v2.0.1
         with:
           version: 1.3.1
@@ -226,6 +259,8 @@ jobs:
     needs: chart
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
@@ -261,6 +296,17 @@ jobs:
           sha256sum quickstart.yaml > quickstart.yaml.sha256
           sha256sum quickstart-demo.yaml > quickstart-demo.yaml.sha256
 
+      - name: Attest the rendered manifests
+        id: attest_quickstart
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: |
+            dist/quickstart.yaml
+            dist/quickstart-demo.yaml
+
+      - name: Stage the attestation bundle for release
+        run: cp "${{ steps.attest_quickstart.outputs.bundle-path }}" dist/quickstart.sigstore.json
+
       - name: Attach to GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228  # v3.0.2
         with:
@@ -269,6 +315,7 @@ jobs:
             dist/quickstart.yaml.sha256
             dist/quickstart-demo.yaml
             dist/quickstart-demo.yaml.sha256
+            dist/quickstart.sigstore.json
           fail_on_unmatched_files: true
 
   cli:
@@ -278,6 +325,7 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -307,6 +355,9 @@ jobs:
           path: internal/ebpf/embedded
           merge-multiple: true
 
+      - name: Verify the staged BPF objects
+        uses: ./.github/actions/verify-bpf-objects
+
       - name: Build CLI tarballs (linux+darwin x amd64+arm64)
         run: make release VERSION=${{ github.ref_name }}
 
@@ -321,6 +372,18 @@ jobs:
             --bundle checksums.txt.sigstore.json \
             checksums.txt
 
+      # Attest the tarballs themselves, not checksums.txt, so that
+      # `gh attestation verify podtrace_linux_amd64.tar.gz` is a one-step check
+      # instead of "verify the checksum file, then hand-match the hash".
+      - name: Attest the CLI tarballs
+        id: attest_cli
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: release/podtrace_*.tar.gz
+
+      - name: Stage the attestation bundle for release
+        run: cp "${{ steps.attest_cli.outputs.bundle-path }}" release/podtrace.sigstore.json
+
       - name: Attach tarballs + checksums + signature to GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228  # v3.0.2
         with:
@@ -328,6 +391,7 @@ jobs:
             release/podtrace_*.tar.gz
             release/checksums.txt
             release/checksums.txt.sigstore.json
+            release/podtrace.sigstore.json
           fail_on_unmatched_files: true
           prerelease: ${{ startsWith(github.ref_name, 'test') || contains(github.ref_name, '-') }}
 

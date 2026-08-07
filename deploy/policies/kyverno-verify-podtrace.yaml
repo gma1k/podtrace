@@ -1,0 +1,89 @@
+# Admission policy: refuse to run a podtrace image that is not signed by the
+# podtrace release workflow and does not carry SLSA build provenance for this
+# repository.
+#
+# Podtrace runs as a privileged DaemonSet and loads eBPF programs into the
+# kernel, so "where did this image come from" is worth enforcing rather than
+# documenting. Adjust the namespace selector to wherever you install it.
+#
+# Requires Kyverno v1.11+.
+#   kubectl apply -f https://raw.githubusercontent.com/gma1k/podtrace/main/deploy/policies/kyverno-verify-podtrace.yaml
+#
+# Two notes that decide whether this actually works:
+#
+#   1. Kyverno resolves attestations as OCI referrers from the registry. It
+#      cannot read the GitHub attestations API. The release workflow publishes
+#      with push-to-registry: true for exactly this reason.
+#
+#   2. A podtrace image carries two provenance predicates: BuildKit emits
+#      slsa.dev/provenance/v0.2 from the mode=max build, and the release
+#      workflow attests slsa.dev/provenance/v1. This policy pins v1, whose
+#      signature chains to the GitHub Actions OIDC identity below. Matching
+#      loosely on predicate type will pick up whichever arrives first.
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-podtrace-provenance
+  annotations:
+    policies.kyverno.io/title: Verify podtrace image provenance
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Verifies that every podtrace image admitted to the cluster carries a
+      keyless cosign signature and SLSA v1 build provenance produced by the
+      release workflow in gma1k/podtrace, from a tag ref.
+spec:
+  validationFailureAction: Enforce
+  background: false
+  failurePolicy: Fail
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: verify-podtrace-image
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - podtrace-system
+      verifyImages:
+        - imageReferences:
+            - "ghcr.io/gma1k/podtrace:*"
+            - "ghcr.io/gma1k/podtrace@sha256:*"
+          mutateDigest: true
+          verifyDigest: true
+          required: true
+
+          attestors:
+            - count: 1
+              entries:
+                - keyless:
+                    subject: "https://github.com/gma1k/podtrace/.github/workflows/release.yml@refs/tags/*"
+                    issuer: "https://token.actions.githubusercontent.com"
+                    rekor:
+                      url: https://rekor.sigstore.dev
+
+          attestations:
+            - type: https://slsa.dev/provenance/v1
+              attestors:
+                - count: 1
+                  entries:
+                    - keyless:
+                        subject: "https://github.com/gma1k/podtrace/.github/workflows/release.yml@refs/tags/*"
+                        issuer: "https://token.actions.githubusercontent.com"
+                        rekor:
+                          url: https://rekor.sigstore.dev
+              conditions:
+                - all:
+                    - key: "{{ buildDefinition.externalParameters.workflow.repository }}"
+                      operator: Equals
+                      value: "https://github.com/gma1k/podtrace"
+                    - key: "{{ buildDefinition.externalParameters.workflow.path }}"
+                      operator: Equals
+                      value: ".github/workflows/release.yml"
+                    - key: "{{ buildDefinition.externalParameters.workflow.ref }}"
+                      operator: AnyIn
+                      value:
+                        - "refs/tags/*"

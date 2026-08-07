@@ -106,11 +106,20 @@ default `TracerConfig`. See [operator.md](operator.md) for what each
 piece does, and the [chart values reference](../deploy/charts/podtrace/values.yaml)
 for available overrides.
 
-### Verifying signatures (cosign keyless)
+### Verifying signatures and provenance
 
-Every released image, chart, and CLI tarball is signed via cosign
-keyless OIDC, recorded in the public Rekor transparency log. Verify
-before running:
+Every released image, chart, CLI tarball, and quickstart manifest is signed
+via cosign keyless OIDC and carries SLSA v1.0 Build L2 provenance, both
+recorded in the public Rekor transparency log. Verify before running:
+
+```bash
+gh attestation verify oci://ghcr.io/gma1k/podtrace:latest \
+  --repo gma1k/podtrace \
+  --signer-workflow gma1k/podtrace/.github/workflows/release.yml
+```
+
+That checks in one step that the image was built by the release workflow in
+this repository. To check the cosign signature specifically:
 
 ```bash
 # x-release-please-version
@@ -119,7 +128,7 @@ cosign verify ghcr.io/gma1k/podtrace:0.11.0 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-The image also ships an SBOM and SLSA provenance attestation:
+The image also ships an SBOM:
 
 ```bash
 # x-release-please-version
@@ -127,16 +136,28 @@ cosign download attestation ghcr.io/gma1k/podtrace:0.11.0 \
   --predicate-type https://spdx.dev/Document | jq .
 ```
 
-Both quickstart manifests ship with `.sha256` companions for integrity verification:
+Both quickstart manifests are attested. Download the bundle from the release
+and verify offline:
 
 ```bash
 cd $(mktemp -d)
-curl -fsSLO https://github.com/gma1k/podtrace/releases/latest/download/quickstart.yaml
-curl -fsSLO https://github.com/gma1k/podtrace/releases/latest/download/quickstart.yaml.sha256
-curl -fsSLO https://github.com/gma1k/podtrace/releases/latest/download/quickstart-demo.yaml
-curl -fsSLO https://github.com/gma1k/podtrace/releases/latest/download/quickstart-demo.yaml.sha256
-sha256sum -c quickstart.yaml.sha256 quickstart-demo.yaml.sha256
+for f in quickstart.yaml quickstart-demo.yaml quickstart.sigstore.json; do
+  curl -fsSLO "https://github.com/gma1k/podtrace/releases/latest/download/$f"
+done
+
+gh attestation verify quickstart.yaml \
+  --bundle quickstart.sigstore.json \
+  --repo gma1k/podtrace \
+  --signer-workflow gma1k/podtrace/.github/workflows/release.yml
 ```
+
+The `.sha256` companions are still published for scripts that consume them,
+but note that a checksum served from the same release page as the file it
+describes proves nothing about origin — use the attestation for that.
+
+To enforce provenance at admission time rather than checking it by hand, see
+[supply-chain.md](supply-chain.md) for a Kyverno policy, the full artifact
+coverage table, and what the L2 claim does and does not cover.
 
 ### Install the CLI
 
@@ -208,11 +229,27 @@ kubectl krew upgrade podtrace
 >   `make build` + `./scripts/setup-capabilities.sh` does the same for
 >   source builds.
 
-#### Verify the tarball signature (cosign keyless + sha256sum)
+#### Verify the tarball
 
-The release pipeline signs `checksums.txt` via cosign keyless and
+The tarballs are attested directly, so a single command establishes that the
+one you downloaded was built by the release workflow in this repository:
+
+```bash
+cd $(mktemp -d)
+curl -fsSLO https://github.com/gma1k/podtrace/releases/latest/download/podtrace_linux_amd64.tar.gz
+
+gh attestation verify podtrace_linux_amd64.tar.gz \
+  --repo gma1k/podtrace \
+  --signer-workflow gma1k/podtrace/.github/workflows/release.yml
+```
+
+##### Alternative: cosign keyless + sha256sum
+
+The release pipeline also signs `checksums.txt` via cosign keyless and
 records the signing event in the [public Rekor transparency log](https://search.sigstore.dev/).
-Trust chain: sigstore bundle → checksums file → tarball.
+Trust chain: sigstore bundle → checksums file → tarball. This route takes two
+steps because the signature covers the checksum file rather than the tarball,
+but it needs only `cosign`, not `gh`.
 
 ```bash
 cd $(mktemp -d)
