@@ -68,17 +68,6 @@ spec:
           metadata:
             type: object
           spec:
-            description: |-
-              TracerConfigSpec configures one tracer fleet: an agent DaemonSet, its
-              RBAC, and the template for the session Jobs the operator spawns. It is
-              cluster-scoped because it governs node-level infrastructure.
-
-              A cluster may hold several TracerConfigs — one per node pool, say, each
-              with its own image, resource envelope, or capture policy. Each one owns a
-              separate DaemonSet; the config named "default" keeps the unsuffixed
-              legacy object names so single-config clusters upgrade in place. Configs
-              are expected to select disjoint node sets: see spec.priority for what
-              happens when they do not.
             properties:
               affinity:
                 description: Affinity is a group of affinity scheduling rules.
@@ -1140,16 +1129,6 @@ spec:
                   type: string
                 type: object
               priority:
-                description: |-
-                  Priority orders TracerConfigs when more than one of them targets the
-                  same node; the highest priority wins, ties broken by the older
-                  creationTimestamp and then by name.
-
-                  The operator does not currently enforce the outcome — both agent
-                  DaemonSets still run on a contested node, which double-counts every
-                  event observed there. Priority determines which config the operator
-                  reports as the winner in the Conflict condition, so overlap is
-                  diagnosable before it is enforced.
                 format: int32
                 type: integer
               redaction:
@@ -1374,21 +1353,12 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               contestedNodes:
-                description: |-
-                  ContestedNodes counts the subset of MatchedNodes that at least one
-                  other TracerConfig also selects. Non-zero means duplicate agents are
-                  running there and events from those nodes are double-counted; see the
-                  Conflict condition for which configs collide.
                 format: int32
                 type: integer
               desiredAgents:
                 format: int32
                 type: integer
               matchedNodes:
-                description: |-
-                  MatchedNodes counts the Nodes this TracerConfig's scheduling
-                  constraints (nodeSelector, required nodeAffinity, tolerations)
-                  select.
                 format: int32
                 type: integer
               observedGeneration:
