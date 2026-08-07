@@ -9,6 +9,7 @@
   <a href="https://ebpf.io/applications/"><img src="https://img.shields.io/badge/eBPF%20Landscape-podtrace-blue" alt="eBPF Landscape"/></a>
   <a href="https://www.bestpractices.dev/projects/12882"><img src="https://www.bestpractices.dev/projects/12882/badge" alt="OpenSSF Best Practices"/></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/gma1k/podtrace"><img src="https://img.shields.io/ossf-scorecard/github.com/gma1k/podtrace?label=openssf%20scorecard" alt="OpenSSF Scorecard"/></a>
+  <a href="https://github.com/gma1k/podtrace/blob/main/docs/supply-chain.md"><img src="https://slsa.dev/images/gh-badge-level2.svg" alt="SLSA Build Level 2"/></a>
   <a href="https://pkg.go.dev/github.com/gma1k/podtrace"><img src="https://pkg.go.dev/badge/github.com/gma1k/podtrace.svg" alt="Go Reference"/></a>  
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0"/></a>
   <a href="https://opensource.org/licenses/GPL-2.0"><img src="https://img.shields.io/badge/BPF%20License-GPL_2.0-blue.svg" alt="BPF License: GPL 2.0"/></a>
@@ -44,6 +45,10 @@ By combining system-level details, application-layer insights, and real-time eve
 Podtrace documentation is available in the [`docs/`](docs/) directory.
 See [ROADMAP.md](ROADMAP.md) for where the project is heading and
 [STABILITY.md](STABILITY.md) for what each version promises.
+
+Podtrace runs privileged and loads eBPF into your kernel, so every release
+artifact ships SLSA v1.0 Build L2 provenance you can verify, and enforce at
+admission time. See [docs/supply-chain.md](docs/supply-chain.md).
 
 ## Three usage patterns
 

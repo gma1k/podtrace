@@ -14,6 +14,7 @@ Welcome to the `Podtrace` documentation. This directory contains comprehensive g
 - **[Event Schema](event-schema.md)** - Binary wire format for BPF ring buffer events
 - **[Development](development.md)** - Development guide, code structure, testing, and contributing
 - **[End-to-end Verification Playbook](e2e-verification.md)** - Manual CLI checks for every operator feature against a real cluster
+- **[Supply Chain Security](supply-chain.md)** - Verifying signatures and SLSA build provenance, enforcing them with Kyverno
 
 ### Operator (CRD-driven workflows)
 - **[Operator](operator.md)** - Operator + agent architecture, helm install, key invariants

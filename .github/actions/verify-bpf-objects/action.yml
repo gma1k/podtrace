@@ -1,0 +1,63 @@
+name: Verify BPF object attestations
+description: |
+  Verify every staged BPF object against the Sigstore bundle that the
+  bpf-objects job published alongside it, then drop the bundles from the
+  build context.
+
+  The objects are compiled in one job and embedded by another, so the
+  hand-off through actions/upload-artifact is the one point where the
+  kernel bytecode we ship could be swapped without touching bpf/. Checking
+  the attestation here binds each object to this workflow, this commit, and
+  a GitHub-hosted runner before it reaches a release artifact.
+
+  Verification is offline against the bundle on disk: an attacker who
+  replaced both object and bundle still cannot produce a GitHub-signed
+  bundle for the substituted digest.
+
+inputs:
+  path:
+    description: Directory holding the staged objects and their bundles.
+    required: false
+    default: internal/ebpf/embedded
+  repo:
+    description: Repository expected in the attestation certificate.
+    required: false
+    default: ${{ github.repository }}
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        VERIFY_PATH: ${{ inputs.path }}
+        VERIFY_REPO: ${{ inputs.repo }}
+        SOURCE_DIGEST: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+        shopt -s nullglob
+
+        objects=("${VERIFY_PATH}"/podtrace.*.bpf.o)
+        if [ "${#objects[@]}" -eq 0 ]; then
+          echo "::error::no BPF objects staged in ${VERIFY_PATH}" >&2
+          exit 1
+        fi
+
+        for obj in "${objects[@]}"; do
+          bundle="${obj}.sigstore.json"
+          if [ ! -f "${bundle}" ]; then
+            echo "::error::no attestation bundle beside ${obj}" >&2
+            exit 1
+          fi
+
+          echo "verifying ${obj}"
+          gh attestation verify "${obj}" \
+            --bundle "${bundle}" \
+            --repo "${VERIFY_REPO}" \
+            --signer-workflow "${VERIFY_REPO}/.github/workflows/release.yml" \
+            --source-digest "${SOURCE_DIGEST}" \
+            --deny-self-hosted-runners
+        done
+
+        rm -f "${VERIFY_PATH}"/podtrace.*.bpf.o.sigstore.json
+        echo "verified ${#objects[@]} BPF object(s); bundles removed from the build context"
