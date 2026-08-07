@@ -9,6 +9,43 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.14.2](https://github.com/gma1k/podtrace/compare/v0.14.1...v0.14.2) (2026-08-07)
+
+
+### Features
+
+* attest every release artifact with SLSA build provenance ([#385](https://github.com/gma1k/podtrace/issues/385)) ([290a0c8](https://github.com/gma1k/podtrace/commit/290a0c802dbee86181c80ac1035d39b5147ce9e5))
+* resolve each session Job's TracerConfig per node ([#384](https://github.com/gma1k/podtrace/issues/384)) ([0660b28](https://github.com/gma1k/podtrace/commit/0660b28f04f9a0ed3f46af96def504ee8a3a9733))
+* support multiple TracerConfigs as isolated agent fleets ([#382](https://github.com/gma1k/podtrace/issues/382)) ([9ed3d17](https://github.com/gma1k/podtrace/commit/9ed3d17a461ea3f8caee0feef0b736e15d7ca8e9))
+
+
+### Bug Fixes
+
+* append /v1/traces to OTLP endpoints without a path ([#373](https://github.com/gma1k/podtrace/issues/373)) ([6b876f9](https://github.com/gma1k/podtrace/commit/6b876f983e242eb14908673107028f32527c7aa1))
+* **ci:** report dco-check on release-please branches ([#380](https://github.com/gma1k/podtrace/issues/380)) ([72697e8](https://github.com/gma1k/podtrace/commit/72697e862ea806316d0da9894e9db46939f11dc7))
+* fix the Go module path and harden the supply chain ([#379](https://github.com/gma1k/podtrace/issues/379)) ([8cd31f1](https://github.com/gma1k/podtrace/commit/8cd31f138bab7f88ebc7ad4528ada023e83f6f7b))
+
+
+### Tests
+
+* fully cover alert-triggered sessions and gate envtest in CI ([#374](https://github.com/gma1k/podtrace/issues/374)) ([099a06c](https://github.com/gma1k/podtrace/commit/099a06c6ba49e04fbfa53181d37afb17b3f6a502))
+
+
+### CI
+
+* require DCO sign-off on every commit ([#377](https://github.com/gma1k/podtrace/issues/377)) ([694cb21](https://github.com/gma1k/podtrace/commit/694cb21b792f1e4afda43dbc216531f8c6ecd3c3))
+* stabilise chainsaw and skip it for release-please PRs ([#375](https://github.com/gma1k/podtrace/issues/375)) ([7c00165](https://github.com/gma1k/podtrace/commit/7c00165f75e68bee8f9ddae022d8cead4a68bab2))
+
+
+### Maintenance
+
+* **deps:** update github/codeql-action action to v4.37.5 ([#370](https://github.com/gma1k/podtrace/issues/370)) ([016790b](https://github.com/gma1k/podtrace/commit/016790b4b57afb035ba07ed7480799314699b84c))
+* **deps:** update github/codeql-action action to v4.37.6 ([#376](https://github.com/gma1k/podtrace/issues/376)) ([5c9892e](https://github.com/gma1k/podtrace/commit/5c9892e4a37fafe6aac99725f33acf269b8832b9))
+* **deps:** update go modules (non-major) ([#372](https://github.com/gma1k/podtrace/issues/372)) ([d1eaeac](https://github.com/gma1k/podtrace/commit/d1eaeaca64680d0c2397199f3c939b41524309dc))
+* **deps:** update go modules (non-major) ([#381](https://github.com/gma1k/podtrace/issues/381)) ([f9b30ba](https://github.com/gma1k/podtrace/commit/f9b30baffcea58d6c52bcb5affac6598509ab789))
+* **deps:** update module github.com/aws/aws-sdk-go-v2/service/s3 to v1.107.0 ([#383](https://github.com/gma1k/podtrace/issues/383)) ([b22001b](https://github.com/gma1k/podtrace/commit/b22001ba27b9001a082a5c2224330da7b27974bb))
+* **deps:** update module google.golang.org/api to v0.292.0 ([#378](https://github.com/gma1k/podtrace/issues/378)) ([ab4f7a8](https://github.com/gma1k/podtrace/commit/ab4f7a8c9c9f85c6488a8649f633c8dab90d01ab))
+
 ## [0.14.1](https://github.com/gma1k/podtrace/compare/v0.14.0...v0.14.1) (2026-08-01)
 
 
