@@ -1,0 +1,245 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: session-fleet-redaction
+spec:
+  # Serial: labels a shared Node and creates a cluster-scoped TracerConfig.
+  # A concurrent fleet test could claim this node with a higher priority and
+  # steal the session this test is asserting on.
+  concurrent: false
+  description: |
+    A PodTraceSession against a pod on a non-default node pool runs under
+    that pool's TracerConfig, not the cluster's default one. This is the
+    promise multi-fleet support makes and the one unit and envtest cannot
+    prove: it needs a real operator resolving a real pod's real node.
+
+    Verifies:
+      1. The session's per-node Job is labelled with the pool's fleet.
+      2. The Job carries that pool's redaction env, which the default
+         fleet does not set.
+      3. spec.tracerConfigRef overrides the node's fleet.
+      4. A pin to a missing TracerConfig fails the session terminally and
+         creates no Job, rather than one with an empty image.
+
+    One step, so the finally block always runs even on an early failure.
+  timeouts:
+    apply: 30s
+    assert: 120s
+    cleanup: 120s
+  steps:
+    - name: session-inherits-its-pools-policy
+      try:
+        - script:
+            timeout: 120s
+            content: |
+              set -eu
+
+              node=""
+              for n in $(kubectl get nodes -o jsonpath='{.items[*].metadata.name}'); do
+                taints=$(kubectl get node "$n" \
+                  -o jsonpath='{.spec.taints[?(@.effect=="NoSchedule")].key}')
+                if [ -z "$taints" ]; then
+                  node="$n"
+                  break
+                fi
+              done
+              if [ -z "$node" ]; then
+                echo "no untainted node to use as a pool" >&2
+                exit 1
+              fi
+              echo "$node" > /tmp/chainsaw-redaction-node
+              kubectl label node "$node" podtrace.io/test-redaction-pool=redacted --overwrite
+
+              image=$(kubectl get tracerconfig default -o jsonpath='{.spec.image}')
+              policy=$(kubectl get tracerconfig default -o jsonpath='{.spec.imagePullPolicy}')
+              cat <<YAMLDOC | kubectl apply -f -
+              apiVersion: podtrace.io/v1alpha1
+              kind: TracerConfig
+              metadata:
+                name: redacted-pool
+              spec:
+                image: ${image}
+                imagePullPolicy: ${policy:-IfNotPresent}
+                systemNamespace: podtrace-system
+                nodeSelector:
+                  podtrace.io/test-redaction-pool: redacted
+                redaction:
+                  enabled: true
+                  redactDNSNames: true
+              YAMLDOC
+
+              for i in $(seq 1 45); do
+                got=$(kubectl get tracerconfig redacted-pool -o jsonpath='{.status.matchedNodes}' 2>/dev/null || true)
+                if [ "${got:-0}" -ge 1 ]; then
+                  echo "ok: redacted-pool claims $got node(s)"
+                  exit 0
+                fi
+                sleep 2
+              done
+              echo "redacted-pool never claimed its node; a targeted fleet must beat the cluster-wide default" >&2
+              kubectl get tracerconfig -o yaml >&2 || true
+              exit 1
+
+        - apply:
+            file: ./workload.yaml
+
+        - script:
+            timeout: 150s
+            content: |
+              set -eu
+              node=$(cat /tmp/chainsaw-redaction-node)
+              kubectl -n $NAMESPACE wait --for=condition=Ready pod/target --timeout=120s
+              placed=$(kubectl -n $NAMESPACE get pod target -o jsonpath='{.spec.nodeName}')
+              if [ "$placed" != "$node" ]; then
+                echo "workload landed on $placed, want $node" >&2
+                exit 1
+              fi
+
+              cat <<YAMLDOC | kubectl apply -f -
+              apiVersion: podtrace.io/v1alpha1
+              kind: PodTraceSession
+              metadata:
+                name: pool-session
+                namespace: $NAMESPACE
+              spec:
+                selector:
+                  matchLabels:
+                    app: target
+                duration: 10s
+                filters: [dns]
+                exporterRef:
+                  name: ec
+              YAMLDOC
+
+              for i in $(seq 1 60); do
+                job=$(kubectl -n podtrace-system get jobs \
+                  -l podtrace.io/session=pool-session \
+                  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+                if [ -n "$job" ]; then
+                  break
+                fi
+                sleep 2
+              done
+              if [ -z "$job" ]; then
+                echo "no session Job appeared" >&2
+                kubectl -n $NAMESPACE get podtracesession pool-session -o yaml >&2 || true
+                exit 1
+              fi
+
+              fleet=$(kubectl -n podtrace-system get job "$job" \
+                -o jsonpath='{.metadata.labels.podtrace\.io/tracer-config}')
+              if [ "$fleet" != "redacted-pool" ]; then
+                echo "session Job resolved fleet $fleet, want redacted-pool: the session ignored its node's pool" >&2
+                exit 1
+              fi
+
+              redact=$(kubectl -n podtrace-system get job "$job" \
+                -o jsonpath='{range .spec.template.spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}' \
+                | grep -c '^PODTRACE_REDACT_PII=true' || true)
+              if [ "$redact" -lt 1 ]; then
+                echo "session Job is missing the pool's redaction policy; per-pool redaction does not reach sessions" >&2
+                kubectl -n podtrace-system get job "$job" -o yaml >&2 || true
+                exit 1
+              fi
+              echo "ok: session on $node ran under redacted-pool with redaction enabled"
+
+        - script:
+            timeout: 120s
+            content: |
+              set -eu
+              cat <<YAMLDOC | kubectl apply -f -
+              apiVersion: podtrace.io/v1alpha1
+              kind: PodTraceSession
+              metadata:
+                name: pinned-session
+                namespace: $NAMESPACE
+              spec:
+                selector:
+                  matchLabels:
+                    app: target
+                duration: 10s
+                filters: [dns]
+                exporterRef:
+                  name: ec
+                tracerConfigRef:
+                  name: default
+              YAMLDOC
+
+              for i in $(seq 1 60); do
+                job=$(kubectl -n podtrace-system get jobs \
+                  -l podtrace.io/session=pinned-session \
+                  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+                if [ -n "$job" ]; then
+                  break
+                fi
+                sleep 2
+              done
+              if [ -z "$job" ]; then
+                echo "no Job for the pinned session" >&2
+                exit 1
+              fi
+              fleet=$(kubectl -n podtrace-system get job "$job" \
+                -o jsonpath='{.metadata.labels.podtrace\.io/tracer-config}')
+              if [ "$fleet" != "default" ]; then
+                echo "pinned session resolved $fleet, want default: spec.tracerConfigRef must override the node's pool" >&2
+                exit 1
+              fi
+              echo "ok: tracerConfigRef overrode the node's pool"
+
+        - script:
+            timeout: 120s
+            content: |
+              set -eu
+              if kubectl get validatingwebhookconfiguration 2>/dev/null | grep -q podtrace; then
+                echo "webhook enabled; a missing pin is rejected at admission and cannot reach the reconciler"
+                exit 0
+              fi
+
+              cat <<YAMLDOC | kubectl apply -f -
+              apiVersion: podtrace.io/v1alpha1
+              kind: PodTraceSession
+              metadata:
+                name: ghost-session
+                namespace: $NAMESPACE
+              spec:
+                selector:
+                  matchLabels:
+                    app: target
+                duration: 10s
+                filters: [dns]
+                exporterRef:
+                  name: ec
+                tracerConfigRef:
+                  name: no-such-config
+              YAMLDOC
+
+              for i in $(seq 1 45); do
+                state=$(kubectl -n $NAMESPACE get podtracesession ghost-session \
+                  -o jsonpath='{.status.state}' 2>/dev/null || true)
+                if [ "$state" = "Failed" ]; then
+                  break
+                fi
+                sleep 2
+              done
+              if [ "$state" != "Failed" ]; then
+                echo "unresolvable pin left the session in state '$state', want Failed" >&2
+                exit 1
+              fi
+
+              jobs=$(kubectl -n podtrace-system get jobs \
+                -l podtrace.io/session=ghost-session --no-headers 2>/dev/null | wc -l)
+              if [ "$jobs" -ne 0 ]; then
+                echo "an unresolvable session created $jobs Job(s); an image-less Job is exactly what this must avoid" >&2
+                exit 1
+              fi
+              echo "ok: unresolvable pin failed terminally with no Job"
+
+      finally:
+        - script:
+            content: |
+              node=$(cat /tmp/chainsaw-redaction-node 2>/dev/null || true)
+              if [ -n "$node" ]; then
+                kubectl label node "$node" podtrace.io/test-redaction-pool- --ignore-not-found || true
+              fi
+              kubectl delete tracerconfig redacted-pool --ignore-not-found --wait=true || true
+              rm -f /tmp/chainsaw-redaction-node

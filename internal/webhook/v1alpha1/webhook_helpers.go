@@ -160,6 +160,35 @@ func validateCrossNamespaceGrants(
 		ungranted, sourceNamespace, podtracev1alpha1.AllowTracingFromAnnotation)}, nil
 }
 
+// resolveTracerConfigRef verifies that an explicit spec.tracerConfigRef
+// names a TracerConfig that exists.
+//
+// Unset is valid and common: the operator then resolves each per-node Job
+// against the fleet targeting its node, falling back to "default". Only a
+// pin that cannot be honoured is rejected — left to the reconciler it would
+// fail the session terminally at run time, long after apply.
+//
+// TracerConfig is cluster-scoped, so the lookup carries no namespace.
+func resolveTracerConfigRef(ctx context.Context, c client.Client, ref *podtracev1alpha1.LocalObjectReference) error {
+	if ref == nil || ref.Name == "" {
+		return nil
+	}
+	if c == nil {
+		return fmt.Errorf("webhook client not configured; cannot resolve TracerConfig %q", ref.Name)
+	}
+	var tc podtracev1alpha1.TracerConfig
+	err := c.Get(ctx, types.NamespacedName{Name: ref.Name}, &tc)
+	if err == nil {
+		return nil
+	}
+	if apierrors.IsNotFound(err) {
+		return fmt.Errorf(
+			"spec.tracerConfigRef.name %q: TracerConfig not found. Leave it unset to resolve each node against the fleet that targets it",
+			ref.Name)
+	}
+	return fmt.Errorf("spec.tracerConfigRef.name %q: %w", ref.Name, err)
+}
+
 // resolveExporterRef verifies that spec.exporterRef.name refers to an
 // ExporterConfig that exists in the caller's namespace.
 func resolveExporterRef(ctx context.Context, c client.Client, namespace, name string) error {

@@ -53,6 +53,7 @@ spec:
 | `duration` | Go duration string | required | Wall-clock run time, e.g. `"30s"`, `"5m"`. Webhook rejects `0s` and bounded by `TracerConfig.spec.session.maxDuration`. |
 | `filters` | `[dns,net,fs,cpu,proc,crypto]` | optional | Event categories to record. |
 | `exporterRef.name` | string | required | Names an `ExporterConfig` in the same namespace. |
+| `tracerConfigRef.name` | string | optional | Pins every Job to one `TracerConfig`, overriding the per-node fleet lookup. Cluster-scoped, so no namespace. See [TracerConfig resolution](#tracerconfig-resolution). |
 | `samplePercent` | int 0-100 | optional | Workload-owner sampling intent. The operator combines this with `ExporterConfig.spec.samplePercent` (platform-owner cap) and writes the **minimum** of the two to the session bundle. Unset on either side is treated as 100%. The resolved value is echoed at `status.policy.effectiveSampleRate`. |
 | `reportRef` | object | optional | Persistent artifact sink — see "Report sinks" below. |
 | `ttlSecondsAfterFinished` | int | optional | When to GC the CR after Completed/Failed (default 300). |
@@ -164,6 +165,43 @@ The selector resolves cluster-wide; the operator fans out one Job per
 node with at least one matched pod. Each Job runs independently — they
 do not coordinate. The aggregated `status.summary` adds counts across
 all Jobs.
+
+## TracerConfig resolution
+
+Each Job takes its image, pull policy, session resources and redaction
+policy from a `TracerConfig`, resolved **per node**:
+
+1. `spec.tracerConfigRef`, if set — pins every Job to that one config.
+2. Otherwise, the fleet whose `nodeSelector`, required `nodeAffinity` and
+   tolerations target that node. When two fleets contest a node, the
+   winner is the one the TracerConfig's `Conflict` condition names.
+3. Otherwise, the config named `default`.
+
+So a session whose pods span a `general` pool and a `regulated` pool runs
+one Job under each pool's own policy — the `regulated` Job redacts, the
+`general` one does not. Pin with `tracerConfigRef` when a session must be
+reproducible regardless of where its pods land:
+
+```yaml
+spec:
+  selector:
+    matchLabels: {app: api}
+  duration: 30s
+  exporterRef: {name: prod-otlp}
+  tracerConfigRef:
+    name: regulated
+```
+
+If none of the three steps resolves, the session fails terminally with
+`Degraded/TracerConfigUnresolved` naming the node. It does not create a
+Job — an image-less Job would be rejected by the apiserver with a message
+about container validation that says nothing about the real cause.
+
+Fleets that set different `spec.systemNamespace` put their Jobs in
+different namespaces. The operator provisions the exporter bundle,
+objectStore credentials, ServiceAccount and RBAC in every namespace the
+resolution touches, since a Job cannot mount a bundle that lives
+elsewhere.
 
 ## RBAC produced for the session Job
 

@@ -368,3 +368,35 @@ func nodeListForbidden() interceptor.Funcs {
 		},
 	}
 }
+
+func TestPartitionUnresolvedWhenConfigListFails(t *testing.T) {
+	scheme := newOperatorScheme(t)
+	tc := fleetConfig(DefaultTracerConfigName, podtracev1alpha1.TracerConfigSpec{})
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithStatusSubresource(&podtracev1alpha1.TracerConfig{}).
+		WithObjects(tc).
+		WithInterceptorFuncs(interceptor.Funcs{
+			List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+				if _, ok := list.(*podtracev1alpha1.TracerConfigList); ok {
+					return apierrors.NewServiceUnavailable("synthetic")
+				}
+				return cl.List(ctx, list, opts...)
+			},
+		}).Build()
+	r := &TracerConfigReconciler{Client: c, Scheme: scheme, SystemNamespace: "podtrace-system"}
+
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: DefaultTracerConfigName},
+	}); err != nil {
+		t.Fatalf("losing the config list must not fail the reconcile: %v", err)
+	}
+
+	var got podtracev1alpha1.TracerConfig
+	if err := c.Get(context.Background(), types.NamespacedName{Name: DefaultTracerConfigName}, &got); err != nil {
+		t.Fatal(err)
+	}
+	cond := findCondition(got.Status.Conditions, ConditionConflict)
+	if cond == nil || cond.Status != metav1.ConditionUnknown || cond.Reason != "PartitionUnresolved" {
+		t.Errorf("want Conflict=Unknown/PartitionUnresolved, got %+v", got.Status.Conditions)
+	}
+}

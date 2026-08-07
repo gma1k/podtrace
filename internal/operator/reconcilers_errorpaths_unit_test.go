@@ -193,7 +193,7 @@ func TestErrPath_Session_FinalStatusUpdateConflictRequeues(t *testing.T) {
 	c := fake.NewClientBuilder().
 		WithScheme(s).
 		WithStatusSubresource(&podtracev1alpha1.PodTraceSession{}).
-		WithObjects(session, pod, ec).
+		WithObjects(session, pod, ec, defaultTracerConfigObject()).
 		WithInterceptorFuncs(interceptor.Funcs{
 			SubResourceUpdate: func(_ context.Context, _ client.Client, _ string, _ client.Object, _ ...client.SubResourceUpdateOption) error {
 				return errConflict("podtracesessions", session.Name)
@@ -278,7 +278,7 @@ func TestErrPath_Session_ExporterGetError(t *testing.T) {
 	c := fake.NewClientBuilder().
 		WithScheme(s).
 		WithStatusSubresource(&podtracev1alpha1.PodTraceSession{}).
-		WithObjects(session, pod).
+		WithObjects(session, pod, defaultTracerConfigObject()).
 		WithInterceptorFuncs(interceptor.Funcs{
 			Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 				if _, ok := obj.(*podtracev1alpha1.ExporterConfig); ok {

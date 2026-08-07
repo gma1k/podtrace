@@ -76,7 +76,7 @@ func TestDeepReconcile_Session_ExporterNotFound(t *testing.T) {
 	scheme := newOperatorScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).
 		WithStatusSubresource(&podtracev1alpha1.PodTraceSession{}).
-		WithObjects(s, pod).Build()
+		WithObjects(s, pod, defaultTracerConfigObject()).Build()
 
 	r := &PodTraceSessionReconciler{Client: c, Scheme: scheme, SystemNamespace: sysNS}
 	res, err := r.Reconcile(context.Background(), ctrl.Request{
@@ -133,7 +133,7 @@ func TestDeepReconcile_Session_FullFanOut(t *testing.T) {
 	objs := append(pods, s, ec)
 	c := fake.NewClientBuilder().WithScheme(scheme).
 		WithStatusSubresource(&podtracev1alpha1.PodTraceSession{}).
-		WithObjects(objs...).Build()
+		WithObjects(append(objs, defaultTracerConfigObject())...).Build()
 
 	r := &PodTraceSessionReconciler{Client: c, Scheme: scheme, SystemNamespace: sysNS}
 	res, err := r.Reconcile(context.Background(), ctrl.Request{

@@ -217,3 +217,57 @@ func TestEnvtestOverlappingFleetsReportConflict(t *testing.T) {
 		t.Errorf("overlap is reported, not enforced: the loser keeps its DaemonSet too: %v", err)
 	}
 }
+
+func TestEnvtestFleetsWithDifferentSystemNamespacesCoexist(t *testing.T) {
+	scheme, c, _ := setupSharedEnvtest(t)
+	nsA := ensureDedicatedSystemNamespace(t, c, "coexist-a")
+	nsB := ensureDedicatedSystemNamespace(t, c, "coexist-b")
+
+	createFleetConfig(t, c, "coexist-a", podtracev1alpha1.TracerConfigSpec{
+		SystemNamespace: nsA,
+		NodeSelector:    map[string]string{"pool": "coexist-a"},
+	})
+	createFleetConfig(t, c, "coexist-b", podtracev1alpha1.TracerConfigSpec{
+		SystemNamespace: nsB,
+		NodeSelector:    map[string]string{"pool": "coexist-b"},
+	})
+
+	r := &TracerConfigReconciler{Client: c, Scheme: scheme, SystemNamespace: nsA}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Three rounds: the flapping regression only shows once each config has
+	// reconciled at least twice, because each pass is what would delete the
+	// other's DaemonSet.
+	for round := 0; round < 3; round++ {
+		for _, name := range []string{"coexist-a", "coexist-b"} {
+			if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: name}}); err != nil {
+				t.Fatalf("round %d reconcile %s: %v", round, name, err)
+			}
+		}
+
+		for _, tt := range []struct{ name, namespace string }{
+			{"podtrace-agent-coexist-a", nsA},
+			{"podtrace-agent-coexist-b", nsB},
+		} {
+			var ds appsv1.DaemonSet
+			if err := c.Get(ctx, types.NamespacedName{Name: tt.name, Namespace: tt.namespace}, &ds); err != nil {
+				t.Fatalf("round %d: %s/%s missing — a fleet deleted a sibling's DaemonSet, which flaps forever and leaves the cluster with no agents: %v",
+					round, tt.namespace, tt.name, err)
+			}
+		}
+	}
+
+	var strays appsv1.DaemonSetList
+	if err := c.List(ctx, &strays, client.InNamespace(nsA), client.MatchingLabels{
+		LabelManagedBy: ManagedByValue, LabelComponent: ComponentAgent,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for i := range strays.Items {
+		if strays.Items[i].Labels[LabelTracerConfig] != "coexist-a" {
+			t.Errorf("namespace %s holds DaemonSet %s belonging to fleet %q",
+				nsA, strays.Items[i].Name, strays.Items[i].Labels[LabelTracerConfig])
+		}
+	}
+}

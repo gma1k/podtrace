@@ -3,6 +3,10 @@ kind: Test
 metadata:
   name: multi-tracerconfig-fleets
 spec:
+  # Serial: labels a shared Node and creates a cluster-scoped TracerConfig.
+  # Run concurrently with another fleet test and the two would contest the
+  # same node, and the higher-priority fleet would win the other's assertions.
+  concurrent: false
   description: |
     A second TracerConfig gets its own agent fleet instead of fighting the
     first one for the podtrace-agent name. Verifies:
@@ -42,7 +46,7 @@ spec:
                 exit 1
               fi
               echo "$node" > /tmp/chainsaw-fleet-node
-              kubectl label node "$node" podtrace.io/test-pool=secondary --overwrite
+              kubectl label node "$node" podtrace.io/test-fleet-pool=secondary --overwrite
 
               image=$(kubectl get tracerconfig default -o jsonpath='{.spec.image}')
               policy=$(kubectl get tracerconfig default -o jsonpath='{.spec.imagePullPolicy}')
@@ -57,7 +61,7 @@ spec:
                 systemNamespace: podtrace-system
                 priority: 10
                 nodeSelector:
-                  podtrace.io/test-pool: secondary
+                  podtrace.io/test-fleet-pool: secondary
               YAML
 
         - assert:
@@ -158,7 +162,7 @@ spec:
             content: |
               node=$(cat /tmp/chainsaw-fleet-node 2>/dev/null || true)
               if [ -n "$node" ]; then
-                kubectl label node "$node" podtrace.io/test-pool- --ignore-not-found || true
+                kubectl label node "$node" podtrace.io/test-fleet-pool- --ignore-not-found || true
               fi
               kubectl delete tracerconfig secondary --ignore-not-found --wait=true || true
               rm -f /tmp/chainsaw-fleet-node

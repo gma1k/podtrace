@@ -15,7 +15,7 @@ spec:
     spec:
       serviceAccountName: podtrace-agent-secondary
       nodeSelector:
-        podtrace.io/test-pool: secondary
+        podtrace.io/test-fleet-pool: secondary
 ---
 apiVersion: apps/v1
 kind: DaemonSet

@@ -74,7 +74,7 @@ func TestEnsureJobs_SkipsCompletedNode(t *testing.T) {
 	targets := sessionTargets{Nodes: []string{"node-a", "node-b"}}
 	completed := map[string]struct{}{"node-a": {}}
 
-	if _, err := r.ensureJobs(context.Background(), s, nil, targets, completed); err != nil {
+	if _, err := r.ensureJobs(context.Background(), s, resolvedFleet(r.SystemNamespace, targets.Nodes, testTracerConfig("default", "img:test", "", nil)), targets, completed); err != nil {
 		t.Fatalf("ensureJobs: %v", err)
 	}
 

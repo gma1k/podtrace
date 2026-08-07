@@ -64,6 +64,9 @@ func (v *PodTraceSessionCustomValidator) validate(ctx context.Context, s *podtra
 	if err := resolveExporterRef(ctx, v.Client, s.Namespace, s.Spec.ExporterRef.Name); err != nil {
 		return nil, err
 	}
+	if err := resolveTracerConfigRef(ctx, v.Client, s.Spec.TracerConfigRef); err != nil {
+		return nil, err
+	}
 	if err := validateReportRef(s.Spec.ReportRef); err != nil {
 		return nil, err
 	}

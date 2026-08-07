@@ -169,3 +169,47 @@ func TestTracerConfigSkipsValidationWhenSpecUnchanged(t *testing.T) {
 		t.Errorf("expected no warnings, got %v", warnings)
 	}
 }
+
+func TestTracerConfigValidateDeleteIsAlwaysAllowed(t *testing.T) {
+	v := tracerConfigValidator(t)
+
+	warnings, err := v.ValidateDelete(context.Background(), tracerConfig("default", podtracev1alpha1.TracerConfigSpec{}))
+	if err != nil {
+		t.Errorf("deleting a TracerConfig must never be blocked by admission: %v", err)
+	}
+	if warnings != nil {
+		t.Errorf("expected no warnings on delete, got %v", warnings)
+	}
+}
+
+func TestTracerConfigValidateWithoutClientSkipsClusterChecks(t *testing.T) {
+	v := &TracerConfigCustomValidator{}
+
+	if _, err := v.ValidateCreate(context.Background(), tracerConfig("default", podtracev1alpha1.TracerConfigSpec{})); err != nil {
+		t.Errorf("with no client the cluster-wide checks must be skipped, not error: %v", err)
+	}
+
+	long := strings.Repeat("x", podtracev1alpha1.MaxTracerConfigNameLength+1)
+	if _, err := v.ValidateCreate(context.Background(), tracerConfig(long, podtracev1alpha1.TracerConfigSpec{})); err == nil {
+		t.Error("the name-length rule needs no client and must still apply")
+	}
+}
+
+func TestResolveTracerConfigRefWithoutClient(t *testing.T) {
+	err := resolveTracerConfigRef(context.Background(), nil, &podtracev1alpha1.LocalObjectReference{Name: "regulated"})
+	if err == nil {
+		t.Fatal("an unconfigured client cannot verify the pin, so it must not silently accept it")
+	}
+	if !strings.Contains(err.Error(), "TracerConfig") {
+		t.Errorf("error should name what could not be resolved, got %q", err)
+	}
+}
+
+func TestResolveTracerConfigRefNilAndEmptyAreUnset(t *testing.T) {
+	if err := resolveTracerConfigRef(context.Background(), nil, nil); err != nil {
+		t.Errorf("a nil ref means resolve per node, got %v", err)
+	}
+	if err := resolveTracerConfigRef(context.Background(), nil, &podtracev1alpha1.LocalObjectReference{}); err != nil {
+		t.Errorf("an empty ref name means resolve per node, got %v", err)
+	}
+}

@@ -103,18 +103,11 @@ func validateSelectorCollision(tc *podtracev1alpha1.TracerConfig, siblings []pod
 	return nil
 }
 
-// isClusterWide reports whether a config constrains its fleet to a subset of
-// nodes at all. Tolerations do not count: they widen the eligible node set,
-// they never narrow it.
+// isClusterWide delegates to the partition package so admission and the
+// reconciler cannot drift on what "targets every node" means — the same
+// predicate also decides fleet precedence in fleet.Outranks.
 func isClusterWide(spec *podtracev1alpha1.TracerConfigSpec) bool {
-	if len(spec.NodeSelector) > 0 {
-		return false
-	}
-	if spec.Affinity == nil || spec.Affinity.NodeAffinity == nil {
-		return true
-	}
-	required := spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
-	return required == nil || len(required.NodeSelectorTerms) == 0
+	return fleet.IsClusterWide(spec)
 }
 
 // warnOnCurrentOverlap reports fleets that share nodes as the cluster is

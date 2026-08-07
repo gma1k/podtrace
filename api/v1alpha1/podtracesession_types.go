@@ -57,6 +57,19 @@ type PodTraceSessionSpec struct {
 	// +kubebuilder:validation:Required
 	ExporterRef LocalObjectReference `json:"exporterRef"`
 
+	// TracerConfigRef pins every Job this session spawns to one
+	// TracerConfig, overriding the per-node fleet lookup.
+	//
+	// Left unset, each per-node Job takes the config of the fleet that
+	// targets its node, so a session spanning two node pools picks up each
+	// pool's own image and redaction policy. Set this when a session must
+	// run under one known configuration regardless of placement.
+	//
+	// TracerConfig is cluster-scoped, so this is a bare name with no
+	// namespace.
+	// +optional
+	TracerConfigRef *LocalObjectReference `json:"tracerConfigRef,omitempty"`
+
 	// +optional
 	Thresholds *Thresholds `json:"thresholds,omitempty"`
 
