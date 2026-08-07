@@ -32,9 +32,9 @@ func newTracerConfigCleanupReconciler(t *testing.T, stale client.Object) *Tracer
 func TestTCCleanupBranch_DaemonSetDeleteError(t *testing.T) {
 	labels := map[string]string{LabelManagedBy: ManagedByValue, LabelComponent: ComponentAgent}
 	r := newTracerConfigCleanupReconciler(t, &appsv1.DaemonSet{
-		ObjectMeta: metav1.ObjectMeta{Name: AgentDaemonSetName(), Namespace: "old-ns", Labels: labels},
+		ObjectMeta: metav1.ObjectMeta{Name: AgentDaemonSetName(DefaultTracerConfigName), Namespace: "old-ns", Labels: labels},
 	})
-	if err := r.cleanupStaleAgentNamespaces(context.Background(), "podtrace-system"); err == nil {
+	if err := r.cleanupStaleAgentObjects(context.Background(), DefaultTracerConfigName, "podtrace-system"); err == nil {
 		t.Fatal("stale DaemonSet delete failure must be surfaced")
 	}
 }
@@ -42,9 +42,9 @@ func TestTCCleanupBranch_DaemonSetDeleteError(t *testing.T) {
 func TestTCCleanupBranch_ServiceAccountDeleteError(t *testing.T) {
 	labels := map[string]string{LabelManagedBy: ManagedByValue, LabelComponent: ComponentAgent}
 	r := newTracerConfigCleanupReconciler(t, &corev1.ServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{Name: AgentServiceAccountName(), Namespace: "old-ns", Labels: labels},
+		ObjectMeta: metav1.ObjectMeta{Name: AgentServiceAccountName(DefaultTracerConfigName), Namespace: "old-ns", Labels: labels},
 	})
-	if err := r.cleanupStaleAgentNamespaces(context.Background(), "podtrace-system"); err == nil {
+	if err := r.cleanupStaleAgentObjects(context.Background(), DefaultTracerConfigName, "podtrace-system"); err == nil {
 		t.Fatal("stale ServiceAccount delete failure must be surfaced")
 	}
 }
@@ -52,9 +52,9 @@ func TestTCCleanupBranch_ServiceAccountDeleteError(t *testing.T) {
 func TestTCCleanupBranch_RoleDeleteError(t *testing.T) {
 	labels := map[string]string{LabelManagedBy: ManagedByValue, LabelComponent: ComponentAgent}
 	r := newTracerConfigCleanupReconciler(t, &rbacv1.Role{
-		ObjectMeta: metav1.ObjectMeta{Name: AgentBundleRoleName(), Namespace: "old-ns", Labels: labels},
+		ObjectMeta: metav1.ObjectMeta{Name: AgentBundleRoleName(DefaultTracerConfigName), Namespace: "old-ns", Labels: labels},
 	})
-	if err := r.cleanupStaleAgentNamespaces(context.Background(), "podtrace-system"); err == nil {
+	if err := r.cleanupStaleAgentObjects(context.Background(), DefaultTracerConfigName, "podtrace-system"); err == nil {
 		t.Fatal("stale Role delete failure must be surfaced")
 	}
 }
@@ -62,9 +62,9 @@ func TestTCCleanupBranch_RoleDeleteError(t *testing.T) {
 func TestTCCleanupBranch_RoleBindingDeleteError(t *testing.T) {
 	labels := map[string]string{LabelManagedBy: ManagedByValue, LabelComponent: ComponentAgent}
 	r := newTracerConfigCleanupReconciler(t, &rbacv1.RoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: AgentBundleRoleBindingName(), Namespace: "old-ns", Labels: labels},
+		ObjectMeta: metav1.ObjectMeta{Name: AgentBundleRoleBindingName(DefaultTracerConfigName), Namespace: "old-ns", Labels: labels},
 	})
-	if err := r.cleanupStaleAgentNamespaces(context.Background(), "podtrace-system"); err == nil {
+	if err := r.cleanupStaleAgentObjects(context.Background(), DefaultTracerConfigName, "podtrace-system"); err == nil {
 		t.Fatal("stale RoleBinding delete failure must be surfaced")
 	}
 }

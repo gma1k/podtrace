@@ -12,27 +12,7 @@ import (
 )
 
 // buildAgentDaemonSetSpec renders the DaemonSet.Spec for the agent
-// derived from a TracerConfig. Extracted from the reconciler so unit
-// tests can assert on the resulting spec without spinning envtest.
-//
-// Design invariants:
-//
-//   - The agent runs unprivileged as root with the tracing capability
-//     set (CAP_BPF, CAP_SYS_ADMIN, CAP_PERFMON, CAP_SYS_RESOURCE,
-//     CAP_NET_ADMIN, CAP_SYS_PTRACE). SYS_PTRACE is required to read
-//     /proc/<pid>/{root,exe,maps} of non-root container processes,
-//     without it every per-container library uprobe (TLS, GoTLS, DB,
-//     …) silently attaches nothing for containers that drop root. The
-//     podtrace-system namespace is PSA-privileged so the pod is
-//     admitted.
-//   - Host mounts are kept to the minimum the tracer needs:
-//     /sys/fs/bpf, /sys/kernel/btf, /proc, /sys/fs/cgroup, and the CRI
-//     socket path. All read-only except /sys/fs/bpf (BPF objects
-//     require RW) and /proc (read-only is enough).
-//   - NODE_NAME is injected via the downward API so the agent's
-//     informers can filter with fieldSelector=spec.nodeName=$NODE_NAME.
-//   - PriorityClassName defaults to system-node-critical so scheduling
-//     pressure does not evict the agent.
+// derived from a TracerConfig.
 func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string) appsv1.DaemonSetSpec {
 	selector := &metav1.LabelSelector{
 		MatchLabels: map[string]string{
@@ -131,7 +111,7 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 				Labels: selector.MatchLabels,
 			},
 			Spec: corev1.PodSpec{
-				ServiceAccountName:            AgentServiceAccountName(),
+				ServiceAccountName:            AgentServiceAccountName(tc.Name),
 				PriorityClassName:             priorityClassName,
 				HostPID:                       true,
 				NodeSelector:                  tc.Spec.NodeSelector,

@@ -1,0 +1,164 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: multi-tracerconfig-fleets
+spec:
+  description: |
+    A second TracerConfig gets its own agent fleet instead of fighting the
+    first one for the podtrace-agent name. Verifies:
+      1. The extra config's DaemonSet is podtrace-agent-<name>, and the
+         default fleet keeps the unsuffixed legacy name.
+      2. Each fleet's agent pods land only on its own node pool.
+      3. The extra fleet runs under its own ServiceAccount and ClusterRole.
+      4. Overlap is reported, not enforced: because the chart's default
+         config has no nodeSelector, both fleets claim the labelled node,
+         and both report Conflict=True while both DaemonSets keep running.
+      5. Deleting the extra config collects its objects and leaves the
+         default fleet untouched.
+  timeouts:
+    apply: 30s
+    assert: 120s
+    cleanup: 120s
+  steps:
+    - name: second-fleet-is-independent
+      try:
+        - script:
+            timeout: 60s
+            content: |
+              set -eu
+
+              node=""
+              for n in $(kubectl get nodes -o jsonpath='{.items[*].metadata.name}'); do
+                taints=$(kubectl get node "$n" \
+                  -o jsonpath='{.spec.taints[?(@.effect=="NoSchedule")].key}')
+                if [ -z "$taints" ]; then
+                  node="$n"
+                  break
+                fi
+              done
+              if [ -z "$node" ]; then
+                echo "no untainted node to use as a second pool" >&2
+                kubectl get nodes -o wide >&2
+                exit 1
+              fi
+              echo "$node" > /tmp/chainsaw-fleet-node
+              kubectl label node "$node" podtrace.io/test-pool=secondary --overwrite
+
+              image=$(kubectl get tracerconfig default -o jsonpath='{.spec.image}')
+              policy=$(kubectl get tracerconfig default -o jsonpath='{.spec.imagePullPolicy}')
+              cat <<YAML | kubectl apply -f -
+              apiVersion: podtrace.io/v1alpha1
+              kind: TracerConfig
+              metadata:
+                name: secondary
+              spec:
+                image: ${image}
+                imagePullPolicy: ${policy:-IfNotPresent}
+                systemNamespace: podtrace-system
+                priority: 10
+                nodeSelector:
+                  podtrace.io/test-pool: secondary
+              YAML
+
+        - assert:
+            file: ./assert-fleets.yaml
+
+        - script:
+            timeout: 120s
+            content: |
+              set -eu
+              node=$(cat /tmp/chainsaw-fleet-node)
+
+              kubectl -n podtrace-system get ds podtrace-agent >/dev/null
+              kubectl -n podtrace-system get ds podtrace-agent-secondary >/dev/null
+              kubectl -n podtrace-system get sa podtrace-agent-secondary >/dev/null
+              kubectl get clusterrole podtrace-agent-secondary >/dev/null
+              kubectl get clusterrolebinding podtrace-agent-secondary >/dev/null
+
+              sa=$(kubectl -n podtrace-system get ds podtrace-agent-secondary \
+                -o jsonpath='{.spec.template.spec.serviceAccountName}')
+              if [ "$sa" != "podtrace-agent-secondary" ]; then
+                echo "secondary fleet runs as $sa, want podtrace-agent-secondary" >&2
+                exit 1
+              fi
+
+              for i in $(seq 1 45); do
+                placed=$(kubectl -n podtrace-system get pods \
+                  -l podtrace.io/tracer-config=secondary \
+                  -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}' | sort -u)
+                if [ "$placed" = "$node" ]; then
+                  echo "ok: secondary fleet confined to $node"
+                  exit 0
+                fi
+                sleep 2
+              done
+              echo "secondary fleet landed on [$placed], want only $node" >&2
+              kubectl -n podtrace-system get ds -o wide >&2 || true
+              kubectl -n podtrace-system get pods -l podtrace.io/component=agent -o wide >&2 || true
+              exit 1
+
+        - script:
+            timeout: 120s
+            content: |
+              set -eu
+              secondary=""
+              contested=""
+              for i in $(seq 1 45); do
+                secondary=$(kubectl get tracerconfig secondary \
+                  -o jsonpath='{.status.conditions[?(@.type=="Conflict")].status}' 2>/dev/null || true)
+                contested=$(kubectl get tracerconfig secondary \
+                  -o jsonpath='{.status.contestedNodes}' 2>/dev/null || true)
+                if [ "$secondary" = "True" ] && [ "${contested:-0}" -ge 1 ]; then
+                  break
+                fi
+                sleep 2
+              done
+              if [ "$secondary" != "True" ]; then
+                echo "secondary must report Conflict=True against the cluster-wide default fleet" >&2
+                kubectl get tracerconfig -o yaml >&2 || true
+                exit 1
+              fi
+
+              kubectl -n podtrace-system rollout status ds/podtrace-agent --timeout=90s
+              kubectl -n podtrace-system rollout status ds/podtrace-agent-secondary --timeout=90s
+              echo "ok: overlap reported on $contested node(s), both fleets still rolled out"
+
+        - script:
+            timeout: 120s
+            content: |
+              set -eu
+              kubectl delete tracerconfig secondary --wait=true
+
+              for i in $(seq 1 45); do
+                if ! kubectl -n podtrace-system get ds podtrace-agent-secondary >/dev/null 2>&1; then
+                  break
+                fi
+                sleep 2
+              done
+              for kind in "ds/podtrace-agent-secondary" "sa/podtrace-agent-secondary"; do
+                if kubectl -n podtrace-system get "$kind" >/dev/null 2>&1; then
+                  echo "$kind outlived its TracerConfig" >&2
+                  exit 1
+                fi
+              done
+              if kubectl get clusterrole podtrace-agent-secondary >/dev/null 2>&1; then
+                echo "secondary ClusterRole outlived its TracerConfig" >&2
+                exit 1
+              fi
+
+              kubectl -n podtrace-system get ds podtrace-agent >/dev/null
+              kubectl -n podtrace-system get sa podtrace-agent >/dev/null
+              kubectl get clusterrole podtrace-agent >/dev/null
+              kubectl get clusterrolebinding podtrace-agent >/dev/null
+              kubectl -n podtrace-system rollout status ds/podtrace-agent --timeout=90s
+              echo "ok: default fleet survived its sibling's deletion"
+
+      finally:
+        - script:
+            content: |
+              node=$(cat /tmp/chainsaw-fleet-node 2>/dev/null || true)
+              if [ -n "$node" ]; then
+                kubectl label node "$node" podtrace.io/test-pool- --ignore-not-found || true
+              fi
+              kubectl delete tracerconfig secondary --ignore-not-found --wait=true || true
+              rm -f /tmp/chainsaw-fleet-node

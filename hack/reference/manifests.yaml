@@ -84,3 +84,23 @@ webhooks:
     resources:
     - podtracesessions
   sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-podtrace-io-v1alpha1-tracerconfig
+  failurePolicy: Fail
+  name: vtracerconfig.podtrace.io
+  rules:
+  - apiGroups:
+    - podtrace.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - tracerconfigs
+  sideEffects: None

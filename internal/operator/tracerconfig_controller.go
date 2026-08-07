@@ -3,30 +3,38 @@ package operator
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"time"
 
+	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	"github.com/gma1k/podtrace/internal/fleet"
+	"github.com/gma1k/podtrace/internal/safeconv"
 )
 
-// TracerConfigReconciler owns the cluster-wide agent infrastructure:
-// the agent DaemonSet, its ServiceAccount, and the ClusterRole/Binding
-// that grants agents the minimum RBAC to do their job.
+// TracerConfigReconciler owns one agent fleet per TracerConfig: the agent
+// DaemonSet, its ServiceAccount, and the ClusterRole/Binding that grants
+// agents the minimum RBAC to do their job.
 type TracerConfigReconciler struct {
 	client.Client
 	Scheme          *runtime.Scheme
@@ -38,6 +46,7 @@ type TracerConfigReconciler struct {
 // +kubebuilder:rbac:groups=podtrace.io,resources=tracerconfigs/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=daemonsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles;clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile ensures the agent DaemonSet and its RBAC match spec.
@@ -48,17 +57,17 @@ func (r *TracerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	var tc podtracev1alpha1.TracerConfig
 	if err := r.Get(ctx, req.NamespacedName, &tc); err != nil {
 		if apierrors.IsNotFound(err) {
+			forgetTracerConfigMetrics(req.Name)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("get TracerConfig: %w", err)
 	}
 
-	if tc.Name != DefaultTracerConfigName {
-		r.setCondition(&tc, ConditionDegraded, metav1.ConditionTrue, "NotDefaultTracerConfig",
-			fmt.Sprintf("only the %q TracerConfig manages the agent DaemonSet; this resource is inert", DefaultTracerConfigName))
-		r.setCondition(&tc, ConditionReady, metav1.ConditionFalse, "NotDefaultTracerConfig", "inert non-default TracerConfig")
-		if err := r.Status().Update(ctx, &tc); err != nil && !apierrors.IsConflict(err) {
-			return ctrl.Result{}, fmt.Errorf("update status: %w", err)
+	if err := validateTracerConfigName(tc.Name); err != nil {
+		r.setCondition(&tc, ConditionDegraded, metav1.ConditionTrue, "InvalidName", err.Error())
+		r.setCondition(&tc, ConditionReady, metav1.ConditionFalse, "InvalidName", err.Error())
+		if uerr := r.Status().Update(ctx, &tc); uerr != nil && !apierrors.IsConflict(uerr) {
+			return ctrl.Result{}, fmt.Errorf("update status: %w", uerr)
 		}
 		return ctrl.Result{}, nil
 	}
@@ -87,14 +96,16 @@ func (r *TracerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
-	if err := r.cleanupStaleAgentNamespaces(ctx, systemNS); err != nil {
-		logger.Error(err, "cleanup stale agent namespaces")
+	if err := r.cleanupStaleAgentObjects(ctx, tc.Name, systemNS); err != nil {
+		logger.Error(err, "cleanup stale agent objects")
 	}
 
 	tc.Status.DesiredAgents = ds.Status.DesiredNumberScheduled
 	tc.Status.ReadyAgents = ds.Status.NumberReady
 	tc.Status.ActiveSessions = r.countActiveSessions(ctx)
 	tc.Status.ObservedGeneration = tc.Generation
+
+	r.applyFleetPartitionStatus(ctx, &tc, logger)
 
 	if tc.Spec.BTFMode == podtracev1alpha1.BTFModeEmbedded {
 		logger.Info("spec.btfMode=embedded is not implemented; agent uses host BTF (auto)")
@@ -133,11 +144,86 @@ func (r *TracerConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&rbacv1.Role{}).
 		Owns(&rbacv1.RoleBinding{}).
 		Watches(&podtracev1alpha1.PodTraceSession{},
-			handler.EnqueueRequestsFromMapFunc(func(context.Context, client.Object) []reconcile.Request {
-				return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: DefaultTracerConfigName}}}
-			})).
+			handler.EnqueueRequestsFromMapFunc(r.enqueueAllTracerConfigs)).
+		Watches(&podtracev1alpha1.TracerConfig{},
+			handler.EnqueueRequestsFromMapFunc(r.enqueueAllTracerConfigs),
+			builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Watches(&corev1.Node{},
+			handler.EnqueueRequestsFromMapFunc(r.enqueueAllTracerConfigs),
+			builder.WithPredicates(nodeSchedulingChangedPredicate())).
 		WithOptions(defaultControllerOptions()).
 		Complete(r)
+}
+
+// enqueueAllTracerConfigs requeues every TracerConfig in the cluster.
+func (r *TracerConfigReconciler) enqueueAllTracerConfigs(ctx context.Context, _ client.Object) []reconcile.Request {
+	var configs podtracev1alpha1.TracerConfigList
+	if err := r.List(ctx, &configs); err != nil {
+		return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: DefaultTracerConfigName}}}
+	}
+	requests := make([]reconcile.Request, 0, len(configs.Items))
+	for i := range configs.Items {
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: configs.Items[i].Name},
+		})
+	}
+	return requests
+}
+
+// nodeSchedulingChangedPredicate admits only the Node transitions that can
+// change which fleet targets a node: creation, deletion, and edits to labels
+// or taints. Everything else, status heartbeats above all, is dropped.
+func nodeSchedulingChangedPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldNode, okOld := e.ObjectOld.(*corev1.Node)
+			newNode, okNew := e.ObjectNew.(*corev1.Node)
+			if !okOld || !okNew {
+				return true
+			}
+			return !maps.Equal(oldNode.Labels, newNode.Labels) ||
+				!slices.Equal(oldNode.Spec.Taints, newNode.Spec.Taints)
+		},
+	}
+}
+
+// applyFleetPartitionStatus resolves which nodes this fleet shares with
+// other fleets and records the answer on status + the Conflict condition.
+func (r *TracerConfigReconciler) applyFleetPartitionStatus(ctx context.Context, tc *podtracev1alpha1.TracerConfig, logger logr.Logger) {
+	var configs podtracev1alpha1.TracerConfigList
+	if err := r.List(ctx, &configs); err != nil {
+		logger.Info("list TracerConfigs for overlap detection failed; skipping", "error", err.Error())
+		r.setCondition(tc, ConditionConflict, metav1.ConditionUnknown, "PartitionUnresolved", err.Error())
+		return
+	}
+
+	var nodes corev1.NodeList
+	if err := r.List(ctx, &nodes); err != nil {
+		logger.Info("list Nodes for overlap detection failed; skipping. "+
+			"The operator ClusterRole needs nodes get/list/watch — upgrade the chart if this persists",
+			"error", err.Error())
+		r.setCondition(tc, ConditionConflict, metav1.ConditionUnknown, "NodesUnreadable", err.Error())
+		return
+	}
+
+	partition := fleet.ComputePartition(configs.Items, nodes.Items)
+	for i := range configs.Items {
+		name := configs.Items[i].Name
+		tracerConfigMatchedNodes.WithLabelValues(name).Set(float64(len(partition.Matched[name])))
+		tracerConfigContestedNodes.WithLabelValues(name).Set(float64(len(partition.Contested[name])))
+	}
+
+	tc.Status.MatchedNodes = safeconv.IntToInt32(len(partition.Matched[tc.Name]))
+	tc.Status.ContestedNodes = safeconv.IntToInt32(len(partition.Contested[tc.Name]))
+
+	if message := partition.ConflictMessage(tc.Name); message != "" {
+		logger.Info("agent fleets overlap",
+			"contestedNodes", tc.Status.ContestedNodes, "rivals", partition.Rivals[tc.Name])
+		r.setCondition(tc, ConditionConflict, metav1.ConditionTrue, "OverlappingNodes", message)
+		return
+	}
+	r.setCondition(tc, ConditionConflict, metav1.ConditionFalse, "ExclusiveNodes",
+		fmt.Sprintf("no other TracerConfig targets any of this fleet's %d node(s)", tc.Status.MatchedNodes))
 }
 
 func (r *TracerConfigReconciler) systemNamespaceFor(tc *podtracev1alpha1.TracerConfig) string {
@@ -166,24 +252,27 @@ func (r *TracerConfigReconciler) countActiveSessions(ctx context.Context) int32 
 	return active
 }
 
-// ensureAgentRBAC creates / updates the agent SA, ClusterRole, and
-// ClusterRoleBinding.
+// ensureAgentRBAC creates / updates this fleet's agent SA, ClusterRole,
+// ClusterRoleBinding, and the namespaced Role/RoleBinding that let the agent
+// read exporter bundles.
 func (r *TracerConfigReconciler) ensureAgentRBAC(ctx context.Context, tc *podtracev1alpha1.TracerConfig, systemNS string) error {
+	agentLabels := agentObjectLabels(tc.Name)
+
 	sa := &corev1.ServiceAccount{
-		ObjectMeta: ManagedObjectMeta(AgentServiceAccountName(), systemNS, ComponentAgent, nil),
+		ObjectMeta: ManagedObjectMeta(AgentServiceAccountName(tc.Name), systemNS, ComponentAgent, agentLabels),
 	}
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, sa, func() error {
-		sa.Labels = mergeLabels(sa.Labels, map[string]string{LabelManagedBy: ManagedByValue, LabelComponent: ComponentAgent})
+		sa.Labels = mergeLabels(sa.Labels, agentLabels)
 		return controllerutil.SetControllerReference(tc, sa, r.Scheme)
 	}); err != nil {
 		return fmt.Errorf("ServiceAccount: %w", err)
 	}
 
 	cr := &rbacv1.ClusterRole{
-		ObjectMeta: ManagedObjectMeta(AgentClusterRoleName(), "", ComponentAgent, nil),
+		ObjectMeta: ManagedObjectMeta(AgentClusterRoleName(tc.Name), "", ComponentAgent, agentLabels),
 	}
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, cr, func() error {
-		cr.Labels = mergeLabels(cr.Labels, map[string]string{LabelManagedBy: ManagedByValue, LabelComponent: ComponentAgent})
+		cr.Labels = mergeLabels(cr.Labels, agentLabels)
 		cr.Rules = agentClusterRoleRules(systemNS)
 		return controllerutil.SetControllerReference(tc, cr, r.Scheme)
 	}); err != nil {
@@ -191,18 +280,18 @@ func (r *TracerConfigReconciler) ensureAgentRBAC(ctx context.Context, tc *podtra
 	}
 
 	crb := &rbacv1.ClusterRoleBinding{
-		ObjectMeta: ManagedObjectMeta(AgentClusterRoleBindingName(), "", ComponentAgent, nil),
+		ObjectMeta: ManagedObjectMeta(AgentClusterRoleBindingName(tc.Name), "", ComponentAgent, agentLabels),
 	}
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, crb, func() error {
-		crb.Labels = mergeLabels(crb.Labels, map[string]string{LabelManagedBy: ManagedByValue, LabelComponent: ComponentAgent})
+		crb.Labels = mergeLabels(crb.Labels, agentLabels)
 		crb.RoleRef = rbacv1.RoleRef{
 			APIGroup: rbacv1.GroupName,
 			Kind:     "ClusterRole",
-			Name:     AgentClusterRoleName(),
+			Name:     AgentClusterRoleName(tc.Name),
 		}
 		crb.Subjects = []rbacv1.Subject{{
 			Kind:      rbacv1.ServiceAccountKind,
-			Name:      AgentServiceAccountName(),
+			Name:      AgentServiceAccountName(tc.Name),
 			Namespace: systemNS,
 		}}
 		return controllerutil.SetControllerReference(tc, crb, r.Scheme)
@@ -211,10 +300,10 @@ func (r *TracerConfigReconciler) ensureAgentRBAC(ctx context.Context, tc *podtra
 	}
 
 	role := &rbacv1.Role{
-		ObjectMeta: ManagedObjectMeta(AgentBundleRoleName(), systemNS, ComponentAgent, nil),
+		ObjectMeta: ManagedObjectMeta(AgentBundleRoleName(tc.Name), systemNS, ComponentAgent, agentLabels),
 	}
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, role, func() error {
-		role.Labels = mergeLabels(role.Labels, map[string]string{LabelManagedBy: ManagedByValue, LabelComponent: ComponentAgent})
+		role.Labels = mergeLabels(role.Labels, agentLabels)
 		role.Rules = []rbacv1.PolicyRule{{
 			APIGroups: []string{""},
 			Resources: []string{"configmaps", "secrets"},
@@ -226,18 +315,18 @@ func (r *TracerConfigReconciler) ensureAgentRBAC(ctx context.Context, tc *podtra
 	}
 
 	rb := &rbacv1.RoleBinding{
-		ObjectMeta: ManagedObjectMeta(AgentBundleRoleBindingName(), systemNS, ComponentAgent, nil),
+		ObjectMeta: ManagedObjectMeta(AgentBundleRoleBindingName(tc.Name), systemNS, ComponentAgent, agentLabels),
 	}
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, rb, func() error {
-		rb.Labels = mergeLabels(rb.Labels, map[string]string{LabelManagedBy: ManagedByValue, LabelComponent: ComponentAgent})
+		rb.Labels = mergeLabels(rb.Labels, agentLabels)
 		rb.RoleRef = rbacv1.RoleRef{
 			APIGroup: rbacv1.GroupName,
 			Kind:     "Role",
-			Name:     AgentBundleRoleName(),
+			Name:     AgentBundleRoleName(tc.Name),
 		}
 		rb.Subjects = []rbacv1.Subject{{
 			Kind:      rbacv1.ServiceAccountKind,
-			Name:      AgentServiceAccountName(),
+			Name:      AgentServiceAccountName(tc.Name),
 			Namespace: systemNS,
 		}}
 		return controllerutil.SetControllerReference(tc, rb, r.Scheme)
@@ -247,68 +336,122 @@ func (r *TracerConfigReconciler) ensureAgentRBAC(ctx context.Context, tc *podtra
 	return nil
 }
 
-// cleanupStaleAgentNamespaces deletes agent DaemonSets (and their namespaced
-// RBAC companions) left behind in OTHER namespaces after a
+// agentObjectLabels is the label set every agent-owned object carries.
+func agentObjectLabels(tracerConfigName string) map[string]string {
+	return map[string]string{
+		LabelManagedBy:    ManagedByValue,
+		LabelComponent:    ComponentAgent,
+		LabelTracerConfig: tracerConfigName,
+	}
+}
+
+// validateTracerConfigName rejects names that cannot round-trip through the
+// podtrace.io/tracer-config label on the agent DaemonSet's pod selector.
+func validateTracerConfigName(name string) error {
+	if len(name) > podtracev1alpha1.MaxTracerConfigNameLength {
+		return fmt.Errorf(
+			"metadata.name is %d characters; TracerConfig names are limited to %d because the name becomes the value of the %s label on the agent DaemonSet's immutable pod selector, and Kubernetes caps label values at %d characters",
+			len(name), podtracev1alpha1.MaxTracerConfigNameLength,
+			LabelTracerConfig, podtracev1alpha1.MaxTracerConfigNameLength)
+	}
+	return nil
+}
+
+// cleanupStaleAgentObjects deletes this fleet's agent DaemonSet (and its
+// namespaced RBAC companions) left behind in OTHER namespaces after a
 // spec.systemNamespace change.
-func (r *TracerConfigReconciler) cleanupStaleAgentNamespaces(ctx context.Context, currentNS string) error {
-	agentLabels := client.MatchingLabels{
-		LabelManagedBy: ManagedByValue,
-		LabelComponent: ComponentAgent,
+func (r *TracerConfigReconciler) cleanupStaleAgentObjects(ctx context.Context, tracerConfigName, currentNS string) error {
+	for _, selector := range staleAgentSelectors(tracerConfigName) {
+		if err := r.deleteAgentObjectsOutsideNamespace(ctx, selector, currentNS); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// staleAgentSelectors lists the label selectors that identify objects this
+// fleet is responsible for cleaning up.
+func staleAgentSelectors(tracerConfigName string) []client.ListOption {
+	selectors := []client.ListOption{client.MatchingLabels{
+		LabelManagedBy:    ManagedByValue,
+		LabelComponent:    ComponentAgent,
+		LabelTracerConfig: tracerConfigName,
+	}}
+	if tracerConfigName != DefaultTracerConfigName {
+		return selectors
 	}
 
-	var dsList appsv1.DaemonSetList
-	if err := r.List(ctx, &dsList, agentLabels); err != nil {
-		return fmt.Errorf("list agent DaemonSets: %w", err)
+	managedBy, err := labels.NewRequirement(LabelManagedBy, selection.Equals, []string{ManagedByValue})
+	if err != nil {
+		return selectors
 	}
-	for i := range dsList.Items {
-		ds := &dsList.Items[i]
-		if ds.Namespace == currentNS {
-			continue
-		}
-		if err := r.Delete(ctx, ds); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("delete stale agent DaemonSet %s/%s: %w", ds.Namespace, ds.Name, err)
-		}
+	component, err := labels.NewRequirement(LabelComponent, selection.Equals, []string{ComponentAgent})
+	if err != nil {
+		return selectors
+	}
+	unlabelled, err := labels.NewRequirement(LabelTracerConfig, selection.DoesNotExist, nil)
+	if err != nil {
+		return selectors
+	}
+	return append(selectors, client.MatchingLabelsSelector{
+		Selector: labels.NewSelector().Add(*managedBy, *component, *unlabelled),
+	})
+}
+
+// deleteAgentObjectsOutsideNamespace deletes every agent object matching
+// selector that does not live in keepNS.
+func (r *TracerConfigReconciler) deleteAgentObjectsOutsideNamespace(ctx context.Context, selector client.ListOption, keepNS string) error {
+	lists := []struct {
+		kind string
+		list client.ObjectList
+		each func(client.ObjectList) []client.Object
+	}{
+		{"DaemonSet", &appsv1.DaemonSetList{}, func(l client.ObjectList) []client.Object {
+			items := l.(*appsv1.DaemonSetList).Items
+			out := make([]client.Object, 0, len(items))
+			for i := range items {
+				out = append(out, &items[i])
+			}
+			return out
+		}},
+		{"ServiceAccount", &corev1.ServiceAccountList{}, func(l client.ObjectList) []client.Object {
+			items := l.(*corev1.ServiceAccountList).Items
+			out := make([]client.Object, 0, len(items))
+			for i := range items {
+				out = append(out, &items[i])
+			}
+			return out
+		}},
+		{"Role", &rbacv1.RoleList{}, func(l client.ObjectList) []client.Object {
+			items := l.(*rbacv1.RoleList).Items
+			out := make([]client.Object, 0, len(items))
+			for i := range items {
+				out = append(out, &items[i])
+			}
+			return out
+		}},
+		{"RoleBinding", &rbacv1.RoleBindingList{}, func(l client.ObjectList) []client.Object {
+			items := l.(*rbacv1.RoleBindingList).Items
+			out := make([]client.Object, 0, len(items))
+			for i := range items {
+				out = append(out, &items[i])
+			}
+			return out
+		}},
 	}
 
-	var saList corev1.ServiceAccountList
-	if err := r.List(ctx, &saList, agentLabels); err != nil {
-		return fmt.Errorf("list agent ServiceAccounts: %w", err)
-	}
-	for i := range saList.Items {
-		sa := &saList.Items[i]
-		if sa.Namespace == currentNS {
-			continue
+	for _, entry := range lists {
+		if err := r.List(ctx, entry.list, selector); err != nil {
+			return fmt.Errorf("list agent %ss: %w", entry.kind, err)
 		}
-		if err := r.Delete(ctx, sa); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("delete stale agent ServiceAccount %s/%s: %w", sa.Namespace, sa.Name, err)
-		}
-	}
-
-	var roleList rbacv1.RoleList
-	if err := r.List(ctx, &roleList, agentLabels); err != nil {
-		return fmt.Errorf("list agent Roles: %w", err)
-	}
-	for i := range roleList.Items {
-		role := &roleList.Items[i]
-		if role.Namespace == currentNS {
-			continue
-		}
-		if err := r.Delete(ctx, role); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("delete stale agent Role %s/%s: %w", role.Namespace, role.Name, err)
-		}
-	}
-
-	var rbList rbacv1.RoleBindingList
-	if err := r.List(ctx, &rbList, agentLabels); err != nil {
-		return fmt.Errorf("list agent RoleBindings: %w", err)
-	}
-	for i := range rbList.Items {
-		rb := &rbList.Items[i]
-		if rb.Namespace == currentNS {
-			continue
-		}
-		if err := r.Delete(ctx, rb); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("delete stale agent RoleBinding %s/%s: %w", rb.Namespace, rb.Name, err)
+		for _, obj := range entry.each(entry.list) {
+			if obj.GetNamespace() == keepNS {
+				continue
+			}
+			if err := r.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
+				return fmt.Errorf("delete stale agent %s %s/%s: %w",
+					entry.kind, obj.GetNamespace(), obj.GetName(), err)
+			}
 		}
 	}
 	return nil
@@ -318,16 +461,10 @@ func (r *TracerConfigReconciler) cleanupStaleAgentNamespaces(ctx context.Context
 // current status so Reconcile can roll it up.
 func (r *TracerConfigReconciler) ensureAgentDaemonSet(ctx context.Context, tc *podtracev1alpha1.TracerConfig, systemNS string) (*appsv1.DaemonSet, error) {
 	ds := &appsv1.DaemonSet{
-		ObjectMeta: ManagedObjectMeta(AgentDaemonSetName(), systemNS, ComponentAgent, map[string]string{
-			LabelTracerConfig: tc.Name,
-		}),
+		ObjectMeta: ManagedObjectMeta(AgentDaemonSetName(tc.Name), systemNS, ComponentAgent, agentObjectLabels(tc.Name)),
 	}
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, ds, func() error {
-		ds.Labels = mergeLabels(ds.Labels, map[string]string{
-			LabelManagedBy:    ManagedByValue,
-			LabelComponent:    ComponentAgent,
-			LabelTracerConfig: tc.Name,
-		})
+		ds.Labels = mergeLabels(ds.Labels, agentObjectLabels(tc.Name))
 		ds.Spec = buildAgentDaemonSetSpec(tc, systemNS)
 		return controllerutil.SetControllerReference(tc, ds, r.Scheme)
 	}); err != nil {

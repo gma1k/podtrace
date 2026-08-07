@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -21,8 +24,6 @@ import (
 type Options struct {
 	SystemNamespace string
 
-	// MetricsBindAddress (host:port) for controller-runtime's Prometheus
-	// metrics endpoint. Empty disables the server.
 	MetricsBindAddress string
 
 	HealthBindAddress string
@@ -100,6 +101,9 @@ func Run(ctx context.Context, opts Options) error {
 			CertDir: opts.WebhookCertDir,
 		})
 	}
+	managerOpts.Cache.ByObject = map[client.Object]cache.ByObject{
+		&corev1.Node{}: {Transform: stripNodeStatus},
+	}
 	if opts.SyncPeriod > 0 {
 		managerOpts.Cache.SyncPeriod = &opts.SyncPeriod
 	}
@@ -142,6 +146,17 @@ func Run(ctx context.Context, opts Options) error {
 	return mgr.Start(ctx)
 }
 
+// stripNodeStatus drops the bulk of a cached Node.
+func stripNodeStatus(obj any) (any, error) {
+	node, ok := obj.(*corev1.Node)
+	if !ok {
+		return obj, nil
+	}
+	node.Status = corev1.NodeStatus{}
+	node.ManagedFields = nil
+	return node, nil
+}
+
 func leaderElectionID(opts Options) string {
 	if opts.LeaderElectionID != "" {
 		return opts.LeaderElectionID
@@ -149,7 +164,7 @@ func leaderElectionID(opts Options) string {
 	return "podtrace-operator.podtrace.io"
 }
 
-// registerWebhooks wires the three validating webhooks onto the manager.
+// registerWebhooks wires the validating webhooks onto the manager.
 func registerWebhooks(mgr ctrl.Manager) error {
 	if err := webhookv1alpha1.SetupPodTraceWebhookWithManager(mgr); err != nil {
 		return fmt.Errorf("podtrace webhook: %w", err)
@@ -162,6 +177,9 @@ func registerWebhooks(mgr ctrl.Manager) error {
 	}
 	if err := webhookv1alpha1.SetupPodTraceScheduleWebhookWithManager(mgr); err != nil {
 		return fmt.Errorf("podtraceschedule webhook: %w", err)
+	}
+	if err := webhookv1alpha1.SetupTracerConfigWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("tracerconfig webhook: %w", err)
 	}
 	return nil
 }

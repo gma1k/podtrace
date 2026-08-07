@@ -32,6 +32,10 @@ spec:
     - jsonPath: .status.activeSessions
       name: Sessions
       type: integer
+    - jsonPath: .status.contestedNodes
+      name: Contested
+      priority: 1
+      type: integer
     - jsonPath: .spec.image
       name: Image
       priority: 1
@@ -43,8 +47,8 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          TracerConfig is the cluster-wide infrastructure configuration for the
-          podtrace operator.
+          TracerConfig is the infrastructure configuration for one podtrace agent
+          fleet.
         properties:
           apiVersion:
             description: |-
@@ -64,9 +68,6 @@ spec:
           metadata:
             type: object
           spec:
-            description: |-
-              TracerConfigSpec configures the tracer infrastructure. It is cluster-scoped
-              because it governs a fleet-wide DaemonSet and the Jobs the operator spawns.
             properties:
               affinity:
                 description: Affinity is a group of affinity scheduling rules.
@@ -1127,6 +1128,9 @@ spec:
                 additionalProperties:
                   type: string
                 type: object
+              priority:
+                format: int32
+                type: integer
               redaction:
                 description: |-
                   RedactionSpec configures PII redaction applied to event Target and Details
@@ -1348,7 +1352,13 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              contestedNodes:
+                format: int32
+                type: integer
               desiredAgents:
+                format: int32
+                type: integer
+              matchedNodes:
                 format: int32
                 type: integer
               observedGeneration:

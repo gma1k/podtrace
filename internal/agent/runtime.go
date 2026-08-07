@@ -78,7 +78,8 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	ctrl.SetLogger(zap.New(zap.UseDevMode(false)))
-	logger := ctrllog.Log.WithName("agent").WithValues("node", opts.NodeName)
+	logger := ctrllog.Log.WithName("agent").
+		WithValues("node", opts.NodeName, "tracerConfig", opts.TracerConfigName)
 
 	if alertManager, mErr := alerting.NewManager(); mErr != nil {
 		logger.Error(mErr, "failed to create alert manager; resource alerts disabled")
@@ -131,6 +132,7 @@ func Run(ctx context.Context, opts Options) error {
 	router := NewRouter(stats).WithEnricher(enricher)
 	probeSrv := NewProbeServer(opts.HealthAddr, 0)
 	metrics := NewMetrics()
+	metrics.SetIdentity(opts.NodeName, opts.TracerConfigName)
 
 	probes.SetAttachObserver(&attachMetricsObserver{metrics: metrics})
 
@@ -200,12 +202,15 @@ func Run(ctx context.Context, opts Options) error {
 	return nil
 }
 
-func (o Options) validate() error {
+func (o *Options) validate() error {
 	if o.NodeName == "" {
 		return errors.New("agent: NodeName is required (set $NODE_NAME via downward API)")
 	}
 	if o.SystemNamespace == "" {
 		return errors.New("agent: SystemNamespace is required")
+	}
+	if o.TracerConfigName == "" {
+		o.TracerConfigName = "default"
 	}
 	return nil
 }

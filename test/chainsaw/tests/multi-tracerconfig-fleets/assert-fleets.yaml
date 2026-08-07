@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: podtrace-agent-secondary
+  namespace: podtrace-system
+  labels:
+    podtrace.io/managed-by: podtrace-operator
+    podtrace.io/component: agent
+    podtrace.io/tracer-config: secondary
+spec:
+  selector:
+    matchLabels:
+      podtrace.io/tracer-config: secondary
+  template:
+    spec:
+      serviceAccountName: podtrace-agent-secondary
+      nodeSelector:
+        podtrace.io/test-pool: secondary
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: podtrace-agent
+  namespace: podtrace-system
+  labels:
+    podtrace.io/tracer-config: default
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: podtrace-agent-secondary
+  namespace: podtrace-system
