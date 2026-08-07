@@ -1,0 +1,178 @@
+package operator
+
+import (
+	"context"
+	"fmt"
+	"sort"
+
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
+
+	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	"github.com/gma1k/podtrace/internal/fleet"
+)
+
+// errNoTracerConfig reports that nothing resolved for a node.
+//
+// This used to be silent: resolveTracerConfig returned (nil, nil) when the
+// default config was missing, and buildSessionJobSpec then produced a Job
+// with an empty image. The apiserver rejects that with a message about
+// container spec validation, which says nothing about the actual cause, so
+// the failure surfaces as a broken Job rather than a broken configuration.
+type errNoTracerConfig struct {
+	node    string
+	pinned  string
+	reason  string
+	configs []string
+}
+
+func (e *errNoTracerConfig) Error() string {
+	if e.pinned != "" {
+		return fmt.Sprintf("spec.tracerConfigRef %q: %s", e.pinned, e.reason)
+	}
+	return fmt.Sprintf(
+		"no TracerConfig resolves for node %q: %s. Existing configs: %v. "+
+			"Either label the node into a fleet, create a TracerConfig named %q, "+
+			"or pin one with spec.tracerConfigRef",
+		e.node, e.reason, e.configs, DefaultTracerConfigName)
+}
+
+// sessionTracerConfigs holds the per-node resolution for one session.
+type sessionTracerConfigs struct {
+	// byNode maps a node name to the config its Job must run under.
+	byNode map[string]*podtracev1alpha1.TracerConfig
+	// namespaces lists the distinct system namespaces those configs
+	// resolve to, sorted. A session whose nodes span fleets with different
+	// spec.systemNamespace needs its bundle, credentials, ServiceAccount
+	// and RBAC provisioned in each of them.
+	namespaces []string
+}
+
+// forNode returns the config resolved for a node, or nil when the node was
+// not part of the resolution.
+func (s sessionTracerConfigs) forNode(node string) *podtracev1alpha1.TracerConfig {
+	if s.byNode == nil {
+		return nil
+	}
+	return s.byNode[node]
+}
+
+// namespaceForNode returns the system namespace a node's Job belongs in.
+func (s sessionTracerConfigs) namespaceForNode(node, fallback string) string {
+	return systemNamespaceForSession(s.forNode(node), fallback)
+}
+
+// resolveSessionTracerConfigs works out which TracerConfig governs each of a
+// session's target nodes.
+//
+// Order per node:
+//
+//  1. spec.tracerConfigRef, when set — an explicit pin wins everywhere, so a
+//     session can be made reproducible regardless of where its pods land.
+//  2. The fleet whose scheduling constraints target that node, taken from
+//     the same partition the TracerConfig reconciler reports on. When two
+//     fleets contest a node, the partition's precedence rule (priority, then
+//     age, then name) picks one — the same answer the Conflict condition
+//     advertises, so the session agrees with what the operator told the user.
+//  3. The config named "default".
+//
+// Exhausting all three is an error, not a nil config: a Job built without a
+// TracerConfig has no image.
+func (r *PodTraceSessionReconciler) resolveSessionTracerConfigs(
+	ctx context.Context,
+	s *podtracev1alpha1.PodTraceSession,
+	nodes []string,
+) (sessionTracerConfigs, error) {
+	out := sessionTracerConfigs{byNode: map[string]*podtracev1alpha1.TracerConfig{}}
+
+	if ref := s.Spec.TracerConfigRef; ref != nil && ref.Name != "" {
+		var pinned podtracev1alpha1.TracerConfig
+		if err := r.Get(ctx, types.NamespacedName{Name: ref.Name}, &pinned); err != nil {
+			if apierrors.IsNotFound(err) {
+				return out, &errNoTracerConfig{pinned: ref.Name, reason: "TracerConfig not found"}
+			}
+			return out, fmt.Errorf("get TracerConfig %q: %w", ref.Name, err)
+		}
+		for _, node := range nodes {
+			out.byNode[node] = &pinned
+		}
+		out.namespaces = distinctNamespaces(out.byNode, r.SystemNamespace)
+		return out, nil
+	}
+
+	var configs podtracev1alpha1.TracerConfigList
+	if err := r.List(ctx, &configs); err != nil {
+		return out, fmt.Errorf("list TracerConfigs: %w", err)
+	}
+	byName := map[string]*podtracev1alpha1.TracerConfig{}
+	names := make([]string, 0, len(configs.Items))
+	for i := range configs.Items {
+		byName[configs.Items[i].Name] = &configs.Items[i]
+		names = append(names, configs.Items[i].Name)
+	}
+	sort.Strings(names)
+
+	// Node objects are only needed to run the partition. Losing the read is
+	// not fatal: fall through to "default", which is what every release
+	// before per-node resolution did.
+	winner := map[string]string{}
+	var nodeList corev1.NodeList
+	if err := r.List(ctx, &nodeList); err == nil {
+		winner = fleet.ComputePartition(configs.Items, nodeList.Items).Winner
+	}
+
+	for _, node := range nodes {
+		if name, ok := winner[node]; ok {
+			if tc := byName[name]; tc != nil {
+				out.byNode[node] = tc
+				continue
+			}
+		}
+		if tc := byName[DefaultTracerConfigName]; tc != nil {
+			out.byNode[node] = tc
+			continue
+		}
+		reason := "no fleet targets it and there is no default TracerConfig"
+		if len(names) == 0 {
+			reason = "the cluster has no TracerConfig at all"
+		}
+		return out, &errNoTracerConfig{node: node, reason: reason, configs: names}
+	}
+
+	out.namespaces = distinctNamespaces(out.byNode, r.SystemNamespace)
+	return out, nil
+}
+
+// distinctNamespaces returns the sorted set of system namespaces the
+// resolved configs map to.
+func distinctNamespaces(byNode map[string]*podtracev1alpha1.TracerConfig, fallback string) []string {
+	seen := map[string]struct{}{}
+	for _, tc := range byNode {
+		seen[systemNamespaceForSession(tc, fallback)] = struct{}{}
+	}
+	if len(seen) == 0 {
+		seen[fallback] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for ns := range seen {
+		out = append(out, ns)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// primary returns the config used for session-wide decisions that are not
+// per-node, such as the concurrency cap. Deterministic: the config of the
+// lowest-sorted node.
+func (s sessionTracerConfigs) primary() *podtracev1alpha1.TracerConfig {
+	nodes := make([]string, 0, len(s.byNode))
+	for node := range s.byNode {
+		nodes = append(nodes, node)
+	}
+	if len(nodes) == 0 {
+		return nil
+	}
+	sort.Strings(nodes)
+	return s.byNode[nodes[0]]
+}

@@ -67,3 +67,10 @@ func TestSetupPodTraceSessionWebhookWithManager(t *testing.T) {
 		t.Fatalf("SetupPodTraceSessionWebhookWithManager: %v", err)
 	}
 }
+
+func TestSetupTracerConfigWebhookWithManager(t *testing.T) {
+	mgr := newNonConnectingManager(t)
+	if err := webhookv1alpha1.SetupTracerConfigWebhookWithManager(mgr); err != nil {
+		t.Fatalf("SetupTracerConfigWebhookWithManager: %v", err)
+	}
+}

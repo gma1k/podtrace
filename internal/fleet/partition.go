@@ -150,17 +150,33 @@ func (p Partition) ConflictMessage(name string) string {
 		outcome)
 }
 
-// Outranks reports whether a beats b for a node both target: higher
-// spec.priority first, then the older resource, then the lexicographically
-// smaller name.
+// Outranks reports whether a beats b for a node both target: explicit
+// spec.priority, then specificity, then the older resource, then the
+// lexicographically smaller name.
 func Outranks(a, b *podtracev1alpha1.TracerConfig) bool {
 	if a.Spec.Priority != b.Spec.Priority {
 		return a.Spec.Priority > b.Spec.Priority
+	}
+	if aWide, bWide := IsClusterWide(&a.Spec), IsClusterWide(&b.Spec); aWide != bWide {
+		return !aWide
 	}
 	if !a.CreationTimestamp.Equal(&b.CreationTimestamp) {
 		return a.CreationTimestamp.Before(&b.CreationTimestamp)
 	}
 	return a.Name < b.Name
+}
+
+// IsClusterWide reports whether a config declines to constrain its fleet to
+// a subset of nodes, so it targets every node it tolerates.
+func IsClusterWide(spec *podtracev1alpha1.TracerConfigSpec) bool {
+	if len(spec.NodeSelector) > 0 {
+		return false
+	}
+	if spec.Affinity == nil || spec.Affinity.NodeAffinity == nil {
+		return true
+	}
+	required := spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+	return required == nil || len(required.NodeSelectorTerms) == 0
 }
 
 // NodeTargetedBy reports whether the agent DaemonSet built from tc would be

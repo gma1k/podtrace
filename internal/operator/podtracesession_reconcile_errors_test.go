@@ -34,6 +34,10 @@ func sessMoreFanOutObjects() []client.Object {
 				OTLP: &podtracev1alpha1.OTLPExporter{Endpoint: "otel:4318", Protocol: podtracev1alpha1.OTLPProtocolHTTP},
 			},
 		},
+		&podtracev1alpha1.TracerConfig{
+			ObjectMeta: metav1.ObjectMeta{Name: DefaultTracerConfigName},
+			Spec:       podtracev1alpha1.TracerConfigSpec{Image: "ghcr.io/gma1k/podtrace:test"},
+		},
 	}
 }
 
@@ -184,11 +188,11 @@ func TestSessionReconcile_ResolveTracerConfigError(t *testing.T) {
 		WithStatusSubresource(&podtracev1alpha1.PodTraceSession{}).
 		WithObjects(objs...).
 		WithInterceptorFuncs(interceptor.Funcs{
-			Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-				if _, ok := obj.(*podtracev1alpha1.TracerConfig); ok {
+			List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+				if _, ok := list.(*podtracev1alpha1.TracerConfigList); ok {
 					return errInternal()
 				}
-				return cl.Get(ctx, key, obj, opts...)
+				return cl.List(ctx, list, opts...)
 			},
 		}).Build()
 	r := &PodTraceSessionReconciler{Client: c, Scheme: scheme, SystemNamespace: sessMoreSysNS}
@@ -327,7 +331,7 @@ func TestSessionReconcile_DeniedAndGrantedMix(t *testing.T) {
 	})
 	c := fake.NewClientBuilder().WithScheme(scheme).
 		WithStatusSubresource(&podtracev1alpha1.PodTraceSession{}).
-		WithObjects(s, ec, granted, deniedNS, grantedPod, deniedPod).Build()
+		WithObjects(s, ec, granted, deniedNS, grantedPod, deniedPod, defaultTracerConfigObject()).Build()
 	r := &PodTraceSessionReconciler{Client: c, Scheme: scheme, SystemNamespace: sessMoreSysNS}
 	if _, err := sessMoreReconcile(t, r); err != nil {
 		t.Fatalf("Reconcile: %v", err)

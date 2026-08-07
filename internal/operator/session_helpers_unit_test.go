@@ -124,7 +124,7 @@ func TestSess_EnsureJobsCreateError(t *testing.T) {
 	c := fake.NewClientBuilder().
 		WithScheme(s).
 		WithStatusSubresource(&podtracev1alpha1.PodTraceSession{}).
-		WithObjects(session, pod, ec).
+		WithObjects(session, pod, ec, defaultTracerConfigObject()).
 		WithInterceptorFuncs(interceptor.Funcs{
 			Create: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
 				if _, ok := obj.(*batchv1.Job); ok {

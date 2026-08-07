@@ -215,12 +215,12 @@ The chart renders only one TracerConfig. Apply additional ones with
 `kubectl apply`, or set `tracerConfig.create=false` and manage all of
 them yourself.
 
-> **Session Jobs still resolve the `default` TracerConfig.** The Jobs
-> behind `podtrace diagnose` and PodTraceSession take their image and
-> their redaction and capture policy from the config named `default`,
-> whichever node the target pod runs on. Per-fleet session policy is not
-> yet implemented, so do not rely on a per-pool `spec.redaction` to
-> constrain what a *session* records.
+Session Jobs follow the same fleets. A `PodTraceSession` spawns one Job
+per node, and each Job takes the image, resources and redaction policy of
+the fleet targeting *its* node — so a session whose pods span two pools
+runs under each pool's own policy. Pin the whole session to one config
+with `spec.tracerConfigRef`. See
+[crd-podtracesession.md](crd-podtracesession.md#tracerconfig-resolution).
 
 ### Overlapping fleets
 

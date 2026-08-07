@@ -298,3 +298,220 @@ func TestComputePartitionEmptyCluster(t *testing.T) {
 		t.Errorf("unknown config must produce no message, got %q", msg)
 	}
 }
+
+func TestOutranksPrefersTargetedFleetOverClusterWide(t *testing.T) {
+	catchAll := config("default", podtracev1alpha1.TracerConfigSpec{})
+	targeted := config("regulated", podtracev1alpha1.TracerConfigSpec{
+		NodeSelector: map[string]string{"pool": "regulated"},
+	})
+
+	if !Outranks(&targeted, &catchAll) {
+		t.Error("a config with a nodeSelector must beat a cluster-wide one at equal priority, or the stock default wins every node alphabetically")
+	}
+	if Outranks(&catchAll, &targeted) {
+		t.Error("Outranks must be antisymmetric across the specificity tie-break")
+	}
+}
+
+func TestOutranksPriorityStillBeatsSpecificity(t *testing.T) {
+	catchAll := config("default", podtracev1alpha1.TracerConfigSpec{Priority: 100})
+	targeted := config("regulated", podtracev1alpha1.TracerConfigSpec{
+		NodeSelector: map[string]string{"pool": "regulated"},
+	})
+
+	if !Outranks(&catchAll, &targeted) {
+		t.Error("an explicit spec.priority must override the specificity heuristic")
+	}
+}
+
+func TestComputePartitionTargetedFleetWinsItsOwnNode(t *testing.T) {
+	configs := []podtracev1alpha1.TracerConfig{
+		config("default", podtracev1alpha1.TracerConfigSpec{}),
+		config("regulated", podtracev1alpha1.TracerConfigSpec{
+			NodeSelector: map[string]string{"pool": "regulated"},
+		}),
+	}
+	nodes := []corev1.Node{
+		node("n-regulated", map[string]string{"pool": "regulated"}),
+		node("n-plain", nil),
+	}
+
+	p := ComputePartition(configs, nodes)
+
+	if got := p.Winner["n-regulated"]; got != "regulated" {
+		t.Errorf("winner for the targeted node = %q, want regulated", got)
+	}
+	if got := p.Winner["n-plain"]; got != "default" {
+		t.Errorf("winner for the untargeted node = %q, want default", got)
+	}
+}
+
+func affinityWith(terms ...corev1.NodeSelectorTerm) *corev1.Affinity {
+	return &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{
+		RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{NodeSelectorTerms: terms},
+	}}
+}
+
+func termWithExpressions(reqs ...corev1.NodeSelectorRequirement) corev1.NodeSelectorTerm {
+	return corev1.NodeSelectorTerm{MatchExpressions: reqs}
+}
+
+func TestNodeTargetedByAffinityOperators(t *testing.T) {
+	cases := []struct {
+		name   string
+		req    corev1.NodeSelectorRequirement
+		labels map[string]string
+		want   bool
+	}{
+		{"In matches", corev1.NodeSelectorRequirement{Key: "pool", Operator: corev1.NodeSelectorOpIn, Values: []string{"a"}}, map[string]string{"pool": "a"}, true},
+		{"In misses", corev1.NodeSelectorRequirement{Key: "pool", Operator: corev1.NodeSelectorOpIn, Values: []string{"a"}}, map[string]string{"pool": "b"}, false},
+		{"NotIn excludes listed", corev1.NodeSelectorRequirement{Key: "pool", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"a"}}, map[string]string{"pool": "a"}, false},
+		{"NotIn admits unlisted", corev1.NodeSelectorRequirement{Key: "pool", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"a"}}, map[string]string{"pool": "b"}, true},
+		{"NotIn admits absent label", corev1.NodeSelectorRequirement{Key: "pool", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"a"}}, nil, true},
+		{"Exists with label", corev1.NodeSelectorRequirement{Key: "pool", Operator: corev1.NodeSelectorOpExists}, map[string]string{"pool": ""}, true},
+		{"Exists without label", corev1.NodeSelectorRequirement{Key: "pool", Operator: corev1.NodeSelectorOpExists}, nil, false},
+		{"DoesNotExist without label", corev1.NodeSelectorRequirement{Key: "pool", Operator: corev1.NodeSelectorOpDoesNotExist}, nil, true},
+		{"DoesNotExist with label", corev1.NodeSelectorRequirement{Key: "pool", Operator: corev1.NodeSelectorOpDoesNotExist}, map[string]string{"pool": "a"}, false},
+		{"Gt above", corev1.NodeSelectorRequirement{Key: "cores", Operator: corev1.NodeSelectorOpGt, Values: []string{"4"}}, map[string]string{"cores": "8"}, true},
+		{"Gt equal", corev1.NodeSelectorRequirement{Key: "cores", Operator: corev1.NodeSelectorOpGt, Values: []string{"4"}}, map[string]string{"cores": "4"}, false},
+		{"Lt below", corev1.NodeSelectorRequirement{Key: "cores", Operator: corev1.NodeSelectorOpLt, Values: []string{"4"}}, map[string]string{"cores": "2"}, true},
+		{"Lt equal", corev1.NodeSelectorRequirement{Key: "cores", Operator: corev1.NodeSelectorOpLt, Values: []string{"4"}}, map[string]string{"cores": "4"}, false},
+		{"Gt on non-numeric label", corev1.NodeSelectorRequirement{Key: "cores", Operator: corev1.NodeSelectorOpGt, Values: []string{"4"}}, map[string]string{"cores": "many"}, false},
+		{"Gt with non-numeric bound", corev1.NodeSelectorRequirement{Key: "cores", Operator: corev1.NodeSelectorOpGt, Values: []string{"lots"}}, map[string]string{"cores": "8"}, false},
+		{"Gt with absent label", corev1.NodeSelectorRequirement{Key: "cores", Operator: corev1.NodeSelectorOpGt, Values: []string{"4"}}, nil, false},
+		{"Gt with two bounds is malformed", corev1.NodeSelectorRequirement{Key: "cores", Operator: corev1.NodeSelectorOpGt, Values: []string{"4", "8"}}, map[string]string{"cores": "16"}, false},
+		{"unknown operator", corev1.NodeSelectorRequirement{Key: "pool", Operator: corev1.NodeSelectorOperator("Bogus"), Values: []string{"a"}}, map[string]string{"pool": "a"}, false},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := config("c", podtracev1alpha1.TracerConfigSpec{Affinity: affinityWith(termWithExpressions(tt.req))})
+			n := node("n1", tt.labels)
+			if got := NodeTargetedBy(&n, &tc); got != tt.want {
+				t.Errorf("NodeTargetedBy = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNodeTargetedByMatchFields(t *testing.T) {
+	cases := []struct {
+		name     string
+		req      corev1.NodeSelectorRequirement
+		nodeName string
+		want     bool
+	}{
+		{"metadata.name In matches", corev1.NodeSelectorRequirement{Key: "metadata.name", Operator: corev1.NodeSelectorOpIn, Values: []string{"n1"}}, "n1", true},
+		{"metadata.name In misses", corev1.NodeSelectorRequirement{Key: "metadata.name", Operator: corev1.NodeSelectorOpIn, Values: []string{"n1"}}, "n2", false},
+		{"metadata.name NotIn", corev1.NodeSelectorRequirement{Key: "metadata.name", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"n1"}}, "n2", true},
+		{"unsupported field key", corev1.NodeSelectorRequirement{Key: "spec.unschedulable", Operator: corev1.NodeSelectorOpIn, Values: []string{"true"}}, "n1", false},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := config("c", podtracev1alpha1.TracerConfigSpec{
+				Affinity: affinityWith(corev1.NodeSelectorTerm{MatchFields: []corev1.NodeSelectorRequirement{tt.req}}),
+			})
+			n := node(tt.nodeName, nil)
+			if got := NodeTargetedBy(&n, &tc); got != tt.want {
+				t.Errorf("NodeTargetedBy = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNodeTargetedByEmptyAffinityShapes(t *testing.T) {
+	n := node("n1", map[string]string{"pool": "a"})
+
+	empty := config("c", podtracev1alpha1.TracerConfigSpec{
+		Affinity: &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{}},
+	})
+	if !NodeTargetedBy(&n, &empty) {
+		t.Error("nodeAffinity with no required clause must not constrain the fleet")
+	}
+
+	noTerms := config("c", podtracev1alpha1.TracerConfigSpec{Affinity: affinityWith()})
+	if !NodeTargetedBy(&n, &noTerms) {
+		t.Error("a required clause with zero terms must not constrain the fleet")
+	}
+
+	emptyTerm := config("c", podtracev1alpha1.TracerConfigSpec{Affinity: affinityWith(corev1.NodeSelectorTerm{})})
+	if NodeTargetedBy(&n, &emptyTerm) {
+		t.Error("a term with neither expressions nor fields matches nothing")
+	}
+
+	onlyPreferred := config("c", podtracev1alpha1.TracerConfigSpec{
+		Affinity: &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{
+			PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{{
+				Weight:     10,
+				Preference: termWithExpressions(corev1.NodeSelectorRequirement{Key: "pool", Operator: corev1.NodeSelectorOpIn, Values: []string{"zzz"}}),
+			}},
+		}},
+	})
+	if !NodeTargetedBy(&n, &onlyPreferred) {
+		t.Error("preferred affinity changes scoring, not admissibility, so it must not exclude a node")
+	}
+}
+
+func TestNodeTargetedByAllRequirementsInATermMustHold(t *testing.T) {
+	tc := config("c", podtracev1alpha1.TracerConfigSpec{
+		Affinity: affinityWith(termWithExpressions(
+			corev1.NodeSelectorRequirement{Key: "pool", Operator: corev1.NodeSelectorOpIn, Values: []string{"a"}},
+			corev1.NodeSelectorRequirement{Key: "tier", Operator: corev1.NodeSelectorOpExists},
+		)),
+	})
+
+	both := node("n1", map[string]string{"pool": "a", "tier": "gold"})
+	if !NodeTargetedBy(&both, &tc) {
+		t.Error("a node satisfying every requirement in the term must be targeted")
+	}
+	partial := node("n2", map[string]string{"pool": "a"})
+	if NodeTargetedBy(&partial, &tc) {
+		t.Error("requirements within a term are AND'd; a partial match must not be targeted")
+	}
+}
+
+func TestNodeTargetedByCombinesSelectorAffinityAndTaints(t *testing.T) {
+	tc := config("c", podtracev1alpha1.TracerConfigSpec{
+		NodeSelector: map[string]string{"pool": "a"},
+		Affinity:     affinityWith(termWithExpressions(corev1.NodeSelectorRequirement{Key: "tier", Operator: corev1.NodeSelectorOpExists})),
+	})
+
+	ok := node("n1", map[string]string{"pool": "a", "tier": "gold"})
+	if !NodeTargetedBy(&ok, &tc) {
+		t.Error("selector and affinity both satisfied must target the node")
+	}
+	selectorFails := node("n2", map[string]string{"pool": "b", "tier": "gold"})
+	if NodeTargetedBy(&selectorFails, &tc) {
+		t.Error("nodeSelector must still gate even when affinity matches")
+	}
+	taintBlocks := node("n3", map[string]string{"pool": "a", "tier": "gold"},
+		corev1.Taint{Key: "dedicated", Value: "db", Effect: corev1.TaintEffectNoExecute})
+	if NodeTargetedBy(&taintBlocks, &tc) {
+		t.Error("an untolerated NoExecute taint must exclude the node")
+	}
+}
+
+func TestIsClusterWide(t *testing.T) {
+	cases := []struct {
+		name string
+		spec podtracev1alpha1.TracerConfigSpec
+		want bool
+	}{
+		{"bare spec", podtracev1alpha1.TracerConfigSpec{}, true},
+		{"nodeSelector narrows", podtracev1alpha1.TracerConfigSpec{NodeSelector: map[string]string{"pool": "a"}}, false},
+		{"required affinity narrows", podtracev1alpha1.TracerConfigSpec{
+			Affinity: affinityWith(termWithExpressions(corev1.NodeSelectorRequirement{Key: "pool", Operator: corev1.NodeSelectorOpExists})),
+		}, false},
+		{"empty affinity does not narrow", podtracev1alpha1.TracerConfigSpec{Affinity: &corev1.Affinity{}}, true},
+		{"required clause with no terms does not narrow", podtracev1alpha1.TracerConfigSpec{Affinity: affinityWith()}, true},
+		{"tolerations widen, never narrow", podtracev1alpha1.TracerConfigSpec{
+			Tolerations: []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
+		}, true},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsClusterWide(&tt.spec); got != tt.want {
+				t.Errorf("IsClusterWide = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

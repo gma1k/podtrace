@@ -119,7 +119,7 @@ func TestSessionBranch_EnsureJobsListOwnedError(t *testing.T) {
 	s := &podtracev1alpha1.PodTraceSession{
 		ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "team-a", UID: "uid-s"},
 	}
-	if _, err := r.ensureJobs(context.Background(), s, nil, sessionTargets{Nodes: nil}, nil); err == nil {
+	if _, err := r.ensureJobs(context.Background(), s, resolvedFleet(sessMoreSysNS, nil, nil), sessionTargets{Nodes: nil}, nil); err == nil {
 		t.Fatal("ensureJobs must surface the owned-Job list error")
 	}
 }

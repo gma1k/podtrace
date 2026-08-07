@@ -821,6 +821,11 @@ func (in *PodTraceSessionSpec) DeepCopyInto(out *PodTraceSessionSpec) {
 		copy(*out, *in)
 	}
 	out.ExporterRef = in.ExporterRef
+	if in.TracerConfigRef != nil {
+		in, out := &in.TracerConfigRef, &out.TracerConfigRef
+		*out = new(LocalObjectReference)
+		**out = **in
+	}
 	if in.Thresholds != nil {
 		in, out := &in.Thresholds, &out.Thresholds
 		*out = new(Thresholds)

@@ -123,10 +123,17 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, r.Status().Update(ctx, &session)
 	}
 
-	tc, err := r.resolveTracerConfig(ctx)
+	resolved, err := r.resolveSessionTracerConfigs(ctx, &session, targets.Nodes)
 	if err != nil {
+		var missing *errNoTracerConfig
+		if errors.As(err, &missing) {
+			// Terminal: no amount of requeueing conjures a TracerConfig, and
+			// proceeding would build a Job with an empty image.
+			return ctrl.Result{}, r.failSessionTerminally(ctx, &session, "TracerConfigUnresolved", err.Error())
+		}
 		return ctrl.Result{}, err
 	}
+	tc := resolved.primary()
 	systemNS := systemNamespaceForSession(tc, r.SystemNamespace)
 
 	var ec podtracev1alpha1.ExporterConfig
@@ -140,22 +147,28 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 		return ctrl.Result{}, fmt.Errorf("get ExporterConfig: %w", err)
 	}
-	if err := ensureSessionExporterBundle(ctx, r.Client, &session, &ec, systemNS); err != nil {
-		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "BundleSync", err.Error())
-		_ = r.Status().Update(ctx, &session)
-		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
-	}
+	// A session whose nodes span fleets with different spec.systemNamespace
+	// puts Jobs in more than one namespace, and a Job cannot mount a bundle,
+	// assume a ServiceAccount, or exercise RBAC that lives somewhere else.
+	// Provision the full set in every namespace the resolution touches.
+	for _, ns := range resolved.namespaces {
+		if err := ensureSessionExporterBundle(ctx, r.Client, &session, &ec, ns); err != nil {
+			r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "BundleSync", err.Error())
+			_ = r.Status().Update(ctx, &session)
+			return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
+		}
 
-	if _, err := ensureSessionObjectStoreCredentials(ctx, r.Client, &session, systemNS); err != nil {
-		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "ObjectStoreCreds", err.Error())
-		_ = r.Status().Update(ctx, &session)
-		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
-	}
+		if _, err := ensureSessionObjectStoreCredentials(ctx, r.Client, &session, ns); err != nil {
+			r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "ObjectStoreCreds", err.Error())
+			_ = r.Status().Update(ctx, &session)
+			return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
+		}
 
-	if err := ensureSessionServiceAccount(ctx, r.Client, &session, systemNS); err != nil {
-		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "SessionSA", err.Error())
-		_ = r.Status().Update(ctx, &session)
-		return ctrl.Result{}, err
+		if err := ensureSessionServiceAccount(ctx, r.Client, &session, ns); err != nil {
+			r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "SessionSA", err.Error())
+			_ = r.Status().Update(ctx, &session)
+			return ctrl.Result{}, err
+		}
 	}
 	if err := ensureSessionReportObject(ctx, r.Client, &session); err != nil {
 		var conflict *reportObjectConflictError
@@ -166,15 +179,17 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		_ = r.Status().Update(ctx, &session)
 		return ctrl.Result{}, err
 	}
-	if err := ensureSessionReportRBAC(ctx, r.Client, &session, r.Scheme, systemNS); err != nil {
-		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "SessionRBAC", err.Error())
-		_ = r.Status().Update(ctx, &session)
-		return ctrl.Result{}, err
-	}
-	if err := ensureSessionPodReadRBAC(ctx, r.Client, &session, r.Scheme, sessionPodNamespaces(&session, targets), systemNS); err != nil {
-		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "SessionRBAC", err.Error())
-		_ = r.Status().Update(ctx, &session)
-		return ctrl.Result{}, err
+	for _, ns := range resolved.namespaces {
+		if err := ensureSessionReportRBAC(ctx, r.Client, &session, r.Scheme, ns); err != nil {
+			r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "SessionRBAC", err.Error())
+			_ = r.Status().Update(ctx, &session)
+			return ctrl.Result{}, err
+		}
+		if err := ensureSessionPodReadRBAC(ctx, r.Client, &session, r.Scheme, sessionPodNamespaces(&session, targets), ns); err != nil {
+			r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "SessionRBAC", err.Error())
+			_ = r.Status().Update(ctx, &session)
+			return ctrl.Result{}, err
+		}
 	}
 
 	cap := effectiveMaxConcurrentSessionsPerNode(tc)
@@ -193,7 +208,7 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	completedNodes := completedSessionNodes(session.Status.Jobs)
-	jobs, err := r.ensureJobs(ctx, &session, tc, targets, completedNodes)
+	jobs, err := r.ensureJobs(ctx, &session, resolved, targets, completedNodes)
 	if err != nil {
 		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "EnsureJobs", err.Error())
 		_ = r.Status().Update(ctx, &session)
@@ -534,29 +549,38 @@ func effectiveMaxConcurrentSessionsPerNode(tc *podtracev1alpha1.TracerConfig) in
 // (Kubernetes forbids cross-namespace owner refs), so their lifecycle is
 // bounded by TTLSecondsAfterFinished, the podtrace.io/cleanup finalizer, and
 // the orphan sweep (see SessionChildReaper) as a finalizer-bypass backstop.
-func (r *PodTraceSessionReconciler) ensureJobs(ctx context.Context, s *podtracev1alpha1.PodTraceSession, tc *podtracev1alpha1.TracerConfig, targets sessionTargets, completedNodes map[string]struct{}) ([]batchv1.Job, error) {
-	systemNS := systemNamespaceForSession(tc, r.SystemNamespace)
-
+// ensureJobs creates one Job per target node, each built from the
+// TracerConfig resolved for that node — so a session spanning two node pools
+// runs each Job under its own pool's image and redaction policy.
+func (r *PodTraceSessionReconciler) ensureJobs(ctx context.Context, s *podtracev1alpha1.PodTraceSession, resolved sessionTracerConfigs, targets sessionTargets, completedNodes map[string]struct{}) ([]batchv1.Job, error) {
 	for _, node := range targets.Nodes {
 		if _, done := completedNodes[node]; done {
 			continue
 		}
+		nodeConfig := resolved.forNode(node)
+		if nodeConfig == nil {
+			// resolveSessionTracerConfigs errors rather than returning a nil
+			// config, so this is unreachable; refuse rather than fall through
+			// to a Job with no image.
+			return nil, fmt.Errorf("no TracerConfig resolved for node %s", node)
+		}
 		job := &batchv1.Job{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      SessionJobName(s.UID, node),
-				Namespace: systemNS,
+				Namespace: resolved.namespaceForNode(node, r.SystemNamespace),
 			},
 		}
 		if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, job, func() error {
 			job.Labels = mergeLabels(job.Labels, map[string]string{
-				LabelManagedBy:   ManagedByValue,
-				LabelComponent:   ComponentSession,
-				LabelSessionName: s.Name,
-				LabelSessionNS:   s.Namespace,
-				LabelNodeName:    node,
+				LabelManagedBy:    ManagedByValue,
+				LabelComponent:    ComponentSession,
+				LabelSessionName:  s.Name,
+				LabelSessionNS:    s.Namespace,
+				LabelNodeName:     node,
+				LabelTracerConfig: nodeConfig.Name,
 			})
 			if job.Spec.Template.Spec.Containers == nil {
-				job.Spec = buildSessionJobSpec(s, tc, node, targets)
+				job.Spec = buildSessionJobSpec(s, nodeConfig, node, targets)
 			}
 			return nil
 		}); err != nil {
@@ -564,16 +588,20 @@ func (r *PodTraceSessionReconciler) ensureJobs(ctx context.Context, s *podtracev
 		}
 	}
 
-	var owned batchv1.JobList
-	if err := r.List(ctx, &owned, client.InNamespace(systemNS), client.MatchingLabels{
-		LabelManagedBy:   ManagedByValue,
-		LabelComponent:   ComponentSession,
-		LabelSessionName: s.Name,
-		LabelSessionNS:   s.Namespace,
-	}); err != nil {
-		return nil, fmt.Errorf("list owned Jobs: %w", err)
+	var owned []batchv1.Job
+	for _, ns := range resolved.namespaces {
+		var inNS batchv1.JobList
+		if err := r.List(ctx, &inNS, client.InNamespace(ns), client.MatchingLabels{
+			LabelManagedBy:   ManagedByValue,
+			LabelComponent:   ComponentSession,
+			LabelSessionName: s.Name,
+			LabelSessionNS:   s.Namespace,
+		}); err != nil {
+			return nil, fmt.Errorf("list owned Jobs in %s: %w", ns, err)
+		}
+		owned = append(owned, inNS.Items...)
 	}
-	return owned.Items, nil
+	return owned, nil
 }
 
 // reconcileTerminalSession handles TTL-driven cleanup only.
