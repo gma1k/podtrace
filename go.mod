@@ -3,7 +3,7 @@ module github.com/gma1k/podtrace
 go 1.26.5
 
 require (
-	cloud.google.com/go/auth v0.22.0
+	cloud.google.com/go/auth v0.23.0
 	cloud.google.com/go/storage v1.64.0
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.22.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.14.0
