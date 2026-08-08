@@ -9,6 +9,13 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.14.3](https://github.com/gma1k/podtrace/compare/v0.14.2...v0.14.3) (2026-08-08)
+
+
+### Maintenance
+
+* **deps:** update module cloud.google.com/go/auth to v0.23.0 ([#386](https://github.com/gma1k/podtrace/issues/386)) ([c1a5125](https://github.com/gma1k/podtrace/commit/c1a512596137f8f3087d19022236915d2c736e00))
+
 ## [0.14.2](https://github.com/gma1k/podtrace/compare/v0.14.1...v0.14.2) (2026-08-07)
 
 
