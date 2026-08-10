@@ -917,7 +917,8 @@ func TestFindLibcPath_ViaProcessMaps(t *testing.T) {
 		t.Fatalf("failed to create proc dir: %v", err)
 	}
 
-	libcPath := filepath.Join(tmpDir, "lib", "x86_64-linux-gnu", "libc.so.6")
+	containerPath := "/lib/x86_64-linux-gnu/libc.so.6"
+	libcPath := filepath.Join(procDir, "root", containerPath)
 	if err := os.MkdirAll(filepath.Dir(libcPath), 0755); err != nil {
 		t.Fatalf("failed to create lib dir: %v", err)
 	}
@@ -925,7 +926,7 @@ func TestFindLibcPath_ViaProcessMaps(t *testing.T) {
 		t.Fatalf("failed to create libc: %v", err)
 	}
 
-	mapsContent := fmt.Sprintf("7f8a1c000000-7f8a1c021000 r-xp 00000000 08:01 123456 %s\n", libcPath)
+	mapsContent := fmt.Sprintf("7f8a1c000000-7f8a1c021000 r-xp 00000000 08:01 123456 %s\n", containerPath)
 	mapsPath := filepath.Join(procDir, "maps")
 	if err := os.WriteFile(mapsPath, []byte(mapsContent), 0644); err != nil {
 		t.Fatalf("failed to create maps: %v", err)
@@ -950,7 +951,8 @@ func TestFindLibcPath_ViaProcessMaps_Musl(t *testing.T) {
 		t.Fatalf("failed to create proc dir: %v", err)
 	}
 
-	libcPath := filepath.Join(tmpDir, "lib", "libc.musl-x86_64.so.1")
+	containerPath := "/lib/libc.musl-x86_64.so.1"
+	libcPath := filepath.Join(procDir, "root", containerPath)
 	if err := os.MkdirAll(filepath.Dir(libcPath), 0755); err != nil {
 		t.Fatalf("failed to create lib dir: %v", err)
 	}
@@ -958,7 +960,7 @@ func TestFindLibcPath_ViaProcessMaps_Musl(t *testing.T) {
 		t.Fatalf("failed to create libc: %v", err)
 	}
 
-	mapsContent := fmt.Sprintf("7f8a1c000000-7f8a1c021000 r-xp 00000000 08:01 123456 %s\n", libcPath)
+	mapsContent := fmt.Sprintf("7f8a1c000000-7f8a1c021000 r-xp 00000000 08:01 123456 %s\n", containerPath)
 	mapsPath := filepath.Join(procDir, "maps")
 	if err := os.WriteFile(mapsPath, []byte(mapsContent), 0644); err != nil {
 		t.Fatalf("failed to create maps: %v", err)
@@ -1060,7 +1062,8 @@ func TestFindLibcInContainer_ViaProcessMaps(t *testing.T) {
 		t.Fatalf("failed to create proc dir: %v", err)
 	}
 
-	libcPath := filepath.Join(tmpDir, "lib", "x86_64-linux-gnu", "libc.so.6")
+	containerPath := "/lib/x86_64-linux-gnu/libc.so.6"
+	libcPath := filepath.Join(procDir, "root", containerPath)
 	if err := os.MkdirAll(filepath.Dir(libcPath), 0755); err != nil {
 		t.Fatalf("failed to create lib dir: %v", err)
 	}
@@ -1074,7 +1077,7 @@ func TestFindLibcInContainer_ViaProcessMaps(t *testing.T) {
 		t.Fatalf("failed to create cgroup: %v", err)
 	}
 
-	mapsContent := fmt.Sprintf("7f8a1c000000-7f8a1c021000 r-xp 00000000 08:01 123456 %s\n", libcPath)
+	mapsContent := fmt.Sprintf("7f8a1c000000-7f8a1c021000 r-xp 00000000 08:01 123456 %s\n", containerPath)
 	mapsPath := filepath.Join(procDir, "maps")
 	if err := os.WriteFile(mapsPath, []byte(mapsContent), 0644); err != nil {
 		t.Fatalf("failed to create maps: %v", err)
@@ -1242,7 +1245,8 @@ func TestFindDBLibsViaProcessMaps(t *testing.T) {
 		t.Fatalf("failed to create proc dir: %v", err)
 	}
 
-	libpqPath := filepath.Join(tmpDir, "usr", "lib", "x86_64-linux-gnu", "libpq.so.5")
+	containerPath := "/usr/lib/x86_64-linux-gnu/libpq.so.5"
+	libpqPath := filepath.Join(procDir, "root", containerPath)
 	if err := os.MkdirAll(filepath.Dir(libpqPath), 0755); err != nil {
 		t.Fatalf("failed to create lib dir: %v", err)
 	}
@@ -1250,7 +1254,7 @@ func TestFindDBLibsViaProcessMaps(t *testing.T) {
 		t.Fatalf("failed to create libpq: %v", err)
 	}
 
-	mapsContent := fmt.Sprintf("7f8a1c000000-7f8a1c021000 r-xp 00000000 08:01 123456 %s\n", libpqPath)
+	mapsContent := fmt.Sprintf("7f8a1c000000-7f8a1c021000 r-xp 00000000 08:01 123456 %s\n", containerPath)
 	mapsPath := filepath.Join(procDir, "maps")
 	if err := os.WriteFile(mapsPath, []byte(mapsContent), 0644); err != nil {
 		t.Fatalf("failed to create maps: %v", err)
@@ -1861,7 +1865,8 @@ func TestFindTLSLibsViaProcessMaps(t *testing.T) {
 		t.Fatalf("failed to create proc dir: %v", err)
 	}
 
-	libsslPath := filepath.Join(tmpDir, "usr", "lib", "x86_64-linux-gnu", "libssl.so.3")
+	containerPath := "/usr/lib/x86_64-linux-gnu/libssl.so.3"
+	libsslPath := filepath.Join(procDir, "root", containerPath)
 	if err := os.MkdirAll(filepath.Dir(libsslPath), 0755); err != nil {
 		t.Fatalf("failed to create lib dir: %v", err)
 	}
@@ -1869,7 +1874,7 @@ func TestFindTLSLibsViaProcessMaps(t *testing.T) {
 		t.Fatalf("failed to create libssl: %v", err)
 	}
 
-	mapsContent := fmt.Sprintf("7f8a1c000000-7f8a1c021000 r-xp 00000000 08:01 123456 %s\n", libsslPath)
+	mapsContent := fmt.Sprintf("7f8a1c000000-7f8a1c021000 r-xp 00000000 08:01 123456 %s\n", containerPath)
 	mapsPath := filepath.Join(procDir, "maps")
 	if err := os.WriteFile(mapsPath, []byte(mapsContent), 0644); err != nil {
 		t.Fatalf("failed to create maps: %v", err)
@@ -2133,21 +2138,22 @@ func TestFileInProcRoot_BracketPrefix(t *testing.T) {
 	}
 }
 
-func TestFileInProcRoot_DirectFileExists(t *testing.T) {
-	// Create a real file and use it as the containerPath directly.
-	dir := t.TempDir()
-	libFile := filepath.Join(dir, "libtest.so")
+func TestFileInProcRoot_ResolvesUnderTargetRootfs(t *testing.T) {
+	procBase := t.TempDir()
+	origProc := config.ProcBasePath
+	config.SetProcBasePath(procBase)
+	defer config.SetProcBasePath(origProc)
+
+	root := filepath.Join(procBase, "9999", "root", "usr", "lib")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	libFile := filepath.Join(root, "libtest.so")
 	if err := os.WriteFile(libFile, []byte("ELF"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	// Point ProcBasePath to a temp dir that has no root subdir,
-	// so fileInProcRoot falls back to checking containerPath directly.
-	origProc := config.ProcBasePath
-	config.SetProcBasePath(t.TempDir())
-	defer config.SetProcBasePath(origProc)
-
-	got := fileInProcRoot(9999, libFile)
+	got := fileInProcRoot(9999, "/usr/lib/libtest.so")
 	if got != libFile {
 		t.Errorf("expected %q, got %q", libFile, got)
 	}
@@ -2185,7 +2191,7 @@ func TestFindLibcViaProcessMapsProcRoot_NoFile(t *testing.T) {
 	defer config.SetProcBasePath(origProc)
 
 	// No maps file → returns ""
-	got := findLibcViaProcessMapsProcRoot(99999)
+	got := findLibcViaProcessMaps(99999)
 	if got != "" {
 		t.Errorf("expected empty when no maps file, got %q", got)
 	}
@@ -2218,7 +2224,7 @@ func TestFindLibcViaProcessMapsProcRoot_WithLibc(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := findLibcViaProcessMapsProcRoot(pid)
+	got := findLibcViaProcessMaps(pid)
 	// Either finds via proc/root or returns empty — just ensure no panic.
 	_ = got
 }
@@ -2243,7 +2249,7 @@ func TestFindDBLibsViaProcessMapsProcRoot_NoFile(t *testing.T) {
 	config.SetProcBasePath(t.TempDir())
 	defer config.SetProcBasePath(origProc)
 
-	got := findDBLibsViaProcessMapsProcRoot(99999, []string{"libpq.so"})
+	got := findDBLibsViaProcessMaps(99999, []string{"libpq.so"})
 	if len(got) != 0 {
 		t.Errorf("expected empty when no maps file, got %v", got)
 	}
@@ -2276,7 +2282,7 @@ func TestFindDBLibsViaProcessMapsProcRoot_WithLib(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := findDBLibsViaProcessMapsProcRoot(pid, []string{"libpq.so"})
+	got := findDBLibsViaProcessMaps(pid, []string{"libpq.so"})
 	_ = got // may or may not find it depending on filesystem layout
 }
 
@@ -2287,7 +2293,7 @@ func TestFindTLSLibsViaProcessMapsProcRoot_NoFile(t *testing.T) {
 	config.SetProcBasePath(t.TempDir())
 	defer config.SetProcBasePath(origProc)
 
-	got := findTLSLibsViaProcessMapsProcRoot(99999, []string{"libssl.so"})
+	got := findTLSLibsViaProcessMaps(99999, []string{"libssl.so"})
 	if len(got) != 0 {
 		t.Errorf("expected empty when no maps file, got %v", got)
 	}
@@ -2321,7 +2327,7 @@ func TestFindTLSLibsViaProcessMapsProcRoot_WithTLSLib(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := findTLSLibsViaProcessMapsProcRoot(pid, []string{"libssl.so"})
+	got := findTLSLibsViaProcessMaps(pid, []string{"libssl.so"})
 	// Either finds the lib or returns empty — just ensure no panic.
 	_ = got
 }
@@ -2343,7 +2349,7 @@ func TestFindTLSLibsViaProcessMapsProcRoot_EmptyPatterns(t *testing.T) {
 	}
 
 	// Empty patterns → no matches.
-	got := findTLSLibsViaProcessMapsProcRoot(pid, []string{})
+	got := findTLSLibsViaProcessMaps(pid, []string{})
 	if len(got) != 0 {
 		t.Errorf("expected empty for empty patterns, got %v", got)
 	}
