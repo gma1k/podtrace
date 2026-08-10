@@ -7,13 +7,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/internal/hostfs"
 	"github.com/gma1k/podtrace/internal/procfs"
+	"github.com/gma1k/podtrace/internal/procmaps"
 	"github.com/gma1k/podtrace/internal/safeconv"
 	"github.com/gma1k/podtrace/internal/sanitize"
 )
@@ -149,25 +149,11 @@ func (r *stackResolver) exeMappings(pid uint32, exePath string) []exeMapping {
 	var out []exeMapping
 	data, err := procfs.ReadFile(fmt.Sprintf("%d/maps", pid))
 	if err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			fields := strings.Fields(line)
-			if len(fields) < 6 {
+		for _, e := range procmaps.Parse(data) {
+			if e.Path != exePath {
 				continue
 			}
-			if strings.Join(fields[5:], " ") != exePath {
-				continue
-			}
-			dash := strings.IndexByte(fields[0], '-')
-			if dash < 0 {
-				continue
-			}
-			start, err1 := strconv.ParseUint(fields[0][:dash], 16, 64)
-			end, err2 := strconv.ParseUint(fields[0][dash+1:], 16, 64)
-			pgoff, err3 := strconv.ParseUint(fields[2], 16, 64)
-			if err1 != nil || err2 != nil || err3 != nil {
-				continue
-			}
-			out = append(out, exeMapping{start: start, end: end, pgoff: pgoff})
+			out = append(out, exeMapping{start: e.Start, end: e.End, pgoff: e.Offset})
 		}
 	}
 	r.mappings[key] = out

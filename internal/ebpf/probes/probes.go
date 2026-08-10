@@ -17,6 +17,7 @@ import (
 	"github.com/gma1k/podtrace/internal/ldsoconf"
 	"github.com/gma1k/podtrace/internal/logger"
 	"github.com/gma1k/podtrace/internal/procfs"
+	"github.com/gma1k/podtrace/internal/procmaps"
 )
 
 // mandatoryProbes must all attach successfully; failure returns an actionable error.
@@ -690,13 +691,18 @@ func AttachPoolProbesWithPID(coll *ebpf.Collection, containerID string, pid uint
 	return links
 }
 
-func FindLibcPath(containerID string) string {
-	if containerID != "" {
-		if path := findLibcInContainer(containerID); path != "" {
-			return path
-		}
-	}
+// hostWideLibrarySearch reports whether the agent may look for probe targets
+// outside the traced workload, in its own mount namespace, via ldconfig, or in
+// the node's root filesystem through /proc/1/root.
+func hostWideLibrarySearch(containerID string, pid uint32) bool {
+	return containerID == "" && pid == 0
+}
 
+func FindLibcPath(containerID string) string {
+	return FindLibcPathWithPID(containerID, 0)
+}
+
+func findLibcHostWide() string {
 	if path := findLibcViaLdconfig(); path != "" {
 		return path
 	}
@@ -710,14 +716,24 @@ func FindLibcPath(containerID string) string {
 
 func FindLibcPathWithPID(containerID string, pid uint32) string {
 	if pid > 0 {
-		if path := findLibcViaProcessMapsProcRoot(pid); path != "" {
+		if path := findLibcViaProcessMaps(pid); path != "" {
 			return path
 		}
 		if path := findLibcInProcess(pid); path != "" {
 			return path
 		}
 	}
-	return FindLibcPath(containerID)
+	if containerID != "" {
+		if path := findLibcInContainer(containerID); path != "" {
+			return path
+		}
+	}
+	if !hostWideLibrarySearch(containerID, pid) {
+		logger.Debug("No libc inside the trace target; not falling back to node-wide libc",
+			zap.String("container_id", containerID), zap.Uint32("pid", pid))
+		return ""
+	}
+	return findLibcHostWide()
 }
 
 func findLibcViaLdconfig() string {
@@ -778,42 +794,12 @@ func findLibcViaLdSoConf() string {
 	return ""
 }
 
+// libcMapsPatterns are the pathname substrings that mark a libc mapping.
+var libcMapsPatterns = []string{"libc.so", "libc.musl"}
+
 func findLibcViaProcessMaps(pid uint32) string {
-	data, err := procfs.ReadFile(fmt.Sprintf("%d/maps", pid))
-	if err != nil {
-		return ""
-	}
-
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.Contains(line, "libc.so") || strings.Contains(line, "libc.musl") {
-			parts := strings.Fields(line)
-			if len(parts) >= 6 {
-				path := parts[5]
-				if hostfs.IsRegularFile(path) {
-					return path
-				}
-			}
-		}
-	}
-	return ""
-}
-
-func findLibcViaProcessMapsProcRoot(pid uint32) string {
-	data, err := procfs.ReadFile(fmt.Sprintf("%d/maps", pid))
-	if err != nil {
-		return ""
-	}
-
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.Contains(line, "libc.so") || strings.Contains(line, "libc.musl") {
-			parts := strings.Fields(line)
-			if len(parts) >= 6 {
-				containerPath := parts[5]
-				if path := fileInProcRoot(pid, containerPath); path != "" {
-					return path
-				}
-			}
-		}
+	for _, path := range mappedFilesMatching(pid, libcMapsPatterns) {
+		return path
 	}
 	return ""
 }
@@ -829,6 +815,8 @@ func findLibcInProcess(pid uint32) string {
 	return ""
 }
 
+// fileInProcRoot resolves a path reported by a traced process against that
+// process's own rootfs.
 func fileInProcRoot(pid uint32, containerPath string) string {
 	if containerPath == "" || strings.HasPrefix(containerPath, "[") {
 		return ""
@@ -837,9 +825,6 @@ func fileInProcRoot(pid uint32, containerPath string) string {
 	hostPath := filepath.Join(procRoot, strings.TrimPrefix(containerPath, "/"))
 	if hostfs.IsRegularFile(hostPath) {
 		return hostPath
-	}
-	if hostfs.IsRegularFile(containerPath) {
-		return containerPath
 	}
 	return ""
 }
@@ -916,12 +901,7 @@ func findGoBinaryInProcess(pid uint32) string {
 		return hostPath
 	}
 
-	if info, err := os.Stat(target); err == nil && !info.IsDir() {
-		logger.Debug("Found binary via direct path", zap.Uint32("pid", pid), zap.String("path", target))
-		return target
-	}
-
-	logger.Debug("Binary not found or not accessible", zap.Uint32("pid", pid), zap.String("target", target), zap.String("host_path", hostPath), zap.Error(err))
+	logger.Debug("Binary not found under the target's own rootfs", zap.Uint32("pid", pid), zap.String("target", target), zap.String("host_path", hostPath))
 	return ""
 }
 
@@ -932,30 +912,16 @@ func findGoBinaryViaProcessMaps(pid uint32) string {
 		return ""
 	}
 
-	procRootPath := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "root")
-
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.Contains(line, "r-xp") {
-			parts := strings.Fields(line)
-			if len(parts) >= 6 {
-				binaryPath := parts[5]
-				if binaryPath != "" && !strings.HasPrefix(binaryPath, "[") {
-					if strings.Contains(binaryPath, ".so") || strings.Contains(binaryPath, "vdso") || strings.Contains(binaryPath, "vsyscall") {
-						continue
-					}
-
-					hostPath := filepath.Join(procRootPath, strings.TrimPrefix(binaryPath, "/"))
-					if hostfs.IsRegularFile(hostPath) {
-						logger.Debug("Found binary via process maps", zap.Uint32("pid", pid), zap.String("container_path", binaryPath), zap.String("host_path", hostPath))
-						return hostPath
-					}
-
-					if hostfs.IsRegularFile(binaryPath) {
-						logger.Debug("Found binary via process maps (direct)", zap.Uint32("pid", pid), zap.String("path", binaryPath))
-						return binaryPath
-					}
-				}
-			}
+	for _, e := range procmaps.Parse(data) {
+		if !e.Named() || !e.Executable() {
+			continue
+		}
+		if strings.Contains(e.Path, ".so") || strings.Contains(e.Path, "vdso") || strings.Contains(e.Path, "vsyscall") {
+			continue
+		}
+		if resolved := resolveMappedFile(pid, e); resolved != "" {
+			logger.Debug("Found binary via process maps", zap.Uint32("pid", pid), zap.String("container_path", e.Path), zap.String("host_path", resolved))
+			return resolved
 		}
 	}
 	return ""
@@ -1050,6 +1016,9 @@ func findGoBinaryInContainer(containerID string, pid uint32) string {
 }
 
 func findLibcInContainer(containerID string) string {
+	if containerID == "" {
+		return ""
+	}
 	if pid := findContainerProcess(containerID); pid > 0 {
 		if path := findLibcViaProcessMaps(pid); path != "" {
 			return path
@@ -1094,14 +1063,6 @@ func findLibcInContainer(containerID string) string {
 					return path
 				}
 			}
-		}
-	}
-
-	procPaths := getArchitecturePaths()
-	for _, basePath := range procPaths {
-		path := filepath.Join(config.GetDefaultProcRootPath(), basePath)
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
-			return path
 		}
 	}
 
@@ -1228,61 +1189,13 @@ func getArchitectureDBPaths(libNames []string) []string {
 }
 
 func findDBLibsViaProcessMaps(pid uint32, libNames []string) []string {
-	var paths []string
-	data, err := procfs.ReadFile(fmt.Sprintf("%d/maps", pid))
-	if err != nil {
-		return paths
-	}
-
-	for _, line := range strings.Split(string(data), "\n") {
-		for _, libName := range libNames {
-			if strings.Contains(line, libName) {
-				parts := strings.Fields(line)
-				if len(parts) >= 6 {
-					path := parts[5]
-					if hostfs.IsRegularFile(path) {
-						paths = append(paths, path)
-					}
-				}
-			}
-		}
-	}
-	return paths
-}
-
-func findDBLibsViaProcessMapsProcRoot(pid uint32, libNames []string) []string {
-	var paths []string
-	data, err := procfs.ReadFile(fmt.Sprintf("%d/maps", pid))
-	if err != nil {
-		return paths
-	}
-
-	seen := make(map[string]bool)
-	for _, line := range strings.Split(string(data), "\n") {
-		for _, libName := range libNames {
-			if strings.Contains(line, libName) {
-				parts := strings.Fields(line)
-				if len(parts) >= 6 {
-					containerPath := parts[5]
-					if hostPath := fileInProcRoot(pid, containerPath); hostPath != "" {
-						if !seen[hostPath] {
-							paths = append(paths, hostPath)
-							seen[hostPath] = true
-						}
-					} else if strings.Contains(parts[1], "x") && !seen[containerPath] {
-						if mf := fileInProcMapFiles(pid, parts[0]); mf != "" {
-							paths = append(paths, mf)
-							seen[containerPath] = true
-						}
-					}
-				}
-			}
-		}
-	}
-	return paths
+	return mappedFilesMatching(pid, libNames)
 }
 
 func findDBLibsInContainer(containerID string, libNames []string) []string {
+	if containerID == "" {
+		return nil
+	}
 	var paths []string
 
 	if pid := findContainerProcess(containerID); pid > 0 {
@@ -1332,14 +1245,8 @@ func findDBLibsInContainer(containerID string, libNames []string) []string {
 		}
 	}
 
-	archPaths := getArchitectureDBPaths(libNames)
-	for _, basePath := range archPaths {
-		path := filepath.Join(config.GetDefaultProcRootPath(), strings.TrimPrefix(basePath, "/"))
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
-			paths = append(paths, path)
-		}
-	}
-
+	// No fallback to config.GetDefaultProcRootPath() (/proc/1/root): the node's
+	// own libraries are not the traced container's. See hostWideLibrarySearch.
 	return paths
 }
 
@@ -1348,7 +1255,7 @@ func findDBLibsWithPID(containerID string, pid uint32, libNames []string) []stri
 		var out []string
 		seen := make(map[string]bool)
 
-		for _, p := range findDBLibsViaProcessMapsProcRoot(pid, libNames) {
+		for _, p := range findDBLibsViaProcessMaps(pid, libNames) {
 			if !seen[p] {
 				out = append(out, p)
 				seen[p] = true
@@ -1367,6 +1274,17 @@ func findDBLibsWithPID(containerID string, pid uint32, libNames []string) []stri
 		if len(out) > 0 {
 			return out
 		}
+	}
+
+	if containerID != "" {
+		if paths := findDBLibsInContainer(containerID, libNames); len(paths) > 0 {
+			return paths
+		}
+	}
+	if !hostWideLibrarySearch(containerID, pid) {
+		logger.Debug("No database client library inside the trace target; not falling back to node-wide libraries",
+			zap.String("container_id", containerID), zap.Uint32("pid", pid), zap.Strings("libs", libNames))
+		return nil
 	}
 	return findDBLibs(containerID, libNames)
 }
@@ -1427,81 +1345,25 @@ func FindLibcInContainer(containerID string) []string {
 		}
 	}
 
-	procPaths := getArchitecturePaths()
-	for _, basePath := range procPaths {
-		paths = append(paths, filepath.Join(config.GetDefaultProcRootPath(), basePath))
+	if hostWideLibrarySearch(containerID, 0) {
+		procPaths := getArchitecturePaths()
+		for _, basePath := range procPaths {
+			paths = append(paths, filepath.Join(config.GetDefaultProcRootPath(), basePath))
+		}
 	}
 
 	return paths
 }
 
+// findTLSLibsViaProcessMaps resolves the TLS libraries pid has mapped.
 func findTLSLibsViaProcessMaps(pid uint32, libPatterns []string) []string {
-	var paths []string
-	data, err := procfs.ReadFile(fmt.Sprintf("%d/maps", pid))
-	if err != nil {
-		return paths
-	}
-
-	seen := make(map[string]bool)
-	for _, line := range strings.Split(string(data), "\n") {
-		for _, pattern := range libPatterns {
-			if strings.Contains(line, pattern) {
-				parts := strings.Fields(line)
-				if len(parts) >= 6 {
-					path := parts[5]
-					if hostfs.IsRegularFile(path) {
-						paths = append(paths, path)
-					} else if strings.Contains(parts[1], "x") && !seen[path] {
-						if mf := fileInProcMapFiles(pid, parts[0]); mf != "" {
-							paths = append(paths, mf)
-							seen[path] = true
-						}
-					}
-				}
-			}
-		}
-	}
-	return paths
-}
-
-func findTLSLibsViaProcessMapsProcRoot(pid uint32, libPatterns []string) []string {
-	var paths []string
-	data, err := procfs.ReadFile(fmt.Sprintf("%d/maps", pid))
-	if err != nil {
-		return paths
-	}
-
-	seen := make(map[string]bool)
-	for _, line := range strings.Split(string(data), "\n") {
-		for _, pattern := range libPatterns {
-			if strings.Contains(line, pattern) {
-				parts := strings.Fields(line)
-				if len(parts) >= 6 {
-					containerPath := parts[5]
-					if hostPath := fileInProcRoot(pid, containerPath); hostPath != "" {
-						if !seen[hostPath] {
-							paths = append(paths, hostPath)
-							seen[hostPath] = true
-						}
-					} else if strings.Contains(parts[1], "x") && !seen[containerPath] {
-						// Backing file may be unlinked (e.g. netty-tcnative
-						// extracted to /tmp then deleted after dlopen); reach the
-						// live inode via map_files. All VMAs of the library share
-						// one inode, so restrict to the executable segment and
-						// dedup by path to attach the code mapping exactly once.
-						if mf := fileInProcMapFiles(pid, parts[0]); mf != "" {
-							paths = append(paths, mf)
-							seen[containerPath] = true
-						}
-					}
-				}
-			}
-		}
-	}
-	return paths
+	return mappedFilesMatching(pid, libPatterns)
 }
 
 func findTLSLibsInContainer(containerID string, libPatterns []string) []string {
+	if containerID == "" {
+		return nil
+	}
 	var paths []string
 
 	if pid := findContainerProcess(containerID); pid > 0 {
@@ -1568,7 +1430,7 @@ func findTLSLibsInContainer(containerID string, libPatterns []string) []string {
 
 func findTLSLibsInContainerWithPID(containerID string, pid uint32, libPatterns []string) []string {
 	if pid > 0 {
-		if foundPaths := findTLSLibsViaProcessMapsProcRoot(pid, libPatterns); len(foundPaths) > 0 {
+		if foundPaths := findTLSLibsViaProcessMaps(pid, libPatterns); len(foundPaths) > 0 {
 			return foundPaths
 		}
 		if foundPaths := findTLSLibsViaProcRootScan(pid, libPatterns); len(foundPaths) > 0 {
@@ -1806,6 +1668,14 @@ func findTLSLibsWithPID(containerID string, pid uint32) []string {
 			seen[exe] = true
 			logger.Debug("TLS probe: target executable bundles OpenSSL", zap.String("exe", exe))
 		}
+	}
+
+	if !hostWideLibrarySearch(containerID, pid) {
+		if len(paths) == 0 {
+			logger.Debug("No TLS library inside the trace target; not falling back to node-wide libraries",
+				zap.String("container_id", containerID), zap.Uint32("pid", pid))
+		}
+		return paths
 	}
 
 	ldconfigPaths := findTLSLibsViaLdconfig(libPatterns)
@@ -2258,7 +2128,7 @@ func attachCLibraryH3Probes(coll *ebpf.Collection, pid uint32, af *AttachedFiles
 
 	seen := make(map[string]bool)
 	var libPaths []string
-	for _, p := range findTLSLibsViaProcessMapsProcRoot(pid, libPatterns) {
+	for _, p := range findTLSLibsViaProcessMaps(pid, libPatterns) {
 		if !seen[p] {
 			libPaths = append(libPaths, p)
 			seen[p] = true
