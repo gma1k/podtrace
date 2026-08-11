@@ -45,7 +45,7 @@ jobs:
 
           failed=0
 
-          for sha in $(git rev-list "${BASE_SHA}..${HEAD_SHA}"); do
+          for sha in $(git rev-list --no-merges "${BASE_SHA}..${HEAD_SHA}"); do
             short=$(git rev-parse --short "${sha}")
             subject=$(git show -s --format='%s' "${sha}")
             author=$(git show -s --format='%ae' "${sha}" | tr '[:upper:]' '[:lower:]')
