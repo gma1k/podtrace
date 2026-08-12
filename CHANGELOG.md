@@ -9,6 +9,26 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.14.3](https://github.com/gma1k/podtrace/compare/v0.14.2...v0.14.3) (2026-08-12)
+
+
+### Bug Fixes
+
+* confine uprobe target resolution to the traced workload ([#389](https://github.com/gma1k/podtrace/issues/389)) ([f052485](https://github.com/gma1k/podtrace/commit/f0524859aca35eae9d71fc3a90257ea0bedb73cf))
+* skip merge commits in the DCO sign-off check ([#393](https://github.com/gma1k/podtrace/issues/393)) ([8b2f5db](https://github.com/gma1k/podtrace/commit/8b2f5db788c66fc26ef0b5fd4495179016ca3882))
+* stop paired-map leak that silently disables the eBPF tracer ([#395](https://github.com/gma1k/podtrace/issues/395)) ([a72f5a1](https://github.com/gma1k/podtrace/commit/a72f5a1cd6dc967d03dc2543765c69a5ed741326))
+
+
+### Maintenance
+
+* **deps:** update gcr.io/distroless/static-debian12:nonroot docker digest to 1b7b9f0 ([#390](https://github.com/gma1k/podtrace/issues/390)) ([d59ce0d](https://github.com/gma1k/podtrace/commit/d59ce0d3db1b3165c6b1564ae1515328af91c67d))
+* **deps:** update go modules (non-major) ([#392](https://github.com/gma1k/podtrace/issues/392)) ([14bfb81](https://github.com/gma1k/podtrace/commit/14bfb81438d246ebba6c84a794420db99b1aab62))
+* **deps:** update go modules (non-major) ([#394](https://github.com/gma1k/podtrace/issues/394)) ([3938a8e](https://github.com/gma1k/podtrace/commit/3938a8eed00626714b9286ba65c9eb697edcf83b))
+* **deps:** update golang:1.26.5-trixie docker digest to 98988b4 ([#391](https://github.com/gma1k/podtrace/issues/391)) ([ad7a79b](https://github.com/gma1k/podtrace/commit/ad7a79b22ef9e6075c9f79526fe1c6f84b011a2f))
+* **deps:** update module cloud.google.com/go/auth to v0.23.0 ([#386](https://github.com/gma1k/podtrace/issues/386)) ([c1a5125](https://github.com/gma1k/podtrace/commit/c1a512596137f8f3087d19022236915d2c736e00))
+* **deps:** update module golang.org/x/arch to v0.30.0 ([#388](https://github.com/gma1k/podtrace/issues/388)) ([1aeb9c6](https://github.com/gma1k/podtrace/commit/1aeb9c6ef8fa935ef64075b9817367de2b59a4f1))
+* **deps:** update module golang.org/x/net to v0.58.0 ([#396](https://github.com/gma1k/podtrace/issues/396)) ([88dbd61](https://github.com/gma1k/podtrace/commit/88dbd6133ba1511c45ea75da3e5cbb9ee7a75fd8))
+
 ## [0.14.2](https://github.com/gma1k/podtrace/compare/v0.14.1...v0.14.2) (2026-08-07)
 
 
