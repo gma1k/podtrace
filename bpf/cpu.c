@@ -163,12 +163,14 @@ int kretprobe_do_futex(struct pt_regs *ctx) {
 	}
 	u64 latency = calc_latency(*start_ts);
 	if (latency < MIN_LATENCY_NS) {
+		bpf_map_delete_elem(&lock_targets, &key);
 		bpf_map_delete_elem(&start_times, &key);
 		return 0;
 	}
 	long ret = PT_REGS_RC(ctx);
 	struct event *e = get_event_buf();
 	if (!e) {
+		bpf_map_delete_elem(&lock_targets, &key);
 		bpf_map_delete_elem(&start_times, &key);
 		return 0;
 	}
@@ -240,12 +242,14 @@ int uretprobe_pthread_mutex_lock(struct pt_regs *ctx) {
 	}
 	u64 latency = calc_latency(*start_ts);
 	if (latency < MIN_LATENCY_NS) {
+		bpf_map_delete_elem(&lock_targets, &key);
 		bpf_map_delete_elem(&start_times, &key);
 		return 0;
 	}
 	long ret = PT_REGS_RC(ctx);
 	struct event *e = get_event_buf();
 	if (!e) {
+		bpf_map_delete_elem(&lock_targets, &key);
 		bpf_map_delete_elem(&start_times, &key);
 		return 0;
 	}

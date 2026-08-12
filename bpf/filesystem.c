@@ -57,6 +57,7 @@ int kretprobe_vfs_read(struct pt_regs *ctx) {
 	
 	u64 latency = calc_latency(*start_ts);
 	if (latency < MIN_LATENCY_NS) {
+		bpf_map_delete_elem(&syscall_paths, &key);
 		bpf_map_delete_elem(&start_times, &key);
 		return 0;
 	}
@@ -69,6 +70,7 @@ int kretprobe_vfs_read(struct pt_regs *ctx) {
 	
 	struct event *e = get_event_buf();
 	if (!e) {
+		bpf_map_delete_elem(&syscall_paths, &key);
 		bpf_map_delete_elem(&start_times, &key);
 		return 0;
 	}
@@ -106,6 +108,7 @@ int kretprobe_vfs_write(struct pt_regs *ctx) {
 	
 	u64 latency = calc_latency(*start_ts);
 	if (latency < MIN_LATENCY_NS) {
+		bpf_map_delete_elem(&syscall_paths, &key);
 		bpf_map_delete_elem(&start_times, &key);
 		return 0;
 	}
@@ -118,6 +121,7 @@ int kretprobe_vfs_write(struct pt_regs *ctx) {
 	
 	struct event *e = get_event_buf();
 	if (!e) {
+		bpf_map_delete_elem(&syscall_paths, &key);
 		bpf_map_delete_elem(&start_times, &key);
 		return 0;
 	}
@@ -174,12 +178,14 @@ int kretprobe_vfs_fsync(struct pt_regs *ctx) {
 	
 	u64 latency = calc_latency(*start_ts);
 	if (latency < MIN_LATENCY_NS) {
+		bpf_map_delete_elem(&syscall_paths, &key);
 		bpf_map_delete_elem(&start_times, &key);
 		return 0;
 	}
 	
 	struct event *e = get_event_buf();
 	if (!e) {
+		bpf_map_delete_elem(&syscall_paths, &key);
 		bpf_map_delete_elem(&start_times, &key);
 		return 0;
 	}

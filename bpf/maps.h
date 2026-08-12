@@ -56,7 +56,7 @@ struct pair_key {
 };
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 4096);
 	__type(key, struct pair_key);
 	__type(value, u64);
@@ -207,8 +207,8 @@ struct {
 } stack_traces SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, 1024);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 4096);
 	__type(key, struct pair_key);
 	__type(value, char[MAX_STRING_LEN]);
 } lock_targets SEC(".maps");
@@ -279,8 +279,8 @@ struct {
 } quic_initial_events SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, 1024);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 4096);
 	__type(key, struct pair_key);
 	__type(value, char[MAX_STRING_LEN]);
 } syscall_paths SEC(".maps");
