@@ -118,6 +118,8 @@ int kretprobe_do_sys_openat2(struct pt_regs *ctx) {
 
 	struct event *e = get_event_buf();
 	if (!e) {
+		bpf_map_delete_elem(&syscall_paths, &key);
+		bpf_map_delete_elem(&start_times, &key);
 		return 0;
 	}
 	e->timestamp = bpf_ktime_get_ns();
@@ -182,6 +184,7 @@ int kretprobe_vfs_unlink(struct pt_regs *ctx) {
 
 	struct event *e = get_event_buf();
 	if (!e) {
+		bpf_map_delete_elem(&syscall_paths, &key);
 		bpf_map_delete_elem(&start_times, &key);
 		return 0;
 	}
@@ -260,6 +263,7 @@ int kretprobe_vfs_rename(struct pt_regs *ctx) {
 
 	struct event *e = get_event_buf();
 	if (!e) {
+		bpf_map_delete_elem(&syscall_paths, &key);
 		bpf_map_delete_elem(&start_times, &key);
 		return 0;
 	}
