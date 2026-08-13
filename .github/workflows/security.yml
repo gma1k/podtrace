@@ -47,7 +47,7 @@ jobs:
           cache: true
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3  # v4.37.6
+        uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd  # v4.37.7
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -81,7 +81,7 @@ jobs:
 
       - name: Upload gosec SARIF results
         if: matrix.language == 'go'
-        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3  # v4.37.6
+        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd  # v4.37.7
         with:
           sarif_file: gosec-results.sarif
           category: gosec
@@ -92,7 +92,7 @@ jobs:
           make internal/ebpf/embedded/podtrace.amd64.bpf.o BPF_GOARCH=amd64
 
       - name: Analyze
-        uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3  # v4.37.6
+        uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd  # v4.37.7
 
   govulncheck:
     name: govulncheck
