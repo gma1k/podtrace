@@ -82,10 +82,6 @@ func renderBundlePayload(policy *bundlePolicyInputs, ec *podtracev1alpha1.Export
 			data["protocol"] = string(podtracev1alpha1.OTLPProtocolHTTP)
 		}
 		data["insecure"] = boolString(ec.Spec.OTLP.Insecure)
-		// The loop must visit every header: an early return on the first
-		// ValueFrom header used to drop all literal headers declared after
-		// it (and silently ignore further ValueFrom headers) while the
-		// readiness evaluator still reported the configuration healthy.
 		var credRef *podtracev1alpha1.SecretKeySelector
 		for _, h := range ec.Spec.OTLP.Headers {
 			if h.ValueFrom != nil {
@@ -153,15 +149,12 @@ func renderBundlePayload(policy *bundlePolicyInputs, ec *podtracev1alpha1.Export
 
 // buildBundleSecretData materializes the bundle Secret contents: the single
 // credential (bundle.CredentialKey) when credRef is set, plus one
-// "header.<name>" entry per key of the headersFromSecret Secret. The latter
-// used to be checked for existence by the readiness evaluator but never
-// rendered anywhere, so OTLP auth supplied exclusively via headersFromSecret
-// reported Ready=True while agents exported with no headers at all.
-func buildBundleSecretData(ctx context.Context, c client.Client, ecNamespace string, credRef *podtracev1alpha1.SecretKeySelector, headersFrom *podtracev1alpha1.LocalObjectReference) (map[string][]byte, error) {
+// "header.<name>" entry per key of the headersFromSecret Secret.
+func buildBundleSecretData(ctx context.Context, reader client.Reader, ecNamespace string, credRef *podtracev1alpha1.SecretKeySelector, headersFrom *podtracev1alpha1.LocalObjectReference) (map[string][]byte, error) {
 	out := map[string][]byte{}
 	if credRef != nil {
 		var src corev1.Secret
-		if err := c.Get(ctx, types.NamespacedName{Namespace: ecNamespace, Name: credRef.Name}, &src); err != nil {
+		if err := reader.Get(ctx, types.NamespacedName{Namespace: ecNamespace, Name: credRef.Name}, &src); err != nil {
 			return nil, fmt.Errorf("get credential Secret %s/%s: %w", ecNamespace, credRef.Name, err)
 		}
 		val, ok := src.Data[credRef.Key]
@@ -172,7 +165,7 @@ func buildBundleSecretData(ctx context.Context, c client.Client, ecNamespace str
 	}
 	if headersFrom != nil {
 		var src corev1.Secret
-		if err := c.Get(ctx, types.NamespacedName{Namespace: ecNamespace, Name: headersFrom.Name}, &src); err != nil {
+		if err := reader.Get(ctx, types.NamespacedName{Namespace: ecNamespace, Name: headersFrom.Name}, &src); err != nil {
 			return nil, fmt.Errorf("get headersFromSecret Secret %s/%s: %w", ecNamespace, headersFrom.Name, err)
 		}
 		for k, v := range src.Data {
@@ -223,7 +216,7 @@ func policyFromSession(s *podtracev1alpha1.PodTraceSession) *bundlePolicyInputs 
 // effectiveSamplePercentFromPolicy returns the operator-side resolution
 // of the "minimum applies" sampling contract between the CR-owner intent
 // (PodTrace/Session.spec.samplePercent) and the platform-owner cap
-// (ExporterConfig.spec.samplePercent). Unset (nil) is treated as 100%.
+// (ExporterConfig.spec.samplePercent).
 func effectiveSamplePercentFromPolicy(p *bundlePolicyInputs, ec *podtracev1alpha1.ExporterConfig) *int32 {
 	var crVal *int32
 	if p != nil {

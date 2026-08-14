@@ -28,6 +28,7 @@ func registerReconcilers(mgr ctrl.Manager, opts Options) error {
 
 	ptsr := &PodTraceSessionReconciler{
 		Client:          mgr.GetClient(),
+		APIReader:       mgr.GetAPIReader(),
 		Scheme:          mgr.GetScheme(),
 		SystemNamespace: opts.SystemNamespace,
 	}
@@ -37,6 +38,7 @@ func registerReconcilers(mgr ctrl.Manager, opts Options) error {
 
 	ptr := &PodTraceReconciler{
 		Client:          mgr.GetClient(),
+		APIReader:       mgr.GetAPIReader(),
 		Scheme:          mgr.GetScheme(),
 		SystemNamespace: opts.SystemNamespace,
 	}
@@ -45,8 +47,9 @@ func registerReconcilers(mgr ctrl.Manager, opts Options) error {
 	}
 
 	ecr := &ExporterConfigReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:    mgr.GetClient(),
+		APIReader: mgr.GetAPIReader(),
+		Scheme:    mgr.GetScheme(),
 	}
 	if err := ecr.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("ExporterConfigReconciler: %w", err)

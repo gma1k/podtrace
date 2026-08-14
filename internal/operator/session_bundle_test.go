@@ -52,7 +52,7 @@ func TestEnsureSessionExporterBundle_CreatesConfigMap(t *testing.T) {
 		},
 	}
 
-	if err := ensureSessionExporterBundle(context.Background(), c, s, ec, "podtrace-system"); err != nil {
+	if err := ensureSessionExporterBundle(context.Background(), c, c, s, ec, "podtrace-system"); err != nil {
 		t.Fatalf("ensureSessionExporterBundle: %v", err)
 	}
 
@@ -87,7 +87,7 @@ func TestEnsureSessionExporterBundle_UpdatesExisting(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ec, existing).Build()
 
-	if err := ensureSessionExporterBundle(context.Background(), c, s, ec, "podtrace-system"); err != nil {
+	if err := ensureSessionExporterBundle(context.Background(), c, c, s, ec, "podtrace-system"); err != nil {
 		t.Fatalf("ensureSessionExporterBundle: %v", err)
 	}
 
@@ -125,7 +125,7 @@ func TestEnsureSessionExporterBundle_WithCredentialCreatesSecret(t *testing.T) {
 	s := &podtracev1alpha1.PodTraceSession{
 		ObjectMeta: metav1.ObjectMeta{Name: "diag", Namespace: "team-a", UID: "sess-xyz"},
 	}
-	if err := ensureSessionExporterBundle(context.Background(), c, s, ec, "podtrace-system"); err != nil {
+	if err := ensureSessionExporterBundle(context.Background(), c, c, s, ec, "podtrace-system"); err != nil {
 		t.Fatalf("ensureSessionExporterBundle: %v", err)
 	}
 

@@ -818,6 +818,7 @@ func TestDeepReconcile_SessionObjectStoreCreds(t *testing.T) {
 
 	if name, err := ensureSessionObjectStoreCredentials(context.Background(),
 		fake.NewClientBuilder().WithScheme(scheme).Build(),
+		fake.NewClientBuilder().WithScheme(scheme).Build(),
 		&podtracev1alpha1.PodTraceSession{}, sysNS); err != nil || name != "" {
 		t.Errorf("nil ReportRef: name=%q err=%v, want empty/nil", name, err)
 	}
@@ -831,7 +832,7 @@ func TestDeepReconcile_SessionObjectStoreCreds(t *testing.T) {
 		},
 	}
 	if name, err := ensureSessionObjectStoreCredentials(context.Background(),
-		fake.NewClientBuilder().WithScheme(scheme).Build(), sNoCreds, sysNS); err != nil || name != "" {
+		fake.NewClientBuilder().WithScheme(scheme).Build(), fake.NewClientBuilder().WithScheme(scheme).Build(), sNoCreds, sysNS); err != nil || name != "" {
 		t.Errorf("no creds ref: name=%q err=%v, want empty/nil", name, err)
 	}
 
@@ -847,7 +848,7 @@ func TestDeepReconcile_SessionObjectStoreCreds(t *testing.T) {
 		},
 	}
 	if _, err := ensureSessionObjectStoreCredentials(context.Background(),
-		fake.NewClientBuilder().WithScheme(scheme).Build(), sMissing, sysNS); err == nil {
+		fake.NewClientBuilder().WithScheme(scheme).Build(), fake.NewClientBuilder().WithScheme(scheme).Build(), sMissing, sysNS); err == nil {
 		t.Error("expected error when source Secret is missing")
 	}
 
@@ -867,7 +868,7 @@ func TestDeepReconcile_SessionObjectStoreCreds(t *testing.T) {
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(src).Build()
-	dstName, err := ensureSessionObjectStoreCredentials(context.Background(), c, sOK, sysNS)
+	dstName, err := ensureSessionObjectStoreCredentials(context.Background(), c, c, sOK, sysNS)
 	if err != nil {
 		t.Fatalf("happy path: %v", err)
 	}

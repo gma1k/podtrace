@@ -548,3 +548,70 @@ func TestChart_OperatorImageAllowlistEnv(t *testing.T) {
 		t.Error("allowlist must combine the chart's image.repository with agent.allowedImageRepos")
 	}
 }
+
+func TestChart_OperatorSecretRBACNarrowed(t *testing.T) {
+	out := renderChart(t, "operator.enabled=true")
+
+	type rbacRule struct {
+		APIGroups []string `json:"apiGroups"`
+		Resources []string `json:"resources"`
+		Verbs     []string `json:"verbs"`
+	}
+	type rbacDoc struct {
+		Kind     string `json:"kind"`
+		Metadata struct {
+			Name string `json:"name"`
+		} `json:"metadata"`
+		Rules []rbacRule `json:"rules"`
+	}
+
+	secretVerbs := func(kind, nameSuffix string) []string {
+		for _, doc := range bytes.Split(out, []byte("\n---\n")) {
+			var d rbacDoc
+			if err := yaml.Unmarshal(doc, &d); err != nil || d.Kind != kind {
+				continue
+			}
+			if !strings.HasSuffix(d.Metadata.Name, nameSuffix) {
+				continue
+			}
+			for _, r := range d.Rules {
+				for _, res := range r.Resources {
+					if res == "secrets" {
+						return r.Verbs
+					}
+				}
+			}
+		}
+		return nil
+	}
+
+	has := func(verbs []string, v string) bool {
+		for _, x := range verbs {
+			if x == v {
+				return true
+			}
+		}
+		return false
+	}
+
+	cw := secretVerbs("ClusterRole", "-operator")
+	if cw == nil {
+		t.Fatal("operator ClusterRole must have a secrets rule")
+	}
+	if has(cw, "update") || has(cw, "patch") {
+		t.Errorf("cluster-wide secrets rule must not grant update/patch, got %v", cw)
+	}
+	for _, v := range []string{"get", "list", "watch", "create", "delete"} {
+		if !has(cw, v) {
+			t.Errorf("cluster-wide secrets rule missing required verb %q, got %v", v, cw)
+		}
+	}
+
+	role := secretVerbs("Role", "-operator-secrets")
+	if role == nil {
+		t.Fatal("a system-namespace Role must grant in-place secret writes")
+	}
+	if !has(role, "update") || !has(role, "patch") {
+		t.Errorf("system-namespace Role must grant update+patch on secrets, got %v", role)
+	}
+}

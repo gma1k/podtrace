@@ -28,6 +28,7 @@ import (
 // node hosting at least one matched pod.
 type PodTraceSessionReconciler struct {
 	client.Client
+	APIReader       client.Reader
 	Scheme          *runtime.Scheme
 	SystemNamespace string
 }
@@ -39,12 +40,20 @@ type PodTraceSessionReconciler struct {
 // +kubebuilder:rbac:groups=podtrace.io,resources=exporterconfigs,verbs=get;list;watch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
-// +kubebuilder:rbac:groups=core,resources=configmaps;secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile fans a PodTraceSession out into per-node Jobs, then rolls
 // Job status back into PodTraceSession.status.
+func (r *PodTraceSessionReconciler) reader() client.Reader {
+	if r.APIReader != nil {
+		return r.APIReader
+	}
+	return r.Client
+}
+
 func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithValues("podtracesession", req.String())
 
@@ -152,13 +161,13 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// assume a ServiceAccount, or exercise RBAC that lives somewhere else.
 	// Provision the full set in every namespace the resolution touches.
 	for _, ns := range resolved.namespaces {
-		if err := ensureSessionExporterBundle(ctx, r.Client, &session, &ec, ns); err != nil {
+		if err := ensureSessionExporterBundle(ctx, r.Client, r.reader(), &session, &ec, ns); err != nil {
 			r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "BundleSync", err.Error())
 			_ = r.Status().Update(ctx, &session)
 			return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
 		}
 
-		if _, err := ensureSessionObjectStoreCredentials(ctx, r.Client, &session, ns); err != nil {
+		if _, err := ensureSessionObjectStoreCredentials(ctx, r.Client, r.reader(), &session, ns); err != nil {
 			r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "ObjectStoreCreds", err.Error())
 			_ = r.Status().Update(ctx, &session)
 			return ctrl.Result{RequeueAfter: 60 * time.Second}, nil

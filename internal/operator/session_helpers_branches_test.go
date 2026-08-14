@@ -32,7 +32,7 @@ func TestEnsureSessionExporterBundle_RenderError(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "ec", Namespace: "team-a"},
 		Spec:       podtracev1alpha1.ExporterConfigSpec{Type: podtracev1alpha1.ExporterTypeOTLP},
 	}
-	if err := ensureSessionExporterBundle(context.Background(), c, s, ec, "podtrace-system"); err == nil {
+	if err := ensureSessionExporterBundle(context.Background(), c, c, s, ec, "podtrace-system"); err == nil {
 		t.Fatal("an OTLP ExporterConfig with a nil OTLP block must fail bundle rendering")
 	}
 }
@@ -56,7 +56,7 @@ func TestEnsureSessionExporterBundle_PruneStaleSecretDeleteError(t *testing.T) {
 			OTLP: &podtracev1alpha1.OTLPExporter{Endpoint: "otel:4318", Protocol: podtracev1alpha1.OTLPProtocolHTTP},
 		},
 	}
-	if err := ensureSessionExporterBundle(context.Background(), c, s, ec, "podtrace-system"); err == nil {
+	if err := ensureSessionExporterBundle(context.Background(), c, c, s, ec, "podtrace-system"); err == nil {
 		t.Fatal("a failing prune of the credential-less bundle Secret must be surfaced")
 	}
 }
@@ -79,7 +79,7 @@ func TestEnsureSessionObjectStoreCredentials_GetError(t *testing.T) {
 			CredentialsSecretRef: &corev1.LocalObjectReference{Name: "creds"},
 		},
 	}
-	if _, err := ensureSessionObjectStoreCredentials(context.Background(), c, s, "podtrace-system"); err == nil {
+	if _, err := ensureSessionObjectStoreCredentials(context.Background(), c, c, s, "podtrace-system"); err == nil {
 		t.Fatal("a non-NotFound Get of the credentials Secret must be surfaced")
 	}
 }
@@ -106,7 +106,7 @@ func TestEnsureSessionObjectStoreCredentials_CreateError(t *testing.T) {
 			CredentialsSecretRef: &corev1.LocalObjectReference{Name: "creds"},
 		},
 	}
-	if _, err := ensureSessionObjectStoreCredentials(context.Background(), c, s, "podtrace-system"); err == nil {
+	if _, err := ensureSessionObjectStoreCredentials(context.Background(), c, c, s, "podtrace-system"); err == nil {
 		t.Fatal("a failing upsert of the copied credentials Secret must be surfaced")
 	}
 }
