@@ -596,7 +596,7 @@ func TestErrPath_TracerConfig_RBACCreateError(t *testing.T) {
 	s := newOperatorScheme(t)
 	tc := &podtracev1alpha1.TracerConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "default", Generation: 1},
-		Spec:       podtracev1alpha1.TracerConfigSpec{SystemNamespace: "podtrace-system"},
+		Spec:       podtracev1alpha1.TracerConfigSpec{SystemNamespace: "podtrace-system", Image: "ghcr.io/gma1k/podtrace:test"},
 	}
 	c := fake.NewClientBuilder().
 		WithScheme(s).
@@ -624,7 +624,7 @@ func TestErrPath_TracerConfig_DaemonSetCreateError(t *testing.T) {
 	s := newOperatorScheme(t)
 	tc := &podtracev1alpha1.TracerConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "default", Generation: 1},
-		Spec:       podtracev1alpha1.TracerConfigSpec{SystemNamespace: "podtrace-system"},
+		Spec:       podtracev1alpha1.TracerConfigSpec{SystemNamespace: "podtrace-system", Image: "ghcr.io/gma1k/podtrace:test"},
 	}
 	c := fake.NewClientBuilder().
 		WithScheme(s).
@@ -652,7 +652,7 @@ func TestErrPath_TracerConfig_DaemonSetConflictRequeues(t *testing.T) {
 	s := newOperatorScheme(t)
 	tc := &podtracev1alpha1.TracerConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "default", Generation: 1},
-		Spec:       podtracev1alpha1.TracerConfigSpec{SystemNamespace: "podtrace-system"},
+		Spec:       podtracev1alpha1.TracerConfigSpec{SystemNamespace: "podtrace-system", Image: "ghcr.io/gma1k/podtrace:test"},
 	}
 	c := fake.NewClientBuilder().
 		WithScheme(s).
@@ -684,7 +684,7 @@ func TestErrPath_TracerConfig_FinalStatusUpdateConflictRequeues(t *testing.T) {
 	s := newOperatorScheme(t)
 	tc := &podtracev1alpha1.TracerConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "default", Generation: 1},
-		Spec:       podtracev1alpha1.TracerConfigSpec{SystemNamespace: "podtrace-system"},
+		Spec:       podtracev1alpha1.TracerConfigSpec{SystemNamespace: "podtrace-system", Image: "ghcr.io/gma1k/podtrace:test"},
 	}
 	c := fake.NewClientBuilder().
 		WithScheme(s).
@@ -713,7 +713,7 @@ func TestErrPath_TracerConfig_FinalStatusUpdateError(t *testing.T) {
 	s := newOperatorScheme(t)
 	tc := &podtracev1alpha1.TracerConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "default", Generation: 1},
-		Spec:       podtracev1alpha1.TracerConfigSpec{SystemNamespace: "podtrace-system"},
+		Spec:       podtracev1alpha1.TracerConfigSpec{SystemNamespace: "podtrace-system", Image: "ghcr.io/gma1k/podtrace:test"},
 	}
 	c := fake.NewClientBuilder().
 		WithScheme(s).

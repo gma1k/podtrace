@@ -57,6 +57,7 @@ operator:
   extraEnv: []
 
 agent:
+  allowedImageRepos: []
   resources:
     requests:
       cpu: 100m

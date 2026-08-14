@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -93,4 +94,30 @@ func TestCaptureHeaderList(t *testing.T) {
 			t.Errorf("CaptureHeaderList() = %v, want %v", got, want)
 		}
 	})
+}
+
+func TestAllowedAgentImageRepos_DefaultsToTrustedImage(t *testing.T) {
+	if _, set := os.LookupEnv("PODTRACE_ALLOWED_AGENT_IMAGE_REPOS"); set {
+		t.Skip("PODTRACE_ALLOWED_AGENT_IMAGE_REPOS set in environment")
+	}
+	got := AllowedAgentImageRepos()
+	if len(got) != 1 || got[0] != Image {
+		t.Errorf("default AllowedAgentImageRepos = %v, want [%s]", got, Image)
+	}
+}
+
+func TestAllowedAgentImageRepos_WidenedViaEnv(t *testing.T) {
+	t.Setenv("PODTRACE_ALLOWED_AGENT_IMAGE_REPOS", "ghcr.io/gma1k/podtrace, registry.internal:5000/mirror , ")
+	got := AllowedAgentImageRepos()
+	want := []string{"ghcr.io/gma1k/podtrace", "registry.internal:5000/mirror"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("AllowedAgentImageRepos = %v, want %v", got, want)
+	}
+}
+
+func TestAllowedAgentImageRepos_ExplicitEmptyDisables(t *testing.T) {
+	t.Setenv("PODTRACE_ALLOWED_AGENT_IMAGE_REPOS", "")
+	if got := AllowedAgentImageRepos(); len(got) != 0 {
+		t.Errorf("explicit empty must disable the policy, got %v", got)
+	}
 }

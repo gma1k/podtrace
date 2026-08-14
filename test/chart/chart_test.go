@@ -523,3 +523,28 @@ func containsAnyKind(doc []byte) bool {
 	}
 	return false
 }
+
+func TestChart_TracerConfigImageHasCELBackstop(t *testing.T) {
+	out := renderChart(t)
+	if !bytes.Contains(out, []byte("must be a fully-qualified image reference")) {
+		t.Error("TracerConfig CRD must carry the spec.image CEL validation backstop")
+	}
+	if !bytes.Contains(out, []byte("x-kubernetes-validations")) {
+		t.Error("TracerConfig CRD must declare x-kubernetes-validations for spec.image")
+	}
+}
+
+func TestChart_OperatorImageAllowlistEnv(t *testing.T) {
+	out := renderChart(t, "operator.enabled=true")
+	if !bytes.Contains(out, []byte("PODTRACE_ALLOWED_AGENT_IMAGE_REPOS")) {
+		t.Fatal("operator must receive PODTRACE_ALLOWED_AGENT_IMAGE_REPOS")
+	}
+	if !bytes.Contains(out, []byte("ghcr.io/gma1k/podtrace")) {
+		t.Error("default allowlist must include the chart's own image repository")
+	}
+
+	custom := renderChart(t, "operator.enabled=true", "image.repository=myreg.io/podtrace", "agent.allowedImageRepos={mirror.io/podtrace}")
+	if !bytes.Contains(custom, []byte("myreg.io/podtrace,mirror.io/podtrace")) {
+		t.Error("allowlist must combine the chart's image.repository with agent.allowedImageRepos")
+	}
+}

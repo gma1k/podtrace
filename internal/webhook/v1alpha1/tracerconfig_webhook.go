@@ -12,7 +12,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/fleet"
+	"github.com/gma1k/podtrace/internal/imagepolicy"
 )
 
 // +kubebuilder:webhook:path=/validate-podtrace-io-v1alpha1-tracerconfig,mutating=false,failurePolicy=fail,sideEffects=None,groups=podtrace.io,resources=tracerconfigs,verbs=create;update,versions=v1alpha1,name=vtracerconfig.podtrace.io,admissionReviewVersions=v1
@@ -49,6 +51,9 @@ func (v *TracerConfigCustomValidator) ValidateDelete(_ context.Context, _ *podtr
 
 func (v *TracerConfigCustomValidator) validate(ctx context.Context, tc *podtracev1alpha1.TracerConfig) (admission.Warnings, error) {
 	if err := validateTracerConfigNameLength(tc.Name); err != nil {
+		return nil, err
+	}
+	if err := imagepolicy.RepoAllowed(tc.Spec.Image, config.AllowedAgentImageRepos()); err != nil {
 		return nil, err
 	}
 	if v.Client == nil {

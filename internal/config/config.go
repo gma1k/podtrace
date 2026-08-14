@@ -483,6 +483,22 @@ var (
 	Image   = "ghcr.io/gma1k/podtrace"
 )
 
+// AllowedAgentImageRepos returns the repository prefixes the operator accepts
+// in TracerConfig.spec.image.
+func AllowedAgentImageRepos() []string {
+	raw, set := os.LookupEnv("PODTRACE_ALLOWED_AGENT_IMAGE_REPOS")
+	if !set {
+		return []string{Image}
+	}
+	var repos []string
+	for _, r := range strings.Split(raw, ",") {
+		if r = strings.TrimSpace(r); r != "" {
+			repos = append(repos, r)
+		}
+	}
+	return repos
+}
+
 var readVCSRevision = func() string {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {

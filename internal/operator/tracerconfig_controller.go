@@ -28,7 +28,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/fleet"
+	"github.com/gma1k/podtrace/internal/imagepolicy"
 	"github.com/gma1k/podtrace/internal/safeconv"
 )
 
@@ -66,6 +68,16 @@ func (r *TracerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if err := validateTracerConfigName(tc.Name); err != nil {
 		r.setCondition(&tc, ConditionDegraded, metav1.ConditionTrue, "InvalidName", err.Error())
 		r.setCondition(&tc, ConditionReady, metav1.ConditionFalse, "InvalidName", err.Error())
+		if uerr := r.Status().Update(ctx, &tc); uerr != nil && !apierrors.IsConflict(uerr) {
+			return ctrl.Result{}, fmt.Errorf("update status: %w", uerr)
+		}
+		return ctrl.Result{}, nil
+	}
+
+	if err := imagepolicy.RepoAllowed(tc.Spec.Image, config.AllowedAgentImageRepos()); err != nil {
+		logger.Info("refusing agent fleet: image not allowed", "image", tc.Spec.Image, "error", err.Error())
+		r.setCondition(&tc, ConditionDegraded, metav1.ConditionTrue, "ImageNotAllowed", err.Error())
+		r.setCondition(&tc, ConditionReady, metav1.ConditionFalse, "ImageNotAllowed", err.Error())
 		if uerr := r.Status().Update(ctx, &tc); uerr != nil && !apierrors.IsConflict(uerr) {
 			return ctrl.Result{}, fmt.Errorf("update status: %w", uerr)
 		}
