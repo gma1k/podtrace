@@ -23,6 +23,10 @@
         },
         {
           "type": "generic",
+          "path": "deploy/charts/podtrace/Chart.yaml"
+        },
+        {
+          "type": "generic",
           "path": "examples/tracerconfig.yaml"
         },
         {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -19,6 +20,8 @@ import (
 // discovers by walking up looking for go.mod. This lets the test run
 // from any cwd (repo root or test/chart).
 const chartSubPath = "deploy/charts/podtrace"
+
+var regexpImage = regexp.MustCompile(`image:[ \t]+("?[^"'\s]+"?)`)
 
 // helmAvailable reports whether the helm CLI is on PATH. The chart
 // rendering tests require it; unit tests elsewhere do not.
@@ -613,5 +616,93 @@ func TestChart_OperatorSecretRBACNarrowed(t *testing.T) {
 	}
 	if !has(role, "update") || !has(role, "patch") {
 		t.Errorf("system-namespace Role must grant update+patch on secrets, got %v", role)
+	}
+}
+
+func repoOf(ref string) string {
+	if at := strings.IndexByte(ref, '@'); at >= 0 {
+		ref = ref[:at]
+	}
+	slash := strings.LastIndexByte(ref, '/')
+	if colon := strings.IndexByte(ref[slash+1:], ':'); colon >= 0 {
+		ref = ref[:slash+1+colon]
+	}
+	return ref
+}
+
+func TestChart_ArtifactHubImagesCoverRenderedImages(t *testing.T) {
+	var chart struct {
+		AppVersion  string            `json:"appVersion"`
+		Annotations map[string]string `json:"annotations"`
+	}
+	raw, err := os.ReadFile(filepath.Join(chartDir(t), "Chart.yaml"))
+	if err != nil {
+		t.Fatalf("read Chart.yaml: %v", err)
+	}
+	if err := yaml.Unmarshal(raw, &chart); err != nil {
+		t.Fatalf("parse Chart.yaml: %v", err)
+	}
+	imgAnnotation, ok := chart.Annotations["artifacthub.io/images"]
+	if !ok {
+		t.Fatal("Chart.yaml must carry the artifacthub.io/images annotation")
+	}
+
+	var images []struct {
+		Name        string   `json:"name"`
+		Image       string   `json:"image"`
+		Platforms   []string `json:"platforms"`
+		Whitelisted bool     `json:"whitelisted"`
+	}
+	if err := yaml.Unmarshal([]byte(imgAnnotation), &images); err != nil {
+		t.Fatalf("artifacthub.io/images is not valid YAML: %v", err)
+	}
+
+	type entry struct {
+		ref         string
+		whitelisted bool
+	}
+	listed := map[string]entry{}
+	for _, im := range images {
+		listed[repoOf(im.Image)] = entry{ref: im.Image, whitelisted: im.Whitelisted}
+	}
+
+	pt, ok := listed["ghcr.io/gma1k/podtrace"]
+	if !ok {
+		t.Fatal("the podtrace product image must be listed in artifacthub.io/images")
+	}
+	if pt.whitelisted {
+		t.Error("the podtrace product image must be scanned, not whitelisted")
+	}
+	if want := "ghcr.io/gma1k/podtrace:" + chart.AppVersion; pt.ref != want {
+		t.Errorf("podtrace image = %q, want %q (the committed tag tracks appVersion via the x-release-please-version marker; the release job appends the @sha256 digest at publish time)", pt.ref, want)
+	}
+
+	k8s, ok := listed["alpine/k8s"]
+	if !ok {
+		t.Fatal("the alpine/k8s hook toolbox must be listed in artifacthub.io/images")
+	}
+	if !k8s.whitelisted {
+		t.Error("the third-party alpine/k8s toolbox must be whitelisted so its CVEs do not define the chart rating")
+	}
+	if !strings.Contains(k8s.ref, "@sha256:") {
+		t.Errorf("alpine/k8s image %q must be digest-pinned (Renovate keeps the digest fresh)", k8s.ref)
+	}
+
+	out := renderChart(t, "operator.enabled=true")
+	rendered := map[string]bool{}
+	for _, m := range regexpImage.FindAllSubmatch(out, -1) {
+		ref := strings.Trim(string(m[1]), `"'`)
+		if !strings.Contains(ref, "/") {
+			continue
+		}
+		rendered[repoOf(ref)] = true
+	}
+	if len(rendered) == 0 {
+		t.Fatal("no images found in rendered chart")
+	}
+	for repo := range rendered {
+		if _, ok := listed[repo]; !ok {
+			t.Errorf("rendered image repository %q is not covered by artifacthub.io/images; add it or Artifact Hub will silently skip scanning it", repo)
+		}
 	}
 }
