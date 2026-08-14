@@ -145,8 +145,18 @@ func TestBuildPodSpec_HostMountsAndEnv(t *testing.T) {
 	}
 }
 
-// TestBuildPodSpec_SecurityFSHostPathHardenedAgainstSilentEmptyMount pins the
-// securityfs volume type to HostPathDirectory (not DirectoryOrCreate).
+func TestBuildPodSpec_CgroupMountsReadOnly(t *testing.T) {
+	got, err := BuildPodSpec(baseOpts())
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	for _, m := range got.Spec.Containers[0].VolumeMounts {
+		if m.Name == "cgroup" && !m.ReadOnly {
+			t.Errorf("cgroup mount at %q must be ReadOnly (writable host cgroupfs under root+CAP_SYS_ADMIN is a release_agent escape)", m.MountPath)
+		}
+	}
+}
+
 func TestBuildPodSpec_SecurityFSHostPathHardenedAgainstSilentEmptyMount(t *testing.T) {
 	got, err := BuildPodSpec(baseOpts())
 	if err != nil {

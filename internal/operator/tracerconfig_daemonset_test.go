@@ -101,6 +101,19 @@ func TestBuildAgentDaemonSetSpec_HostMounts(t *testing.T) {
 	}
 }
 
+func TestBuildAgentDaemonSetSpec_HostSysMountsReadOnly(t *testing.T) {
+	spec := buildAgentDaemonSetSpec(tc(nil), "podtrace-system")
+	ro := map[string]bool{}
+	for _, m := range spec.Template.Spec.Containers[0].VolumeMounts {
+		ro[m.Name] = m.ReadOnly
+	}
+	for _, name := range []string{"cgroup", "btf", "proc", "debugfs", "tracefs"} {
+		if !ro[name] {
+			t.Errorf("host mount %q must be ReadOnly (writable host cgroupfs under root+CAP_SYS_ADMIN is a release_agent escape)", name)
+		}
+	}
+}
+
 func TestBuildAgentDaemonSetSpec_NodeNameEnvInjected(t *testing.T) {
 	spec := buildAgentDaemonSetSpec(tc(nil), "podtrace-system")
 	c := spec.Template.Spec.Containers[0]

@@ -92,7 +92,7 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 		{Name: "bpf", MountPath: "/sys/fs/bpf", MountPropagation: mountPropagationHostToContainer()},
 		{Name: "btf", MountPath: "/sys/kernel/btf", ReadOnly: true},
 		{Name: "proc", MountPath: "/host/proc", ReadOnly: true},
-		{Name: "cgroup", MountPath: "/sys/fs/cgroup", ReadOnly: false},
+		{Name: "cgroup", MountPath: "/sys/fs/cgroup", ReadOnly: true},
 		{Name: "debugfs", MountPath: "/sys/kernel/debug", ReadOnly: true},
 		{Name: "tracefs", MountPath: "/sys/kernel/tracing", ReadOnly: true},
 		{Name: "exporter", MountPath: "/etc/podtrace/exporter", ReadOnly: true},

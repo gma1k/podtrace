@@ -169,6 +169,20 @@ func TestBuildSessionJobSpec_CoreInvariants(t *testing.T) {
 	}
 }
 
+func TestBuildSessionJobSpec_CgroupMountReadOnly(t *testing.T) {
+	tc := &podtracev1alpha1.TracerConfig{
+		Spec: podtracev1alpha1.TracerConfigSpec{Image: "ghcr.io/gma1k/podtrace:test"},
+	}
+	spec := buildSessionJobSpec(newSession(nil), tc, "node-a", sessionTargets{})
+	for _, c := range spec.Template.Spec.Containers {
+		for _, m := range c.VolumeMounts {
+			if m.Name == "cgroup" && !m.ReadOnly {
+				t.Errorf("container %q cgroup mount at %q must be ReadOnly", c.Name, m.MountPath)
+			}
+		}
+	}
+}
+
 func TestBuildSessionJobSpec_SidecarOptedIn(t *testing.T) {
 	tc := &podtracev1alpha1.TracerConfig{
 		Spec: podtracev1alpha1.TracerConfigSpec{
