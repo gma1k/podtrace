@@ -114,9 +114,8 @@ type Tracer struct {
 	attributionCorrelatorDisabled bool
 	pathCache                     *cache.PathCache
 	resourceMgr                   *resourceMonitorManager
-	cgroupPath                    string
 	lastDNSDrops                  uint64
-	cgroupPaths                   []string
+	cgroupPaths                   atomic.Pointer[[]string]
 	useUserspaceCgroupFilter      atomic.Bool
 	denyWhenNoTargets             atomic.Bool
 	targetCgroupIDs               atomic.Pointer[map[uint64]struct{}]
@@ -165,15 +164,11 @@ type ContainerProbeTarget struct {
 	PIDs []uint32
 }
 
-// containerUprobeSet holds one container's uprobe links keyed by probe group
-// so DisableProbeGroup/EnableProbeGroup can detach and re-attach a group for
-// every targeted container.
 type containerUprobeSet struct {
 	pids  []uint32
 	links map[probes.ProbeGroup][]link.Link
 }
 
-// samePIDSet compares two sorted PID slices.
 func samePIDSet(a, b []uint32) bool {
 	if len(a) != len(b) {
 		return false
@@ -301,10 +296,7 @@ func (t *Tracer) attachContainerUprobes(id string, pids []uint32) map[probes.Pro
 }
 
 // SetContainerTargets reconciles container-scoped uprobes against the full set
-// of currently-targeted containers. Each target's PIDs are expanded to one
-// representative PID per distinct executable in the container (the caller's
-// PIDs act as seeds), so a container is re-attached whenever its binary set
-// changes, not just when a single PID changes.
+// of currently-targeted containers.
 func (t *Tracer) SetContainerTargets(targets []ContainerProbeTarget) error {
 	t.attachGlobalProtocolProbesOnce()
 
@@ -358,8 +350,7 @@ func (t *Tracer) SetContainerTargets(targets []ContainerProbeTarget) error {
 }
 
 // attachGroupUprobes re-attaches the probes of a group that are NOT
-// container-scoped. Container-scoped uprobes are re-attached per container by
-// reattachContainerGroupUprobes.
+// container-scoped.
 func (t *Tracer) attachGroupUprobes(g probes.ProbeGroup) []link.Link {
 	coll := t.collection
 	if coll == nil {
@@ -843,11 +834,30 @@ func (t *Tracer) idleDeny() bool {
 
 // SetCgroups replaces the tracer's entire cgroup filter set with the
 // given paths.
+// setCgroupPaths atomically publishes the current cgroup target set. Callers
+// hold cgroupWriteMu to serialize writers.
+func (t *Tracer) setCgroupPaths(paths []string) {
+	t.cgroupPaths.Store(&paths)
+}
+
+func (t *Tracer) currentCgroupPaths() []string {
+	if p := t.cgroupPaths.Load(); p != nil {
+		return *p
+	}
+	return nil
+}
+
+func (t *Tracer) primaryCgroupPath() string {
+	if p := t.cgroupPaths.Load(); p != nil && len(*p) > 0 {
+		return (*p)[0]
+	}
+	return ""
+}
+
 func (t *Tracer) SetCgroups(cgroupPaths []string) error {
 	if len(cgroupPaths) == 0 {
 		t.cgroupWriteMu.Lock()
-		t.cgroupPaths = nil
-		t.cgroupPath = ""
+		t.setCgroupPaths(nil)
 		t.storeCgroupIDs(map[uint64]struct{}{})
 		t.filter.SetCgroupPaths(nil)
 		if err := t.syncTargetCgroupMap(); err != nil {
@@ -907,8 +917,9 @@ func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 		allPaths = normalized
 		newIDs = make(map[uint64]struct{}, len(normalized))
 	} else {
-		seen := make(map[string]struct{}, len(t.cgroupPaths)+len(normalized))
-		for _, p := range t.cgroupPaths {
+		existing := t.currentCgroupPaths()
+		seen := make(map[string]struct{}, len(existing)+len(normalized))
+		for _, p := range existing {
 			if _, dup := seen[p]; dup {
 				continue
 			}
@@ -928,10 +939,7 @@ func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 		}
 	}
 
-	t.cgroupPaths = allPaths
-	if len(allPaths) > 0 {
-		t.cgroupPath = allPaths[0]
-	}
+	t.setCgroupPaths(allPaths)
 	t.filter.SetCgroupPaths(allPaths)
 
 	if !pidInCgroupPaths(t.containerPID, allPaths) {
@@ -977,7 +985,7 @@ func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 		t.storeCgroupIDs(newIDs)
 		logger.Debug("Cgroup v2 not detected, using userspace filtering only", zap.String("cgroup_base", config.CgroupBasePath))
 	}
-	currentPaths := append([]string(nil), t.cgroupPaths...)
+	currentPaths := allPaths
 	t.syncDNSPacketProbes(currentPaths)
 	t.syncHTTP3Probes(currentPaths)
 
@@ -986,7 +994,7 @@ func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 	}
 
 	logger.Debug("Attached to cgroups",
-		zap.Int("cgroup_count", len(t.cgroupPaths)),
+		zap.Int("cgroup_count", len(allPaths)),
 		zap.Uint32("container_pid", t.containerPID),
 		zap.Int("target_cgroup_id_count", len(newIDs)),
 		zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter.Load()),
@@ -1007,7 +1015,7 @@ func (t *Tracer) syncTargetCgroupMap() error {
 	t.warnOnCgroupCapacity(len(ids), targetMap.MaxEntries())
 
 	if len(ids) == 0 {
-		deny := t.denyWhenNoTargets.Load() && len(t.cgroupPaths) == 0
+		deny := t.denyWhenNoTargets.Load() && len(t.currentCgroupPaths()) == 0
 		if err := t.setCgroupFilterEnabled(deny); err != nil {
 			return err
 		}
@@ -1225,7 +1233,7 @@ func (t *Tracer) pidsForContainer(id string, seeds []uint32) []uint32 {
 		short = short[:12]
 	}
 	var procs []uint32
-	for _, p := range t.cgroupPaths {
+	for _, p := range t.currentCgroupPaths() {
 		if strings.Contains(p, id) || (short != "" && strings.Contains(p, short)) {
 			if procs = readPIDsFromCgroupProcs(p); len(procs) > 0 {
 				break
@@ -1248,7 +1256,7 @@ func (t *Tracer) pidsForContainer(id string, seeds []uint32) []uint32 {
 		}
 		logger.Warn("No attached cgroup path matched container ID; uprobe attachment will fall back to scanning /proc for the container",
 			zap.String("container_id", id),
-			zap.Strings("cgroup_paths", t.cgroupPaths))
+			zap.Strings("cgroup_paths", t.currentCgroupPaths()))
 		return []uint32{0}
 	}
 
@@ -1299,7 +1307,7 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 	stackMap := t.collection.Maps["stack_traces"]
 
 	t.cgroupWriteMu.Lock()
-	dnsCgroups := append([]string(nil), t.cgroupPaths...)
+	dnsCgroups := t.currentCgroupPaths()
 	if err := t.syncTargetCgroupMap(); err != nil {
 		logger.Warn("Failed initial target cgroup map sync", zap.Error(err))
 	}
@@ -1350,7 +1358,7 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 	startTime := time.Now()
 
 	logger.Info("Starting event collection",
-		zap.String("cgroup_path", t.cgroupPath),
+		zap.String("cgroup_path", t.primaryCgroupPath()),
 		zap.Uint32("container_pid", t.containerPID),
 		zap.Int("target_cgroup_id_count", len(t.loadCgroupIDs())),
 		zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter.Load()))
@@ -1375,7 +1383,7 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 							zap.Int64("events_filtered", eventsFiltered.Load()),
 							zap.Int64("events_collected", eventsCollected.Load()),
 							zap.Int("target_cgroup_id_count", len(t.loadCgroupIDs())),
-							zap.String("cgroup_path", t.cgroupPath),
+							zap.String("cgroup_path", t.primaryCgroupPath()),
 							zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter.Load()))
 						filteringDisabled.Store(true)
 						t.cgroupWriteMu.Lock()
@@ -1391,12 +1399,12 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 							zap.Int64("events_parsed", eventsParsed.Load()),
 							zap.Int64("events_filtered", eventsFiltered.Load()),
 							zap.Int64("events_collected", eventsCollected.Load()),
-							zap.String("cgroup_path", t.cgroupPath))
+							zap.String("cgroup_path", t.primaryCgroupPath()))
 					}
 				} else if eventsParsed.Load() == 0 && elapsed > 15*time.Second {
 					logger.Warn("No events parsed from ring buffer after 15 seconds - check eBPF program attachment",
 						zap.Int("target_cgroup_id_count", len(t.loadCgroupIDs())),
-						zap.String("cgroup_path", t.cgroupPath),
+						zap.String("cgroup_path", t.primaryCgroupPath()),
 						zap.Duration("elapsed", elapsed),
 						zap.Int("links_attached", t.linkCount()))
 					logger.Warn("If running in a container (e.g. DaemonSet), ensure host /sys/fs/cgroup and /proc are mounted and PODTRACE_CGROUP_BASE / PODTRACE_PROC_BASE point at them; see installation doc 'Running as a DaemonSet'")
@@ -1405,7 +1413,7 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 						zap.Int64("events_parsed", eventsParsed.Load()),
 						zap.Int64("events_filtered", eventsFiltered.Load()),
 						zap.Int("target_cgroup_id_count", len(t.loadCgroupIDs())),
-						zap.String("cgroup_path", t.cgroupPath),
+						zap.String("cgroup_path", t.primaryCgroupPath()),
 						zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter.Load()),
 						zap.Duration("elapsed", elapsed))
 					if t.useUserspaceCgroupFilter.Load() {
@@ -1611,7 +1619,7 @@ func (t *Tracer) processAndDispatch(ctx context.Context, event *events.Event,
 				logger.Debug("Event filtered by userspace PID cgroup check",
 					zap.Uint32("pid", event.PID),
 					zap.String("process", event.ProcessName),
-					zap.String("cgroup_path", t.cgroupPath))
+					zap.String("cgroup_path", t.primaryCgroupPath()))
 			}
 		}
 	} else {
