@@ -34,7 +34,7 @@ func expectFields(t *testing.T, got []HeaderField, want ...HeaderField) {
 // end to end: field sections B.1, B.2 and B.4 plus the encoder stream
 // instructions of B.2, B.3, B.4 and B.5.
 func TestRFC9204AppendixB(t *testing.T) {
-	d := NewDecoder(0)
+	d := NewDecoder(220)
 
 	fields, err := d.DecodeFieldSection(mustHex(t, "0000 510b 2f69 6e64 6578 2e68 746d 6c"))
 	if err != nil {
@@ -131,7 +131,7 @@ func TestBlockedSection(t *testing.T) {
 // TestEncoderStreamByteAtATime feeds the B.2+B.3 encoder stream one byte at
 // a time; instructions split across chunks must decode identically.
 func TestEncoderStreamByteAtATime(t *testing.T) {
-	d := NewDecoder(0)
+	d := NewDecoder(220)
 	stream := mustHex(t,
 		"3fbd01 c00f 7777 772e 6578 616d 706c 652e 636f 6d c10c 2f73 616d 706c 652f 7061 7468"+
 			"4a 6375 7374 6f6d 2d6b 6579 0c63 7573 746f 6d2d 7661 6c75 65")
