@@ -84,6 +84,8 @@ type Tracer struct {
 	dnsPacketLinks map[string][]link.Link
 	http3Links     map[string][]link.Link
 
+	probesClosed bool
+
 	intentionallyDisabled map[probes.ProbeGroup]struct{}
 	detachWarned          map[probes.ProbeGroup]struct{}
 
@@ -133,6 +135,11 @@ func (t *Tracer) registerGroupLinks(g probes.ProbeGroup, ls []link.Link) {
 		return
 	}
 	t.probeGroupsMu.Lock()
+	if t.probesClosed {
+		t.probeGroupsMu.Unlock()
+		closeLinks(ls)
+		return
+	}
 	defer t.probeGroupsMu.Unlock()
 	t.probeGroups[g] = append(t.probeGroups[g], ls...)
 	t.links = append(t.links, ls...)
@@ -187,6 +194,12 @@ func (s *containerUprobeSet) allLinks() []link.Link {
 	return out
 }
 
+func closeLinks(ls []link.Link) {
+	for _, l := range ls {
+		_ = l.Close()
+	}
+}
+
 // containerUprobeGroups lists the probe groups that carry container-scoped
 // uprobes, in attach order.
 var containerUprobeGroups = []probes.ProbeGroup{
@@ -203,6 +216,10 @@ var containerUprobeGroups = []probes.ProbeGroup{
 // exactly once.
 func (t *Tracer) attachGlobalProtocolProbesOnce() {
 	t.probeGroupsMu.Lock()
+	if t.probesClosed {
+		t.probeGroupsMu.Unlock()
+		return
+	}
 	already := t.globalProtocolAttached
 	t.globalProtocolAttached = true
 	t.probeGroupsMu.Unlock()
@@ -299,6 +316,10 @@ func (t *Tracer) SetContainerTargets(targets []ContainerProbeTarget) error {
 	}
 
 	t.probeGroupsMu.Lock()
+	if t.probesClosed {
+		t.probeGroupsMu.Unlock()
+		return nil
+	}
 	if t.containerUprobes == nil {
 		t.containerUprobes = map[string]*containerUprobeSet{}
 	}
@@ -325,6 +346,11 @@ func (t *Tracer) SetContainerTargets(targets []ContainerProbeTarget) error {
 	for _, ct := range toAttach {
 		links := t.attachContainerUprobes(ct.ID, ct.PIDs)
 		t.probeGroupsMu.Lock()
+		if t.probesClosed {
+			t.probeGroupsMu.Unlock()
+			closeLinks((&containerUprobeSet{links: links}).allLinks())
+			continue
+		}
 		t.containerUprobes[ct.ID] = &containerUprobeSet{pids: ct.PIDs, links: links}
 		t.probeGroupsMu.Unlock()
 	}
@@ -406,6 +432,10 @@ func (t *Tracer) syncDNSPacketProbes(paths []string) {
 	}
 
 	t.probeGroupsMu.Lock()
+	if t.probesClosed {
+		t.probeGroupsMu.Unlock()
+		return
+	}
 	if t.dnsPacketLinks == nil {
 		t.dnsPacketLinks = map[string][]link.Link{}
 	}
@@ -429,6 +459,11 @@ func (t *Tracer) syncDNSPacketProbes(paths []string) {
 	for _, p := range missing {
 		ls := probes.AttachDNSPacketProbes(t.collection, []string{p})
 		t.probeGroupsMu.Lock()
+		if t.probesClosed {
+			t.probeGroupsMu.Unlock()
+			closeLinks(ls)
+			continue
+		}
 		t.dnsPacketLinks[p] = ls
 		t.probeGroupsMu.Unlock()
 	}
@@ -448,6 +483,10 @@ func (t *Tracer) syncHTTP3Probes(paths []string) {
 	}
 
 	t.probeGroupsMu.Lock()
+	if t.probesClosed {
+		t.probeGroupsMu.Unlock()
+		return
+	}
 	if t.http3Links == nil {
 		t.http3Links = map[string][]link.Link{}
 	}
@@ -471,6 +510,11 @@ func (t *Tracer) syncHTTP3Probes(paths []string) {
 	for _, p := range missing {
 		ls := probes.AttachHTTP3Probes(t.collection, []string{p})
 		t.probeGroupsMu.Lock()
+		if t.probesClosed {
+			t.probeGroupsMu.Unlock()
+			closeLinks(ls)
+			continue
+		}
 		t.http3Links[p] = ls
 		t.probeGroupsMu.Unlock()
 	}
@@ -2191,6 +2235,7 @@ func (t *Tracer) Stop() error {
 	}
 
 	t.probeGroupsMu.Lock()
+	t.probesClosed = true
 	closing := t.links
 	t.links = nil
 	t.probeGroups = map[probes.ProbeGroup][]link.Link{}
@@ -2431,6 +2476,11 @@ func (t *Tracer) EnableProbeGroup(g probes.ProbeGroup) error {
 	newLinks = append(newLinks, t.attachGroupUprobes(g)...)
 
 	t.probeGroupsMu.Lock()
+	if t.probesClosed {
+		t.probeGroupsMu.Unlock()
+		closeLinks(newLinks)
+		return nil
+	}
 	t.probeGroups[g] = append(t.probeGroups[g], newLinks...)
 	t.links = append(t.links, newLinks...)
 	delete(t.intentionallyDisabled, g)
