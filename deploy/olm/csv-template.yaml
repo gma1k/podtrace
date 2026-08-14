@@ -371,8 +371,11 @@ spec:
               resources: ["nodes"]
               verbs: ["get", "list", "watch"]
             - apiGroups: [""]
-              resources: ["serviceaccounts", "configmaps", "secrets"]
+              resources: ["serviceaccounts", "configmaps"]
               verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+            - apiGroups: [""]
+              resources: ["secrets"]
+              verbs: ["get", "list", "watch", "create", "delete"]
             - apiGroups: ["rbac.authorization.k8s.io"]
               resources: ["clusterroles", "clusterrolebindings"]
               verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -385,6 +388,12 @@ spec:
             - apiGroups: ["coordination.k8s.io"]
               resources: ["leases"]
               verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      permissions:
+        - serviceAccountName: podtrace-operator
+          rules:
+            - apiGroups: [""]
+              resources: ["secrets"]
+              verbs: ["update", "patch"]
 
       deployments:
         - name: podtrace-operator

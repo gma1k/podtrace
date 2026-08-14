@@ -32,7 +32,7 @@ func TestEnsureSessionExporterBundle_ConfigMapCreateError(t *testing.T) {
 	s := &podtracev1alpha1.PodTraceSession{
 		ObjectMeta: metav1.ObjectMeta{Name: "diag", Namespace: "team-a", UID: "sess-cm-err"},
 	}
-	err := ensureSessionExporterBundle(context.Background(), c, s, ec, "podtrace-system")
+	err := ensureSessionExporterBundle(context.Background(), c, c, s, ec, "podtrace-system")
 	if err == nil {
 		t.Fatal("expected error when ConfigMap reconcile fails")
 		return
@@ -71,7 +71,7 @@ func TestEnsureSessionExporterBundle_SecretCreateError(t *testing.T) {
 	s := &podtracev1alpha1.PodTraceSession{
 		ObjectMeta: metav1.ObjectMeta{Name: "diag", Namespace: "team-a", UID: "sess-secret-err"},
 	}
-	err := ensureSessionExporterBundle(context.Background(), c, s, ec, "podtrace-system")
+	err := ensureSessionExporterBundle(context.Background(), c, c, s, ec, "podtrace-system")
 	if err == nil {
 		t.Fatal("expected error when companion Secret reconcile fails")
 		return
@@ -97,7 +97,7 @@ func TestEnsureSessionExporterBundle_MissingCredentialSecretErrors(t *testing.T)
 	s := &podtracev1alpha1.PodTraceSession{
 		ObjectMeta: metav1.ObjectMeta{Name: "diag", Namespace: "team-a", UID: "sess-missing-cred"},
 	}
-	err := ensureSessionExporterBundle(context.Background(), c, s, ec, "podtrace-system")
+	err := ensureSessionExporterBundle(context.Background(), c, c, s, ec, "podtrace-system")
 	if err == nil {
 		t.Fatal("expected error when credential Secret is absent")
 		return

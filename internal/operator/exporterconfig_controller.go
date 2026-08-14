@@ -30,7 +30,8 @@ import (
 //   - Referenced condition mirrors ReferencedBy > 0.
 type ExporterConfigReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	APIReader client.Reader
+	Scheme    *runtime.Scheme
 }
 
 // Reason strings for the Ready / Referenced conditions. Stable
@@ -47,10 +48,6 @@ const (
 	ecMaxConditionMessageLen = 256
 )
 
-// Field-indexer keys. Registered against PodTrace and PodTraceSession
-// in registerExporterConfigIndexers — reverse lookup so the
-// reconciler can ask "which PT/PTS objects point at this EC name?"
-// without listing the entire namespace.
 const (
 	IndexFieldPodTraceExporterRef        = "spec.exporterRef.name"
 	IndexFieldPodTraceSessionExporterRef = "spec.exporterRef.name"
@@ -59,6 +56,13 @@ const (
 // +kubebuilder:rbac:groups=podtrace.io,resources=exporterconfigs,verbs=get;list;watch
 // +kubebuilder:rbac:groups=podtrace.io,resources=exporterconfigs/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
+
+func (r *ExporterConfigReconciler) reader() client.Reader {
+	if r.APIReader != nil {
+		return r.APIReader
+	}
+	return r.Client
+}
 
 func (r *ExporterConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -134,7 +138,7 @@ func (r *ExporterConfigReconciler) evaluateReadiness(ctx context.Context, ec *po
 	for _, ref := range collectSecretRefs(ec.Spec) {
 		var sec corev1.Secret
 		key := types.NamespacedName{Namespace: ec.Namespace, Name: ref.Name}
-		if err := r.Get(ctx, key, &sec); err != nil {
+		if err := r.reader().Get(ctx, key, &sec); err != nil {
 			if apierrors.IsNotFound(err) {
 				logger.V(1).Info("secret missing", "secret", key.String())
 				return false, metav1.ConditionFalse, ecReasonSecretMissing,

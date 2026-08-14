@@ -24,7 +24,7 @@ func SessionObjectStoreCredsName(sessionUID types.UID) string {
 // ensureSessionObjectStoreCredentials copies the user's
 // CredentialsSecretRef Secret from the session's namespace into
 // systemNS.
-func ensureSessionObjectStoreCredentials(ctx context.Context, c client.Client, s *podtracev1alpha1.PodTraceSession, systemNS string) (string, error) {
+func ensureSessionObjectStoreCredentials(ctx context.Context, c client.Client, reader client.Reader, s *podtracev1alpha1.PodTraceSession, systemNS string) (string, error) {
 	if s == nil || s.Spec.ReportRef == nil || s.Spec.ReportRef.ObjectStore == nil {
 		return "", nil
 	}
@@ -34,7 +34,7 @@ func ensureSessionObjectStoreCredentials(ctx context.Context, c client.Client, s
 	}
 
 	var src corev1.Secret
-	if err := c.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: ref.Name}, &src); err != nil {
+	if err := reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: ref.Name}, &src); err != nil {
 		if apierrors.IsNotFound(err) {
 			return "", fmt.Errorf("objectstore credentials Secret %s/%s not found", s.Namespace, ref.Name)
 		}

@@ -38,7 +38,7 @@ func SessionBundleName(sessionUID types.UID) string {
 
 // ensureSessionExporterBundle creates-or-updates the ConfigMap + optional
 // companion Secret the session Job mounts at /etc/podtrace/exporter/.
-func ensureSessionExporterBundle(ctx context.Context, c client.Client, s *podtracev1alpha1.PodTraceSession, ec *podtracev1alpha1.ExporterConfig, systemNS string) error {
+func ensureSessionExporterBundle(ctx context.Context, c client.Client, reader client.Reader, s *podtracev1alpha1.PodTraceSession, ec *podtracev1alpha1.ExporterConfig, systemNS string) error {
 	name := SessionBundleName(s.UID)
 
 	payload, credSecretRef, headersFrom, err := renderBundlePayload(policyFromSession(s), ec, nil)
@@ -76,7 +76,7 @@ func ensureSessionExporterBundle(ctx context.Context, c client.Client, s *podtra
 	}
 
 	if credSecretRef != nil || headersFrom != nil {
-		credData, err := buildBundleSecretData(ctx, c, ec.Namespace, credSecretRef, headersFrom)
+		credData, err := buildBundleSecretData(ctx, reader, ec.Namespace, credSecretRef, headersFrom)
 		if err != nil {
 			return fmt.Errorf("load session credential Secret: %w", err)
 		}
@@ -112,9 +112,9 @@ func ensureSessionExporterBundle(ctx context.Context, c client.Client, s *podtra
 // loadCredentialSecret fetches exactly the one SecretKeySelector an
 // ExporterConfig references and returns the value under the fixed
 // "credential" key.
-func loadCredentialSecret(ctx context.Context, c client.Client, namespace string, ref podtracev1alpha1.SecretKeySelector) (map[string][]byte, error) {
+func loadCredentialSecret(ctx context.Context, reader client.Reader, namespace string, ref podtracev1alpha1.SecretKeySelector) (map[string][]byte, error) {
 	var src corev1.Secret
-	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: ref.Name}, &src); err != nil {
+	if err := reader.Get(ctx, types.NamespacedName{Namespace: namespace, Name: ref.Name}, &src); err != nil {
 		return nil, fmt.Errorf("get Secret %s/%s: %w", namespace, ref.Name, err)
 	}
 	val, ok := src.Data[ref.Key]
