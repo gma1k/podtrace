@@ -20,12 +20,11 @@ type HeaderField struct {
 const (
 	entryOverhead          = 32
 	maxFieldLength         = 8192
-	maxTableCapacity       = 1 << 24
+	maxTableCapacity       = 1 << 18
 	maxEncoderRemainder    = 64 * 1024
 	maxPrefixedIntegerBits = 62
 )
 
-// errIncomplete signals that the buffer ends mid-instruction.
 var errIncomplete = errors.New("qpackdecode: truncated input")
 
 // BlockedError reports a field section that references dynamic table state
@@ -58,12 +57,10 @@ type Decoder struct {
 	remainder        []byte
 }
 
-// NewDecoder returns a decoder for one connection direction.
 func NewDecoder(maxTableCapacity uint64) *Decoder {
 	return &Decoder{settingsCapacity: maxTableCapacity}
 }
 
-// InsertCount returns the total number of dynamic table insertions observed.
 func (d *Decoder) InsertCount() uint64 {
 	return d.evicted + uint64(len(d.entries))
 }
@@ -199,7 +196,7 @@ func (d *Decoder) setCapacity(capacity uint64) error {
 	if capacity > maxTableCapacity {
 		return fmt.Errorf("qpackdecode: dynamic table capacity %d exceeds limit %d", capacity, maxTableCapacity)
 	}
-	if d.settingsCapacity > 0 && capacity > d.settingsCapacity {
+	if capacity > d.settingsCapacity {
 		return fmt.Errorf("qpackdecode: capacity %d exceeds SETTINGS maximum %d", capacity, d.settingsCapacity)
 	}
 	if capacity > d.largestCapacity {
