@@ -12,8 +12,8 @@ import (
 func TestPidForContainer_NoCgroupMatchReturnsZero(t *testing.T) {
 	tr := &Tracer{
 		containerPID: 42,
-		cgroupPaths:  []string{"/sys/fs/cgroup/kubepods/poduid/othercontainerid"},
 	}
+	tr.setCgroupPaths([]string{"/sys/fs/cgroup/kubepods/poduid/othercontainerid"})
 	if pids := tr.pidsForContainer("deadbeefdeadbeef", nil); len(pids) != 1 || pids[0] != 0 {
 		t.Fatalf("pidsForContainer = %v, want [0] (must not borrow another container's PID)", pids)
 	}

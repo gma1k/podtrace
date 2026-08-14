@@ -75,7 +75,8 @@ func TestPidsForContainer_DedupesByExecutableInode(t *testing.T) {
 			104: "",
 		})
 
-	tr := &Tracer{cgroupPaths: []string{cgroupDir}}
+	tr := &Tracer{}
+	tr.setCgroupPaths([]string{cgroupDir})
 	pids := tr.pidsForContainer(cid, nil)
 	if len(pids) != 2 || pids[0] != 101 || pids[1] != 103 {
 		t.Fatalf("pidsForContainer = %v, want [101 103] (one PID per distinct executable)", pids)
@@ -93,7 +94,8 @@ func TestPidsForContainer_CapsDistinctBinaries(t *testing.T) {
 	}
 	cgroupDir := fakeContainerProc(t, cid, pids, exeOf)
 
-	tr := &Tracer{cgroupPaths: []string{cgroupDir}}
+	tr := &Tracer{}
+	tr.setCgroupPaths([]string{cgroupDir})
 	got := tr.pidsForContainer(cid, nil)
 	if len(got) != maxDistinctBinariesPerContainer {
 		t.Fatalf("pidsForContainer returned %d PIDs, want cap %d", len(got), maxDistinctBinariesPerContainer)
