@@ -62,6 +62,8 @@ spec:
               value: {{ include "podtrace.image" . | quote }}
             - name: PODTRACE_BOOTSTRAP_TC_NAME
               value: {{ .Values.tracerConfig.name | default "default" | quote }}
+            - name: PODTRACE_ALLOWED_AGENT_IMAGE_REPOS
+              value: {{ prepend (.Values.agent.allowedImageRepos | default list) .Values.image.repository | uniq | join "," | quote }}
             {{- with .Values.operator.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

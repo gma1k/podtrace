@@ -382,7 +382,7 @@ func TestTracerConfigReconciler_HappyPath(t *testing.T) {
 	const sysNS = "podtrace-system"
 	tc := &podtracev1alpha1.TracerConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "default", UID: "tc-uid"},
-		Spec:       podtracev1alpha1.TracerConfigSpec{SystemNamespace: sysNS},
+		Spec:       podtracev1alpha1.TracerConfigSpec{SystemNamespace: sysNS, Image: "ghcr.io/gma1k/podtrace:test"},
 	}
 	scheme := newOperatorScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).

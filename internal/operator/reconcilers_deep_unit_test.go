@@ -570,7 +570,7 @@ func TestDeepReconcile_TracerConfig_CustomNamespace(t *testing.T) {
 	const customNS = "custom-sys"
 	tc := &podtracev1alpha1.TracerConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "default", UID: "tc-uid", Generation: 4},
-		Spec:       podtracev1alpha1.TracerConfigSpec{SystemNamespace: customNS},
+		Spec:       podtracev1alpha1.TracerConfigSpec{SystemNamespace: customNS, Image: "ghcr.io/gma1k/podtrace:test"},
 	}
 	scheme := newOperatorScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).

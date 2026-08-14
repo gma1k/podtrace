@@ -205,7 +205,10 @@ func TestTC_Reconcile_NonDefaultStatusUpdateError(t *testing.T) {
 
 func TestTC_Reconcile_RBACError(t *testing.T) {
 	scheme := newOperatorScheme(t)
-	tc := &podtracev1alpha1.TracerConfig{ObjectMeta: metav1.ObjectMeta{Name: DefaultTracerConfigName}}
+	tc := &podtracev1alpha1.TracerConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: DefaultTracerConfigName},
+		Spec:       podtracev1alpha1.TracerConfigSpec{Image: "ghcr.io/gma1k/podtrace:test"},
+	}
 	c := fake.NewClientBuilder().WithScheme(scheme).
 		WithStatusSubresource(&podtracev1alpha1.TracerConfig{}).
 		WithObjects(tc).

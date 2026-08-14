@@ -1097,7 +1097,14 @@ spec:
                     type: array
                 type: object
               image:
+                maxLength: 512
+                minLength: 1
                 type: string
+                x-kubernetes-validations:
+                - message: spec.image must be a fully-qualified image reference that
+                    includes a registry host, e.g. ghcr.io/org/app:tag
+                  rule: self.contains('/') && (self.split('/')[0].contains('.') ||
+                    self.split('/')[0].contains(':') || self.split('/')[0] == 'localhost')
               imagePullPolicy:
                 description: PullPolicy describes a policy for if/when to pull a container
                   image

@@ -125,6 +125,9 @@ const MaxTracerConfigNameLength = 63
 
 type TracerConfigSpec struct {
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=512
+	// +kubebuilder:validation:XValidation:rule="self.contains('/') && (self.split('/')[0].contains('.') || self.split('/')[0].contains(':') || self.split('/')[0] == 'localhost')",message="spec.image must be a fully-qualified image reference that includes a registry host, e.g. ghcr.io/org/app:tag"
 	Image string `json:"image"`
 
 	// +optional
