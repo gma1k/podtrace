@@ -97,7 +97,7 @@ func BuildPodSpec(opts PodSpecOptions) (*corev1.Pod, error) {
 		{Name: "bpf", MountPath: "/sys/fs/bpf"},
 		{Name: "btf", MountPath: "/sys/kernel/btf", ReadOnly: true},
 		{Name: "proc", MountPath: "/host/proc", ReadOnly: true},
-		{Name: "cgroup", MountPath: "/sys/fs/cgroup", ReadOnly: false},
+		{Name: "cgroup", MountPath: "/sys/fs/cgroup", ReadOnly: true},
 		{Name: "cgroup", MountPath: "/host/sys/fs/cgroup", ReadOnly: true},
 		{Name: "containerd-sock", MountPath: "/run/containerd", ReadOnly: true},
 		{Name: "debug", MountPath: "/sys/kernel/debug"},
