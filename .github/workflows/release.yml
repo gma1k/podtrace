@@ -206,6 +206,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Pin the scanned image digest
+        env:
+          DIGEST: ${{ needs.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DIGEST}" ]; then
+            echo "::error::image job did not provide a digest to pin"
+            exit 1
+          fi
+          chart="${CHART_PATH}/Chart.yaml"
+          sed -i -E \
+            "s|(image: ${IMAGE}:[0-9]+\.[0-9]+\.[0-9]+)( # x-release-please-version)?$|\1@${DIGEST}|" \
+            "$chart"
+          if ! grep -q "image: ${IMAGE}:.*@${DIGEST}" "$chart"; then
+            echo "::error::failed to pin ${IMAGE} digest in ${chart}"
+            grep -n "${IMAGE}" "$chart" || true
+            exit 1
+          fi
+          echo "pinned ${IMAGE}@${DIGEST} for Artifact Hub"
+
       - id: package
         name: Lint, package, push
         run: |

@@ -24,6 +24,21 @@
       "before 5am on monday"
     ]
   },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Keep the alpine/k8s hook toolbox tag+digest in sync wherever it is pinned (chart annotation and template defaults)",
+      "managerFilePatterns": [
+        "/(^|/)Chart\\.yaml$/",
+        "/(^|/)templates/.+\\.yaml$/"
+      ],
+      "matchStrings": [
+        "alpine/k8s:(?<currentValue>[0-9][^@\\s\"]*)@(?<currentDigest>sha256:[a-f0-9]+)"
+      ],
+      "depNameTemplate": "alpine/k8s",
+      "datasourceTemplate": "docker"
+    }
+  ],
   "vulnerabilityAlerts": {
     "labels": [
       "security",
@@ -66,6 +81,16 @@
       "description": "Dockerfile base image \u2014 security-sensitive, label clearly",
       "matchManagers": [
         "dockerfile"
+      ],
+      "labels": [
+        "dependencies",
+        "container-image"
+      ]
+    },
+    {
+      "description": "Label the alpine/k8s hook toolbox digest updates as container images",
+      "matchDepNames": [
+        "alpine/k8s"
       ],
       "labels": [
         "dependencies",

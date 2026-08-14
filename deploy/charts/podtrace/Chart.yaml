@@ -35,3 +35,12 @@ annotations:
     - kind: changed
       description: "Chart description rewritten to mirror the project README."
   artifacthub.io/category: monitoring-logging
+  artifacthub.io/images: |
+    - name: podtrace
+      image: ghcr.io/gma1k/podtrace:0.14.3 # x-release-please-version
+      platforms:
+        - linux/amd64
+        - linux/arm64
+    - name: crd-labeler
+      image: alpine/k8s:1.30.4@sha256:129291af93e2b5df392f619cee8564cac4b377d66ff45f52f165af87688b68b9
+      whitelisted: true
