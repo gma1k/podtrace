@@ -755,13 +755,6 @@ func runNormalModeWithSource(ctx context.Context, eventChan <-chan *events.Event
 			} else {
 				diagnostician.AddEvent(event)
 			}
-			if tracingManager != nil && enableTracing {
-				var k8sCtxInterface interface{}
-				if k8sCtx != nil {
-					k8sCtxInterface = k8sCtx
-				}
-				tracingManager.ProcessEvent(event, k8sCtxInterface)
-			}
 
 		case <-ticker.C:
 			diagnostician.Finish()
@@ -841,13 +834,6 @@ func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Eve
 				}
 			} else {
 				diagnostician.AddEvent(e)
-			}
-			if tracingManager != nil && enableTracing {
-				var k8sCtxInterface interface{}
-				if k8sCtx != nil {
-					k8sCtxInterface = k8sCtx
-				}
-				tracingManager.ProcessEvent(e, k8sCtxInterface)
 			}
 		}
 		eventBatch = eventBatch[:0]

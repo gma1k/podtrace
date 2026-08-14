@@ -39,8 +39,9 @@ func teeEvents(ctx context.Context, source <-chan *events.Event, auxiliary int) 
 					return
 				}
 				for _, c := range aux {
+					evCopy := *ev
 					select {
-					case c <- ev:
+					case c <- &evCopy:
 					default:
 					}
 				}
