@@ -2,15 +2,13 @@ package main
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gma1k/podtrace/internal/events"
 )
 
-// TestTeeEvents_EveryConsumerSeesEveryEvent is a regression test: the
-// report loop, metrics handler, and tracing handler all used to receive from
-// the SAME channel, so each saw only a random disjoint subset of events.
 func TestTeeEvents_EveryConsumerSeesEveryEvent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -52,9 +50,75 @@ func TestTeeEvents_EveryConsumerSeesEveryEvent(t *testing.T) {
 	count("aux[1]", aux[1])
 }
 
-// TestTeeEvents_SlowAuxiliaryDoesNotStallPrimary: auxiliary sends are
-// non-blocking, so a consumer that never drains its channel must not stop
-// the report pipeline.
+func TestTeeEvents_AuxiliaryConsumersGetIndependentCopies(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	source := make(chan *events.Event, 1)
+	primary, aux := teeEvents(ctx, source, 2)
+
+	source <- &events.Event{PID: 1, TraceID: "original"}
+	close(source)
+
+	ev0 := <-aux[0]
+	ev0.TraceID = "mutated"
+	ev0.PID = 999
+
+	ev1 := <-aux[1]
+	evP := <-primary
+
+	if ev1.TraceID != "original" || ev1.PID != 1 {
+		t.Errorf("aux[1] observed aux[0]'s mutation: TraceID=%q PID=%d", ev1.TraceID, ev1.PID)
+	}
+	if evP.TraceID != "original" || evP.PID != 1 {
+		t.Errorf("primary observed aux[0]'s mutation: TraceID=%q PID=%d", evP.TraceID, evP.PID)
+	}
+	if ev0 == ev1 {
+		t.Error("aux consumers received the same pointer; each must get an independent copy")
+	}
+}
+
+func TestTeeEvents_ConcurrentAuxMutationIsRaceFree(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	source := make(chan *events.Event, 64)
+	primary, aux := teeEvents(ctx, source, 2)
+
+	var wg sync.WaitGroup
+	wg.Add(4)
+
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 5000; i++ {
+			source <- &events.Event{PID: uint32(i + 1), TraceID: "seed"}
+		}
+		close(source)
+	}()
+
+	go func() {
+		defer wg.Done()
+		for ev := range aux[0] {
+			ev.TraceID = "mutated"
+			ev.SpanID = "span"
+			ev.TraceFlags = 1
+		}
+	}()
+
+	drain := func(ch <-chan *events.Event) {
+		defer wg.Done()
+		for ev := range ch {
+			_ = ev.TraceID
+			_ = ev.SpanID
+			_ = ev.PID
+		}
+	}
+	go drain(aux[1])
+	go drain(primary)
+
+	wg.Wait()
+}
+
 func TestTeeEvents_SlowAuxiliaryDoesNotStallPrimary(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
