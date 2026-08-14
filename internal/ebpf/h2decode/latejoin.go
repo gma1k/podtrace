@@ -16,6 +16,12 @@ const (
 	maxDynamicIndex = hpackStaticTableSize + 8192
 
 	maxFieldsPerBlock = 256
+
+	maxFieldLength = 8192
+
+	maxTrackedBytes = 1 << 18
+
+	hpackEntryOverhead = 32
 )
 
 var (
@@ -24,6 +30,7 @@ var (
 	errHPACKZeroIndex       = errors.New("hpack: zero index")
 	errHPACKIndexRange      = errors.New("hpack: index out of range")
 	errHPACKTooManyFields   = errors.New("hpack: too many fields in block")
+	errHPACKFieldTooLong    = errors.New("hpack: field exceeds length limit")
 )
 
 // tableEntry is one observed dynamic-table insertion.
@@ -36,12 +43,14 @@ type tableEntry struct {
 // observed insertion window allows and skipping pre-attach references instead
 // of failing the block.
 type lateJoinDecoder struct {
-	inserts []tableEntry
+	inserts      []tableEntry
+	trackedBytes int
 }
 
 // resetEpoch discards the observed insertion window.
 func (d *lateJoinDecoder) resetEpoch() {
 	d.inserts = d.inserts[:0]
+	d.trackedBytes = 0
 }
 
 // decodeBlock decodes one complete header block. complete is false when one
@@ -160,10 +169,22 @@ func (d *lateJoinDecoder) resolveIndex(index int) (hpack.HeaderField, bool, erro
 	return entry.field, true, nil
 }
 
+// entrySize is the retained cost of one tracked insertion, mirroring the
+// RFC 7541 §4.1 dynamic-table entry size (name + value + 32).
+func entrySize(entry tableEntry) int {
+	return len(entry.field.Name) + len(entry.field.Value) + hpackEntryOverhead
+}
+
 func (d *lateJoinDecoder) insert(entry tableEntry) {
 	d.inserts = append(d.inserts, entry)
-	if len(d.inserts) > maxTrackedInserts {
-		n := copy(d.inserts, d.inserts[len(d.inserts)-maxTrackedInserts:])
+	d.trackedBytes += entrySize(entry)
+	drop := 0
+	for drop < len(d.inserts) && (len(d.inserts)-drop > maxTrackedInserts || d.trackedBytes > maxTrackedBytes) {
+		d.trackedBytes -= entrySize(d.inserts[drop])
+		drop++
+	}
+	if drop > 0 {
+		n := copy(d.inserts, d.inserts[drop:])
 		d.inserts = d.inserts[:n]
 	}
 }
@@ -209,6 +230,9 @@ func readString(buf []byte) (s string, consumed int, err error) {
 	if err != nil {
 		return "", 0, err
 	}
+	if length > maxFieldLength {
+		return "", 0, errHPACKFieldTooLong
+	}
 	if length > len(buf)-n {
 		return "", 0, errHPACKTruncated
 	}
@@ -220,6 +244,9 @@ func readString(buf []byte) (s string, consumed int, err error) {
 	s, err = hpack.HuffmanDecodeToString(raw)
 	if err != nil {
 		return "", 0, err
+	}
+	if len(s) > maxFieldLength {
+		return "", 0, errHPACKFieldTooLong
 	}
 	return s, consumed, nil
 }
