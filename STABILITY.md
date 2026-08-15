@@ -5,12 +5,14 @@ versions move forward, and when fields and behaviors can change.
 
 ## Status
 
-Podtrace is pre-1.0. All four CRDs are at `podtrace.io/v1alpha1`:
+Podtrace is pre-1.0. All six CRDs are at `podtrace.io/v1alpha1`:
 
 - `PodTrace` (namespaced, short name `pt`)
 - `PodTraceSession` (namespaced, short name `pts`)
+- `PodTraceSchedule` (namespaced, short name `ptsch`)
 - `ExporterConfig` (namespaced, short name `ec`)
 - `TracerConfig` (cluster-scoped, short name `tc`)
+- `ApplicationTrace` (namespaced, short name `appt`)
 
 The CLI and operator are released together from one repository as a single
 tagged version (e.g. `v0.11.0`). The Helm chart in
@@ -96,7 +98,7 @@ during transition.
 
 The repository tags `v1.0.0` when:
 
-1. All four CRDs are at `v1beta1` or `v1` and have been stable for ≥6
+1. All six CRDs are at `v1beta1` or `v1` and have been stable for ≥6
    months.
 2. CLI flag surface has been stable for ≥6 months.
 3. Helm chart values have been stable for ≥6 months.
@@ -114,6 +116,8 @@ Until then, expect `v0.x` cadence with the rules above.
   CRD models. Not the same as schema migration.
 - [docs/crd-podtrace.md](docs/crd-podtrace.md),
   [docs/crd-podtracesession.md](docs/crd-podtracesession.md),
+  [docs/crd-podtraceschedule.md](docs/crd-podtraceschedule.md),
   [docs/crd-exporterconfig.md](docs/crd-exporterconfig.md),
-  [docs/crd-tracerconfig.md](docs/crd-tracerconfig.md) — per-CRD field
-  reference.
+  [docs/crd-tracerconfig.md](docs/crd-tracerconfig.md),
+  [docs/crd-applicationtrace.md](docs/crd-applicationtrace.md) — per-CRD
+  field reference.
