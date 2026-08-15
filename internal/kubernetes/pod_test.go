@@ -45,6 +45,7 @@ func TestFindCgroupPath_Found(t *testing.T) {
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		t.Fatalf("failed to create target dir: %v", err)
 	}
+	_ = os.WriteFile(filepath.Join(targetDir, "cgroup.procs"), nil, 0o644)
 
 	if path, err := findCgroupPath(containerID); err != nil || path == "" {
 		t.Fatalf("expected to find cgroup path, got path=%q err=%v", path, err)
@@ -73,8 +74,7 @@ func TestFindCgroupPath_SystemdDriver(t *testing.T) {
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		t.Fatalf("failed to create target dir: %v", err)
 	}
-	// cgroup v1 may not have cgroup.procs in every hierarchy; findCgroupPathV1 just matches path.
-	// For v2 we'd need cgroup.procs. This test uses v1 layout (no cgroup.controllers at root).
+	_ = os.WriteFile(filepath.Join(targetDir, "cgroup.procs"), nil, 0o644)
 	path, err := findCgroupPath(containerID)
 	if err != nil {
 		t.Fatalf("expected to find cgroup path under systemd/, got err=%v", err)
@@ -197,6 +197,7 @@ func TestResolvePod_Success_WithoutContainerName(t *testing.T) {
 	shortID := "abcdef1234567890abcdef1234567890abcdef12"
 	targetDir := filepath.Join(kubepodsSlice, "pod_"+shortID)
 	_ = os.MkdirAll(targetDir, 0755)
+	_ = os.WriteFile(filepath.Join(targetDir, "cgroup.procs"), nil, 0o644)
 
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -261,6 +262,7 @@ func TestResolvePod_Success_WithContainerName(t *testing.T) {
 	shortID := "abcdef1234567890abcdef1234567890abcdef12"
 	targetDir := filepath.Join(kubepodsSlice, "pod_"+shortID)
 	_ = os.MkdirAll(targetDir, 0755)
+	_ = os.WriteFile(filepath.Join(targetDir, "cgroup.procs"), nil, 0o644)
 
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -568,6 +570,7 @@ func TestFindCgroupPath_ShortIDMatch(t *testing.T) {
 	shortID := fullID[:12]
 	targetDir := filepath.Join(kubepodsSlice, "pod_"+shortID)
 	_ = os.MkdirAll(targetDir, 0755)
+	_ = os.WriteFile(filepath.Join(targetDir, "cgroup.procs"), nil, 0o644)
 
 	path, err := findCgroupPath(fullID)
 	if err != nil {
@@ -1337,8 +1340,7 @@ func buildFakeProc(t *testing.T, comm, cmdlineArgs string) string {
 }
 
 func TestReadKubeletCgroupFlag_SeparateArg(t *testing.T) {
-	// --cgroup-root /mycgrouproot  (flag and value as separate NUL-separated args)
-	args := "kubelet\x00--cgroup-root\x00/mycgrouproot\x00"
+	args := "kubelet\x00--cgroup-root\x00mycgrouproot\x00"
 	dir := buildFakeProc(t, "kubelet", args)
 
 	origProc := config.ProcBasePath
@@ -1346,14 +1348,13 @@ func TestReadKubeletCgroupFlag_SeparateArg(t *testing.T) {
 	defer func() { config.SetProcBasePath(origProc) }()
 
 	got := readKubeletCgroupFlag()
-	if got != "/mycgrouproot" {
-		t.Errorf("readKubeletCgroupFlag()=%q, want %q", got, "/mycgrouproot")
+	if got != "mycgrouproot" {
+		t.Errorf("readKubeletCgroupFlag()=%q, want %q", got, "mycgrouproot")
 	}
 }
 
 func TestReadKubeletCgroupFlag_EqualSign(t *testing.T) {
-	// --cgroup-parent=/kubepods  (flag=value syntax)
-	args := "kubelet\x00--other-flag=foo\x00--cgroup-parent=/kubepods\x00"
+	args := "kubelet\x00--other-flag=foo\x00--cgroup-parent=kubepods\x00"
 	dir := buildFakeProc(t, "kubelet", args)
 
 	origProc := config.ProcBasePath
@@ -1361,8 +1362,8 @@ func TestReadKubeletCgroupFlag_EqualSign(t *testing.T) {
 	defer func() { config.SetProcBasePath(origProc) }()
 
 	got := readKubeletCgroupFlag()
-	if got != "/kubepods" {
-		t.Errorf("readKubeletCgroupFlag()=%q, want %q", got, "/kubepods")
+	if got != "kubepods" {
+		t.Errorf("readKubeletCgroupFlag()=%q, want %q", got, "kubepods")
 	}
 }
 
@@ -1586,15 +1587,14 @@ func TestReadKubeletCgroupFlag_SeparateArgFormat(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(pidDir, "comm"), []byte("kubelet\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Use --cgroup-parent <value> as separate NUL-separated arg.
-	cmdline := "kubelet\x00--cgroup-parent\x00/custom/cgroup\x00"
+	cmdline := "kubelet\x00--cgroup-parent\x00custom/cgroup\x00"
 	if err := os.WriteFile(filepath.Join(pidDir, "cmdline"), []byte(cmdline), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	got := readKubeletCgroupFlag()
-	if got != "/custom/cgroup" {
-		t.Errorf("expected '/custom/cgroup', got %q", got)
+	if got != "custom/cgroup" {
+		t.Errorf("expected 'custom/cgroup', got %q", got)
 	}
 }
 

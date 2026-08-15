@@ -267,7 +267,7 @@ func cgroupRootCandidates() []string {
 		} else {
 			full = filepath.Join(base, kcp)
 		}
-		if dirExists(full) && !seen[full] {
+		if _, ok := sysfs.CgroupRelative(full); ok && dirExists(full) && !seen[full] {
 			seen[full] = true
 			candidates = append(candidates, full)
 		}
@@ -320,16 +320,15 @@ func readKubeletCgroupFlag() string {
 			for _, flag := range []string{"--cgroup-root", "--cgroup-parent"} {
 				if arg == flag && i+1 < len(args) {
 					v := strings.TrimSpace(args[i+1])
-					if v != "" {
+					if validCgroupFlagValue(v) {
 						logger.Debug("Detected kubelet cgroup flag",
 							zap.String("flag", flag), zap.String("value", v))
 						return v
 					}
 				}
 				if strings.HasPrefix(arg, flag+"=") {
-					v := strings.TrimPrefix(arg, flag+"=")
-					v = strings.TrimSpace(v)
-					if v != "" {
+					v := strings.TrimSpace(strings.TrimPrefix(arg, flag+"="))
+					if validCgroupFlagValue(v) {
 						logger.Debug("Detected kubelet cgroup flag",
 							zap.String("flag", flag), zap.String("value", v))
 						return v
@@ -337,9 +336,21 @@ func readKubeletCgroupFlag() string {
 				}
 			}
 		}
-		break
 	}
 	return ""
+}
+
+// validCgroupFlagValue rejects a kubelet cgroup flag value that would escape
+// the cgroup base — any ".." traversal or an absolute path outside the base.
+func validCgroupFlagValue(v string) bool {
+	if v == "" || strings.Contains(v, "..") {
+		return false
+	}
+	if filepath.IsAbs(v) {
+		_, ok := sysfs.CgroupRelative(v)
+		return ok
+	}
+	return true
 }
 
 func dirExists(path string) bool {
@@ -515,7 +526,6 @@ func findCgroupPathV2(containerID string) (string, error) {
 			filepath.Join(root, "system.slice"),
 			filepath.Join(root, "user"),
 			filepath.Join(root, "user.slice"),
-			root,
 		)
 	}
 
@@ -594,10 +604,15 @@ func findCgroupPathV1(containerID string) (string, error) {
 			if err != nil {
 				return nil
 			}
+			if !info.IsDir() {
+				return nil
+			}
 			if strings.Contains(path, containerID) || strings.Contains(path, shortID) {
-				foundPath = path
-				found = true
-				return errFound
+				if _, err := os.Stat(filepath.Join(path, "cgroup.procs")); err == nil {
+					foundPath = path
+					found = true
+					return errFound
+				}
 			}
 			return nil
 		})

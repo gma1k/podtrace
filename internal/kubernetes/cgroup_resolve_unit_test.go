@@ -70,6 +70,7 @@ func TestBuildPodInfoFromPreResolved_Success(t *testing.T) {
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatalf("mkdir target: %v", err)
 	}
+	_ = os.WriteFile(filepath.Join(target, "cgroup.procs"), nil, 0o644)
 
 	info, err := BuildPodInfoFromPreResolved(PreResolvedRef{
 		Namespace:     "ns",
