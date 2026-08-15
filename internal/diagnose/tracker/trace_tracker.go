@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/events"
 )
 
@@ -63,6 +64,10 @@ func (tt *TraceTracker) ProcessEvent(event *events.Event, k8sContext interface{}
 	tt.mu.Lock()
 	trace, exists := tt.traces[event.TraceID]
 	if !exists {
+		if len(tt.traces) >= config.MaxTrackedTraces {
+			tt.mu.Unlock()
+			return
+		}
 		trace = &Trace{
 			TraceID:   event.TraceID,
 			Spans:     make([]*Span, 0),
@@ -106,6 +111,10 @@ func (tt *TraceTracker) findOrCreateSpan(trace *Trace, event *events.Event) *Spa
 		if span.SpanID == event.SpanID {
 			return span
 		}
+	}
+
+	if len(trace.Spans) >= config.MaxSpansPerTrace {
+		return nil
 	}
 
 	span := &Span{
@@ -327,7 +336,7 @@ func (tt *TraceTracker) CleanupOldTraces(maxAge time.Duration) {
 	now := time.Now()
 	for traceID, trace := range tt.traces {
 		trace.mu.RLock()
-		age := now.Sub(trace.EndTime)
+		age := now.Sub(trace.lastUpdate)
 		trace.mu.RUnlock()
 		if age > maxAge {
 			delete(tt.traces, traceID)

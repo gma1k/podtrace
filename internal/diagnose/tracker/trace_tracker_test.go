@@ -124,15 +124,16 @@ func TestTraceTracker_GetAllTraces(t *testing.T) {
 func TestTraceTracker_CleanupOldTraces(t *testing.T) {
 	tt := NewTraceTracker()
 
-	oldTime := time.Now().Add(-2 * time.Second)
 	event := &events.Event{
 		TraceID:   "old-trace",
 		SpanID:    "span1",
-		Timestamp: clock.WallToBPFTimestamp(oldTime),
+		Timestamp: clock.WallToBPFTimestamp(time.Now()),
 		Type:      events.EventHTTPReq,
 	}
 
 	tt.ProcessEvent(event, nil)
+
+	tt.traces["old-trace"].lastUpdate = time.Now().Add(-2 * time.Second)
 
 	tt.CleanupOldTraces(1 * time.Second)
 
