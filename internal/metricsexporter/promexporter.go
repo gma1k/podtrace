@@ -541,14 +541,15 @@ func (l *labelCardinalityLimiter) bound(value string) string {
 }
 
 var (
-	commandCardinality = newLabelCardinalityLimiter(config.MetricsLabelLimit)
-	methodCardinality  = newLabelCardinalityLimiter(config.MetricsLabelLimit)
-	topicCardinality   = newLabelCardinalityLimiter(config.MetricsLabelLimit)
-	podCardinality     = newLabelCardinalityLimiter(config.MetricsPodLabelLimit)
-	serviceCardinality = newLabelCardinalityLimiter(config.MetricsPodLabelLimit)
-	podIPCardinality   = newLabelCardinalityLimiter(config.MetricsPodLabelLimit)
-	poolCardinality    = newLabelCardinalityLimiter(config.MetricsLabelLimit)
-	processCardinality = newLabelCardinalityLimiter(config.MetricsLabelLimit)
+	commandCardinality   = newLabelCardinalityLimiter(config.MetricsLabelLimit)
+	methodCardinality    = newLabelCardinalityLimiter(config.MetricsLabelLimit)
+	topicCardinality     = newLabelCardinalityLimiter(config.MetricsLabelLimit)
+	podCardinality       = newLabelCardinalityLimiter(config.MetricsPodLabelLimit)
+	serviceCardinality   = newLabelCardinalityLimiter(config.MetricsPodLabelLimit)
+	podIPCardinality     = newLabelCardinalityLimiter(config.MetricsPodLabelLimit)
+	poolCardinality      = newLabelCardinalityLimiter(config.MetricsLabelLimit)
+	processCardinality   = newLabelCardinalityLimiter(config.MetricsLabelLimit)
+	errorCodeCardinality = newLabelCardinalityLimiter(config.MetricsLabelLimit)
 )
 
 func HandleEventWithContext(e *events.Event, k8sContext map[string]interface{}) {
@@ -790,7 +791,7 @@ func RecordEventProcessingLatency(duration time.Duration) {
 }
 
 func RecordError(eventType string, errorCode int32) {
-	errorRateCounter.WithLabelValues(eventType, fmt.Sprintf("%d", errorCode)).Inc()
+	errorRateCounter.WithLabelValues(eventType, errorCodeCardinality.bound(fmt.Sprintf("%d", errorCode))).Inc()
 }
 
 // RecordAttribution counts one process-identity attribution outcome at

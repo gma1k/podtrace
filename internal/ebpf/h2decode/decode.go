@@ -39,6 +39,8 @@ const (
 	defaultMaxStreams       = 8192
 	defaultTTL              = 60 * time.Second
 	defaultGapTimeout       = 2 * time.Second
+
+	maxGrpcStatusCode = 16
 )
 
 // unknownPathPlaceholder stands in for a request :path that was HPACK-indexed
@@ -316,7 +318,7 @@ func (d *Decoder) decodeBlockLocked(st *dirState, rec *RawRecord, block []byte) 
 		}
 		ev := d.buildResponseLocked(rec, status, traceparent, extra)
 		if ev != nil && ev.Error == 0 {
-			if code, err := strconv.Atoi(grpcStatus); err == nil && code > 0 {
+			if code, err := strconv.Atoi(grpcStatus); err == nil && code > 0 && code <= maxGrpcStatusCode {
 				ev.Error = safeconv.IntToInt32(code)
 			}
 		}
@@ -440,7 +442,7 @@ func (d *Decoder) buildGrpcTrailerLocked(rec *RawRecord, grpcStatus string) *eve
 	ev.Type = events.EventHTTPResp
 	ev.TCPState = uint32(rec.Transport)
 	ev.Details = "grpc-status: " + grpcStatus
-	if code, err := strconv.Atoi(grpcStatus); err == nil && code > 0 {
+	if code, err := strconv.Atoi(grpcStatus); err == nil && code > 0 && code <= maxGrpcStatusCode {
 		ev.Error = safeconv.IntToInt32(code)
 	}
 
