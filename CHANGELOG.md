@@ -9,6 +9,32 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.14.4](https://github.com/gma1k/podtrace/compare/v0.14.3...v0.14.4) (2026-08-15)
+
+
+### Bug Fixes
+
+* bound HPACK late-join window by bytes, cap field length ([#412](https://github.com/gma1k/podtrace/issues/412)) ([fdd03fa](https://github.com/gma1k/podtrace/commit/fdd03fa879f39bab1e5acb5bee40ce65ce6ed165))
+* bound QPACK dynamic table and sweep idle HTTP/3 connections ([#411](https://github.com/gma1k/podtrace/issues/411)) ([c9f9d63](https://github.com/gma1k/podtrace/commit/c9f9d63386827101f395a994f3d83ddbd09db8c5))
+* constrain TracerConfig agent image to a trusted allowlist ([#403](https://github.com/gma1k/podtrace/issues/403)) ([0808e27](https://github.com/gma1k/podtrace/commit/0808e271029967ee999e930550f7c85fb67dd6a1))
+* give each event-tee consumer its own copy to end a data race ([#409](https://github.com/gma1k/podtrace/issues/409)) ([f4c5e9d](https://github.com/gma1k/podtrace/commit/f4c5e9d2f946028d2cc90f1e1feaf52f87a02bcb))
+* guard tracer map writers against a concurrent Stop ([#406](https://github.com/gma1k/podtrace/issues/406)) ([6a5852a](https://github.com/gma1k/podtrace/commit/6a5852ad16ae5ae79704a1fa4e994fa76c7c819f))
+* mount host cgroupfs read-only to close release_agent escap ([#402](https://github.com/gma1k/podtrace/issues/402)) ([b26406a](https://github.com/gma1k/podtrace/commit/b26406a7e3a1b3ea007082f0345d54b5a31bbae0))
+* publish tracer cgroup paths atomically to end read race ([#408](https://github.com/gma1k/podtrace/issues/408)) ([3c6189e](https://github.com/gma1k/podtrace/commit/3c6189e1de6fe9d4658bc074093e635fb74610c7))
+* size QUIC CRYPTO reassembly from received data, not claimed offset ([#410](https://github.com/gma1k/podtrace/issues/410)) ([c41f3e7](https://github.com/gma1k/podtrace/commit/c41f3e72a1983c0468ad3b6859136a357137e6b0))
+* stop the operator caching and cluster-wide-writing every Secret ([#404](https://github.com/gma1k/podtrace/issues/404)) ([1ceaa5e](https://github.com/gma1k/podtrace/commit/1ceaa5ef792fb3713e085bf69c2cfb5596f9d835))
+
+
+### Maintenance
+
+* auto-maintain Artifact Hub scanned image digests ([#405](https://github.com/gma1k/podtrace/issues/405)) ([d64ef84](https://github.com/gma1k/podtrace/commit/d64ef848d870689e40811110dc0f2f8d7f3a7c7f))
+* **deps:** update alpine/k8s docker tag to v1.36.2 ([#407](https://github.com/gma1k/podtrace/issues/407)) ([0882047](https://github.com/gma1k/podtrace/commit/0882047411966887f71aa048d0689bcbf6a4465b))
+* **deps:** update dependency helm to v4.2.4 ([#400](https://github.com/gma1k/podtrace/issues/400)) ([a9ca269](https://github.com/gma1k/podtrace/commit/a9ca2692e6f1dd2f81d38b1d97617c7bdaba4287))
+* **deps:** update github/codeql-action action to v4.37.7 ([#399](https://github.com/gma1k/podtrace/issues/399)) ([48962ea](https://github.com/gma1k/podtrace/commit/48962ea2806d8e5a53daa75c6d25bce949a7116e))
+* **deps:** update go modules (non-major) ([#401](https://github.com/gma1k/podtrace/issues/401)) ([d89f879](https://github.com/gma1k/podtrace/commit/d89f879b90f611c68eec3e15f233e573fae4c976))
+* **deps:** update go modules (non-major) ([#413](https://github.com/gma1k/podtrace/issues/413)) ([e2692c6](https://github.com/gma1k/podtrace/commit/e2692c6f26d3a1e51f4f82e668246b0c28072d86))
+* **deps:** update golang:1.26.5-trixie docker digest to f1a1324 ([#397](https://github.com/gma1k/podtrace/issues/397)) ([d1aafce](https://github.com/gma1k/podtrace/commit/d1aafce49dc6cbe2f0f95ce16c772afaa026dcb6))
+
 ## [0.14.3](https://github.com/gma1k/podtrace/compare/v0.14.2...v0.14.3) (2026-08-12)
 
 
