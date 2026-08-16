@@ -86,12 +86,12 @@ func NewOTLPExporter(endpoint string, sampleRate float64) (*OTLPExporter, error)
 	if useInsecure {
 		opts = append(opts, otlptracehttp.WithInsecure())
 	}
-	otlpExporter, err := otlptracehttp.New(ctx, opts...)
+	otlpExporter, err := newOTLPClient(ctx, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
 	}
 
-	res, err := resource.New(ctx,
+	res, err := newResource(ctx,
 		resource.WithAttributes(
 			semconv.ServiceNameKey.String("Podtrace"),
 		),

@@ -10,7 +10,9 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 
+	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/netguard"
 	"github.com/gma1k/podtrace/pkg/tracer"
 )
 
@@ -38,6 +40,7 @@ func newOTLPSpanExporter(b *BundlePayload) (*otlptrace.Exporter, error) {
 
 	opts := []otlptracehttp.Option{
 		otlptracehttp.WithEndpoint(endpoint.host),
+		otlptracehttp.WithHTTPClient(netguard.HardenedClient(config.TracingExporterTimeout)),
 	}
 	if endpoint.path != "" && endpoint.path != "/" {
 		opts = append(opts, otlptracehttp.WithURLPath(endpoint.path))

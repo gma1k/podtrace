@@ -3,13 +3,13 @@ package exporter
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/diagnose/tracker"
+	"github.com/gma1k/podtrace/internal/netguard"
 )
 
 type SplunkExporter struct {
@@ -37,7 +37,7 @@ func NewSplunkExporter(endpoint, token string, sampleRate float64) (*SplunkExpor
 	return &SplunkExporter{
 		endpoint:   endpoint,
 		token:      token,
-		client:     &http.Client{Timeout: config.TracingExporterTimeout},
+		client:     netguard.HardenedClient(config.TracingExporterTimeout),
 		enabled:    true,
 		sampleRate: sampleRate,
 	}, nil
@@ -106,7 +106,7 @@ func (e *SplunkExporter) exportTrace(t *tracker.Trace) error {
 
 	var errs []error
 	for _, event := range events {
-		payload, err := json.Marshal(event)
+		payload, err := marshalJSON(event)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("marshal event: %w", err))
 			continue
