@@ -95,4 +95,6 @@ LABEL org.opencontainers.image.title="podtrace" \
 
 COPY --from=builder /out/podtrace /usr/local/bin/podtrace
 
+USER 65532:65532
+
 ENTRYPOINT ["/usr/local/bin/podtrace"]

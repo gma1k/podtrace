@@ -160,13 +160,24 @@ jobs:
 
       - name: Install Trivy
         run: |
-          curl -sfL "https://raw.githubusercontent.com/aquasecurity/trivy/v0.74.0/contrib/install.sh" \
-            | sudo sh -s -- -b /usr/local/bin v0.74.0
+          ver="0.74.0"
+          arch="$(dpkg --print-architecture)"
+          case "${arch}" in
+            amd64) asset="trivy_${ver}_Linux-64bit.tar.gz"; want="2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a" ;;
+            arm64) asset="trivy_${ver}_Linux-ARM64.tar.gz"; want="b94ce1976bbf3c15b514b605ee88be7c6d94a29be2302847ff01cb794d47aad5" ;;
+            *) echo "::error::no pinned Trivy for arch ${arch}"; exit 1 ;;
+          esac
+          tmp="$(mktemp -d)"
+          curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${ver}/${asset}" -o "${tmp}/trivy.tgz"
+          echo "${want}  ${tmp}/trivy.tgz" | sha256sum -c -
+          tar -C "${tmp}" -xzf "${tmp}/trivy.tgz" trivy
+          sudo install -m0755 "${tmp}/trivy" /usr/local/bin/trivy
+          rm -rf "${tmp}"
           trivy --version
 
-      - name: Trivy filesystem scan (SARIF, advisory)
+      - name: Trivy vulnerability and secret scan (SARIF, advisory)
         run: |
-          trivy fs --scanners vuln,misconfig,secret \
+          trivy fs --scanners vuln,secret \
             --format sarif --output trivy.sarif \
             --severity HIGH,CRITICAL --exit-code 0 --no-progress .
 

@@ -27,9 +27,11 @@ runs:
   using: composite
   steps:
     - shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
       run: |
         set -euo pipefail
-        image="${{ inputs.image }}"
+        image="${IMAGE}"
         tag="${image%@*}"
 
         pulled=0
