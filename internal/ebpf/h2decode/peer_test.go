@@ -29,3 +29,20 @@ func TestParseRecordPeer(t *testing.T) {
 		t.Errorf("peer ports = %d -> %d, want 54321 -> 8443", r.PeerSrcPort, r.PeerDstPort)
 	}
 }
+
+func TestParseRecordUnresolvedPeerIsEmpty(t *testing.T) {
+	data := make([]byte, recordHeaderSize)
+	binary.LittleEndian.PutUint16(data[36:38], 0)
+	data[38] = DirIngress
+
+	r, ok := ParseRecord(data)
+	if !ok {
+		t.Fatal("ParseRecord failed")
+	}
+	if r.PeerSrcIP != "" || r.PeerDstIP != "" {
+		t.Errorf("unresolved peer IPs = %q -> %q, want empty", r.PeerSrcIP, r.PeerDstIP)
+	}
+	if r.PeerSrcPort != 0 || r.PeerDstPort != 0 {
+		t.Errorf("unresolved peer ports = %d -> %d, want 0 -> 0", r.PeerSrcPort, r.PeerDstPort)
+	}
+}

@@ -214,6 +214,14 @@ func TestParseChunkRawLayout(t *testing.T) {
 	}
 }
 
+func TestParseChunkRejectsCopiedLenOverrun(t *testing.T) {
+	raw := make([]byte, chunkHeaderSize+4)
+	binary.LittleEndian.PutUint32(raw[28:32], 64)
+	if _, ok := ParseChunk(raw); ok {
+		t.Fatal("chunk with copied_len beyond sample parsed")
+	}
+}
+
 func TestSectionStash(t *testing.T) {
 	s := NewSectionStash(time.Hour, 4)
 	key := SectionKey{TGID: 1, Conn: 2, Stream: 3}

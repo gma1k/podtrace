@@ -512,9 +512,39 @@ func isCgroupV2(basePath string) (bool, error) {
 	return false, nil
 }
 
+const maxCgroupWalkDepth = 8
+
+// walkCgroupForContainer scans basePath for containerID's cgroup directory.
+func walkCgroupForContainer(basePath, containerID, shortID string) (string, bool) {
+	base := filepath.Clean(basePath)
+	found := ""
+	_ = filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return nil
+		}
+		name := filepath.Base(path)
+		if strings.Contains(path, containerID) || strings.Contains(path, shortID) ||
+			strings.Contains(name, containerID) || strings.Contains(name, shortID) {
+			if _, err := os.Stat(filepath.Join(path, "cgroup.procs")); err == nil {
+				found = path
+				return filepath.SkipAll
+			}
+		}
+		if path != base {
+			if rel, rerr := filepath.Rel(base, path); rerr == nil &&
+				strings.Count(rel, string(os.PathSeparator))+1 >= maxCgroupWalkDepth {
+				return filepath.SkipDir
+			}
+		}
+		return nil
+	})
+	return found, found != ""
+}
+
 func findCgroupPathV2(containerID string) (string, error) {
+	roots := cgroupRootCandidates()
 	var basePaths []string
-	for _, root := range cgroupRootCandidates() {
+	for _, root := range roots {
 		basePaths = append(basePaths,
 			filepath.Join(root, "kubepods"),
 			filepath.Join(root, "kubepods.slice"),
@@ -528,8 +558,8 @@ func findCgroupPathV2(containerID string) (string, error) {
 			filepath.Join(root, "user.slice"),
 		)
 	}
+	basePaths = append(basePaths, roots...)
 
-	var errFound = errors.New("podtrace: cgroup found")
 	shortID := containerID
 	if len(containerID) >= 12 {
 		shortID = containerID[:12]
@@ -539,31 +569,8 @@ func findCgroupPathV2(containerID string) (string, error) {
 		if _, err := os.Stat(basePath); os.IsNotExist(err) {
 			continue
 		}
-
-		var foundPath string
-		found := false
-		_ = filepath.Walk(basePath, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return nil
-			}
-			if !info.IsDir() {
-				return nil
-			}
-			baseName := filepath.Base(path)
-			pathStr := path
-			if strings.Contains(pathStr, containerID) || strings.Contains(pathStr, shortID) || strings.Contains(baseName, containerID) || strings.Contains(baseName, shortID) {
-				cgroupProcsPath := filepath.Join(path, "cgroup.procs")
-				if _, err := os.Stat(cgroupProcsPath); err == nil {
-					foundPath = path
-					found = true
-					return errFound
-				}
-			}
-			return nil
-		})
-
-		if found && foundPath != "" {
-			return foundPath, nil
+		if p, ok := walkCgroupForContainer(basePath, containerID, shortID); ok {
+			return p, nil
 		}
 	}
 
