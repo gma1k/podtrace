@@ -3,6 +3,7 @@ package agent
 import (
 	"net/http"
 	"sync"
+	"sync/atomic"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -16,15 +17,16 @@ import (
 type Metrics struct {
 	registry *prometheus.Registry
 
-	AgentInfo       *prometheus.GaugeVec
-	EventsExported  *prometheus.CounterVec
-	EventsDropped   *prometheus.CounterVec
-	ActiveCgroups   *prometheus.GaugeVec
-	ActiveCRs       prometheus.Gauge
-	ReconcileTotal  prometheus.Counter
-	BackendDegraded *prometheus.GaugeVec
-	CgroupsAttached prometheus.Counter
-	CgroupsDetached prometheus.Counter
+	AgentInfo           *prometheus.GaugeVec
+	EventsExported      *prometheus.CounterVec
+	EventsDropped       *prometheus.CounterVec
+	KernelEventsDropped *prometheus.CounterVec
+	ActiveCgroups       *prometheus.GaugeVec
+	ActiveCRs           prometheus.Gauge
+	ReconcileTotal      prometheus.Counter
+	BackendDegraded     *prometheus.GaugeVec
+	CgroupsAttached     prometheus.Counter
+	CgroupsDetached     prometheus.Counter
 
 	ThresholdTripped    *prometheus.CounterVec
 	EffectiveSampleRate *prometheus.GaugeVec
@@ -48,6 +50,8 @@ type Metrics struct {
 	EnrichmentCacheSize     prometheus.Gauge
 	EnrichmentSnapshots     prometheus.Counter
 	EnrichmentOwnerResolved *prometheus.CounterVec
+
+	kernelDropped atomic.Int64
 
 	mu          sync.Mutex
 	lastEvents  map[CRKey]int64
@@ -83,6 +87,11 @@ func NewMetrics() *Metrics {
 			Name:      "events_dropped_total",
 			Help:      "Events a CR claimed but whose exporter returned an error (non-fatal, retried via stats only).",
 		}, []string{"cr_namespace", "cr_name"}),
+		KernelEventsDropped: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "podtrace_agent",
+			Name:      "kernel_events_dropped_total",
+			Help:      "Events discarded before the dispatch loop (kernel ring buffer overrun or full event channel), labeled by reason. Node-level; predates CR routing so it is not attributable to a CR.",
+		}, []string{"reason"}),
 		ActiveCgroups: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: "podtrace_agent",
 			Name:      "active_cgroups",
@@ -185,7 +194,7 @@ func NewMetrics() *Metrics {
 	}
 	reg.MustRegister(
 		m.AgentInfo,
-		m.EventsExported, m.EventsDropped, m.ActiveCgroups, m.ActiveCRs,
+		m.EventsExported, m.EventsDropped, m.KernelEventsDropped, m.ActiveCgroups, m.ActiveCRs,
 		m.ReconcileTotal, m.BackendDegraded, m.CgroupsAttached, m.CgroupsDetached,
 		m.EnrichmentLookups, m.EnrichmentCacheSize, m.EnrichmentSnapshots,
 		m.EnrichmentOwnerResolved,
@@ -427,6 +436,26 @@ func (o *metricsEngineObserver) OnTargetError(stage string, err error) {
 		zap.String("stage", stage),
 		zap.Error(err),
 	)
+}
+
+// OnEventsDropped records kernel-side event loss (ring buffer overrun, full
+// event channel) on the agent registry so it is visible in agent mode, where
+// the tracer's default-registry drop counter is not served.
+func (o *metricsEngineObserver) OnEventsDropped(reason string, n int) {
+	if n <= 0 {
+		return
+	}
+	o.m.KernelEventsDropped.WithLabelValues(reason).Add(float64(n))
+	o.m.kernelDropped.Add(int64(n))
+}
+
+// KernelDroppedTotal returns the cumulative count of events discarded before
+// the dispatch loop, for folding into per-node CR status.
+func (m *Metrics) KernelDroppedTotal() int64 {
+	if m == nil {
+		return 0
+	}
+	return m.kernelDropped.Load()
 }
 
 // RefreshFromRouter walks the router's rule set + stats table and

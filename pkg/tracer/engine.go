@@ -17,17 +17,8 @@ type Config struct {
 
 	ExportBatchSize int
 
-	// ExportFlushInterval bounds how long a partial batch waits before it is
-	// flushed to exporters even when it has not reached ExportBatchSize.
-	// Without it, a low-traffic pod (e.g. one emitting only periodic
-	// resource-limit events) would never fill a batch, so its events — and
-	// anything that depends on their timely delivery, like alert-triggered
-	// sessions — would be delayed until the batch happened to fill or the
-	// engine shut down. Defaults to 1s.
 	ExportFlushInterval time.Duration
 
-	// ShutdownFlushTimeout bounds the final flush + drain on shutdown so
-	// a hung exporter cannot block engine teardown. Defaults to 10s.
 	ShutdownFlushTimeout time.Duration
 
 	Observer EngineObserver
@@ -122,6 +113,11 @@ func (e *engine) Run(ctx context.Context, targets <-chan TargetSet) error {
 	dispatchCtx, cancelDispatch := context.WithCancel(context.WithoutCancel(ctx))
 
 	eventCh := make(chan *events.Event, e.cfg.EventBufferSize)
+	if edo, ok := e.cfg.Observer.(EventDropObserver); ok {
+		if dr, ok := e.backend.(DropReporter); ok {
+			dr.SetDropReporter(edo.OnEventsDropped)
+		}
+	}
 	if err := e.backend.Start(ctx, eventCh); err != nil {
 		cancelDispatch()
 		return fmt.Errorf("tracer: backend start: %w", err)

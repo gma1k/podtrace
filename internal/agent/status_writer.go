@@ -26,6 +26,8 @@ type StatusWriter struct {
 	Ready     func() bool
 	Heartbeat func()
 
+	KernelDropped func() int64
+
 	BackendErr error
 
 	reportedKeys map[CRKey]struct{}
@@ -69,6 +71,9 @@ func (w *StatusWriter) emitOnce(ctx context.Context) error {
 	current := make(map[CRKey]struct{}, len(rules))
 	for _, rule := range rules {
 		entry := buildNodeStatusEntry(w.NodeName, &rule, stats[rule.Key], agentReady, w.BackendErr, time.Now())
+		if w.KernelDropped != nil {
+			entry.DroppedEvents += w.KernelDropped()
+		}
 		if err := w.patchCRStatus(ctx, rule.Key, entry); err != nil && firstErr == nil {
 			firstErr = err
 		}
