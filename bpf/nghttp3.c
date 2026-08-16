@@ -276,7 +276,8 @@ static __always_inline void h3_capture_stream_bytes(u64 conn, u64 stream_id,
 	c->offset = captured;
 	if (bpf_probe_read_user(c->data, n, (void *)src) != 0)
 		return;
-	bpf_ringbuf_output(&h3_stream_chunks, c, sizeof(*c), 0);
+	bpf_ringbuf_output(&h3_stream_chunks, c,
+			   __builtin_offsetof(struct h3_stream_chunk, data) + n, 0);
 	captured += n;
 	bpf_map_update_elem(&h3_stream_captured, &k, &captured, BPF_ANY);
 }

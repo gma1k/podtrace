@@ -51,8 +51,9 @@ static __always_inline void quic_ship(struct __sk_buff *skb, u8 is_v6,
 		bpf_map_update_elem(&quic_seen, &k, &one, BPF_ANY);
 	}
 
+	u32 zero = 0;
 	struct quic_initial_record *rec =
-		bpf_ringbuf_reserve(&quic_initial_events, sizeof(*rec), 0);
+		bpf_map_lookup_elem(&quic_initial_scratch, &zero);
 	if (!rec)
 		return;
 	rec->timestamp = bpf_ktime_get_ns();
@@ -68,12 +69,11 @@ static __always_inline void quic_ship(struct __sk_buff *skb, u8 is_v6,
 	u32 caplen = skb->len > off ? skb->len - off : 0;
 	if (caplen > QUIC_PKT_CAP)
 		caplen = QUIC_PKT_CAP;
-	if (caplen < 20 || bpf_skb_load_bytes(skb, off, rec->pkt, caplen) < 0) {
-		bpf_ringbuf_discard(rec, 0);
+	if (caplen < 20 || bpf_skb_load_bytes(skb, off, rec->pkt, caplen) < 0)
 		return;
-	}
 	rec->pktlen = (u16)caplen;
-	bpf_ringbuf_submit(rec, 0);
+	bpf_ringbuf_output(&quic_initial_events, rec,
+			   __builtin_offsetof(struct quic_initial_record, pkt) + caplen, 0);
 }
 
 SEC("cgroup_skb/egress")

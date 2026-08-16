@@ -108,6 +108,7 @@ static long h2_frames_cb(u32 idx, void *vctx)
 			if (frag > 0 &&
 			    bpf_probe_read_user(s->frag, frag, (u8 *)c->base + off) == 0) {
 				u8 completes = (fs->remaining - frag) == 0;
+				__builtin_memset(&s->rec, 0, sizeof(s->rec));
 				s->rec.conn_id = c->conn_id;
 				s->rec.timestamp = c->ts;
 				s->rec.cgroup_id = c->cgroup_id;
