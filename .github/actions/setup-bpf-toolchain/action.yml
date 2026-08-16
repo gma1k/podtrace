@@ -53,17 +53,30 @@ runs:
             bpftool_works && return 0
           fi
 
-          local arch url
+          local ver="v7.7.0"
+          local arch want url tmp
           arch="$(dpkg --print-architecture)"
-          url="$(curl -fsSL https://api.github.com/repos/libbpf/bpftool/releases/latest 2>/dev/null \
-            | grep -oE '"browser_download_url": *"[^"]+"' | cut -d'"' -f4 \
-            | grep -E "bpftool-.*-${arch}\.tar\.gz$" | head -1 || true)"
-          if [[ -n "${url}" ]] && curl -fsSL "${url}" -o /tmp/bpftool.tar.gz; then
-            sudo tar -C /usr/local/bin -xzf /tmp/bpftool.tar.gz bpftool || true
-            sudo chmod 0755 /usr/local/bin/bpftool 2>/dev/null || true
-            hash -r
-            bpftool_works && return 0
+          case "${arch}" in
+            amd64) want="09150596f09356b0ff632dd7f9856e0ea86bf96b269e9bc94278d9a9432a268c" ;;
+            arm64) want="d68443d945c146080151eb215bebaa400294ab7ada22af4f5d0a940f5992b9d9" ;;
+            *) echo "::warning::no pinned bpftool for arch ${arch}"; return 1 ;;
+          esac
+          url="https://github.com/libbpf/bpftool/releases/download/${ver}/bpftool-${ver}-${arch}.tar.gz"
+          tmp="$(mktemp)"
+          if ! curl -fsSL "${url}" -o "${tmp}"; then
+            rm -f "${tmp}"; return 1
           fi
+          if ! echo "${want}  ${tmp}" | sha256sum -c - >/dev/null 2>&1; then
+            echo "::error::bpftool ${ver} ${arch} checksum mismatch; refusing to install"
+            rm -f "${tmp}"; return 1
+          fi
+          if ! sudo tar -C /usr/local/bin -xzf "${tmp}" bpftool; then
+            rm -f "${tmp}"; return 1
+          fi
+          sudo chmod 0755 /usr/local/bin/bpftool || true
+          rm -f "${tmp}"
+          hash -r
+          bpftool_works && return 0
 
           return 1
         }

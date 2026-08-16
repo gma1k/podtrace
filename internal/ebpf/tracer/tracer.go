@@ -108,6 +108,7 @@ type Tracer struct {
 	dnsResolved6Map               *ebpf.Map
 	filter                        *filter.CgroupFilter
 	containerID                   string
+	containerIDMu                 sync.Mutex
 	containerPID                  uint32
 	processNameCache              *cache.LRUCache
 	attributionTable              *attribution.Table
@@ -115,7 +116,7 @@ type Tracer struct {
 	pathCache                     *cache.PathCache
 	resourceMgr                   *resourceMonitorManager
 	lastDNSDrops                  uint64
-	dropReport                    func(reason string, n int)
+	dropReport                    atomic.Pointer[dropReportFn]
 	cgroupPaths                   atomic.Pointer[[]string]
 	useUserspaceCgroupFilter      atomic.Bool
 	denyWhenNoTargets             atomic.Bool
@@ -1216,8 +1217,19 @@ func (t *Tracer) SetContainerIDs(containerIDs []string) error {
 	if len(targets) == 0 {
 		return fmt.Errorf("all container IDs are empty")
 	}
+	t.containerIDMu.Lock()
 	t.containerID = targets[0].ID
+	t.containerIDMu.Unlock()
 	return t.SetContainerTargets(targets)
+}
+
+// lastContainerID returns the most recently recorded primary container ID
+// under the guarding mutex, so readers never race a concurrent
+// SetContainerIDs writer.
+func (t *Tracer) lastContainerID() string {
+	t.containerIDMu.Lock()
+	defer t.containerIDMu.Unlock()
+	return t.containerID
 }
 
 // pidForContainer resolves the PID used to discover a container's binaries
@@ -1301,15 +1313,22 @@ func (t *Tracer) pidsForContainer(id string, seeds []uint32) []uint32 {
 	return out
 }
 
+type dropReportFn func(reason string, n int)
+
 // SetDropReporter installs a callback the tracer invokes on every discarded
 // event.
 func (t *Tracer) SetDropReporter(report func(reason string, n int)) {
-	t.dropReport = report
+	if report == nil {
+		t.dropReport.Store(nil)
+		return
+	}
+	fn := dropReportFn(report)
+	t.dropReport.Store(&fn)
 }
 
 func (t *Tracer) reportDrop(reason string, n int) {
-	if t.dropReport != nil {
-		t.dropReport(reason, n)
+	if fn := t.dropReport.Load(); fn != nil && *fn != nil {
+		(*fn)(reason, n)
 	}
 }
 

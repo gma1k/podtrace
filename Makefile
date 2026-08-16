@@ -1,6 +1,7 @@
 .PHONY: all build clean test check-go test-unit test-integration test-bench coverage \
         generate manifests clientset envtest docker-build helm-lint helm-template operator-tools \
         lint lint-version fmt fmt-check \
+        test-bpf-load \
         chainsaw chainsaw-tools \
         e2e-kind e2e-kind-cleanup \
         bundle bundle-validate bundle-build bundle-push bundle-clean
@@ -213,6 +214,17 @@ test-unit-verbose:
 test-integration:
 	@echo "Running integration tests..."
 	$(GO) test -v -tags=integration ./test
+
+test-bpf-load: $(BPF_OBJ)
+	@echo "Running BPF loader tests against the freshly built object..."
+	$(GO) test -count=1 ./internal/ebpf/loader/...
+	@if [ "$$(id -u)" = "0" ]; then \
+		echo ">>> root detected: running kernel verifier load-test"; \
+		$(GO) test -count=1 -tags bpf_loadtest -run TestLoadPodtrace_KernelVerifierAccepts ./internal/ebpf/loader/...; \
+	else \
+		echo ">>> not root: skipping kernel verifier load-test"; \
+		echo ">>> to include it: sudo -E env \"PATH=\$$PATH\" make test-bpf-load"; \
+	fi
 
 test-bench:
 	@echo "Running benchmarks..."

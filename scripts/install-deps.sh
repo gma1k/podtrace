@@ -14,6 +14,8 @@
 set -euo pipefail
 
 KERNEL_RELEASE=$(uname -r)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 detect_distro() {
 	if [[ -f /etc/os-release ]]; then
@@ -116,9 +118,14 @@ install_alpine() {
 }
 
 install_go_if_needed() {
-	local required="1.24"
-	local go_bin=""
+	local required
+	required="$(awk '/^go [0-9]+\.[0-9]+/{print $2; exit}' "${PROJECT_ROOT}/go.mod" 2>/dev/null || true)"
+	if [[ -z "${required}" ]]; then
+		echo "Error: could not read the Go version from ${PROJECT_ROOT}/go.mod" >&2
+		return 1
+	fi
 
+	local go_bin=""
 	for candidate in /usr/local/go/bin/go go; do
 		if command -v "${candidate}" &>/dev/null; then
 			go_bin="${candidate}"
@@ -127,22 +134,20 @@ install_go_if_needed() {
 	done
 
 	if [[ -n "${go_bin}" ]]; then
-		local current
+		local current highest
 		current=$("${go_bin}" version 2>/dev/null | awk '{print $3}' | tr -d 'go')
-		local major minor
-		major=$(echo "${current}" | cut -d. -f1)
-		minor=$(echo "${current}" | cut -d. -f2)
-		if [[ "${major}" -ge 1 && "${minor}" -ge 24 ]]; then
+		highest="$(printf '%s\n%s\n' "${required}" "${current}" | sort -V | tail -1)"
+		if [[ -n "${current}" && "${highest}" == "${current}" ]]; then
 			echo "Go ${current} already installed and satisfies requirement (>=${required})."
 			return
 		fi
-		echo "Installed Go ${current} is below ${required}."
+		echo "Installed Go ${current:-unknown} is below ${required}."
 	else
 		echo "Go not found."
 	fi
 
 	echo "Installing Go ${required}..."
-	local arch
+	local arch arch_tag
 	arch=$(uname -m)
 	case "${arch}" in
 	x86_64) arch_tag="amd64" ;;
@@ -158,21 +163,39 @@ install_go_if_needed() {
 	local tarball="go${required}.linux-${arch_tag}.tar.gz"
 	local url="https://go.dev/dl/${tarball}"
 
+	local want_sha
+	want_sha="$(curl -fsSL 'https://go.dev/dl/?mode=json&include=all' 2>/dev/null |
+		grep -F "\"${tarball}\"" -A 6 |
+		grep -oE '[a-f0-9]{64}' |
+		head -1 || true)"
+	if [[ -z "${want_sha}" ]]; then
+		echo "Error: could not resolve the published SHA256 for ${tarball}; refusing to install unverified" >&2
+		return 1
+	fi
+
+	local tmp
+	tmp="$(mktemp)"
+	trap 'rm -f "${tmp}"' RETURN
+
 	echo "Downloading ${url}..."
 	if command -v curl &>/dev/null; then
-		curl -fsSL "${url}" -o "/tmp/${tarball}"
+		curl -fsSL "${url}" -o "${tmp}"
 	elif command -v wget &>/dev/null; then
-		wget -q "${url}" -O "/tmp/${tarball}"
+		wget -q "${url}" -O "${tmp}"
 	else
 		echo "Error: neither curl nor wget found. Install Go manually from https://go.dev/dl/"
 		return
 	fi
 
-	rm -rf /usr/local/go
-	tar -C /usr/local -xzf "/tmp/${tarball}"
-	rm "/tmp/${tarball}"
+	if ! printf '%s  %s\n' "${want_sha}" "${tmp}" | sha256sum -c - >/dev/null 2>&1; then
+		echo "Error: checksum mismatch for ${tarball}; refusing to install" >&2
+		return 1
+	fi
 
-	echo "Go ${required} installed to /usr/local/go."
+	rm -rf /usr/local/go
+	tar -C /usr/local -xzf "${tmp}"
+
+	echo "Go ${required} installed and verified to /usr/local/go."
 	echo "Add to PATH: export PATH=\$PATH:/usr/local/go/bin"
 }
 
