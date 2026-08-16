@@ -104,6 +104,10 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return r.reconcileTerminalSession(ctx, &session)
 	}
 
+	if err := validateManagedCRName("PodTraceSession", session.Name); err != nil {
+		return ctrl.Result{}, r.failSessionTerminally(ctx, &session, "NameTooLong", err.Error())
+	}
+
 	if session.Spec.ReportRef != nil && session.Spec.ReportRef.ObjectStore != nil {
 		if err := podtracev1alpha1.ValidateObjectStoreReference(session.Spec.ReportRef.ObjectStore); err != nil {
 			return ctrl.Result{}, r.failSessionTerminally(ctx, &session, "ObjectStoreURIInvalid", err.Error())
@@ -155,6 +159,9 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("get ExporterConfig: %w", err)
+	}
+	if err := validateManagedCRName("ExporterConfig", ec.Name); err != nil {
+		return ctrl.Result{}, r.failSessionTerminally(ctx, &session, "ExporterConfigNameTooLong", err.Error())
 	}
 	// A session whose nodes span fleets with different spec.systemNamespace
 	// puts Jobs in more than one namespace, and a Job cannot mount a bundle,

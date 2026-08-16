@@ -77,6 +77,27 @@ func (r *ExporterConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	orig := ec.DeepCopy()
 
+	if err := validateManagedCRName("ExporterConfig", ec.Name); err != nil {
+		ec.Status.ObservedGeneration = ec.Generation
+		ec.Status.Ready = false
+		setCondition(&ec.Status.Conditions, ec.Generation, metav1.Condition{
+			Type:    ConditionReady,
+			Status:  metav1.ConditionFalse,
+			Reason:  "NameTooLong",
+			Message: clampMessage(err.Error()),
+		})
+		if statusEqual(orig.Status, ec.Status) {
+			return ctrl.Result{}, nil
+		}
+		if perr := r.Status().Patch(ctx, &ec, client.MergeFrom(orig)); perr != nil {
+			if apierrors.IsConflict(perr) {
+				return ctrl.Result{RequeueAfter: time.Second}, nil
+			}
+			return ctrl.Result{}, fmt.Errorf("patch status: %w", perr)
+		}
+		return ctrl.Result{}, nil
+	}
+
 	ready, readyStatus, readyReason, readyMessage := r.evaluateReadiness(ctx, &ec)
 
 	refs, err := r.countReferences(ctx, &ec)
