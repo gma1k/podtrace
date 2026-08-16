@@ -14,8 +14,6 @@ import (
 	"github.com/gma1k/podtrace/internal/ebpf/probes"
 )
 
-// fakeProfilingController records HTTP method calls so we can verify the
-// management API wires the profiling endpoints correctly.
 type fakeProfilingController struct {
 	mu       sync.Mutex
 	starts   int
@@ -54,10 +52,6 @@ func TestSetProfilingController(t *testing.T) {
 	}
 }
 
-// TestServeManagementAPI_WithProfilingController verifies that when a
-// profiling controller is registered the /profile/* paths are wired
-// onto the mux. We exercise the mux directly via httptest rather than
-// running the goroutine-based ListenAndServe loop.
 func TestServeManagementAPI_WithProfilingController(t *testing.T) {
 	ctrl := &fakeProfilingController{}
 	tr := &Tracer{
@@ -65,17 +59,9 @@ func TestServeManagementAPI_WithProfilingController(t *testing.T) {
 		profilingCtrl: ctrl,
 	}
 
-	// Reuse the real mux setup by calling serveManagementAPI on a
-	// short-lived context. ListenAndServe can fail (port in use); we
-	// don't care about the listener's success — only that the mux is
-	// configured. To do that without binding a port, we replicate the
-	// mux setup by running serveManagementAPI in a goroutine and
-	// cancelling immediately.
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		// Use a port that is almost certainly bindable; rapid cancel
-		// closes the server before any external traffic.
 		tr.serveManagementAPI(ctx, 0)
 		close(done)
 	}()
@@ -83,7 +69,6 @@ func TestServeManagementAPI_WithProfilingController(t *testing.T) {
 	<-done
 }
 
-// TestSetContainerIDs_AllEmpty exercises the all-blank validation guard.
 func TestSetContainerIDs_AllEmpty(t *testing.T) {
 	tr := &Tracer{collection: &ebpf.Collection{Programs: map[string]*ebpf.Program{}}}
 	err := tr.SetContainerIDs([]string{"", "", ""})
@@ -104,22 +89,17 @@ func TestSetContainerIDs_NoIDs(t *testing.T) {
 	}
 }
 
-// TestSetContainerIDs_PicksFirstNonEmpty: even with leading blanks the
-// first non-empty ID wins as the primary; collection has no programs
-// so no probes attach but the function returns nil.
 func TestSetContainerIDs_PicksFirstNonEmpty(t *testing.T) {
 	tr := &Tracer{collection: &ebpf.Collection{Programs: map[string]*ebpf.Program{}}}
 	if err := tr.SetContainerIDs([]string{"", "abc123def456", ""}); err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
-	if tr.containerID != "abc123def456" {
-		t.Errorf("containerID = %q, want abc123def456", tr.containerID)
+	if tr.lastContainerID() != "abc123def456" {
+		t.Errorf("containerID = %q, want abc123def456", tr.lastContainerID())
 	}
 }
 
 func TestActiveProbeGroups_StableOrder(t *testing.T) {
-	// Just verify ActiveProbeGroups returns membership equality with
-	// the source map. Order is undefined.
 	tr := &Tracer{
 		probeGroups: map[probes.ProbeGroup][]link.Link{
 			probes.ProbeGroup("a"): {},
@@ -139,10 +119,6 @@ func TestActiveProbeGroups_StableOrder(t *testing.T) {
 	}
 }
 
-// TestServeManagementAPI_ProfilingPaths exercises the registered handlers
-// using httptest by reaching into the mux indirectly: we invoke the tracer's
-// inner HandlerFunc behaviour by issuing requests against an httptest server
-// configured with a mirrored ServeMux.
 func TestServeManagementAPI_ProfilingPaths(t *testing.T) {
 	ctrl := &fakeProfilingController{}
 	mux := http.NewServeMux()

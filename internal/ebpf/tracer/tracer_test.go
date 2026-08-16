@@ -122,8 +122,8 @@ func TestTracer_SetContainerID(t *testing.T) {
 
 	err := tracer.SetContainerID(containerID)
 	if err == nil {
-		if tracer.containerID != containerID {
-			t.Errorf("Expected containerID %q, got %q", containerID, tracer.containerID)
+		if tracer.lastContainerID() != containerID {
+			t.Errorf("Expected containerID %q, got %q", containerID, tracer.lastContainerID())
 		}
 	}
 }
@@ -243,8 +243,8 @@ func TestTracer_SetContainerID_EmptyContainerID(t *testing.T) {
 
 	err := tracer.SetContainerID("")
 	if err == nil {
-		if tracer.containerID != "" {
-			t.Errorf("Expected empty containerID, got %q", tracer.containerID)
+		if tracer.lastContainerID() != "" {
+			t.Errorf("Expected empty containerID, got %q", tracer.lastContainerID())
 		}
 	}
 }
@@ -265,8 +265,8 @@ func TestTracer_SetContainerID_WithLinks(t *testing.T) {
 
 	err := tracer.SetContainerID("test-container-id")
 	if err == nil {
-		if tracer.containerID != "test-container-id" {
-			t.Errorf("Expected containerID 'test-container-id', got %q", tracer.containerID)
+		if tracer.lastContainerID() != "test-container-id" {
+			t.Errorf("Expected containerID 'test-container-id', got %q", tracer.lastContainerID())
 		}
 	}
 }
@@ -620,8 +620,8 @@ func TestTracer_SetContainerID_WithCollection(t *testing.T) {
 
 	err := tracer.SetContainerID(containerID)
 	if err == nil {
-		if tracer.containerID != containerID {
-			t.Errorf("Expected containerID %q, got %q", containerID, tracer.containerID)
+		if tracer.lastContainerID() != containerID {
+			t.Errorf("Expected containerID %q, got %q", containerID, tracer.lastContainerID())
 		}
 	}
 }
@@ -644,8 +644,8 @@ func TestTracer_SetContainerID_MultipleCalls(t *testing.T) {
 	err2 := tracer.SetContainerID("container-2")
 
 	if err1 == nil && err2 == nil {
-		if tracer.containerID != "container-2" {
-			t.Errorf("Expected containerID 'container-2', got %q", tracer.containerID)
+		if tracer.lastContainerID() != "container-2" {
+			t.Errorf("Expected containerID 'container-2', got %q", tracer.lastContainerID())
 		}
 	}
 }
@@ -1635,8 +1635,8 @@ func TestTracer_SetContainerID_AllProbeTypes(t *testing.T) {
 
 	err := tracer.SetContainerID("test-container")
 	if err == nil {
-		if tracer.containerID != "test-container" {
-			t.Errorf("Expected containerID 'test-container', got %q", tracer.containerID)
+		if tracer.lastContainerID() != "test-container" {
+			t.Errorf("Expected containerID 'test-container', got %q", tracer.lastContainerID())
 		}
 	}
 }
@@ -1659,8 +1659,8 @@ func TestTracer_SetContainerID_MultipleProbes(t *testing.T) {
 	if err == nil {
 		err = tracer.SetContainerID("container-2")
 		if err == nil {
-			if tracer.containerID != "container-2" {
-				t.Errorf("Expected containerID 'container-2', got %q", tracer.containerID)
+			if tracer.lastContainerID() != "container-2" {
+				t.Errorf("Expected containerID 'container-2', got %q", tracer.lastContainerID())
 			}
 		}
 	}

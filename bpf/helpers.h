@@ -69,6 +69,8 @@ static __attribute__((noinline)) u32 append_dec(char *buf, u32 idx, u32 max_idx,
 	u32 divisor = 10000;
 	int started = 0;
 	for (int i = 0; i < 5; i++) {
+		/* divisor cycles 10000,1000,100,10,1 over these 5 iterations, never 0 */
+		// cppcheck-suppress zerodivcond
 		u32 digit = (val / divisor) % 10;
 		if (digit != 0 || started || divisor == 1) {
 			if (idx < max_idx) buf[idx++] = '0' + digit;

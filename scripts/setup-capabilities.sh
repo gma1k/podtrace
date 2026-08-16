@@ -5,9 +5,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BINARY="${PROJECT_ROOT}/bin/podtrace"
 
-REQUIRED_CAPS="cap_bpf,cap_sys_admin,cap_sys_resource,cap_net_admin"
+REQUIRED_CAPS="cap_bpf,cap_perfmon,cap_sys_admin,cap_net_admin,cap_sys_resource"
 
 check_binary_exists() {
+	if [[ -L "${BINARY}" ]]; then
+		echo "Error: ${BINARY} is a symlink; refusing to grant capabilities to a symlink target" >&2
+		exit 1
+	fi
+
 	if [[ ! -f "${BINARY}" ]]; then
 		echo "Error: ${BINARY} not found" >&2
 		echo "Build it first with: make build" >&2
@@ -34,6 +39,11 @@ set_capabilities() {
 
 	if ! command -v setcap &>/dev/null; then
 		echo "Error: setcap command not found. Install libcap2-bin package." >&2
+		exit 1
+	fi
+
+	if [[ -L "${BINARY}" ]]; then
+		echo "Error: ${BINARY} became a symlink before capabilities were set; aborting" >&2
 		exit 1
 	fi
 

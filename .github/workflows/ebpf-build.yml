@@ -65,6 +65,9 @@ jobs:
       - name: Run embed smoke test
         run: GOTOOLCHAIN=auto GOARCH=${{ matrix.goarch }} go test -tags embed_bpf ./internal/ebpf/embedded/...
 
+      - name: BPF loader + kernel verifier load-test
+        run: sudo -E env "PATH=$PATH" make test-bpf-load GO=go BPF_GOARCH=${{ matrix.goarch }}
+
       - name: List outputs
         run: |
           echo "=== eBPF object (arch=${{ matrix.bpf_arch }}) ==="

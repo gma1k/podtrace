@@ -1,0 +1,35 @@
+rules:
+  - id: podtrace-unpinned-github-action
+    languages: [generic]
+    severity: WARNING
+    message: >
+      GitHub Actions must be pinned to a full-length 40-character commit SHA,
+      not a tag or branch, so a re-tagged upstream release cannot inject code
+      into podtrace's CI (which builds and attests release artifacts).
+    paths:
+      include:
+        - "**/.github/workflows/*.yml"
+        - "**/.github/workflows/*.yaml"
+        - "**/.github/actions/**/*.yml"
+        - "**/.github/actions/**/*.yaml"
+    patterns:
+      - pattern-regex: 'uses:\s+(?!\./)[A-Za-z0-9._/-]+@(?![0-9a-f]{40}(?:\s|#|$))\S+'
+
+  - id: podtrace-default-http-client
+    languages: [go]
+    severity: WARNING
+    message: >
+      Avoid the timeout-less default HTTP client and package-level
+      http.Get/Post/Head; use an explicit *http.Client with a timeout, and for
+      any outbound exporter traffic the netguard-hardened dialer.
+    paths:
+      exclude:
+        - "**/*_test.go"
+        - "**/test/**"
+    patterns:
+      - pattern-either:
+          - pattern: http.Get(...)
+          - pattern: http.Post(...)
+          - pattern: http.PostForm(...)
+          - pattern: http.Head(...)
+          - pattern: http.DefaultClient
