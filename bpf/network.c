@@ -46,6 +46,15 @@ static __always_inline void stash_tcp_peer(struct pt_regs *ctx, u32 pair)
 }
 #endif
 
+static __always_inline void drop_pair_sidemaps(struct pair_key *key)
+{
+	bpf_map_delete_elem(&start_times, key);
+	bpf_map_delete_elem(&tcp_target, key);
+	bpf_map_delete_elem(&connect_addrs, key);
+	bpf_map_delete_elem(&dns_targets, key);
+	bpf_map_delete_elem(&db_queries, key);
+}
+
 SEC("kprobe/tcp_v4_connect")
 int kprobe_tcp_connect(struct pt_regs *ctx) {
 	struct pair_key key = make_pair_key(PAIR_TCP_CONNECT_V4);
@@ -100,12 +109,13 @@ int kretprobe_tcp_v6_connect(struct pt_regs *ctx) {
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	
 	if (!start_ts) {
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	
 	struct event *e = get_event_buf();
 	if (!e) {
-		bpf_map_delete_elem(&start_times, &key);
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	
@@ -145,12 +155,13 @@ int kretprobe_tcp_connect(struct pt_regs *ctx) {
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	
 	if (!start_ts) {
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	
 	struct event *e = get_event_buf();
 	if (!e) {
-		bpf_map_delete_elem(&start_times, &key);
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	
@@ -202,6 +213,7 @@ int kretprobe_tcp_sendmsg(struct pt_regs *ctx) {
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 
 	if (!start_ts) {
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 
@@ -217,7 +229,7 @@ int kretprobe_tcp_sendmsg(struct pt_regs *ctx) {
 
 	struct event *e = get_event_buf();
 	if (!e) {
-		bpf_map_delete_elem(&start_times, &key);
+		drop_pair_sidemaps(&key);
 		bpf_map_delete_elem(&grpc_methods, &conn_key);
 		return 0;
 	}
@@ -287,6 +299,7 @@ int kretprobe_tcp_recvmsg(struct pt_regs *ctx) {
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	
 	if (!start_ts) {
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	
@@ -298,7 +311,7 @@ int kretprobe_tcp_recvmsg(struct pt_regs *ctx) {
 	
 	struct event *e = get_event_buf();
 	if (!e) {
-		bpf_map_delete_elem(&start_times, &key);
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	e->timestamp = bpf_ktime_get_ns();
@@ -354,6 +367,7 @@ int uretprobe_getaddrinfo(struct pt_regs *ctx) {
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	
 	if (!start_ts) {
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	
@@ -361,7 +375,7 @@ int uretprobe_getaddrinfo(struct pt_regs *ctx) {
 	
 	struct event *e = get_event_buf();
 	if (!e) {
-		bpf_map_delete_elem(&start_times, &key);
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	e->timestamp = bpf_ktime_get_ns();
@@ -582,6 +596,7 @@ int kretprobe_udp_sendmsg(struct pt_regs *ctx) {
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	
 	if (!start_ts) {
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	
@@ -593,7 +608,7 @@ int kretprobe_udp_sendmsg(struct pt_regs *ctx) {
 	
 	struct event *e = get_event_buf();
 	if (!e) {
-		bpf_map_delete_elem(&start_times, &key);
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	e->timestamp = bpf_ktime_get_ns();
@@ -629,6 +644,7 @@ int kretprobe_udp_recvmsg(struct pt_regs *ctx) {
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	
 	if (!start_ts) {
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	
@@ -640,7 +656,7 @@ int kretprobe_udp_recvmsg(struct pt_regs *ctx) {
 	
 	struct event *e = get_event_buf();
 	if (!e) {
-		bpf_map_delete_elem(&start_times, &key);
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	e->timestamp = bpf_ktime_get_ns();
@@ -681,15 +697,19 @@ int uretprobe_http_request(struct pt_regs *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_HTTP_REQUEST);
+	u64 conn_key = get_key(pid, tid);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
-	
+
 	if (!start_ts) {
+		drop_pair_sidemaps(&key);
+		bpf_map_delete_elem(&socket_conns, &conn_key);
 		return 0;
 	}
-	
+
 	struct event *e = get_event_buf();
 	if (!e) {
-		bpf_map_delete_elem(&start_times, &key);
+		drop_pair_sidemaps(&key);
+		bpf_map_delete_elem(&socket_conns, &conn_key);
 		return 0;
 	}
 	e->timestamp = bpf_ktime_get_ns();
@@ -700,7 +720,6 @@ int uretprobe_http_request(struct pt_regs *ctx) {
 	e->bytes = 0;
 	e->tcp_state = 0;
 	
-	u64 conn_key = get_key(pid, tid);
 	char *url_ptr = bpf_map_lookup_elem(&socket_conns, &conn_key);
 	if (url_ptr) {
 		bpf_probe_read_kernel_str(e->target, sizeof(e->target), url_ptr);
@@ -732,6 +751,7 @@ int uretprobe_http_response(struct pt_regs *ctx) {
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	
 	if (!start_ts) {
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	
@@ -743,7 +763,7 @@ int uretprobe_http_response(struct pt_regs *ctx) {
 	
 	struct event *e = get_event_buf();
 	if (!e) {
-		bpf_map_delete_elem(&start_times, &key);
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	e->timestamp = bpf_ktime_get_ns();
@@ -791,12 +811,13 @@ int uretprobe_PQexec(struct pt_regs *ctx) {
 	struct pair_key key = make_pair_key(PAIR_PQEXEC);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	if (!start_ts) {
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	u64 latency = calc_latency(*start_ts);
 	struct event *e = get_event_buf();
 	if (!e) {
-		bpf_map_delete_elem(&start_times, &key);
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	e->timestamp = bpf_ktime_get_ns();
@@ -850,12 +871,13 @@ int uretprobe_mysql_real_query(struct pt_regs *ctx) {
 	struct pair_key key = make_pair_key(PAIR_MYSQL_QUERY);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	if (!start_ts) {
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	u64 latency = calc_latency(*start_ts);
 	struct event *e = get_event_buf();
 	if (!e) {
-		bpf_map_delete_elem(&start_times, &key);
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	e->timestamp = bpf_ktime_get_ns();
@@ -895,11 +917,12 @@ int uretprobe_SSL_connect(struct pt_regs *ctx) {
 	struct pair_key key = make_pair_key(PAIR_SSL_CONNECT);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	if (!start_ts) {
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	struct event *e = get_event_buf();
 	if (!e) {
-		bpf_map_delete_elem(&start_times, &key);
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	e->timestamp = bpf_ktime_get_ns();
@@ -934,11 +957,12 @@ int uretprobe_SSL_accept(struct pt_regs *ctx) {
 	struct pair_key key = make_pair_key(PAIR_SSL_ACCEPT);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	if (!start_ts) {
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	struct event *e = get_event_buf();
 	if (!e) {
-		bpf_map_delete_elem(&start_times, &key);
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	e->timestamp = bpf_ktime_get_ns();
@@ -973,11 +997,12 @@ int uretprobe_SSL_do_handshake(struct pt_regs *ctx) {
 	struct pair_key key = make_pair_key(PAIR_SSL_DO_HANDSHAKE);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	if (!start_ts) {
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	struct event *e = get_event_buf();
 	if (!e) {
-		bpf_map_delete_elem(&start_times, &key);
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	e->timestamp = bpf_ktime_get_ns();
@@ -1012,11 +1037,12 @@ int uretprobe_gnutls_handshake(struct pt_regs *ctx) {
 	struct pair_key key = make_pair_key(PAIR_GNUTLS_HANDSHAKE);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	if (!start_ts) {
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	struct event *e = get_event_buf();
 	if (!e) {
-		bpf_map_delete_elem(&start_times, &key);
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	e->timestamp = bpf_ktime_get_ns();
@@ -1051,11 +1077,12 @@ int uretprobe_mbedtls_ssl_handshake(struct pt_regs *ctx) {
 	struct pair_key key = make_pair_key(PAIR_MBEDTLS_HANDSHAKE);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	if (!start_ts) {
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	struct event *e = get_event_buf();
 	if (!e) {
-		bpf_map_delete_elem(&start_times, &key);
+		drop_pair_sidemaps(&key);
 		return 0;
 	}
 	e->timestamp = bpf_ktime_get_ns();

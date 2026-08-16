@@ -63,7 +63,7 @@ struct {
 } start_times SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 1024);
 	__type(key, struct pair_key);
 	__type(value, char[MAX_STRING_LEN]);
@@ -214,7 +214,7 @@ struct {
 } lock_targets SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 1024);
 	__type(key, struct pair_key);
 	__type(value, char[MAX_STRING_LEN]);
