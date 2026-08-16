@@ -97,6 +97,12 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	r.setCondition(&pt, ConditionPaused, metav1.ConditionFalse, "NotPaused", "")
 
+	if err := validateManagedCRName("PodTrace", pt.Name); err != nil {
+		r.setCondition(&pt, ConditionDegraded, metav1.ConditionTrue, "NameTooLong", err.Error())
+		r.setCondition(&pt, ConditionReady, metav1.ConditionFalse, "NameTooLong", err.Error())
+		return ctrl.Result{}, r.Status().Update(ctx, &pt)
+	}
+
 	var ec podtracev1alpha1.ExporterConfig
 	ecKey := types.NamespacedName{Namespace: pt.Namespace, Name: pt.Spec.ExporterRef.Name}
 	if err := r.Get(ctx, ecKey, &ec); err != nil {
@@ -108,6 +114,12 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("get ExporterConfig: %w", err)
+	}
+
+	if err := validateManagedCRName("ExporterConfig", ec.Name); err != nil {
+		r.setCondition(&pt, ConditionDegraded, metav1.ConditionTrue, "ExporterConfigNameTooLong", err.Error())
+		r.setCondition(&pt, ConditionReady, metav1.ConditionFalse, "ExporterConfigNameTooLong", err.Error())
+		return ctrl.Result{}, r.Status().Update(ctx, &pt)
 	}
 
 	// Resolve spec.namespaceSelector against the cluster's Namespace

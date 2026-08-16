@@ -51,6 +51,15 @@ func (r *ApplicationTraceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		r.setCondition(&app, ConditionPaused, metav1.ConditionFalse, "NotPaused", "")
 	}
 
+	if err := validateManagedCRName("ApplicationTrace", app.Name); err != nil {
+		r.setCondition(&app, ConditionDegraded, metav1.ConditionTrue, "NameTooLong", err.Error())
+		r.setCondition(&app, ConditionReady, metav1.ConditionFalse, "NameTooLong", err.Error())
+		if perr := r.patchStatus(ctx, &app); perr != nil {
+			return ctrl.Result{}, perr
+		}
+		return ctrl.Result{}, nil
+	}
+
 	pt, err := r.ensureChildPodTrace(ctx, &app)
 	if err != nil {
 		r.setCondition(&app, ConditionDegraded, metav1.ConditionTrue, "ChildPodTrace", err.Error())
