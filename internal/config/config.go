@@ -539,6 +539,10 @@ func ExporterAllowInsecureNonLoopback() bool {
 	return getBoolEnvOrDefault("PODTRACE_EXPORTER_INSECURE", false)
 }
 
+func ExporterBlockPrivateRanges() bool {
+	return getBoolEnvOrDefault("PODTRACE_EXPORTER_BLOCK_PRIVATE", false)
+}
+
 func MetricsEnablePprof() bool {
 	return getBoolEnvOrDefault("PODTRACE_METRICS_ENABLE_PPROF", false) || ProfilingEnabled
 }
