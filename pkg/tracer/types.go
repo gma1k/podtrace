@@ -77,6 +77,14 @@ type TargetErrorObserver interface {
 	OnTargetError(stage string, err error)
 }
 
+type EventDropObserver interface {
+	OnEventsDropped(reason string, n int)
+}
+
+type DropReporter interface {
+	SetDropReporter(report func(reason string, n int))
+}
+
 // CategoryGateable is an optional capability a TracerBackend can
 // implement to support kernel-side gating of probe groups by CRD
 // filter category.

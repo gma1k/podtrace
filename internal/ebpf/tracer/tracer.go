@@ -115,6 +115,7 @@ type Tracer struct {
 	pathCache                     *cache.PathCache
 	resourceMgr                   *resourceMonitorManager
 	lastDNSDrops                  uint64
+	dropReport                    func(reason string, n int)
 	cgroupPaths                   atomic.Pointer[[]string]
 	useUserspaceCgroupFilter      atomic.Bool
 	denyWhenNoTargets             atomic.Bool
@@ -1300,6 +1301,18 @@ func (t *Tracer) pidsForContainer(id string, seeds []uint32) []uint32 {
 	return out
 }
 
+// SetDropReporter installs a callback the tracer invokes on every discarded
+// event.
+func (t *Tracer) SetDropReporter(report func(reason string, n int)) {
+	t.dropReport = report
+}
+
+func (t *Tracer) reportDrop(reason string, n int) {
+	if t.dropReport != nil {
+		t.dropReport(reason, n)
+	}
+}
+
 func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) error {
 	errorLimiter := newErrorRateLimiter()
 	slidingWindow := newSlidingWindow(config.DefaultSlidingWindowSize, config.DefaultSlidingWindowBuckets)
@@ -1461,6 +1474,7 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 				slidingWindow.addError()
 				errorRate := slidingWindow.getErrorRate()
 				metricsexporter.RecordRingBufferDrop()
+				t.reportDrop("ringbuf", 1)
 
 				if config.ErrorBackoffEnabled && errorLimiter.shouldLog() {
 					if errorRate > config.HighErrorCountThreshold {
@@ -1647,6 +1661,7 @@ func (t *Tracer) processAndDispatch(ctx context.Context, event *events.Event,
 			metricsexporter.RecordEventProcessingLatency(time.Since(processingStart))
 		default:
 			metricsexporter.RecordRingBufferDrop()
+			t.reportDrop("channel_full", 1)
 			parser.PutEvent(event)
 		}
 	} else {
