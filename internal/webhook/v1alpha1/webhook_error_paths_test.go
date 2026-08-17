@@ -40,7 +40,7 @@ func TestResolveTracerConfigRefSurfacesNonNotFoundErrors(t *testing.T) {
 		},
 	})
 
-	err := resolveTracerConfigRef(context.Background(), c, &podtracev1alpha1.LocalObjectReference{Name: "regulated"})
+	err := resolveTracerConfigRef(context.Background(), c, &podtracev1alpha1.LocalObjectReference{Name: "regulated"}, "team-a", "podtrace-system")
 	if err == nil {
 		t.Fatal("an apiserver failure must not be mistaken for a missing TracerConfig")
 	}

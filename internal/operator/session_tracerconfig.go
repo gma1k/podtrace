@@ -40,12 +40,7 @@ func (e *errNoTracerConfig) Error() string {
 
 // sessionTracerConfigs holds the per-node resolution for one session.
 type sessionTracerConfigs struct {
-	// byNode maps a node name to the config its Job must run under.
-	byNode map[string]*podtracev1alpha1.TracerConfig
-	// namespaces lists the distinct system namespaces those configs
-	// resolve to, sorted. A session whose nodes span fleets with different
-	// spec.systemNamespace needs its bundle, credentials, ServiceAccount
-	// and RBAC provisioned in each of them.
+	byNode     map[string]*podtracev1alpha1.TracerConfig
 	namespaces []string
 }
 
@@ -93,6 +88,13 @@ func (r *PodTraceSessionReconciler) resolveSessionTracerConfigs(
 				return out, &errNoTracerConfig{pinned: ref.Name, reason: "TracerConfig not found"}
 			}
 			return out, fmt.Errorf("get TracerConfig %q: %w", ref.Name, err)
+		}
+		if !podtracev1alpha1.TracerConfigAllowsSessionFrom(&pinned, s.Namespace, r.SystemNamespace) {
+			return out, &errNoTracerConfig{
+				pinned: ref.Name,
+				reason: fmt.Sprintf("not entitled: TracerConfig %q does not grant sessions from namespace %q (set annotation %s on the config)",
+					ref.Name, s.Namespace, podtracev1alpha1.AllowSessionsFromAnnotation),
+			}
 		}
 		for _, node := range nodes {
 			out.byNode[node] = &pinned

@@ -57,7 +57,7 @@ func TestEnsureSessionReportRBAC_CreatesNarrowRole(t *testing.T) {
 		},
 	}
 
-	if err := ensureSessionReportRBAC(ctx, c, s, scheme, "podtrace-system"); err != nil {
+	if err := ensureSessionReportRBAC(ctx, c, s, scheme, []string{"podtrace-system"}); err != nil {
 		t.Fatalf("ensureSessionReportRBAC: %v", err)
 	}
 
@@ -116,7 +116,7 @@ func TestEnsureSessionReportRBAC_NoSinkStillGrantsPodRead(t *testing.T) {
 	s := &podtracev1alpha1.PodTraceSession{
 		ObjectMeta: metav1.ObjectMeta{Name: "diag", Namespace: "team-a", UID: "sess-abc"},
 	}
-	if err := ensureSessionReportRBAC(ctx, c, s, scheme, "podtrace-system"); err != nil {
+	if err := ensureSessionReportRBAC(ctx, c, s, scheme, []string{"podtrace-system"}); err != nil {
 		t.Fatalf("ensureSessionReportRBAC: %v", err)
 	}
 
@@ -271,7 +271,7 @@ func TestEnsureSessionReportRBAC_OwnsSameNamespaceRBAC(t *testing.T) {
 			ReportRef: &podtracev1alpha1.ReportReference{ConfigMap: &corev1.LocalObjectReference{Name: "r"}},
 		},
 	}
-	if err := ensureSessionReportRBAC(ctx, c, s, scheme, "podtrace-system"); err != nil {
+	if err := ensureSessionReportRBAC(ctx, c, s, scheme, []string{"podtrace-system"}); err != nil {
 		t.Fatalf("ensureSessionReportRBAC: %v", err)
 	}
 
@@ -298,7 +298,7 @@ func TestEnsureSessionPodReadRBAC_OwnsOnlySameNamespace(t *testing.T) {
 	s := &podtracev1alpha1.PodTraceSession{
 		ObjectMeta: metav1.ObjectMeta{Name: "diag", Namespace: "team-a", UID: "own-2"},
 	}
-	if err := ensureSessionPodReadRBAC(ctx, c, s, scheme, []string{"team-a", "team-b"}, "podtrace-system"); err != nil {
+	if err := ensureSessionPodReadRBAC(ctx, c, s, scheme, []string{"team-a", "team-b"}, []string{"podtrace-system"}); err != nil {
 		t.Fatalf("ensureSessionPodReadRBAC: %v", err)
 	}
 

@@ -25,12 +25,13 @@ import (
 //     CRD schema accepts as a valid metav1.Duration but produces an
 //     instantly-expired session that spawns Jobs with activeDeadline 0).
 type PodTraceSessionCustomValidator struct {
-	Client client.Client
+	Client          client.Client
+	SystemNamespace string
 }
 
-func SetupPodTraceSessionWebhookWithManager(mgr ctrl.Manager) error {
+func SetupPodTraceSessionWebhookWithManager(mgr ctrl.Manager, systemNamespace string) error {
 	return ctrl.NewWebhookManagedBy(mgr, &podtracev1alpha1.PodTraceSession{}).
-		WithValidator(&PodTraceSessionCustomValidator{Client: mgr.GetClient()}).
+		WithValidator(&PodTraceSessionCustomValidator{Client: mgr.GetClient(), SystemNamespace: systemNamespace}).
 		Complete()
 }
 
@@ -64,7 +65,7 @@ func (v *PodTraceSessionCustomValidator) validate(ctx context.Context, s *podtra
 	if err := resolveExporterRef(ctx, v.Client, s.Namespace, s.Spec.ExporterRef.Name); err != nil {
 		return nil, err
 	}
-	if err := resolveTracerConfigRef(ctx, v.Client, s.Spec.TracerConfigRef); err != nil {
+	if err := resolveTracerConfigRef(ctx, v.Client, s.Spec.TracerConfigRef, s.Namespace, v.SystemNamespace); err != nil {
 		return nil, err
 	}
 	if err := validateReportRef(s.Spec.ReportRef); err != nil {

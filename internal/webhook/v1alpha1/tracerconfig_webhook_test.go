@@ -196,7 +196,7 @@ func TestTracerConfigValidateWithoutClientSkipsClusterChecks(t *testing.T) {
 }
 
 func TestResolveTracerConfigRefWithoutClient(t *testing.T) {
-	err := resolveTracerConfigRef(context.Background(), nil, &podtracev1alpha1.LocalObjectReference{Name: "regulated"})
+	err := resolveTracerConfigRef(context.Background(), nil, &podtracev1alpha1.LocalObjectReference{Name: "regulated"}, "team-a", "podtrace-system")
 	if err == nil {
 		t.Fatal("an unconfigured client cannot verify the pin, so it must not silently accept it")
 	}
@@ -206,10 +206,10 @@ func TestResolveTracerConfigRefWithoutClient(t *testing.T) {
 }
 
 func TestResolveTracerConfigRefNilAndEmptyAreUnset(t *testing.T) {
-	if err := resolveTracerConfigRef(context.Background(), nil, nil); err != nil {
+	if err := resolveTracerConfigRef(context.Background(), nil, nil, "team-a", "podtrace-system"); err != nil {
 		t.Errorf("a nil ref means resolve per node, got %v", err)
 	}
-	if err := resolveTracerConfigRef(context.Background(), nil, &podtracev1alpha1.LocalObjectReference{}); err != nil {
+	if err := resolveTracerConfigRef(context.Background(), nil, &podtracev1alpha1.LocalObjectReference{}, "team-a", "podtrace-system"); err != nil {
 		t.Errorf("an empty ref name means resolve per node, got %v", err)
 	}
 }

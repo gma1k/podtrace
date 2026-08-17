@@ -80,6 +80,15 @@ func (r *PodTraceScheduleReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 	r.setCondition(&sch, ConditionPaused, metav1.ConditionFalse, "NotSuspended", "")
 
+	if err := podtracev1alpha1.ValidateSessionTemplateMetadata(sch.Spec.SessionTemplate.Metadata); err != nil {
+		r.setCondition(&sch, ConditionDegraded, metav1.ConditionTrue, "SessionTemplateInvalid", err.Error())
+		r.refreshStatus(&sch, active, nil)
+		if perr := r.patchStatus(ctx, &sch); perr != nil {
+			return ctrl.Result{}, perr
+		}
+		return ctrl.Result{}, nil
+	}
+
 	if sch.Spec.Trigger != nil {
 		return r.reconcileTrigger(ctx, &sch, active, succeeded, failed, now)
 	}

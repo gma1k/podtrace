@@ -171,7 +171,6 @@ func (e *engine) applyTargets(set TargetSet) error {
 	}
 
 	e.mu.Lock()
-
 	added, removed, changed := 0, 0, 0
 	for path, t := range desired {
 		prev, ok := e.activeCgroups[path]
@@ -188,15 +187,16 @@ func (e *engine) applyTargets(set TargetSet) error {
 			removed++
 		}
 	}
+	e.mu.Unlock()
 
 	if added == 0 && removed == 0 && changed == 0 {
-		e.mu.Unlock()
 		return nil
 	}
 
 	var attachErrs []attachError
 
 	if err := e.backend.SetCgroups(snapshot); err != nil {
+		e.mu.Lock()
 		e.attachFailure++
 		e.mu.Unlock()
 		e.reportAttachErrors([]attachError{{stage: "set_cgroups", err: err}})
@@ -217,7 +217,6 @@ func (e *engine) applyTargets(set TargetSet) error {
 			cts = append(cts, ContainerUprobeTarget{ContainerID: t.ContainerID, PID: t.ContainerPID})
 		}
 		if err := rec.SetContainerTargets(cts); err != nil {
-			e.attachFailure++
 			attachErrs = append(attachErrs, attachError{stage: "set_container_targets", err: err})
 		}
 	} else {
@@ -238,13 +237,11 @@ func (e *engine) applyTargets(set TargetSet) error {
 				SetContainerIDs(containerIDs []string) error
 			}); ok {
 				if err := multi.SetContainerIDs(ids); err != nil {
-					e.attachFailure++
 					attachErrs = append(attachErrs, attachError{stage: "set_container_ids", err: err})
 				}
 			} else {
 				for _, id := range ids {
 					if err := e.backend.SetContainerID(id); err != nil {
-						e.attachFailure++
 						attachErrs = append(attachErrs, attachError{stage: "set_container_id", err: err})
 					}
 				}
@@ -256,9 +253,11 @@ func (e *engine) applyTargets(set TargetSet) error {
 	for path, t := range desired {
 		next[path] = cgroupState{containerID: t.ContainerID, containerPID: t.ContainerPID}
 	}
+	e.mu.Lock()
 	e.activeCgroups = next
 	e.cgroupsAttached += int64(added)
 	e.cgroupsDetached += int64(removed)
+	e.attachFailure += int64(len(attachErrs))
 	e.mu.Unlock()
 
 	e.reportAttachErrors(attachErrs)
