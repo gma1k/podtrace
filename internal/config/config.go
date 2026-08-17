@@ -57,7 +57,7 @@ var (
 	ErrorBackoffEnabled       = getBoolEnvOrDefault("PODTRACE_ERROR_BACKOFF_ENABLED", true)
 	CircuitBreakerEnabled     = getBoolEnvOrDefault("PODTRACE_CIRCUIT_BREAKER_ENABLED", true)
 	TracingEnabled            = getBoolEnvOrDefault("PODTRACE_TRACING_ENABLED", false)
-	TracingSampleRate         = getFloatEnvOrDefault("PODTRACE_TRACING_SAMPLE_RATE", DefaultTracingSampleRate)
+	TracingSampleRate         = getFloatEnvInRange("PODTRACE_TRACING_SAMPLE_RATE", DefaultTracingSampleRate, 0, 1)
 	SynthesizeSpans           = getBoolEnvOrDefault("PODTRACE_TRACING_SYNTHESIZE_SPANS", DefaultSynthesizeSpans)
 	OTLPEndpoint              = getEnvOrDefault("PODTRACE_OTLP_ENDPOINT", DefaultOTLPEndpoint)
 	JaegerEndpoint            = os.Getenv("PODTRACE_JAEGER_ENDPOINT")
@@ -90,9 +90,9 @@ var (
 	MetricsPodLabelLimit      = getIntEnvOrDefault("PODTRACE_METRICS_POD_LABEL_LIMIT", 500)
 	MaxTrackedTraces          = getIntEnvOrDefault("PODTRACE_MAX_TRACKED_TRACES", 10000)
 	MaxSpansPerTrace          = getIntEnvOrDefault("PODTRACE_MAX_SPANS_PER_TRACE", 1000)
-	ProcessCacheEvictionRatio = getFloatEnvOrDefault("PODTRACE_PROCESS_CACHE_EVICTION_RATIO", DefaultProcessCacheEvictionRatio)
-	PIDCacheEvictionRatio     = getFloatEnvOrDefault("PODTRACE_PID_CACHE_EVICTION_RATIO", DefaultPIDCacheEvictionRatio)
-	CacheEvictionThreshold    = getFloatEnvOrDefault("PODTRACE_CACHE_EVICTION_THRESHOLD", DefaultCacheEvictionThreshold)
+	ProcessCacheEvictionRatio = getFloatEnvInRange("PODTRACE_PROCESS_CACHE_EVICTION_RATIO", DefaultProcessCacheEvictionRatio, 0, 1)
+	PIDCacheEvictionRatio     = getFloatEnvInRange("PODTRACE_PID_CACHE_EVICTION_RATIO", DefaultPIDCacheEvictionRatio, 0, 1)
+	CacheEvictionThreshold    = getFloatEnvInRange("PODTRACE_CACHE_EVICTION_THRESHOLD", DefaultCacheEvictionThreshold, 0, 1)
 	RateLimitPerSec           = getIntEnvOrDefault("PODTRACE_RATE_LIMIT_PER_SEC", DefaultRateLimitPerSec)
 	RateLimitBurst            = getIntEnvOrDefault("PODTRACE_RATE_LIMIT_BURST", DefaultRateLimitBurst)
 	TopTargetsLimit           = getIntEnvOrDefault("PODTRACE_TOP_TARGETS_LIMIT", DefaultTopTargetsLimit)
@@ -107,7 +107,7 @@ var (
 	TimelineBuckets           = getIntEnvOrDefault("PODTRACE_TIMELINE_BUCKETS", DefaultTimelineBuckets)
 	MaxConnectionTargets      = getIntEnvOrDefault("PODTRACE_MAX_CONNECTION_TARGETS", DefaultMaxConnectionTargets)
 	HighErrorCountThreshold   = getIntEnvOrDefault("PODTRACE_HIGH_ERROR_COUNT_THRESHOLD", DefaultHighErrorCountThreshold)
-	SpikeRateThreshold        = getFloatEnvOrDefault("PODTRACE_SPIKE_RATE_THRESHOLD", DefaultSpikeRateThreshold)
+	SpikeRateThreshold        = getPositiveFloatEnvOrDefault("PODTRACE_SPIKE_RATE_THRESHOLD", DefaultSpikeRateThreshold)
 	MaxEventsForStacks        = getIntEnvOrDefault("PODTRACE_MAX_EVENTS_FOR_STACKS", DefaultMaxEventsForStacks)
 	MinLatencyForStackNS      = getInt64EnvOrDefault("PODTRACE_MIN_LATENCY_FOR_STACK_NS", DefaultMinLatencyForStackNS)
 	MaxBytesForBandwidth      = getInt64EnvOrDefault("PODTRACE_MAX_BYTES_FOR_BANDWIDTH", DefaultMaxBytesForBandwidth)
@@ -134,7 +134,7 @@ var (
 
 	ProfilingEnabled         = getBoolEnvOrDefault("PODTRACE_PROFILING_ENABLED", false)
 	ProfilingPprofPorts      = getEnvOrDefault("PODTRACE_PROFILING_PPROF_PORTS", "6060,8080,8081,9090,2345")
-	ProfilingAutoTriggerMS   = getFloatEnvOrDefault("PODTRACE_PROFILING_AUTO_TRIGGER_MS", DefaultProfilingAutoTriggerMS)
+	ProfilingAutoTriggerMS   = getPositiveFloatEnvOrDefault("PODTRACE_PROFILING_AUTO_TRIGGER_MS", DefaultProfilingAutoTriggerMS)
 	ProfilingDefaultDuration = getDurationEnvOrDefault("PODTRACE_PROFILING_DEFAULT_DURATION", DefaultProfilingDuration)
 	ProfilingMaxConcurrent   = getIntEnvOrDefault("PODTRACE_PROFILING_MAX_CONCURRENT", DefaultProfilingMaxConcurrent)
 )
@@ -334,27 +334,35 @@ func GetDefaultProcRootPath() string {
 }
 
 var (
-	TCPLatencySpikeThresholdMS = getFloatEnvOrDefault("PODTRACE_TCP_LATENCY_SPIKE_MS", 100.0)
-	TCPRealtimeThresholdMS     = getFloatEnvOrDefault("PODTRACE_TCP_REALTIME_MS", 10.0)
-	UDPLatencySpikeThresholdMS = getFloatEnvOrDefault("PODTRACE_UDP_LATENCY_SPIKE_MS", 100.0)
-	ConnectLatencyThresholdMS  = getFloatEnvOrDefault("PODTRACE_CONNECT_LATENCY_MS", 1.0)
+	TCPLatencySpikeThresholdMS = getPositiveFloatEnvOrDefault("PODTRACE_TCP_LATENCY_SPIKE_MS", 100.0)
+	TCPRealtimeThresholdMS     = getPositiveFloatEnvOrDefault("PODTRACE_TCP_REALTIME_MS", 10.0)
+	UDPLatencySpikeThresholdMS = getPositiveFloatEnvOrDefault("PODTRACE_UDP_LATENCY_SPIKE_MS", 100.0)
+	ConnectLatencyThresholdMS  = getPositiveFloatEnvOrDefault("PODTRACE_CONNECT_LATENCY_MS", 1.0)
 )
 
-// getBoolEnvOrDefault parses the env var with strconv.ParseBool, so
-// "true", "TRUE", "True", "1", "t" (and their negatives) all work — the
-// previous string comparison silently treated "TRUE" or "1" as false. A
-// set-but-unparsable value is reported instead of silently ignored.
+func parseBoolLenient(value string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "t", "true", "y", "yes", "on", "enable", "enabled":
+		return true, true
+	case "0", "f", "false", "n", "no", "off", "disable", "disabled":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+// getBoolEnvOrDefault parses the env var with parseBoolLenient. A set-but-
+// unrecognized value is reported instead of silently ignored.
 func getBoolEnvOrDefault(key string, defaultValue bool) bool {
 	value := os.Getenv(key)
 	if value == "" {
 		return defaultValue
 	}
-	b, err := strconv.ParseBool(strings.TrimSpace(value))
-	if err != nil {
-		warnIgnoredEnv(key, value, "not a boolean")
-		return defaultValue
+	if b, ok := parseBoolLenient(value); ok {
+		return b
 	}
-	return b
+	warnIgnoredEnv(key, value, "not a boolean")
+	return defaultValue
 }
 
 // warnIgnoredEnv surfaces configuration that LOOKS set but is being
@@ -373,12 +381,37 @@ func getEnvOrDefault(key, defaultValue string) string {
 	return defaultValue
 }
 
-func getFloatEnvOrDefault(key string, defaultValue float64) float64 {
+// getFloatEnvInRange parses a float and accepts it only within the inclusive
+// [lo, hi] range its consumer requires (e.g. a sample rate or eviction ratio
+// in [0,1]).
+func getFloatEnvInRange(key string, defaultValue, lo, hi float64) float64 {
 	if value := os.Getenv(key); value != "" {
-		if f, err := strconv.ParseFloat(value, 64); err == nil {
+		f, err := strconv.ParseFloat(value, 64)
+		switch {
+		case err != nil:
+			warnIgnoredEnv(key, value, "not a number")
+		case f < lo || f > hi:
+			warnIgnoredEnv(key, value, fmt.Sprintf("must be within [%g, %g]", lo, hi))
+		default:
 			return f
 		}
-		warnIgnoredEnv(key, value, "not a number")
+	}
+	return defaultValue
+}
+
+// getPositiveFloatEnvOrDefault mirrors getIntEnvOrDefault for float knobs that
+// must be strictly positive (durations, latency thresholds).
+func getPositiveFloatEnvOrDefault(key string, defaultValue float64) float64 {
+	if value := os.Getenv(key); value != "" {
+		f, err := strconv.ParseFloat(value, 64)
+		switch {
+		case err != nil:
+			warnIgnoredEnv(key, value, "not a number")
+		case f <= 0:
+			warnIgnoredEnv(key, value, "must be a positive number")
+		default:
+			return f
+		}
 	}
 	return defaultValue
 }

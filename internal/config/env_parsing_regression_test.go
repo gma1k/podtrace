@@ -2,8 +2,6 @@ package config
 
 import "testing"
 
-// TestGetBoolEnvOrDefault_AcceptedForms: only lowercase "true" used to
-// count; "TRUE", "True", and "1" silently read as false.
 func TestGetBoolEnvOrDefault_AcceptedForms(t *testing.T) {
 	cases := []struct {
 		value string
@@ -11,8 +9,12 @@ func TestGetBoolEnvOrDefault_AcceptedForms(t *testing.T) {
 	}{
 		{"true", true}, {"TRUE", true}, {"True", true}, {"1", true}, {"t", true},
 		{"false", false}, {"FALSE", false}, {"0", false},
-		{"garbage", true}, // unparsable keeps the default (true here)
-		{" true ", true},  // surrounding whitespace tolerated
+		{"yes", true}, {"YES", true}, {"on", true}, {"On", true},
+		{"enable", true}, {"enabled", true}, {"ENABLED", true}, {"y", true},
+		{"no", false}, {"NO", false}, {"off", false}, {"Off", false},
+		{"disable", false}, {"disabled", false}, {"n", false},
+		{"garbage", true},
+		{" true ", true},
 	}
 	for _, c := range cases {
 		t.Setenv("PODTRACE_TEST_BOOL", c.value)
@@ -23,6 +25,22 @@ func TestGetBoolEnvOrDefault_AcceptedForms(t *testing.T) {
 	t.Setenv("PODTRACE_TEST_BOOL", "garbage")
 	if got := getBoolEnvOrDefault("PODTRACE_TEST_BOOL", false); got != false {
 		t.Error("unparsable value must keep the default (false)")
+	}
+}
+
+func TestRedactPII_HumanTruthyEnablesRedaction(t *testing.T) {
+	const key = "PODTRACE_REDACT_PII"
+	for _, v := range []string{"yes", "YES", "on", "enabled", "enable", "y", "true", "1"} {
+		t.Setenv(key, v)
+		if !getBoolEnvOrDefault(key, false) {
+			t.Errorf("%s=%q must enable redaction (fail-open regression)", key, v)
+		}
+	}
+	for _, v := range []string{"no", "off", "disabled", "false", "0", "n"} {
+		t.Setenv(key, v)
+		if getBoolEnvOrDefault(key, false) {
+			t.Errorf("%s=%q must keep redaction off", key, v)
+		}
 	}
 }
 
