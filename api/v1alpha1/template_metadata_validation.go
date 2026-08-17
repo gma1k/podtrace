@@ -10,12 +10,6 @@ import (
 // SessionTemplate would stamp onto every child PodTraceSession that the
 // apiserver would itself reject (an over-long key, an invalid value, an
 // oversized annotation set).
-//
-// Left unchecked, a bad entry surfaces only when a child create fails, and
-// because that create is retried every reconcile the schedule requeues on the
-// same error forever. Validated up front in the webhook (and terminally in the
-// controller for schedules that predate it) the fault is reported once and the
-// schedule stops churning.
 func ValidateSessionTemplateMetadata(meta PodTraceSessionTemplateMetadata) error {
 	base := field.NewPath("spec", "sessionTemplate", "metadata")
 	var errs field.ErrorList
