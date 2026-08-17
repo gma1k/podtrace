@@ -31,6 +31,27 @@ type PodTraceSessionReconciler struct {
 	APIReader       client.Reader
 	Scheme          *runtime.Scheme
 	SystemNamespace string
+
+	nowFn func() time.Time
+}
+
+func (r *PodTraceSessionReconciler) now() time.Time {
+	if r.nowFn != nil {
+		return r.nowFn()
+	}
+	return time.Now()
+}
+
+const pendingMatchDeadline = 30 * time.Minute
+
+// sessionPendingDeadline is the instant after which a zero-match session is
+// failed terminally, or the zero time when the creation timestamp is unset.
+func sessionPendingDeadline(s *podtracev1alpha1.PodTraceSession) time.Time {
+	created := s.CreationTimestamp.Time
+	if created.IsZero() {
+		return time.Time{}
+	}
+	return created.Add(pendingMatchDeadline)
 }
 
 // +kubebuilder:rbac:groups=podtrace.io,resources=podtracesessions,verbs=get;list;watch;update;patch
@@ -73,7 +94,11 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			tc = nil
 		}
 		sessionNS := systemNamespaceForSession(tc, r.SystemNamespace)
-		for _, ns := range candidateSystemNamespaces(sessionNS, r.SystemNamespace) {
+		namespaces, err := sessionChildNamespaces(ctx, r.Client, &session, candidateSystemNamespaces(sessionNS, r.SystemNamespace))
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		for _, ns := range namespaces {
 			if err := cleanupPodTraceSessionChildren(ctx, r.Client, &session, ns); err != nil {
 				return ctrl.Result{}, err
 			}
@@ -129,6 +154,10 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if len(targets.DeniedNamespaces) > 0 {
 			reason = "CrossNamespaceNotGranted"
 			message = crossNamespaceDeniedMessage(session.Namespace, targets.DeniedNamespaces)
+		}
+		if deadline := sessionPendingDeadline(&session); !deadline.IsZero() && r.now().After(deadline) {
+			return ctrl.Result{}, r.failSessionTerminally(ctx, &session, reason+"DeadlineExceeded",
+				fmt.Sprintf("%s; no pods matched within %s of creation", message, pendingMatchDeadline))
 		}
 		logger.Info("no matched pods; session stays Pending until pods appear", "reason", reason)
 		session.Status.State = podtracev1alpha1.SessionStatePending
@@ -195,17 +224,15 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		_ = r.Status().Update(ctx, &session)
 		return ctrl.Result{}, err
 	}
-	for _, ns := range resolved.namespaces {
-		if err := ensureSessionReportRBAC(ctx, r.Client, &session, r.Scheme, ns); err != nil {
-			r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "SessionRBAC", err.Error())
-			_ = r.Status().Update(ctx, &session)
-			return ctrl.Result{}, err
-		}
-		if err := ensureSessionPodReadRBAC(ctx, r.Client, &session, r.Scheme, sessionPodNamespaces(&session, targets), ns); err != nil {
-			r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "SessionRBAC", err.Error())
-			_ = r.Status().Update(ctx, &session)
-			return ctrl.Result{}, err
-		}
+	if err := ensureSessionReportRBAC(ctx, r.Client, &session, r.Scheme, resolved.namespaces); err != nil {
+		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "SessionRBAC", err.Error())
+		_ = r.Status().Update(ctx, &session)
+		return ctrl.Result{}, err
+	}
+	if err := ensureSessionPodReadRBAC(ctx, r.Client, &session, r.Scheme, sessionPodNamespaces(&session, targets), resolved.namespaces); err != nil {
+		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "SessionRBAC", err.Error())
+		_ = r.Status().Update(ctx, &session)
+		return ctrl.Result{}, err
 	}
 
 	cap := effectiveMaxConcurrentSessionsPerNode(tc)

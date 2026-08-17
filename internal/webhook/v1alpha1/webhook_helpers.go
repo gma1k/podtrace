@@ -27,15 +27,7 @@ import (
 )
 
 // specUnchanged reports whether old and new spec values are deep-equal. When
-// they are, validating webhooks should skip re-validation of the spec: the
-// admission request is touching only metadata (finalizers, labels, annotations)
-// or status, and re-running spec validation can wedge legacy CRs whose spec
-// pre-dates a stricter validation rule (e.g. a session created before the
-// "at most one reportRef sink" rule landed can't have its finalizer cleared
-// because the webhook rejects every UPDATE on spec grounds).
-//
-// Standard Kubernetes pattern — built-in validators use the same shortcut to
-// allow finalizer-only updates on otherwise-invalid resources.
+// they are, validating webhooks should skip re-validation of the spec.
 func specUnchanged(oldSpec, newSpec any) bool {
 	return reflect.DeepEqual(oldSpec, newSpec)
 }
@@ -169,7 +161,7 @@ func validateCrossNamespaceGrants(
 // fail the session terminally at run time, long after apply.
 //
 // TracerConfig is cluster-scoped, so the lookup carries no namespace.
-func resolveTracerConfigRef(ctx context.Context, c client.Client, ref *podtracev1alpha1.LocalObjectReference) error {
+func resolveTracerConfigRef(ctx context.Context, c client.Client, ref *podtracev1alpha1.LocalObjectReference, sourceNamespace, operatorNamespace string) error {
 	if ref == nil || ref.Name == "" {
 		return nil
 	}
@@ -179,6 +171,11 @@ func resolveTracerConfigRef(ctx context.Context, c client.Client, ref *podtracev
 	var tc podtracev1alpha1.TracerConfig
 	err := c.Get(ctx, types.NamespacedName{Name: ref.Name}, &tc)
 	if err == nil {
+		if !podtracev1alpha1.TracerConfigAllowsSessionFrom(&tc, sourceNamespace, operatorNamespace) {
+			return fmt.Errorf(
+				"spec.tracerConfigRef.name %q: TracerConfig does not grant sessions from namespace %q (set annotation %s on the config, or leave tracerConfigRef unset)",
+				ref.Name, sourceNamespace, podtracev1alpha1.AllowSessionsFromAnnotation)
+		}
 		return nil
 	}
 	if apierrors.IsNotFound(err) {

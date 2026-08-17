@@ -44,9 +44,27 @@ func cleanupSessionServiceAccount(ctx context.Context, c client.Client, s *podtr
 	return nil
 }
 
-// ensureSessionReportRBAC provisions per-session RBAC in the user
-// namespace.
-func ensureSessionReportRBAC(ctx context.Context, c client.Client, s *podtracev1alpha1.PodTraceSession, scheme *runtime.Scheme, systemNS string) error {
+func sessionSubjects(s *podtracev1alpha1.PodTraceSession, systemNamespaces []string) []rbacv1.Subject {
+	seen := make(map[string]struct{}, len(systemNamespaces))
+	subs := make([]rbacv1.Subject, 0, len(systemNamespaces))
+	for _, ns := range systemNamespaces {
+		if ns == "" {
+			continue
+		}
+		if _, dup := seen[ns]; dup {
+			continue
+		}
+		seen[ns] = struct{}{}
+		subs = append(subs, rbacv1.Subject{
+			Kind:      rbacv1.ServiceAccountKind,
+			Name:      SessionServiceAccountName(s.UID),
+			Namespace: ns,
+		})
+	}
+	return subs
+}
+
+func ensureSessionReportRBAC(ctx context.Context, c client.Client, s *podtracev1alpha1.PodTraceSession, scheme *runtime.Scheme, systemNamespaces []string) error {
 	roleName := SessionReportRoleName(s.UID)
 	bindingName := SessionReportRoleBindingName(s.UID)
 
@@ -81,11 +99,7 @@ func ensureSessionReportRBAC(ctx context.Context, c client.Client, s *podtracev1
 			Kind:     "Role",
 			Name:     roleName,
 		}
-		binding.Subjects = []rbacv1.Subject{{
-			Kind:      rbacv1.ServiceAccountKind,
-			Name:      SessionServiceAccountName(s.UID),
-			Namespace: systemNS,
-		}}
+		binding.Subjects = sessionSubjects(s, systemNamespaces)
 		return controllerutil.SetControllerReference(s, binding, scheme)
 	}); err != nil {
 		return fmt.Errorf("ensure session report RoleBinding: %w", err)
@@ -150,7 +164,7 @@ func sessionPodNamespaces(s *podtracev1alpha1.PodTraceSession, targets sessionTa
 
 // ensureSessionPodReadRBAC grants the session SA pods+events read in each
 // extra namespace a cross-namespace session targets.
-func ensureSessionPodReadRBAC(ctx context.Context, c client.Client, s *podtracev1alpha1.PodTraceSession, scheme *runtime.Scheme, namespaces []string, systemNS string) error {
+func ensureSessionPodReadRBAC(ctx context.Context, c client.Client, s *podtracev1alpha1.PodTraceSession, scheme *runtime.Scheme, namespaces []string, systemNamespaces []string) error {
 	for _, ns := range namespaces {
 		sameNS := ns == s.Namespace
 		role := &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: SessionPodReadRoleName(s.UID), Namespace: ns}}
@@ -176,11 +190,7 @@ func ensureSessionPodReadRBAC(ctx context.Context, c client.Client, s *podtracev
 				Kind:     "Role",
 				Name:     SessionPodReadRoleName(s.UID),
 			}
-			binding.Subjects = []rbacv1.Subject{{
-				Kind:      rbacv1.ServiceAccountKind,
-				Name:      SessionServiceAccountName(s.UID),
-				Namespace: systemNS,
-			}}
+			binding.Subjects = sessionSubjects(s, systemNamespaces)
 			if sameNS {
 				return controllerutil.SetControllerReference(s, binding, scheme)
 			}

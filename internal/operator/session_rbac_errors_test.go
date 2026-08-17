@@ -135,7 +135,7 @@ func TestEnsureSessionPodReadRBAC_CreateErrors(t *testing.T) {
 					return cl.Create(ctx, obj, opts...)
 				},
 			}).Build()
-		if err := ensureSessionPodReadRBAC(context.Background(), c, s, scheme, []string{"team-b"}, "podtrace-system"); err == nil {
+		if err := ensureSessionPodReadRBAC(context.Background(), c, s, scheme, []string{"team-b"}, []string{"podtrace-system"}); err == nil {
 			t.Fatal("expected Role create error")
 		}
 	})
@@ -150,7 +150,7 @@ func TestEnsureSessionPodReadRBAC_CreateErrors(t *testing.T) {
 					return cl.Create(ctx, obj, opts...)
 				},
 			}).Build()
-		if err := ensureSessionPodReadRBAC(context.Background(), c, s, scheme, []string{"team-b"}, "podtrace-system"); err == nil {
+		if err := ensureSessionPodReadRBAC(context.Background(), c, s, scheme, []string{"team-b"}, []string{"podtrace-system"}); err == nil {
 			t.Fatal("expected RoleBinding create error")
 		}
 	})
@@ -168,7 +168,7 @@ func TestEnsureSessionReportRBAC_BindingCreateError(t *testing.T) {
 				return cl.Create(ctx, obj, opts...)
 			},
 		}).Build()
-	if err := ensureSessionReportRBAC(context.Background(), c, s, scheme, "podtrace-system"); err == nil {
+	if err := ensureSessionReportRBAC(context.Background(), c, s, scheme, []string{"podtrace-system"}); err == nil {
 		t.Fatal("expected RoleBinding create error from ensureSessionReportRBAC")
 	}
 }

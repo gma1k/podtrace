@@ -94,7 +94,7 @@ struct usdt_probe {
 };
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 4096);
 	__type(key, u64);
 	__type(value, struct usdt_probe);
@@ -692,15 +692,15 @@ struct {
 } h3_req_stash SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, 1024);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 4096);
 	__type(key, u32);
 	__type(value, struct h3_field_offsets);
 } h3_offsets SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, 1024);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 4096);
 	__type(key, u32);
 	__type(value, struct h3_peer_paths);
 } h3_peer_paths_map SEC(".maps");

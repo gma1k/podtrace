@@ -96,6 +96,9 @@ func (v *PodTraceScheduleCustomValidator) validate(ctx context.Context, s *podtr
 	if err := validateReportRef(tmpl.ReportRef); err != nil {
 		return nil, fmt.Errorf("spec.sessionTemplate.%w", err)
 	}
+	if err := podtracev1alpha1.ValidateSessionTemplateMetadata(s.Spec.SessionTemplate.Metadata); err != nil {
+		return nil, err
+	}
 	tmplWarnings, err := validateCrossNamespaceGrants(ctx, v.Client, s.Namespace, tmpl.PodRefs, tmpl.NamespaceSelector)
 	if err != nil {
 		return nil, fmt.Errorf("spec.sessionTemplate.%w", err)

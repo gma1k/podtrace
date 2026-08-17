@@ -215,6 +215,22 @@ func TestPodTraceScheduleValidator(t *testing.T) {
 			},
 			exporter: "prod-otlp",
 		},
+		{
+			name: "template-invalid-label-value",
+			mutate: func(s *podtracev1alpha1.PodTraceSchedule) {
+				s.Spec.SessionTemplate.Metadata.Labels = map[string]string{"team": "not a valid value"}
+			},
+			exporter:  "prod-otlp",
+			wantError: "labels",
+		},
+		{
+			name: "template-invalid-annotation-key",
+			mutate: func(s *podtracev1alpha1.PodTraceSchedule) {
+				s.Spec.SessionTemplate.Metadata.Annotations = map[string]string{"bad key": "v"}
+			},
+			exporter:  "prod-otlp",
+			wantError: "annotations",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

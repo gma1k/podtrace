@@ -126,6 +126,9 @@ type Tracer struct {
 	cpAnalyzer                    *criticalpath.Analyzer
 	piiRedactor                   *redactor.Redactor
 	profilingCtrl                 ProfilingController
+
+	stopCancel context.CancelFunc
+	readerWG   sync.WaitGroup
 }
 
 // registerGroupLinks records freshly attached links under their probe group
@@ -1332,11 +1335,27 @@ func (t *Tracer) reportDrop(reason string, n int) {
 	}
 }
 
+// recoverReaderPanic recovers a panic from processing a single record so a
+// malformed/edge-case event skips that iteration instead of unwinding the
+// reader goroutine and permanently ending event collection.
+func recoverReaderPanic(where string) {
+	if r := recover(); r != nil {
+		logger.Error("panic processing record (recovered, reader continues)",
+			zap.String("reader", where),
+			zap.Any("panic", r),
+			zap.ByteString("stack", debug.Stack()))
+	}
+}
+
 func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) error {
 	errorLimiter := newErrorRateLimiter()
 	slidingWindow := newSlidingWindow(config.DefaultSlidingWindowSize, config.DefaultSlidingWindowBuckets)
 	circuitBreaker := newCircuitBreaker(config.DefaultCircuitBreakerThreshold, config.DefaultCircuitBreakerTimeout)
 	stackMap := t.collection.Maps["stack_traces"]
+
+	stopCtx, stopCancel := context.WithCancel(ctx)
+	t.stopCancel = stopCancel
+	ctx = stopCtx
 
 	t.cgroupWriteMu.Lock()
 	dnsCgroups := t.currentCgroupPaths()
@@ -1352,7 +1371,9 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 		t.collection.Maps["cgroup_alerts"],
 		t.collection.Maps["cgroup_cpu_quota"])
 
+	t.readerWG.Add(1)
 	go func() {
+		defer t.readerWG.Done()
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -1371,7 +1392,11 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 		}
 	}()
 
-	go t.runDNSTimeoutSweeper(ctx, eventChan)
+	t.readerWG.Add(1)
+	go func() {
+		defer t.readerWG.Done()
+		t.runDNSTimeoutSweeper(ctx, eventChan)
+	}()
 
 	if config.ManagementPort > 0 {
 		go t.serveManagementAPI(ctx, config.ManagementPort)
@@ -1395,7 +1420,9 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 		zap.Int("target_cgroup_id_count", len(t.loadCgroupIDs())),
 		zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter.Load()))
 
+	t.readerWG.Add(1)
 	go func() {
+		defer t.readerWG.Done()
 		eventCollectionTicker := time.NewTicker(5 * time.Second)
 		defer eventCollectionTicker.Stop()
 		filterAutoDisableHintLogged := false
@@ -1458,7 +1485,9 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 		}
 	}()
 
+	t.readerWG.Add(1)
 	go func() {
+		defer t.readerWG.Done()
 		defer func() {
 			if r := recover(); r != nil {
 				logger.Error("Panic in event reader",
@@ -1521,35 +1550,44 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 			}
 
 			processingStart := time.Now()
-			event := parser.ParseEvent(record.RawSample)
-			if event != nil {
-				t.processAndDispatch(ctx, event, eventChan, stackMap, ec, processingStart)
-			}
+			func() {
+				defer recoverReaderPanic("event reader")
+				event := parser.ParseEvent(record.RawSample)
+				if event != nil {
+					t.processAndDispatch(ctx, event, eventChan, stackMap, ec, processingStart)
+				}
+			}()
 		}
 	}()
 
 	if t.h2Reader != nil && t.h2Decoder != nil {
-		go t.runH2DecodeReader(ctx, eventChan, stackMap, ec)
+		t.readerWG.Add(1)
+		go func() { defer t.readerWG.Done(); t.runH2DecodeReader(ctx, eventChan, stackMap, ec) }()
 	}
 
 	if t.h3Reader != nil {
-		go t.runH3DecodeReader(ctx, eventChan, stackMap, ec)
+		t.readerWG.Add(1)
+		go func() { defer t.readerWG.Done(); t.runH3DecodeReader(ctx, eventChan, stackMap, ec) }()
 	}
 
 	if t.h3ChunkReader != nil && t.h3Assembler != nil {
-		go t.runH3ChunkReader(ctx)
+		t.readerWG.Add(1)
+		go func() { defer t.readerWG.Done(); t.runH3ChunkReader(ctx) }()
 	}
 
 	if t.h3Reader != nil && t.h3SectionStash != nil {
-		go t.runH3ParkedFlusher(ctx, eventChan, stackMap, ec)
+		t.readerWG.Add(1)
+		go func() { defer t.readerWG.Done(); t.runH3ParkedFlusher(ctx, eventChan, stackMap, ec) }()
 	}
 
 	if t.quicReader != nil {
-		go t.runQUICInitialReader(ctx, eventChan, stackMap, ec)
+		t.readerWG.Add(1)
+		go func() { defer t.readerWG.Done(); t.runQUICInitialReader(ctx, eventChan, stackMap, ec) }()
 	}
 
 	if t.dnsPayloadReader != nil {
-		go t.runDNSPayloadReader(ctx, eventChan, stackMap, ec)
+		t.readerWG.Add(1)
+		go func() { defer t.readerWG.Done(); t.runDNSPayloadReader(ctx, eventChan, stackMap, ec) }()
 	}
 
 	return nil
@@ -1701,7 +1739,9 @@ func (t *Tracer) runH2DecodeReader(ctx context.Context, eventChan chan<- *events
 		}
 	}()
 
+	t.readerWG.Add(1)
 	go func() {
+		defer t.readerWG.Done()
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		for {
@@ -1732,17 +1772,20 @@ func (t *Tracer) runH2DecodeReader(ctx context.Context, eventChan chan<- *events
 			continue
 		}
 
-		rec, ok := h2decode.ParseRecord(record.RawSample)
-		if !ok {
-			continue
-		}
-		if rec.IsClose() {
-			t.h2Decoder.Evict(rec.ConnID)
-			continue
-		}
-		for _, ev := range t.h2Decoder.Ingest(rec) {
-			t.processAndDispatch(ctx, ev, eventChan, stackMap, ec, time.Now())
-		}
+		func() {
+			defer recoverReaderPanic("http/2 decode")
+			rec, ok := h2decode.ParseRecord(record.RawSample)
+			if !ok {
+				return
+			}
+			if rec.IsClose() {
+				t.h2Decoder.Evict(rec.ConnID)
+				return
+			}
+			for _, ev := range t.h2Decoder.Ingest(rec) {
+				t.processAndDispatch(ctx, ev, eventChan, stackMap, ec, time.Now())
+			}
+		}()
 	}
 }
 
@@ -1797,12 +1840,15 @@ func (t *Tracer) runDNSPayloadReader(ctx context.Context, eventChan chan<- *even
 			continue
 		}
 
-		rec, ok := dns.ParseRecord(record.RawSample)
-		if !ok {
-			continue
-		}
-		t.populateDNSResolved(rec)
-		t.processAndDispatch(ctx, buildDNSEventFromRecord(rec), eventChan, stackMap, ec, time.Now())
+		func() {
+			defer recoverReaderPanic("dns payload")
+			rec, ok := dns.ParseRecord(record.RawSample)
+			if !ok {
+				return
+			}
+			t.populateDNSResolved(rec)
+			t.processAndDispatch(ctx, buildDNSEventFromRecord(rec), eventChan, stackMap, ec, time.Now())
+		}()
 	}
 }
 
@@ -1913,23 +1959,26 @@ func (t *Tracer) runH3DecodeReader(ctx context.Context, eventChan chan<- *events
 			continue
 		}
 
-		txn, ok := t.h3Decoder.ParseRecord(record.RawSample)
-		if !ok {
-			continue
-		}
-		if h3Logged := h3TxnLogCount.Add(1); h3Logged <= 20 {
-			logger.Debug("h3 txn decoded",
-				zap.String("method", txn.Method), zap.String("path", txn.Path),
-				zap.Uint16("status", txn.Status), zap.Bool("client", txn.IsClient),
-				zap.Uint8("flags", txn.Flags), zap.String("peer_ip", txn.PeerIP),
-				zap.Uint16("peer_port", txn.PeerPort), zap.Int("headers", len(txn.Headers)))
-		}
-		if t.h3EnrichOrPark(txn) {
-			continue
-		}
-		for _, ev := range txn.Events() {
-			t.processAndDispatch(ctx, ev, eventChan, stackMap, ec, time.Now())
-		}
+		func() {
+			defer recoverReaderPanic("http/3 decode")
+			txn, ok := t.h3Decoder.ParseRecord(record.RawSample)
+			if !ok {
+				return
+			}
+			if h3Logged := h3TxnLogCount.Add(1); h3Logged <= 20 {
+				logger.Debug("h3 txn decoded",
+					zap.String("method", txn.Method), zap.String("path", txn.Path),
+					zap.Uint16("status", txn.Status), zap.Bool("client", txn.IsClient),
+					zap.Uint8("flags", txn.Flags), zap.String("peer_ip", txn.PeerIP),
+					zap.Uint16("peer_port", txn.PeerPort), zap.Int("headers", len(txn.Headers)))
+			}
+			if t.h3EnrichOrPark(txn) {
+				return
+			}
+			for _, ev := range txn.Events() {
+				t.processAndDispatch(ctx, ev, eventChan, stackMap, ec, time.Now())
+			}
+		}()
 	}
 }
 
@@ -2012,15 +2061,18 @@ func (t *Tracer) runH3ChunkReader(ctx context.Context) {
 			}
 			continue
 		}
-		if c, ok := h3stream.ParseChunk(record.RawSample); ok {
-			if n := h3ChunkLogCount.Add(1); n <= 20 {
-				logger.Debug("h3 stream chunk",
-					zap.Uint32("tgid", c.TGID), zap.Uint64("conn", c.Conn),
-					zap.Uint64("stream", c.StreamID), zap.Uint32("len", c.CopiedLen),
-					zap.Uint32("offset", c.Offset))
+		func() {
+			defer recoverReaderPanic("http/3 chunk")
+			if c, ok := h3stream.ParseChunk(record.RawSample); ok {
+				if n := h3ChunkLogCount.Add(1); n <= 20 {
+					logger.Debug("h3 stream chunk",
+						zap.Uint32("tgid", c.TGID), zap.Uint64("conn", c.Conn),
+						zap.Uint64("stream", c.StreamID), zap.Uint32("len", c.CopiedLen),
+						zap.Uint32("offset", c.Offset))
+				}
+				t.h3Assembler.Feed(c)
 			}
-			t.h3Assembler.Feed(c)
-		}
+		}()
 	}
 }
 
@@ -2200,72 +2252,78 @@ func (t *Tracer) runQUICInitialReader(ctx context.Context, eventChan chan<- *eve
 			}
 			continue
 		}
-		data := record.RawSample
-		if len(data) <= hdr {
-			continue
-		}
-		family := data[20]
-		dport := binary.LittleEndian.Uint16(data[22:24])
-		var v6 [16]byte
-		copy(v6[:], data[24:40])
-		var ip string
-		if family == 10 {
-			ip = events.PeerIP(10, 0, v6)
-		} else {
-			ip = events.PeerIP(2, binary.BigEndian.Uint32(data[24:28]), v6)
-		}
-
-		now := time.Now()
-		key := quicFlowKey{cgroup: binary.LittleEndian.Uint64(data[8:16]), addr: v6, port: dport}
-		st := flows[key]
-		if st == nil {
-			if len(flows) >= quicMaxTrackedFlows {
-				evictQUICFlows(flows, now)
+		func() {
+			defer recoverReaderPanic("http/3 quic")
+			data := record.RawSample
+			if len(data) <= hdr {
+				return
 			}
-			st = &quicFlowState{lastSeen: now}
-			flows[key] = st
-		}
-		if st.done {
-			continue
-		}
-		st.lastSeen = now
-		pktEnd := hdr + int(binary.LittleEndian.Uint16(data[40:42]))
-		if pktEnd > len(data) {
-			pktEnd = len(data)
-		}
-		pkt := make([]byte, pktEnd-hdr)
-		copy(pkt, data[hdr:pktEnd])
-		st.pkts = append(st.pkts, pkt)
-
-		info, xerr := quicinitial.ExtractPackets(st.pkts)
-		if xerr != nil && len(st.pkts) < quicInitialMaxPackets {
-			continue
-		}
-		st.done = true
-		st.pkts = nil
-
-		ev := &events.Event{}
-		ev.Timestamp = binary.LittleEndian.Uint64(data[0:8])
-		ev.CgroupID = binary.LittleEndian.Uint64(data[8:16])
-		ev.PID = binary.LittleEndian.Uint32(data[16:20])
-		ev.ProcessName = string(bytes.TrimRight(data[44:60], "\x00"))
-		ev.Type = events.EventHTTP3
-		ev.Target = fmt.Sprintf("%s:%d", ip, dport)
-		ev.PeerDstIP = ip
-		ev.PeerDstPort = dport
-		if xerr == nil && info.SNI != "" {
-			ev.Details = "sni: " + info.SNI
-			if len(info.ALPN) > 0 {
-				ev.Details += " alpn: " + strings.Join(info.ALPN, ",")
+			family := data[20]
+			dport := binary.LittleEndian.Uint16(data[22:24])
+			var v6 [16]byte
+			copy(v6[:], data[24:40])
+			var ip string
+			if family == 10 {
+				ip = events.PeerIP(10, 0, v6)
+			} else {
+				ip = events.PeerIP(2, binary.BigEndian.Uint32(data[24:28]), v6)
 			}
-		} else {
-			ev.Details = "HTTP/3 (QUIC)"
-		}
-		t.processAndDispatch(ctx, ev, eventChan, stackMap, ec, time.Now())
+
+			now := time.Now()
+			key := quicFlowKey{cgroup: binary.LittleEndian.Uint64(data[8:16]), addr: v6, port: dport}
+			st := flows[key]
+			if st == nil {
+				if len(flows) >= quicMaxTrackedFlows {
+					evictQUICFlows(flows, now)
+				}
+				st = &quicFlowState{lastSeen: now}
+				flows[key] = st
+			}
+			if st.done {
+				return
+			}
+			st.lastSeen = now
+			pktEnd := hdr + int(binary.LittleEndian.Uint16(data[40:42]))
+			if pktEnd > len(data) {
+				pktEnd = len(data)
+			}
+			pkt := make([]byte, pktEnd-hdr)
+			copy(pkt, data[hdr:pktEnd])
+			st.pkts = append(st.pkts, pkt)
+
+			info, xerr := quicinitial.ExtractPackets(st.pkts)
+			if xerr != nil && len(st.pkts) < quicInitialMaxPackets {
+				return
+			}
+			st.done = true
+			st.pkts = nil
+
+			ev := &events.Event{}
+			ev.Timestamp = binary.LittleEndian.Uint64(data[0:8])
+			ev.CgroupID = binary.LittleEndian.Uint64(data[8:16])
+			ev.PID = binary.LittleEndian.Uint32(data[16:20])
+			ev.ProcessName = string(bytes.TrimRight(data[44:60], "\x00"))
+			ev.Type = events.EventHTTP3
+			ev.Target = fmt.Sprintf("%s:%d", ip, dport)
+			ev.PeerDstIP = ip
+			ev.PeerDstPort = dport
+			if xerr == nil && info.SNI != "" {
+				ev.Details = "sni: " + info.SNI
+				if len(info.ALPN) > 0 {
+					ev.Details += " alpn: " + strings.Join(info.ALPN, ",")
+				}
+			} else {
+				ev.Details = "HTTP/3 (QUIC)"
+			}
+			t.processAndDispatch(ctx, ev, eventChan, stackMap, ec, time.Now())
+		}()
 	}
 }
 
 func (t *Tracer) Stop() error {
+	if t.stopCancel != nil {
+		t.stopCancel()
+	}
 	if t.reader != nil {
 		_ = t.reader.Close()
 	}
@@ -2306,6 +2364,8 @@ func (t *Tracer) Stop() error {
 	for _, l := range closing {
 		_ = l.Close()
 	}
+
+	t.readerWG.Wait()
 
 	if t.collection != nil {
 		t.collection.Close()

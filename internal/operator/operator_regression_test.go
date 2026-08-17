@@ -92,7 +92,7 @@ func TestEnsureSessionPodReadRBAC(t *testing.T) {
 	s := newSession(nil)
 	const systemNS = "podtrace-system"
 
-	if err := ensureSessionPodReadRBAC(context.Background(), c, s, scheme, []string{"team-a", "team-b"}, systemNS); err != nil {
+	if err := ensureSessionPodReadRBAC(context.Background(), c, s, scheme, []string{"team-a", "team-b"}, []string{systemNS}); err != nil {
 		t.Fatal(err)
 	}
 

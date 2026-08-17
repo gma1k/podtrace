@@ -84,6 +84,14 @@ jobs:
             -coverprofile=coverage.out -covermode=atomic \
             ./cmd/... ./internal/... | tee test-report.txt
 
+      - name: Exclude e2e-covered BPF integration code from unit coverage
+        if: always()
+        run: |
+          if [ -f coverage.out ]; then
+            grep -v 'github.com/gma1k/podtrace/internal/ebpf/probes/' coverage.out > coverage.filtered.out
+            mv coverage.filtered.out coverage.out
+          fi
+
       - name: Run integration suite
         timeout-minutes: 5
         run: |

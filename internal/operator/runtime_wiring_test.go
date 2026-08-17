@@ -45,7 +45,7 @@ func TestNewSchemeRegistersBothGroups(t *testing.T) {
 }
 
 func TestRegisterWebhooksWiresEveryValidator(t *testing.T) {
-	if err := registerWebhooks(nonConnectingManager(t)); err != nil {
+	if err := registerWebhooks(nonConnectingManager(t), "podtrace-system"); err != nil {
 		t.Fatalf("registerWebhooks: %v", err)
 	}
 }

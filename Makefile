@@ -190,7 +190,7 @@ clean:
 	rm -f $(BINARY)
 	rm -rf bin
 	rm -rf $(RELEASE_DIR)
-	rm -f coverage.out coverage.html
+	rm -f coverage.out coverage.unit.out coverage.html
 	rm -rf "$(BPF_GEN_DIR)"
 
 deps:
@@ -250,12 +250,15 @@ test-changed:
 		$(GO) test -short -count=1 -parallel=4 $(shell $(GO) list ./... | grep -v '/test$$'); \
 	fi
 
+COVERAGE_EXCLUDE ?= github.com/gma1k/podtrace/internal/ebpf/probes/
+
 coverage: test-unit
 	@echo "Generating coverage report..."
-	$(GO) tool cover -html=coverage.out -o coverage.html
+	@grep -v '$(COVERAGE_EXCLUDE)' coverage.out > coverage.unit.out
+	$(GO) tool cover -html=coverage.unit.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
-	@echo "Coverage summary:"
-	$(GO) tool cover -func=coverage.out | tail -1
+	@echo "Coverage summary (excluding e2e-covered BPF integration code):"
+	$(GO) tool cover -func=coverage.unit.out | tail -1
 
 CONTROLLER_GEN_VERSION ?= v0.18.0
 CONTROLLER_GEN ?= $(shell go env GOPATH 2>/dev/null)/bin/controller-gen

@@ -63,7 +63,7 @@ func TestSetupPodTraceScheduleWebhookWithManager(t *testing.T) {
 
 func TestSetupPodTraceSessionWebhookWithManager(t *testing.T) {
 	mgr := newNonConnectingManager(t)
-	if err := webhookv1alpha1.SetupPodTraceSessionWebhookWithManager(mgr); err != nil {
+	if err := webhookv1alpha1.SetupPodTraceSessionWebhookWithManager(mgr, "podtrace-system"); err != nil {
 		t.Fatalf("SetupPodTraceSessionWebhookWithManager: %v", err)
 	}
 }

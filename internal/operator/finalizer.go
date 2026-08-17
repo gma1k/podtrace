@@ -3,6 +3,7 @@ package operator
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -30,15 +31,10 @@ import (
 // This is the standard pattern in Prometheus Operator, cert-manager, etc.
 const FinalizerCleanup = "podtrace.io/cleanup"
 
-// ensureFinalizer adds FinalizerCleanup to the object if it is not
-// already present. Returns true when the finalizer was added and the
-// caller should update the object.
 func ensureFinalizer(obj client.Object) bool {
 	return controllerutil.AddFinalizer(obj, FinalizerCleanup)
 }
 
-// removeFinalizer removes FinalizerCleanup from the object. Returns
-// true when removal changed the object.
 func removeFinalizer(obj client.Object) bool {
 	return controllerutil.RemoveFinalizer(obj, FinalizerCleanup)
 }
@@ -175,4 +171,54 @@ func cleanupPodTraceSessionChildren(ctx context.Context, c client.Client, s *pod
 		return err
 	}
 	return nil
+}
+
+// sessionChildNamespaces returns every namespace that currently holds a
+// resource labelled as owned by this session, unioned with the caller's
+// best-effort seed (the currently-resolved system namespace plus the operator
+// default).
+func sessionChildNamespaces(ctx context.Context, c client.Client, s *podtracev1alpha1.PodTraceSession, seed []string) ([]string, error) {
+	set := map[string]struct{}{}
+	for _, ns := range seed {
+		if ns != "" {
+			set[ns] = struct{}{}
+		}
+	}
+	sel := client.MatchingLabels(sessionRBACLabels(s))
+
+	var jobs batchv1.JobList
+	if err := c.List(ctx, &jobs, sel); err != nil {
+		return nil, fmt.Errorf("list session Jobs for cleanup: %w", err)
+	}
+	for i := range jobs.Items {
+		set[jobs.Items[i].Namespace] = struct{}{}
+	}
+	var configMaps corev1.ConfigMapList
+	if err := c.List(ctx, &configMaps, sel); err != nil {
+		return nil, fmt.Errorf("list session ConfigMaps for cleanup: %w", err)
+	}
+	for i := range configMaps.Items {
+		set[configMaps.Items[i].Namespace] = struct{}{}
+	}
+	var secrets corev1.SecretList
+	if err := c.List(ctx, &secrets, sel); err != nil {
+		return nil, fmt.Errorf("list session Secrets for cleanup: %w", err)
+	}
+	for i := range secrets.Items {
+		set[secrets.Items[i].Namespace] = struct{}{}
+	}
+	var serviceAccounts corev1.ServiceAccountList
+	if err := c.List(ctx, &serviceAccounts, sel); err != nil {
+		return nil, fmt.Errorf("list session ServiceAccounts for cleanup: %w", err)
+	}
+	for i := range serviceAccounts.Items {
+		set[serviceAccounts.Items[i].Namespace] = struct{}{}
+	}
+
+	out := make([]string, 0, len(set))
+	for ns := range set {
+		out = append(out, ns)
+	}
+	sort.Strings(out)
+	return out, nil
 }
