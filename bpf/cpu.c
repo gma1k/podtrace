@@ -6,6 +6,8 @@
 #include "helpers.h"
 
 #define CPU_SAMPLE_WINDOW_NS (1000ULL * 1000ULL * 1000ULL)
+#define MAX_CPU_WINDOW_NS (60ULL * 1000ULL * 1000ULL * 1000ULL)
+#define MAX_SCHED_BLOCK_NS (30ULL * 1000ULL * 1000ULL * 1000ULL)
 
 static __always_inline void cpu_sample_accumulate(void *ctx, u64 on_cpu_ns, u64 now)
 {
@@ -21,11 +23,17 @@ static __always_inline void cpu_sample_accumulate(void *ctx, u64 on_cpu_ns, u64 
 		return;
 	}
 
-	w->runtime_ns += on_cpu_ns;
+	__sync_fetch_and_add(&w->runtime_ns, on_cpu_ns);
 
 	u64 elapsed = now > w->window_start_ns ? now - w->window_start_ns : 0;
 	if (elapsed < CPU_SAMPLE_WINDOW_NS)
 		return;
+
+	if (elapsed > MAX_CPU_WINDOW_NS) {
+		w->window_start_ns = now;
+		w->runtime_ns = 0;
+		return;
+	}
 
 	struct cpu_quota *q = bpf_map_lookup_elem(&cgroup_cpu_quota, &cgid);
 	if (q && q->quota_us > 0 && elapsed > 0) {
@@ -76,7 +84,7 @@ int tracepoint_sched_switch(void *ctx) {
 		if (out_ts) {
 			u64 blocked = now > *out_ts ? now - *out_ts : 0;
 			bpf_map_delete_elem(&sched_out_ts, &next_pid);
-			if (blocked > MIN_LATENCY_NS) {
+			if (blocked > MIN_LATENCY_NS && blocked < MAX_SCHED_BLOCK_NS) {
 				bpf_map_update_elem(&sched_pending_blocked, &next_pid, &blocked, BPF_ANY);
 			}
 		}

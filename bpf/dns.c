@@ -177,6 +177,7 @@ static __noinline void parse_name_compressed(struct __sk_buff *skb, int dns_off,
 				need_len = 1;
 		}
 	}
+	out[j & (MAX_STRING_LEN - 1)] = '\0';
 }
 
 static __always_inline int is_known_doh(__u32 d) {
@@ -489,12 +490,13 @@ int dns_ingress(struct __sk_buff *skb) {
 		if (atype == DNS_TYPE_A) {
 			__u32 ip = 0;
 			if (bpf_skb_load_bytes(skb, rdata, &ip, sizeof(ip)) == 0) {
-				bpf_map_update_elem(&dns_resolved, &ip, q->name, BPF_ANY);
+				struct dns_resolved_key rk = { .cgroup_id = key.cgroup_id, .ip = ip };
+				bpf_map_update_elem(&dns_resolved, &rk, q->name, BPF_ANY);
 				format_ip_port(__builtin_bswap32(ip), 0, e->details);
 				wrote_detail = 1;
 			}
 		} else if (atype == DNS_TYPE_AAAA) {
-			struct dns_v6key k6 = {};
+			struct dns_v6key k6 = { .cgroup_id = key.cgroup_id };
 			if (bpf_skb_load_bytes(skb, rdata, k6.addr, sizeof(k6.addr)) == 0) {
 				bpf_map_update_elem(&dns_resolved6, &k6, q->name, BPF_ANY);
 				if (!wrote_detail) {
@@ -504,6 +506,7 @@ int dns_ingress(struct __sk_buff *skb) {
 			}
 		} else if (atype == DNS_TYPE_CNAME && !wrote_detail) {
 			parse_name_compressed(skb, dns_off, rdata, e->details);
+			wrote_detail = 1;
 		}
 		aoff = (rdata + (rdlen & DNS_OFF_MASK)) & DNS_OFF_MASK;
 	}

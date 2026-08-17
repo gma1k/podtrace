@@ -43,6 +43,11 @@ struct oom_mark_victim_hdr {
 };
 _Static_assert(__builtin_offsetof(struct oom_mark_victim_hdr, pid) == 8, "mark_victim: pid must be at offset 8");
 
+#ifdef PODTRACE_VMLINUX_FROM_BTF
+extern struct task_struct *bpf_task_from_pid(s32 pid) __ksym;
+extern void bpf_task_release(struct task_struct *p) __ksym;
+#endif
+
 SEC("tp/oom/mark_victim")
 int tracepoint_oom_mark_victim(void *ctx) {
 	struct event *e = get_event_buf_unfiltered();
@@ -57,9 +62,16 @@ int tracepoint_oom_mark_victim(void *ctx) {
 	e->tcp_state = 0;
 	e->target[0] = '\0';
 
+	__builtin_memset(e->comm, 0, sizeof(e->comm));
+
 #ifdef PODTRACE_VMLINUX_FROM_BTF
 	struct trace_event_raw_mark_victim *tp = ctx;
 	e->pid = BPF_CORE_READ(tp, pid);
+	struct task_struct *victim = bpf_task_from_pid((s32)e->pid);
+	if (victim) {
+		e->cgroup_id = BPF_CORE_READ(victim, cgroups, dfl_cgrp, kn, id);
+		bpf_task_release(victim);
+	}
 	if (bpf_core_field_exists(tp->__data_loc_comm)) {
 		u32 comm_loc = BPF_CORE_READ(tp, __data_loc_comm);
 		unsigned short comm_off = (unsigned short)(comm_loc & 0xffff);

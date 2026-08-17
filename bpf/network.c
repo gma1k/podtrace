@@ -34,6 +34,7 @@ static __noinline void stash_tcp_peer(struct pt_regs *ctx, u32 pair)
 	} else {
 		return;
 	}
+	peer.stash_ns = bpf_ktime_get_ns();
 	struct pair_key key = make_pair_key(pair);
 	bpf_map_update_elem(&tcp_target, &key, buf, BPF_ANY);
 	bpf_map_update_elem(&tcp_peer_stash, &key, &peer, BPF_ANY);
@@ -45,6 +46,32 @@ static __always_inline void stash_tcp_peer(struct pt_regs *ctx, u32 pair)
 	(void)pair;
 }
 #endif
+
+static __always_inline void stash_sk_owner(struct pt_regs *ctx)
+{
+	u64 sk = (u64)PT_REGS_PARM1(ctx);
+	if (!sk)
+		return;
+	struct sk_owner o = {};
+	o.cgroup_id = bpf_get_current_cgroup_id();
+	o.pid = bpf_get_current_pid_tgid() >> 32;
+	bpf_get_current_comm(&o.comm, sizeof(o.comm));
+	bpf_map_update_elem(&sk_owner, &sk, &o, BPF_ANY);
+}
+
+static __always_inline void apply_sk_owner(struct event *e, u64 skaddr)
+{
+	struct sk_owner *o = skaddr ? bpf_map_lookup_elem(&sk_owner, &skaddr) : NULL;
+	if (o) {
+		e->pid = o->pid;
+		e->cgroup_id = o->cgroup_id;
+		__builtin_memcpy(e->comm, o->comm, COMM_LEN);
+	} else {
+		e->pid = 0;
+		e->cgroup_id = 0;
+		__builtin_memset(e->comm, 0, COMM_LEN);
+	}
+}
 
 static __always_inline void drop_pair_sidemaps(struct pair_key *key)
 {
@@ -133,7 +160,7 @@ int kretprobe_tcp_v6_connect(struct pt_regs *ctx) {
 	if (ca && ca->family == AF_INET6) {
 		u16 port = __builtin_bswap16(ca->port_be);
 		format_ipv6_port(ca->addr6, port, e->target);
-		struct dns_v6key k6 = {};
+		struct dns_v6key k6 = { .cgroup_id = bpf_get_current_cgroup_id() };
 		__builtin_memcpy(k6.addr, ca->addr6, 16);
 		char *resolved = bpf_map_lookup_elem(&dns_resolved6, &k6);
 		if (resolved) {
@@ -180,8 +207,8 @@ int kretprobe_tcp_connect(struct pt_regs *ctx) {
 		u16 port = __builtin_bswap16(ca->port_be);
 		u32 ip = __builtin_bswap32(ca->addr_be);
 		format_ip_port(ip, port, e->target);
-		u32 ip_be = ca->addr_be;
-		char *resolved = bpf_map_lookup_elem(&dns_resolved, &ip_be);
+		struct dns_resolved_key rk = { .cgroup_id = bpf_get_current_cgroup_id(), .ip = ca->addr_be };
+		char *resolved = bpf_map_lookup_elem(&dns_resolved, &rk);
 		if (resolved) {
 			__builtin_memcpy(e->details, resolved, MAX_STRING_LEN);
 		}
@@ -202,6 +229,7 @@ int kprobe_tcp_sendmsg(struct pt_regs *ctx) {
 
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 	stash_tcp_peer(ctx, PAIR_TCP_SENDMSG);
+	stash_sk_owner(ctx);
 	return 0;
 }
 
@@ -288,6 +316,7 @@ int kprobe_tcp_recvmsg(struct pt_regs *ctx) {
 
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 	stash_tcp_peer(ctx, PAIR_TCP_RECVMSG);
+	stash_sk_owner(ctx);
 	return 0;
 }
 
@@ -451,7 +480,7 @@ int tracepoint_inet_sock_set_state(void *ctx) {
 		return 0;
 	}
 	e->timestamp = bpf_ktime_get_ns();
-	e->pid = pid;
+	apply_sk_owner(e, (u64)args_local.skaddr);
 	e->type = EVENT_TCP_STATE;
 	e->latency_ns = 0;
 	e->error = 0;
@@ -514,7 +543,7 @@ int tracepoint_tcp_retransmit_skb(void *ctx) {
 		return 0;
 	}
 	e->timestamp = bpf_ktime_get_ns();
-	e->pid = pid;
+	apply_sk_owner(e, (u64)args_local.skaddr);
 	e->type = EVENT_TCP_RETRANS;
 	e->latency_ns = 0;
 	e->error = 0;
@@ -565,7 +594,7 @@ int tracepoint_net_dev_xmit(void *ctx) {
 		return 0;
 	}
 	e->timestamp = bpf_ktime_get_ns();
-	e->pid = pid;
+	apply_sk_owner(e, 0);
 	e->type = EVENT_NET_DEV_ERROR;
 	e->latency_ns = 0;
 	e->error = args_local.rc;

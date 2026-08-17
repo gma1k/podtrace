@@ -11,7 +11,7 @@
 
 static __always_inline void mc_store_op(const struct pair_key *key, u64 ts,
 	const char *op_prefix, u32 prefix_len,
-	const char *mc_key, u64 bytes_val)
+	const char *mc_key, u64 key_len, u64 bytes_val)
 {
 	char buf[MAX_STRING_LEN] = {};
 
@@ -19,8 +19,11 @@ static __always_inline void mc_store_op(const struct pair_key *key, u64 ts,
 		__builtin_memcpy(buf, op_prefix, prefix_len);
 
 	u32 remaining = MAX_STRING_LEN - prefix_len - 1;
-	if (remaining > 0)
-		bpf_probe_read_user_str(buf + prefix_len, remaining, mc_key);
+	u32 n = key_len < remaining ? (u32)key_len : remaining;
+	n &= (MAX_STRING_LEN - 1);
+	if (n > 0)
+		bpf_probe_read_user(buf + prefix_len, n, mc_key);
+	buf[prefix_len + n] = '\0';
 
 	bpf_map_update_elem(&memcached_ops, key, buf, BPF_ANY);
 	bpf_map_update_elem(&start_times, key, &ts, BPF_ANY);
@@ -83,7 +86,7 @@ int uprobe_memcached_get(struct pt_regs *ctx)
 	struct pair_key key = make_pair_key(PAIR_MEMCACHED);
 	const char *mc_key = (const char *)PT_REGS_PARM2(ctx);
 	if (!mc_key) return 0;
-	mc_store_op(&key, bpf_ktime_get_ns(), MC_OP_GET, 4, mc_key, 0);
+	mc_store_op(&key, bpf_ktime_get_ns(), MC_OP_GET, 4, mc_key, (u64)PT_REGS_PARM3(ctx), 0);
 	return 0;
 }
 
@@ -104,7 +107,7 @@ int uprobe_memcached_set(struct pt_regs *ctx)
 	const char *mc_key = (const char *)PT_REGS_PARM2(ctx);
 	if (!mc_key) return 0;
 	u64 vlen = (u64)PT_REGS_PARM5(ctx);
-	mc_store_op(&key, bpf_ktime_get_ns(), MC_OP_SET, 4, mc_key, vlen);
+	mc_store_op(&key, bpf_ktime_get_ns(), MC_OP_SET, 4, mc_key, (u64)PT_REGS_PARM3(ctx), vlen);
 	return 0;
 }
 
@@ -124,7 +127,7 @@ int uprobe_memcached_delete(struct pt_regs *ctx)
 	struct pair_key key = make_pair_key(PAIR_MEMCACHED);
 	const char *mc_key = (const char *)PT_REGS_PARM2(ctx);
 	if (!mc_key) return 0;
-	mc_store_op(&key, bpf_ktime_get_ns(), MC_OP_DEL, 4, mc_key, 0);
+	mc_store_op(&key, bpf_ktime_get_ns(), MC_OP_DEL, 4, mc_key, (u64)PT_REGS_PARM3(ctx), 0);
 	return 0;
 }
 
