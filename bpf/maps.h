@@ -125,14 +125,20 @@ struct {
 	__type(value, struct dns_query_state);
 } dns_inflight SEC(".maps");
 
+struct dns_resolved_key {
+	u64 cgroup_id;
+	u32 ip;
+	u32 _pad;
+};
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 8192);
-	__type(key, u32);
+	__type(key, struct dns_resolved_key);
 	__type(value, char[MAX_STRING_LEN]);
 } dns_resolved SEC(".maps");
 
 struct dns_v6key {
+	u64 cgroup_id;
 	u8 addr[16];
 };
 
@@ -236,6 +242,7 @@ struct tcp_peer {
 	u16 _pad;
 	u8  saddr6[16];
 	u8  daddr6[16];
+	u64 stash_ns;
 };
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
@@ -243,6 +250,19 @@ struct {
 	__type(key, struct pair_key);
 	__type(value, struct tcp_peer);
 } tcp_peer_stash SEC(".maps");
+
+struct sk_owner {
+	u64 cgroup_id;
+	u32 pid;
+	u32 _pad;
+	char comm[COMM_LEN];
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 8192);
+	__type(key, u64);
+	__type(value, struct sk_owner);
+} sk_owner SEC(".maps");
 
 #define QUIC_INITIAL_MAX_PKTS 3
 
@@ -355,7 +375,7 @@ struct cpu_window {
 };
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 1024);
 	__type(key, u64);
 	__type(value, struct cpu_window);
@@ -449,10 +469,16 @@ struct fastcgi_req {
 	char uri[MAX_STRING_LEN];
 	char method[16];
 };
+struct fcgi_req_key {
+	u32 pid;
+	u32 tid;
+	u16 request_id;
+	u16 _pad;
+};
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 1024);
-	__type(key, u64);
+	__type(key, struct fcgi_req_key);
 	__type(value, struct fastcgi_req);
 } fastcgi_reqs SEC(".maps");
 
@@ -573,6 +599,8 @@ struct grpc_go_scratch {
 	char status[8];
 	u8 have_path;
 	u8 have_status;
+	u8 have_method;
+	u8 _pad;
 };
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);

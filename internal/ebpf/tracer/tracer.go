@@ -1806,9 +1806,20 @@ func (t *Tracer) runDNSPayloadReader(ctx context.Context, eventChan chan<- *even
 	}
 }
 
-// populateDNSResolved mirrors the in-kernel dns_resolved/dns_resolved6 answer
-// caching that the payload path skips, so network.c can still attribute a
-// connection's remote address to the hostname that resolved it.
+func dnsResolvedKeyV4(cgroupID uint64, ip4 net.IP) [16]byte {
+	var key [16]byte
+	binary.NativeEndian.PutUint64(key[0:8], cgroupID)
+	copy(key[8:12], ip4)
+	return key
+}
+
+func dnsResolvedKeyV6(cgroupID uint64, ip6 net.IP) [24]byte {
+	var key [24]byte
+	binary.NativeEndian.PutUint64(key[0:8], cgroupID)
+	copy(key[8:24], ip6)
+	return key
+}
+
 func (t *Tracer) populateDNSResolved(rec dns.Record) {
 	name := dnsResolvedValue(rec.Msg.QName)
 	for _, a := range rec.Msg.Answers {
@@ -1818,8 +1829,7 @@ func (t *Tracer) populateDNSResolved(rec dns.Record) {
 				continue
 			}
 			if ip4 := net.ParseIP(a.IP).To4(); ip4 != nil {
-				var key [4]byte
-				copy(key[:], ip4)
+				key := dnsResolvedKeyV4(rec.CgroupID, ip4)
 				_ = t.dnsResolvedMap.Update(key[:], name[:], ebpf.UpdateAny)
 			}
 		case dns.TypeAAAA:
@@ -1827,8 +1837,7 @@ func (t *Tracer) populateDNSResolved(rec dns.Record) {
 				continue
 			}
 			if ip6 := net.ParseIP(a.IP).To16(); ip6 != nil {
-				var key [16]byte
-				copy(key[:], ip6)
+				key := dnsResolvedKeyV6(rec.CgroupID, ip6)
 				_ = t.dnsResolved6Map.Update(key[:], name[:], ebpf.UpdateAny)
 			}
 		}

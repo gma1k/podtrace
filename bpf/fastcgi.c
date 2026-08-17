@@ -105,7 +105,7 @@ int kretprobe_unix_stream_recvmsg(struct pt_regs *ctx)
 
 emit_params: ;
 
-	u64 req_key = get_key(pid, tid) ^ (u64)request_id;
+	struct fcgi_req_key req_key = { .pid = pid, .tid = tid, .request_id = request_id };
 
 	struct event *e = get_event_buf();
 	if (!e) return 0;
@@ -214,7 +214,8 @@ int kprobe_unix_stream_sendmsg(struct pt_regs *ctx)
 	struct msghdr *msg = (struct msghdr *)PT_REGS_PARM2(ctx);
 	if (!msg) return 0;
 
-	void *user_base = msghdr_user_base(msg, NULL);
+	u64 avail = 0;
+	void *user_base = msghdr_user_base(msg, &avail);
 	if (!user_base) return 0;
 
 	const u32 FCGI_MAX_RECORD_BODY = 8 * 1024;
@@ -226,6 +227,8 @@ int kprobe_unix_stream_sendmsg(struct pt_regs *ctx)
 
 	#pragma unroll
 	for (int k = 0; k < 4; k++) {
+		if ((u64)offset + sizeof(hdr) > avail)
+			break;
 		if (bpf_probe_read_user(hdr, sizeof(hdr), (u8 *)user_base + offset) != 0)
 			break;
 		if (hdr[0] != FCGI_VERSION_1)
@@ -246,7 +249,7 @@ int kprobe_unix_stream_sendmsg(struct pt_regs *ctx)
 	if (!found_end)
 		return 0;
 
-	u64 req_key = get_key(pid, tid) ^ (u64)request_id;
+	struct fcgi_req_key req_key = { .pid = pid, .tid = tid, .request_id = request_id };
 
 	struct fastcgi_req *req = bpf_map_lookup_elem(&fastcgi_reqs, &req_key);
 	if (!req) return 0;

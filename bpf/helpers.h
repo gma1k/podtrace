@@ -17,15 +17,29 @@ static inline struct pair_key make_pair_key(u32 pair) {
 	return k;
 }
 
+// The stash is keyed by thread+direction only, so a thread that multiplexes
+// connections (Go/event-loop servers) can leave an entry from an unrelated
+// connection. It is also never deleted. Dropping entries older than this bounds
+// how stale a served peer can be; the definitive fix is socket-scoped keying.
+#define TCP_PEER_MAX_AGE_NS (5ULL * 1000ULL * 1000ULL * 1000ULL)
+
+static inline struct tcp_peer *fresh_tcp_peer(struct pair_key *k, u64 now) {
+	struct tcp_peer *p = bpf_map_lookup_elem(&tcp_peer_stash, k);
+	if (p && now >= p->stash_ns && now - p->stash_ns < TCP_PEER_MAX_AGE_NS)
+		return p;
+	return NULL;
+}
+
 static inline struct tcp_peer *lookup_tcp_peer(u32 prefer_pair) {
+	u64 now = bpf_ktime_get_ns();
 	struct pair_key k = {};
 	k.pid_tgid = bpf_get_current_pid_tgid();
 	k.pair = prefer_pair;
-	struct tcp_peer *p = bpf_map_lookup_elem(&tcp_peer_stash, &k);
+	struct tcp_peer *p = fresh_tcp_peer(&k, now);
 	if (p)
 		return p;
 	k.pair = (prefer_pair == PAIR_TCP_SENDMSG) ? PAIR_TCP_RECVMSG : PAIR_TCP_SENDMSG;
-	return bpf_map_lookup_elem(&tcp_peer_stash, &k);
+	return fresh_tcp_peer(&k, now);
 }
 
 static inline void fill_event_peer(struct event *e) {

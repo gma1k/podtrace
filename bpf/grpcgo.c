@@ -78,17 +78,32 @@ static long grpc_hf_cb(u32 i, void *vctx)
 		return 0;
 
 	if (name[1] == 'p' && name[2] == 'a' && name[3] == 't' && name[4] == 'h') {
+		if (s->have_path)
+			return 0;
+		__builtin_memset(s->path, 0, sizeof(s->path));
 		u32 vl = vlen < (MAX_STRING_LEN - 1) ? (u32)vlen : (MAX_STRING_LEN - 1);
-		if (vl > 0 && bpf_probe_read_user(s->path, vl, (void *)vptr) == 0)
+		if (vl > 0 && bpf_probe_read_user(s->path, vl, (void *)vptr) == 0) {
+			s->path[vl & (MAX_STRING_LEN - 1)] = '\0';
 			s->have_path = 1;
+		}
 	} else if (name[1] == 'm' && name[2] == 'e' && name[3] == 't') {
+		if (s->have_method)
+			return 0;
+		__builtin_memset(s->method, 0, sizeof(s->method));
 		u32 vl = vlen < (sizeof(s->method) - 1) ? (u32)vlen : (sizeof(s->method) - 1);
-		if (vl > 0)
-			bpf_probe_read_user(s->method, vl, (void *)vptr);
+		if (vl > 0 && bpf_probe_read_user(s->method, vl, (void *)vptr) == 0) {
+			s->method[vl & (sizeof(s->method) - 1)] = '\0';
+			s->have_method = 1;
+		}
 	} else if (name[1] == 's' && name[2] == 't' && name[3] == 'a') {
+		if (s->have_status)
+			return 0;
+		__builtin_memset(s->status, 0, sizeof(s->status));
 		u32 vl = vlen < (sizeof(s->status) - 1) ? (u32)vlen : (sizeof(s->status) - 1);
-		if (vl > 0 && bpf_probe_read_user(s->status, vl, (void *)vptr) == 0)
+		if (vl > 0 && bpf_probe_read_user(s->status, vl, (void *)vptr) == 0) {
+			s->status[vl & (sizeof(s->status) - 1)] = '\0';
 			s->have_status = 1;
+		}
 	}
 	return 0;
 }
