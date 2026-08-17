@@ -63,6 +63,16 @@ func TestSessionReconcile_ZeroMatchPastDeadlineFailsTerminally(t *testing.T) {
 	}
 }
 
+func TestSessionReconcilerNow_DefaultsToWallClock(t *testing.T) {
+	r := &PodTraceSessionReconciler{}
+	before := time.Now()
+	got := r.now()
+	after := time.Now()
+	if got.Before(before) || got.After(after) {
+		t.Fatalf("now() = %v, want within [%v, %v]", got, before, after)
+	}
+}
+
 func TestSessionReconcile_ZeroMatchBeforeDeadlineStaysPending(t *testing.T) {
 	r, g := newPendingDeadlineReconciler(t, pendingDeadlineCreated.Add(pendingMatchDeadline-time.Minute))
 

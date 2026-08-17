@@ -2,6 +2,8 @@ package operator
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -9,7 +11,9 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 )
@@ -70,5 +74,37 @@ func TestSessionReconcile_DeletionSweepsStaleNamespaceChildren(t *testing.T) {
 	err := c.Get(context.Background(), types.NamespacedName{Name: "job-stale", Namespace: "fleet-gone"}, &batchv1.Job{})
 	if !apierrors.IsNotFound(err) {
 		t.Fatalf("stale-namespace Job should have been swept before the finalizer cleared, err = %v", err)
+	}
+}
+
+func TestSessionChildNamespaces_ListErrorsSurface(t *testing.T) {
+	scheme := newOperatorScheme(t)
+	s := finTestSession()
+	cases := []struct {
+		name   string
+		failOn func(client.ObjectList) bool
+		want   string
+	}{
+		{"jobs", func(l client.ObjectList) bool { _, ok := l.(*batchv1.JobList); return ok }, "list session Jobs for cleanup"},
+		{"configmaps", func(l client.ObjectList) bool { _, ok := l.(*corev1.ConfigMapList); return ok }, "list session ConfigMaps for cleanup"},
+		{"secrets", func(l client.ObjectList) bool { _, ok := l.(*corev1.SecretList); return ok }, "list session Secrets for cleanup"},
+		{"serviceaccounts", func(l client.ObjectList) bool { _, ok := l.(*corev1.ServiceAccountList); return ok }, "list session ServiceAccounts for cleanup"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := fake.NewClientBuilder().WithScheme(scheme).
+				WithInterceptorFuncs(interceptor.Funcs{
+					List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+						if tc.failOn(list) {
+							return errors.New("boom")
+						}
+						return cl.List(ctx, list, opts...)
+					},
+				}).Build()
+			_, err := sessionChildNamespaces(context.Background(), c, s, nil)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want it to mention %q", err, tc.want)
+			}
+		})
 	}
 }
