@@ -129,6 +129,9 @@ func ValidateContainerID(containerID string) bool {
 }
 
 func SanitizeCSVField(field string) string {
+	if field != "" && strings.IndexByte("=+-@\t\r", field[0]) >= 0 {
+		field = "'" + field
+	}
 	if strings.ContainsAny(field, ",\"\n\r") {
 		field = strings.ReplaceAll(field, "\"", "\"\"")
 		return "\"" + field + "\""

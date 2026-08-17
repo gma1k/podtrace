@@ -110,11 +110,13 @@ func (r *Redactor) Redact(e *events.Event) {
 // rules so coverage cannot drift between formats.
 const credentialKeyNames = `password|passwd|pwd|token|api[_-]?key|apikey|secret|access[_-]?key|` +
 	`authorization|auth|bearer|session[_-]?id|jsessionid|phpsessid|asp\.net_sessionid|session|sid|` +
-	`csrf[_-]?token|xsrf[_-]?token|refresh[_-]?token|id[_-]?token`
+	`csrf[_-]?token|xsrf[_-]?token|refresh[_-]?token|id[_-]?token|` +
+	`private[_-]?key|client[_-]?key|passphrase|signature|credentials?`
 
 // sensitiveHeaderNames are HTTP header names whose entire value is a
 // credential (or a cookie jar of them).
 const sensitiveHeaderNames = `cookie|set-cookie|authorization|proxy-authorization|` +
+	`www-authenticate|proxy-authenticate|` +
 	`x-auth-token|x-api-key|x-csrf-token|x-xsrf-token`
 
 func defaultRules() []Rule {
@@ -138,6 +140,11 @@ func defaultRules() []Rule {
 			Name:    "basic_auth",
 			Pattern: regexp.MustCompile(`(?i)Basic\s+[A-Za-z0-9+/]+=*`),
 			Replace: "Basic ***",
+		},
+		{
+			Name:    "url_userinfo",
+			Pattern: regexp.MustCompile(`(?i)([a-z][a-z0-9+.\-]*://)[^/@\s]+@`),
+			Replace: "${1}***@",
 		},
 		{
 			Name:    "credential_json",
