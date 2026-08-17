@@ -55,42 +55,49 @@ func TestGetEnvOrDefault(t *testing.T) {
 	}
 }
 
-func TestGetFloatEnvOrDefault(t *testing.T) {
-	key := "TEST_FLOAT_ENV_VAR"
-	originalValue := os.Getenv(key)
-	defer func() {
-		if originalValue != "" {
-			_ = os.Setenv(key, originalValue)
-		} else {
-			_ = os.Unsetenv(key)
-		}
-	}()
-
-	tests := []struct {
-		name         string
-		setValue     string
-		defaultValue float64
-		expected     float64
+func TestGetFloatEnvInRange(t *testing.T) {
+	const key = "PODTRACE_TEST_FLOAT_RANGE"
+	cases := []struct {
+		value    string
+		def      float64
+		lo, hi   float64
+		expected float64
 	}{
-		{"valid float", "123.45", 0.0, 123.45},
-		{"valid int", "100", 0.0, 100.0},
-		{"invalid float", "invalid", 50.0, 50.0},
-		{"env not set", "", 50.0, 50.0},
-		{"empty string", "", 50.0, 50.0},
+		{"0.5", 0.9, 0, 1, 0.5},
+		{"0", 0.9, 0, 1, 0},
+		{"1", 0.9, 0, 1, 1},
+		{"1.5", 0.9, 0, 1, 0.9},
+		{"-0.1", 0.9, 0, 1, 0.9},
+		{"notanumber", 0.9, 0, 1, 0.9},
+		{"", 0.9, 0, 1, 0.9},
 	}
+	for _, c := range cases {
+		t.Setenv(key, c.value)
+		if got := getFloatEnvInRange(key, c.def, c.lo, c.hi); got != c.expected {
+			t.Errorf("getFloatEnvInRange(%q, [%g,%g]) = %g, want %g", c.value, c.lo, c.hi, got, c.expected)
+		}
+	}
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.setValue != "" {
-				_ = os.Setenv(key, tt.setValue)
-			} else {
-				_ = os.Unsetenv(key)
-			}
-			result := getFloatEnvOrDefault(key, tt.defaultValue)
-			if result != tt.expected {
-				t.Errorf("Expected %f, got %f", tt.expected, result)
-			}
-		})
+func TestGetPositiveFloatEnvOrDefault(t *testing.T) {
+	const key = "PODTRACE_TEST_FLOAT_POS"
+	cases := []struct {
+		value    string
+		def      float64
+		expected float64
+	}{
+		{"5", 500, 5},
+		{"0.001", 500, 0.001},
+		{"0", 500, 500},
+		{"-1", 500, 500},
+		{"notanumber", 500, 500},
+		{"", 500, 500},
+	}
+	for _, c := range cases {
+		t.Setenv(key, c.value)
+		if got := getPositiveFloatEnvOrDefault(key, c.def); got != c.expected {
+			t.Errorf("getPositiveFloatEnvOrDefault(%q) = %g, want %g", c.value, got, c.expected)
+		}
 	}
 }
 
