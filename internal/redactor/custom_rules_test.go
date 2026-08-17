@@ -56,3 +56,13 @@ func TestParseRules_MalformedJSON(t *testing.T) {
 		t.Fatal("expected error for malformed JSON")
 	}
 }
+
+func TestParseRules_InvalidPatternWithoutNameUsesIndex(t *testing.T) {
+	_, err := redactor.ParseRules(`[{"pattern":"[","replace":"x"}]`)
+	if err == nil {
+		t.Fatal("expected error for invalid regex")
+	}
+	if !strings.Contains(err.Error(), `"#0"`) {
+		t.Errorf("nameless invalid rule should be reported by index, got: %v", err)
+	}
+}
