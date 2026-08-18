@@ -9,6 +9,37 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.14.5](https://github.com/gma1k/podtrace/compare/v0.14.4...v0.14.5) (2026-08-18)
+
+
+### Bug Fixes
+
+* bound CR names stamped into label values to 63 chars ([#424](https://github.com/gma1k/podtrace/issues/424)) ([e4eacbc](https://github.com/gma1k/podtrace/commit/e4eacbcb64cde7d558dcba4e9228a8911ad176ee))
+* cap tracked traces and spans-per-trace to bound the trace map ([#418](https://github.com/gma1k/podtrace/issues/418)) ([d6980fe](https://github.com/gma1k/podtrace/commit/d6980fe308058f6183ae30ba07ce8f52bee0df89))
+* clamp gRPC status and bound the error_code metric label ([#414](https://github.com/gma1k/podtrace/issues/414)) ([b5996e9](https://github.com/gma1k/podtrace/commit/b5996e962f04cce32bd211803ee9a32735bfc509))
+* clear all side maps on the cgroup-prefilter early-out ([#421](https://github.com/gma1k/podtrace/issues/421)) ([e2a2823](https://github.com/gma1k/podtrace/commit/e2a28235533e3f68464210ddd145d9452cc17fce))
+* close operator tenancy gaps and bound session/map lifecycles ([#431](https://github.com/gma1k/podtrace/issues/431)) ([abafba5](https://github.com/gma1k/podtrace/commit/abafba52e5ae951fd0d70fe65622c801eaf49e4d))
+* close PII redaction gaps and CSV formula injection ([#429](https://github.com/gma1k/podtrace/issues/429)) ([d9fcbc5](https://github.com/gma1k/podtrace/commit/d9fcbc5208e1c4aacead6196332660ad4df71f0a))
+* confine kubelet-derived cgroup walk roots to the cgroup base ([#419](https://github.com/gma1k/podtrace/issues/419)) ([c00fcc5](https://github.com/gma1k/podtrace/commit/c00fcc5bd4582b25dadd442a38353258853c28ea))
+* correct BPF L7 parser desyncs and wire the gRPC port knob ([#432](https://github.com/gma1k/podtrace/issues/432)) ([4ef0756](https://github.com/gma1k/podtrace/commit/4ef0756db5fbbbe33b06b9dd38d5e018a91a2fbc))
+* guard exporter egress against SSRF, cleartext, and redirects ([#423](https://github.com/gma1k/podtrace/issues/423)) ([1adab35](https://github.com/gma1k/podtrace/commit/1adab35e3e444d4b12fce1e29d586b3beb3a9f80))
+* harden BPF attribution, bounds, and telemetry integrity ([#430](https://github.com/gma1k/podtrace/issues/430)) ([a70a9dd](https://github.com/gma1k/podtrace/commit/a70a9ddd600464fdb593568f57bd3263c3f896b7))
+* harden setup scripts/CI and tracer lifecycle races ([#425](https://github.com/gma1k/podtrace/issues/425)) ([21f7672](https://github.com/gma1k/podtrace/commit/21f76729a1c24b7fff6805fffa744aff1e7d9122))
+* honor human bool env values and range-check float config ([#428](https://github.com/gma1k/podtrace/issues/428)) ([f0ef064](https://github.com/gma1k/podtrace/commit/f0ef06453a186c0f211a18dec0a19ae647af0dbd))
+* rescope Trivy to vuln/secret and fix code-scanning findings ([#426](https://github.com/gma1k/podtrace/issues/426)) ([8a31278](https://github.com/gma1k/podtrace/commit/8a3127838dd59278c237ea02d84549fea7c7d7eb))
+* restore systemd cgroup walk and stop stale h2/h3 record bytes ([#420](https://github.com/gma1k/podtrace/issues/420)) ([dc93e1a](https://github.com/gma1k/podtrace/commit/dc93e1a3e1ed9fb565980a5a344013cb512a788d))
+* surface kernel event drops in agent metrics and status ([#422](https://github.com/gma1k/podtrace/issues/422)) ([0f9ec00](https://github.com/gma1k/podtrace/commit/0f9ec00fdfa06eadca15046bdef70fec33b40cef))
+
+
+### Documentation
+
+* reconcile CRD inventory in STABILITY.md (four -&gt; six) ([#415](https://github.com/gma1k/podtrace/issues/415)) ([64ee6ad](https://github.com/gma1k/podtrace/commit/64ee6ad0638ac78696393cf97f21213a04872a05))
+
+
+### Maintenance
+
+* **deps:** update golang:1.26.6-trixie docker digest to b75d466 ([#427](https://github.com/gma1k/podtrace/issues/427)) ([33cc98d](https://github.com/gma1k/podtrace/commit/33cc98df00809753685d101ccb7b7a8f49702974))
+
 ## [0.14.4](https://github.com/gma1k/podtrace/compare/v0.14.3...v0.14.4) (2026-08-15)
 
 
