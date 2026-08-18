@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"fmt"
+
 	"github.com/gma1k/podtrace/pkg/tracer"
 )
 
@@ -10,6 +12,9 @@ func newSplunkEventExporter(cr CRKey, b *BundlePayload, opts ...sdkOption) (trac
 	spanExporter, err := newOTLPSpanExporter(b)
 	if err != nil {
 		return nil, err
+	}
+	if len(b.Credential) == 0 {
+		return nil, fmt.Errorf("splunk exporter: missing token")
 	}
 	return newSDKEventExporter("splunk", cr, b, spanExporter, opts...)
 }

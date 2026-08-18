@@ -42,6 +42,7 @@ const (
 	DefaultProcessCacheEvictionRatio = 0.9
 	MaxPIDCacheSize                  = 10000
 	DefaultPIDCacheEvictionRatio     = 0.9
+	DefaultPIDCacheTTLSeconds        = 30
 	MaxStackDepth                    = 64
 	MaxTargetStringLength            = 256
 	MaxCgroupFilePathLength          = 64
@@ -92,6 +93,7 @@ var (
 	MaxSpansPerTrace          = getIntEnvOrDefault("PODTRACE_MAX_SPANS_PER_TRACE", 1000)
 	ProcessCacheEvictionRatio = getFloatEnvInRange("PODTRACE_PROCESS_CACHE_EVICTION_RATIO", DefaultProcessCacheEvictionRatio, 0, 1)
 	PIDCacheEvictionRatio     = getFloatEnvInRange("PODTRACE_PID_CACHE_EVICTION_RATIO", DefaultPIDCacheEvictionRatio, 0, 1)
+	PIDCacheTTLSeconds        = getIntEnvOrDefault("PODTRACE_PID_CACHE_TTL_SECONDS", DefaultPIDCacheTTLSeconds)
 	CacheEvictionThreshold    = getFloatEnvInRange("PODTRACE_CACHE_EVICTION_THRESHOLD", DefaultCacheEvictionThreshold, 0, 1)
 	RateLimitPerSec           = getIntEnvOrDefault("PODTRACE_RATE_LIMIT_PER_SEC", DefaultRateLimitPerSec)
 	RateLimitBurst            = getIntEnvOrDefault("PODTRACE_RATE_LIMIT_BURST", DefaultRateLimitBurst)

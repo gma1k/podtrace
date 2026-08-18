@@ -2,10 +2,6 @@
 changelog:
   exclude:
     authors:
-      - renovate
-      - renovate[bot]
-      - dependabot
-      - dependabot[bot]
       - github-actions
       - github-actions[bot]
     labels:
@@ -31,6 +27,8 @@ changelog:
       labels: [test, tests]
     - title: CI / Build
       labels: [ci, build]
+    - title: Dependencies
+      labels: [dependencies]
     - title: Maintenance
       labels: [chore, refactor, style, revert]
     - title: Other Changes

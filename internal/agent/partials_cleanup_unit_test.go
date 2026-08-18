@@ -13,11 +13,6 @@ import (
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 )
 
-// TestObserveExportDelivery_RecordsAndShortCircuits drives every branch
-// of ObserveExportDelivery: the nil-receiver, nil-error, and
-// non-positive-span guards must all be no-ops, while a real delivery
-// failure must add spanCount to export_delivery_dropped_total under the
-// ClassifyExporterError reason label.
 func TestObserveExportDelivery_RecordsAndShortCircuits(t *testing.T) {
 	cr := CRKey{Namespace: "ns", Name: "cr"}
 
@@ -51,11 +46,6 @@ func TestObserveExportDelivery_RecordsAndShortCircuits(t *testing.T) {
 	}
 }
 
-// TestDropErrorRateDetector_RemovesAndNilSafe covers both branches of
-// dropErrorRateDetector: the nil-receiver short-circuit, and the
-// delete-from-map path verified indirectly by observing that a dropped
-// detector is reconstructed fresh (and thus does not breach until it
-// re-accumulates a full sample window).
 func TestDropErrorRateDetector_RemovesAndNilSafe(t *testing.T) {
 	var nilM *Metrics
 	nilM.dropErrorRateDetector(CRKey{Namespace: "ns", Name: "gone"})
@@ -93,11 +83,6 @@ func TestDropErrorRateDetector_RemovesAndNilSafe(t *testing.T) {
 	}
 }
 
-// TestNewProbeServer_DefaultStallWindow covers the stallWindow<=0
-// fallback branch of NewProbeServer that the existing probe tests skip
-// (they always pass a positive window). The constructor only builds the
-// struct and records an initial Heartbeat; it binds no port, so this is
-// safe to exercise directly without a listener.
 func TestNewProbeServer_DefaultStallWindow(t *testing.T) {
 	const addr = "127.0.0.1:0"
 
@@ -128,10 +113,6 @@ func TestNewProbeServer_DefaultStallWindow(t *testing.T) {
 	}
 }
 
-// TestClassifyRuleErr_Arms covers classifyRuleErr directly, hitting the
-// nil guard and the "policy" Contains arm that buildNodeStatusEntry
-// fixtures do not reach, plus a representative prefix arm and the
-// unknown fallback.
 func TestClassifyRuleErr_Arms(t *testing.T) {
 	cases := []struct {
 		name string
@@ -155,21 +136,15 @@ func TestClassifyRuleErr_Arms(t *testing.T) {
 	}
 }
 
-// TestResolveCgroupIDs_NoCgroupHost covers the reachable path of
-// resolveCgroupIDs on a host without a kubepods hierarchy: scanPodCgroups
-// finds no root and returns no entries, so the result is an empty,
-// non-nil map and a nil error. The live-cgroup-stat branch (inode read
-// from a real kubelet cgroup tree) needs a kubepods root and is not
-// unit-testable here.
-func TestResolveCgroupIDs_NoCgroupHost(t *testing.T) {
+func TestResolveCgroupIDs_MatchedPodsZeroCgroupsErrors(t *testing.T) {
 	pods := []*corev1.Pod{
 		{ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "ns", UID: types.UID("11111111-2222-3333-4444-555555555555")}},
 		{ObjectMeta: metav1.ObjectMeta{Name: "p2", Namespace: "ns", UID: types.UID("66666666-7777-8888-9999-000000000000")}},
 	}
 
 	got, err := resolveCgroupIDs(pods)
-	if err != nil {
-		t.Fatalf("resolveCgroupIDs returned error: %v", err)
+	if err == nil {
+		t.Fatal("matched pods that resolve to zero cgroups must return an error, not a false-healthy success")
 	}
 	if got == nil {
 		t.Fatal("resolveCgroupIDs returned a nil map, want non-nil")
@@ -184,10 +159,6 @@ func TestResolveCgroupIDs_NoCgroupHost(t *testing.T) {
 	}
 }
 
-// TestResolveNodeName_EnvAndFallback drives both branches of
-// ResolveNodeName: the NODE_NAME env-set path (including whitespace
-// trimming) and the unset path that falls back to os.Hostname. The env
-// var is restored automatically by t.Setenv.
 func TestResolveNodeName_EnvAndFallback(t *testing.T) {
 	t.Setenv("NODE_NAME", "  worker-7  ")
 	if got := ResolveNodeName(); got != "worker-7" {

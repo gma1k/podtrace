@@ -63,9 +63,7 @@ func (sr *ServiceResolver) ResolveService(ctx context.Context, ip string, port i
 	}
 
 	if sr.informerCache != nil {
-		if svc := sr.informerCache.GetServiceByEndpoint(ip, port); svc != nil {
-			return svc
-		}
+		return sr.informerCache.GetServiceByEndpoint(ip, port)
 	}
 
 	cacheKey := fmt.Sprintf("%s:%d", ip, port)

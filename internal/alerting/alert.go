@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/sanitize"
 )
 
 type AlertSeverity string
@@ -92,17 +93,25 @@ func (a *Alert) Sanitize() {
 	if a == nil {
 		return
 	}
-	a.Title = truncateUTF8(a.Title, 256)
-	a.Message = truncateUTF8(a.Message, 1024)
-	a.PodName = truncateUTF8(a.PodName, 256)
-	a.Namespace = truncateUTF8(a.Namespace, 256)
-	a.Source = truncateUTF8(a.Source, 128)
-	a.ErrorCode = truncateUTF8(a.ErrorCode, 64)
+	// Strip terminal-unsafe runes (ANSI, control, bidi) before length-capping:
+	// alert fields carry attacker-influenced strings (e.g. an AF_ALG salg_name
+	// bound by an untrusted process) that flow to Slack/webhook sinks and logs.
+	a.Title = truncateUTF8(sanitize.Terminal(a.Title), 256)
+	a.Message = truncateUTF8(sanitize.Terminal(a.Message), 1024)
+	a.PodName = truncateUTF8(sanitize.Terminal(a.PodName), 256)
+	a.Namespace = truncateUTF8(sanitize.Terminal(a.Namespace), 256)
+	a.Source = truncateUTF8(sanitize.Terminal(a.Source), 128)
+	a.ErrorCode = truncateUTF8(sanitize.Terminal(a.ErrorCode), 64)
 	if len(a.Recommendations) > 10 {
 		a.Recommendations = a.Recommendations[:10]
 	}
 	for i, rec := range a.Recommendations {
-		a.Recommendations[i] = truncateUTF8(rec, 512)
+		a.Recommendations[i] = truncateUTF8(sanitize.Terminal(rec), 512)
+	}
+	for k, v := range a.Context {
+		if s, ok := v.(string); ok {
+			a.Context[k] = truncateUTF8(sanitize.Terminal(s), 512)
+		}
 	}
 }
 

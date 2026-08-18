@@ -42,9 +42,6 @@ func (e *fakeExporter) Close(_ context.Context) error {
 	return nil
 }
 
-// waitForCloses polls until the exporter's Close count reaches want.
-// Displaced exporters are closed asynchronously after Router.Publish (so a
-// hung collector cannot stall the reconcile loop), hence the wait.
 func waitForCloses(t *testing.T, e *fakeExporter, want int) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -137,8 +134,6 @@ func TestFilterToEventTypes_AllCategories(t *testing.T) {
 	}
 }
 
-// TestFilterToEventTypes_NetIncludesHTTP guards against the socket-level
-// HTTP/1.x events being dropped by the agent router.
 func TestFilterToEventTypes_NetIncludesHTTP(t *testing.T) {
 	got := filterToEventTypes(podtracev1alpha1.FilterNet)
 	want := map[events.EventType]bool{
@@ -957,8 +952,8 @@ func TestResolveCgroupIDs_SkipsUnresolvable(t *testing.T) {
 		},
 	}
 	out, err := resolveCgroupIDs(pods)
-	if err != nil {
-		t.Fatalf("expected nil error, got %v", err)
+	if err == nil {
+		t.Fatal("a matched pod that resolves to zero cgroups must error, not report false-healthy success")
 	}
 	if len(out) != 0 {
 		t.Errorf("expected empty result for synthetic pod, got %v", out)
