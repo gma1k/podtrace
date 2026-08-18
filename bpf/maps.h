@@ -192,6 +192,13 @@ struct {
 } dns_payload_enabled SEC(".maps");
 
 struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, u32);
+	__type(value, u32);
+} grpc_port_cfg SEC(".maps");
+
+struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(max_entries, 1);
 	__type(key, u32);
@@ -577,6 +584,13 @@ struct {
 } h2_recv_base SEC(".maps");
 
 struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u64);
+	__type(value, struct h2_recv_info);
+} h2_send_base SEC(".maps");
+
+struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
 	__uint(max_entries, 2 * 1024 * 1024);
 } h2_hdr_events SEC(".maps");
@@ -834,6 +848,8 @@ struct h2_frame_state {
 	u8  flags;
 	u8  preface_seen;
 	u8  pad;
+	u8  hdr_have;
+	u8  hdr_partial[9];
 };
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);

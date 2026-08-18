@@ -746,6 +746,7 @@ func NewTracer() (*Tracer, error) {
 	}
 	populateCaptureHeaderNames(coll, captureHeaders)
 	populatePidNamespace(coll)
+	setGRPCPort(coll, config.GRPCPort)
 
 	var quicrd *ringbuf.Reader
 	if m := coll.Maps["quic_initial_events"]; m != nil {
@@ -1790,6 +1791,26 @@ func (t *Tracer) runH2DecodeReader(ctx context.Context, eventChan chan<- *events
 }
 
 const dnsResolvedNameLen = 128
+
+// setGRPCPort publishes the runtime gRPC destination port (PODTRACE_GRPC_PORT)
+// into the array map the gRPC method probe filters on.
+func setGRPCPort(coll *ebpf.Collection, port int) {
+	if coll == nil || coll.Maps == nil {
+		return
+	}
+	m, ok := coll.Maps["grpc_port_cfg"]
+	if !ok || m == nil {
+		return
+	}
+	if port <= 0 || port > 65535 {
+		return
+	}
+	var zero uint32
+	val := uint32(port)
+	if err := m.Update(&zero, &val, ebpf.UpdateAny); err != nil {
+		logger.Warn("failed to set gRPC port config", zap.Error(err))
+	}
+}
 
 // setDNSPayloadFlag flips the dedicated array flag the DNS ingress program
 // consults before shipping raw DNS payloads.

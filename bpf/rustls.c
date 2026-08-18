@@ -28,9 +28,10 @@
 
 #define RUSTLS_PEEK 16
 
-static __always_inline u64 rustls_conn_key(void)
+static __always_inline u64 rustls_conn_key(u32 dir)
 {
-	struct tcp_peer *p = lookup_tcp_peer(PAIR_TCP_SENDMSG);
+	u32 prefer = (dir == H2_DIR_EGRESS) ? PAIR_TCP_SENDMSG : PAIR_TCP_RECVMSG;
+	struct tcp_peer *p = lookup_tcp_peer(prefer);
 	if (!p)
 		return 0;
 	return ((u64)p->saddr << 32) ^ (u64)p->daddr ^
@@ -40,7 +41,7 @@ static __always_inline u64 rustls_conn_key(void)
 static __always_inline void rustls_dispatch(void *ctx, void *base, u64 len,
 					    u64 conn, u32 dir)
 {
-	if (!base || len == 0)
+	if (!base || len == 0 || conn == 0)
 		return;
 	u8 peek[RUSTLS_PEEK] = {};
 	u32 plen = len < sizeof(peek) ? (u32)len : sizeof(peek);
@@ -61,8 +62,8 @@ int uprobe_rustls_write(struct pt_regs *ctx)
 {
 	if (!http_should_trace())
 		return 0;
-	rustls_dispatch(ctx, RUSTLS_BUF(ctx), RUSTLS_LEN(ctx), rustls_conn_key(),
-			H2_DIR_EGRESS);
+	rustls_dispatch(ctx, RUSTLS_BUF(ctx), RUSTLS_LEN(ctx),
+			rustls_conn_key(H2_DIR_EGRESS), H2_DIR_EGRESS);
 	return 0;
 }
 
@@ -76,7 +77,7 @@ int uprobe_rustls_read(struct pt_regs *ctx)
 	u64 key = get_key(pid, tid);
 	struct ssl_read_state st = {
 		.buf = (u64)RUSTLS_BUF(ctx),
-		.conn = rustls_conn_key(),
+		.conn = rustls_conn_key(H2_DIR_INGRESS),
 	};
 	bpf_map_update_elem(&rustls_read_args, &key, &st, BPF_ANY);
 	return 0;

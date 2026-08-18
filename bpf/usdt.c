@@ -7,8 +7,9 @@
 
 static __always_inline u32 usdt_put_char(char *buf, u32 pos, char c)
 {
-	pos &= (MAX_STRING_LEN - 1);
-	buf[pos] = c;
+	buf[pos & (MAX_STRING_LEN - 1)] = c;
+	if (pos >= MAX_STRING_LEN - 1)
+		return MAX_STRING_LEN - 1;
 	return pos + 1;
 }
 

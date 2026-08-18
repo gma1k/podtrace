@@ -585,7 +585,9 @@ SEC("tp/net/net_dev_xmit")
 int tracepoint_net_dev_xmit(void *ctx) {
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
 	struct net_dev_xmit_args args_local;
-	bpf_probe_read_kernel(&args_local, sizeof(args_local), ctx);
+	if (bpf_probe_read_kernel(&args_local, sizeof(args_local), ctx) != 0) {
+		return 0;
+	}
 	if (args_local.rc == 0) {
 		return 0;
 	}

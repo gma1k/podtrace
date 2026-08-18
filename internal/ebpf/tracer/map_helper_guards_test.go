@@ -21,6 +21,11 @@ func TestMapHelpers_NilAndMissingMapGuards(t *testing.T) {
 	setDNSPayloadFlag(nil, true)
 	setDNSPayloadFlag(emptyColl(), true)
 
+	setGRPCPort(nil, 50051)
+	setGRPCPort(emptyColl(), 50051)
+	setGRPCPort(emptyColl(), 0)
+	setGRPCPort(emptyColl(), 70000)
+
 	populatePidNamespace(&ebpf.Collection{})
 
 	populateCaptureHeaderNames(nil, nil)

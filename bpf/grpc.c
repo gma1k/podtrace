@@ -19,7 +19,10 @@ int kprobe_grpc_tcp_sendmsg(struct pt_regs *ctx)
 		return 0;
 
 	u16 dport = __builtin_bswap16(BPF_CORE_READ(sk, __sk_common.skc_dport));
-	if (dport != GRPC_DEFAULT_PORT)
+	u32 zero = 0;
+	u32 *cfg = bpf_map_lookup_elem(&grpc_port_cfg, &zero);
+	u16 want = (cfg && *cfg != 0 && *cfg <= 0xffff) ? (u16)*cfg : GRPC_DEFAULT_PORT;
+	if (dport != want)
 		return 0;
 
 	struct msghdr *msg = (struct msghdr *)PT_REGS_PARM2(ctx);
