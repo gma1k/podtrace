@@ -714,17 +714,17 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	}
 
 	if diagnoseDuration != "" {
-		return runDiagnoseModeWithSource(ctx, filteredChan, diagnoseDuration, podInfo, enricher, nil, tracingManager, enableTracing, sourceIndex.Resolve, profilingReporter)
+		return runDiagnoseModeWithSource(ctx, filteredChan, diagnoseDuration, podInfo, enricher, nil, sourceIndex.Resolve, profilingReporter)
 	}
 
-	return runNormalModeWithSource(ctx, filteredChan, podInfo, enricher, nil, tracingManager, enableTracing, sourceIndex.Resolve, profilingReporter)
+	return runNormalModeWithSource(ctx, filteredChan, podInfo, enricher, nil, sourceIndex.Resolve, profilingReporter)
 }
 
-func runNormalMode(ctx context.Context, eventChan <-chan *events.Event, podInfo *kubernetes.PodInfo, enricher *kubernetes.ContextEnricher, eventsCorrelator *kubernetes.EventsCorrelator, tracingManager *tracing.Manager, enableTracing bool) error {
-	return runNormalModeWithSource(ctx, eventChan, podInfo, enricher, eventsCorrelator, tracingManager, enableTracing, nil, nil)
+func runNormalMode(ctx context.Context, eventChan <-chan *events.Event, podInfo *kubernetes.PodInfo, enricher *kubernetes.ContextEnricher, eventsCorrelator *kubernetes.EventsCorrelator) error {
+	return runNormalModeWithSource(ctx, eventChan, podInfo, enricher, eventsCorrelator, nil, nil)
 }
 
-func runNormalModeWithSource(ctx context.Context, eventChan <-chan *events.Event, podInfo *kubernetes.PodInfo, enricher *kubernetes.ContextEnricher, _ *kubernetes.EventsCorrelator, tracingManager *tracing.Manager, enableTracing bool, resolveSource func(*events.Event) *kubernetes.PodInfo, profilingReporter profiling.Reporter) error {
+func runNormalModeWithSource(ctx context.Context, eventChan <-chan *events.Event, podInfo *kubernetes.PodInfo, enricher *kubernetes.ContextEnricher, _ *kubernetes.EventsCorrelator, resolveSource func(*events.Event) *kubernetes.PodInfo, profilingReporter profiling.Reporter) error {
 	logger.Info("Tracing started",
 		zap.Duration("update_interval", config.DefaultRealtimeUpdateInterval))
 
@@ -788,11 +788,11 @@ func runNormalModeWithSource(ctx context.Context, eventChan <-chan *events.Event
 	}
 }
 
-func runDiagnoseMode(ctx context.Context, eventChan <-chan *events.Event, durationStr string, podInfo *kubernetes.PodInfo, enricher *kubernetes.ContextEnricher, eventsCorrelator *kubernetes.EventsCorrelator, tracingManager *tracing.Manager, enableTracing bool) error {
-	return runDiagnoseModeWithSource(ctx, eventChan, durationStr, podInfo, enricher, eventsCorrelator, tracingManager, enableTracing, nil, nil)
+func runDiagnoseMode(ctx context.Context, eventChan <-chan *events.Event, durationStr string, podInfo *kubernetes.PodInfo, enricher *kubernetes.ContextEnricher, eventsCorrelator *kubernetes.EventsCorrelator) error {
+	return runDiagnoseModeWithSource(ctx, eventChan, durationStr, podInfo, enricher, eventsCorrelator, nil, nil)
 }
 
-func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Event, durationStr string, podInfo *kubernetes.PodInfo, enricher *kubernetes.ContextEnricher, _ *kubernetes.EventsCorrelator, tracingManager *tracing.Manager, enableTracing bool, resolveSource func(*events.Event) *kubernetes.PodInfo, profilingReporter profiling.Reporter) error {
+func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Event, durationStr string, podInfo *kubernetes.PodInfo, enricher *kubernetes.ContextEnricher, _ *kubernetes.EventsCorrelator, resolveSource func(*events.Event) *kubernetes.PodInfo, profilingReporter profiling.Reporter) error {
 	duration, err := time.ParseDuration(durationStr)
 	if err != nil {
 		return fmt.Errorf("invalid duration: %w", err)
@@ -919,6 +919,8 @@ func filterEvents(ctx context.Context, in <-chan *events.Event, out chan<- *even
 			case filterMap["proc"] && (event.Type == events.EventExec || event.Type == events.EventFork || event.Type == events.EventOpen || event.Type == events.EventClose):
 				shouldInclude = true
 			case filterMap["crypto"] && event.Type == events.EventAFALG:
+				shouldInclude = true
+			case filterMap["usdt"] && event.Type == events.EventUSDT:
 				shouldInclude = true
 			}
 			if shouldInclude {

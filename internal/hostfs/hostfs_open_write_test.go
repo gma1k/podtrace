@@ -70,3 +70,46 @@ func TestWriteFileAtomic_RenameFailureCleansTemp(t *testing.T) {
 		t.Errorf("temp file must be removed after a rename failure, stat err = %v", statErr)
 	}
 }
+
+func TestWriteFile_RefusesSymlinkTarget(t *testing.T) {
+	dir := t.TempDir()
+	secret := filepath.Join(dir, "secret")
+	if err := os.WriteFile(secret, []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "artifact")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Fatal(err)
+	}
+
+	err := WriteFile(link, []byte("redirected"), 0o600)
+	if err == nil {
+		t.Fatal("WriteFile through a symlink must be refused")
+	}
+
+	got, rerr := os.ReadFile(secret)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if string(got) != "original" {
+		t.Errorf("symlink target was overwritten: %q", got)
+	}
+}
+
+func TestWriteFile_PlainFileRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.txt")
+	if err := WriteFile(path, []byte("first"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := WriteFile(path, []byte("second"), 0o600); err != nil {
+		t.Fatalf("WriteFile overwrite: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "second" {
+		t.Errorf("content = %q, want %q", got, "second")
+	}
+}

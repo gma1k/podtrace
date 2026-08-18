@@ -6,6 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/events"
 )
 
@@ -151,6 +154,72 @@ func TestTeeEvents_SlowAuxiliaryDoesNotStallPrimary(t *testing.T) {
 			got++
 		case <-deadline:
 			t.Fatalf("primary stalled after %d events (auxiliary backpressure leaked)", got)
+		}
+	}
+}
+func promCounterTotal(t *testing.T, name string) float64 {
+	t.Helper()
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	for _, mf := range mfs {
+		if mf.GetName() == name {
+			return mf.GetMetric()[0].GetCounter().GetValue()
+		}
+	}
+	return 0
+}
+
+func TestTeeEvents_CountsAuxDropsWhenConsumerStalls(t *testing.T) {
+	origBuf := config.EventChannelBufferSize
+	config.EventChannelBufferSize = 1
+	defer func() { config.EventChannelBufferSize = origBuf }()
+
+	before := promCounterTotal(t, "podtrace_event_tee_aux_drops_total")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	source := make(chan *events.Event, 16)
+	primary, aux := teeEvents(ctx, source, 1)
+
+	const total = 8
+	for i := 0; i < total; i++ {
+		source <- &events.Event{PID: uint32(i + 1)}
+	}
+	close(source)
+
+	for range primary {
+	}
+	_ = aux
+
+	if got := promCounterTotal(t, "podtrace_event_tee_aux_drops_total") - before; got < 1 {
+		t.Fatalf("aux drops counted = %v, want >= 1 (a stalled consumer must be visible)", got)
+	}
+}
+
+func TestTeeEvents_PrimarySendCanceledByContext(t *testing.T) {
+	origBuf := config.EventChannelBufferSize
+	config.EventChannelBufferSize = 0
+	defer func() { config.EventChannelBufferSize = origBuf }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	source := make(chan *events.Event)
+	primary, _ := teeEvents(ctx, source, 0)
+
+	source <- &events.Event{PID: 1}
+	cancel()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case _, ok := <-primary:
+			if !ok {
+				return
+			}
+		case <-deadline:
+			t.Fatal("tee did not return after context cancel during a blocked primary send")
 		}
 	}
 }

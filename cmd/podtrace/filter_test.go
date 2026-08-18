@@ -65,6 +65,25 @@ func TestFilterEvents(t *testing.T) {
 			expected: 2,
 		},
 		{
+			name:   "usdt filter",
+			filter: "usdt",
+			events: []*events.Event{
+				{Type: events.EventUSDT},
+				{Type: events.EventConnect},
+				{Type: events.EventUSDT},
+			},
+			expected: 2,
+		},
+		{
+			name:   "crypto filter",
+			filter: "crypto",
+			events: []*events.Event{
+				{Type: events.EventAFALG},
+				{Type: events.EventConnect},
+			},
+			expected: 1,
+		},
+		{
 			name:   "multiple filters",
 			filter: "dns,net",
 			events: []*events.Event{
@@ -107,6 +126,21 @@ func TestFilterEvents(t *testing.T) {
 				t.Errorf("Expected %d events, got %d", tt.expected, count)
 			}
 		})
+	}
+}
+
+func TestFilterEvents_DropsAndCountsWhenOutFull(t *testing.T) {
+	before := promCounterTotal(t, "podtrace_filtered_event_drops_total")
+
+	in := make(chan *events.Event, 1)
+	out := make(chan *events.Event)
+	in <- &events.Event{Type: events.EventDNS}
+	close(in)
+
+	filterEvents(context.Background(), in, out, "dns")
+
+	if got := promCounterTotal(t, "podtrace_filtered_event_drops_total") - before; got < 1 {
+		t.Fatalf("filtered-event drop delta = %v, want >= 1 (a full out channel must be counted)", got)
 	}
 }
 

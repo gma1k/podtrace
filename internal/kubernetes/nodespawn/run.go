@@ -321,6 +321,8 @@ var dumpPodLogs = func(ctx context.Context, clientset kubernetes.Interface, name
 
 func ptrInt64(v int64) *int64 { return &v }
 
+func ptrBool(b bool) *bool { return &b }
+
 // ExitError carries a non-zero exit code from a spawned pod so the CLI can
 // propagate the same code to its caller.
 type ExitError struct {

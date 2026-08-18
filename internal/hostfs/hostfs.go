@@ -27,14 +27,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
-// ErrInvalidPath is returned when the supplied path is not absolute or
-// contains a ".." element.
 var ErrInvalidPath = errors.New("hostfs: path must be absolute and contain no '..' elements")
 
-// ErrUnsafeMode is returned by the write helpers when the requested mode
-// grants write permission to group or other.
 var ErrUnsafeMode = errors.New("hostfs: refusing to write with a group/other-writable mode")
 
 func validate(path string) error {
@@ -105,7 +102,15 @@ func WriteFile(path string, data []byte, perm os.FileMode) error {
 	if perm&0o022 != 0 {
 		return fmt.Errorf("%w: %#o (%s)", ErrUnsafeMode, perm, path)
 	}
-	return os.WriteFile(path, data, perm) // #nosec G304,G306 -- path validated absolute/no-"..", mode asserted non-group/other-writable above; some handoffs pass 0644 so a nonroot sidecar can read a root-written file over a pod-private emptyDir.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, perm) // #nosec G304 -- path validated absolute/no-".."; mode asserted non-group/other-writable above; O_NOFOLLOW blocks symlink redirection; some handoffs pass 0644 so a nonroot sidecar can read a root-written file over a pod-private emptyDir.
+	if err != nil {
+		return err
+	}
+	_, werr := f.Write(data)
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	return werr
 }
 
 // ErrOutsideBase is returned by WriteFileWithin when the target path

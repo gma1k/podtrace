@@ -24,3 +24,14 @@ func TestRecordFilteredEventDrop_DoesNotTouchRingBufferCounter(t *testing.T) {
 		t.Errorf("ring-buffer drop counter changed by %v, want 0 (distinct failure mode)", after-before)
 	}
 }
+
+func TestRecordTeeAuxDrop_IncrementsCounter(t *testing.T) {
+	before := testutil.ToFloat64(teeAuxDropsCounter)
+	RecordTeeAuxDrop()
+	RecordTeeAuxDrop()
+	RecordTeeAuxDrop()
+	after := testutil.ToFloat64(teeAuxDropsCounter)
+	if after-before != 3 {
+		t.Errorf("teeAuxDropsCounter delta = %v, want 3", after-before)
+	}
+}

@@ -20,6 +20,7 @@ import (
 	"github.com/gma1k/podtrace/internal/diagnose"
 	"github.com/gma1k/podtrace/internal/hostfs"
 	"github.com/gma1k/podtrace/internal/logger"
+	"github.com/gma1k/podtrace/internal/redactor"
 	"go.uber.org/zap"
 )
 
@@ -179,16 +180,22 @@ func writeTerminationMessage(path string, summary SessionSummary) error {
 	return writeArtifactFile(path, data, 0o600)
 }
 
-// objectStoreReportFile is the on-disk handoff path between the main
-// session container and the report-uploader sidecar. A var, not a const,
-// so tests can redirect it. Lives in a pod-private emptyDir.
 var objectStoreReportFile = "/var/run/podtrace/report.txt"
 
+// redactReportText scrubs the rendered report before it is persisted to any
+// sink.
+func redactReportText(reportText string) string {
+	red, err := redactor.DefaultWithCustomRules(config.RedactCustomRules)
+	if err != nil {
+		logger.Warn("custom redaction rules invalid; redacting report with defaults only", zap.Error(err))
+	}
+	return red.RedactText(reportText)
+}
+
 func uploadReport(ctx context.Context, spec, reportText string) error {
+	reportText = redactReportText(reportText)
 	if strings.Contains(spec, "://") {
-		// 0644 (other-readable) is required, not lax: the main container runs
-		// as root but the report-uploader sidecar is the distroless nonroot
-		// user, and it must read this file over the shared emptyDir.
+
 		if err := hostfs.WriteFileAtomic(objectStoreReportFile, []byte(reportText), 0o644); err != nil {
 			return fmt.Errorf("write report file for sidecar: %w", err)
 		}

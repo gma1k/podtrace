@@ -142,6 +142,13 @@ var (
 		},
 	)
 
+	teeAuxDropsCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "podtrace_event_tee_aux_drops_total",
+			Help: "Total events dropped for a secondary consumer (metrics/tracing/profiling) because its fan-out channel was full. A non-zero rate means those consumers undercount relative to the primary diagnose report.",
+		},
+	)
+
 	processCacheHitsCounter = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "podtrace_process_cache_hits_total",
@@ -410,6 +417,7 @@ func init() {
 	prometheus.MustRegister(ringBufferDropsCounter)
 	prometheus.MustRegister(dnsDropsCounter)
 	prometheus.MustRegister(filteredEventDropsCounter)
+	prometheus.MustRegister(teeAuxDropsCounter)
 	prometheus.MustRegister(processCacheHitsCounter)
 	prometheus.MustRegister(processCacheMissesCounter)
 	prometheus.MustRegister(pidCacheHitsCounter)
@@ -744,6 +752,10 @@ func RecordRingBufferDrop() {
 // a kernel ring-buffer drop and must not inflate that metric.
 func RecordFilteredEventDrop() {
 	filteredEventDropsCounter.Inc()
+}
+
+func RecordTeeAuxDrop() {
+	teeAuxDropsCounter.Inc()
 }
 
 func AddDNSDrops(delta uint64) {

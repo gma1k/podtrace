@@ -127,8 +127,10 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 					Env:             env,
 					Resources:       tc.Spec.Agent.Resources,
 					SecurityContext: &corev1.SecurityContext{
-						Privileged: &priv,
-						RunAsUser:  &runAsRoot,
+						Privileged:               &priv,
+						RunAsUser:                &runAsRoot,
+						AllowPrivilegeEscalation: boolPtr(false),
+						SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 						Capabilities: &corev1.Capabilities{
 							Add: []corev1.Capability{
 								"BPF", "SYS_ADMIN", "PERFMON", "SYS_RESOURCE", "NET_ADMIN", "SYS_PTRACE",
@@ -185,6 +187,8 @@ func mountPropagationHostToContainer() *corev1.MountPropagationMode {
 }
 
 func ptrInt64(v int64) *int64 { return &v }
+
+func boolPtr(b bool) *bool { return &b }
 func itoa(n int) string       { return strconv.Itoa(n) }
 
 // intstrFromString returns an IntOrString whose StrVal names a port by
