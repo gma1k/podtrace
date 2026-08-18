@@ -32,6 +32,7 @@ func TestGroupForProbe_TLSPlaintextProbes(t *testing.T) {
 func TestGroupForProbe_H2Probes(t *testing.T) {
 	for _, prog := range []string{
 		"kprobe_h2_tcp_sendmsg",
+		"kretprobe_h2_tcp_sendmsg",
 		"kprobe_h2_tcp_recvmsg",
 		"kretprobe_h2_tcp_recvmsg",
 	} {

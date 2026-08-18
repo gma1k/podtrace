@@ -135,17 +135,51 @@ static long h2_frames_cb(u32 idx, void *vctx)
 		return 0;
 	}
 
-	if (off + HTTP2_FRAME_HDR > c->avail)
-		return 1;
 	u8 fh[HTTP2_FRAME_HDR];
-	if (bpf_probe_read_user(fh, sizeof(fh), (u8 *)c->base + off) != 0)
-		return 1;
+	if (fs->hdr_have > 0) {
+		u32 have = fs->hdr_have;
+		u32 avail_here = c->avail - off;
+		u32 need = HTTP2_FRAME_HDR - have;
+		if (avail_here < need) {
+			fs->hdr_have = 0;
+			return 1;
+		}
+#pragma clang loop unroll(full)
+		for (u32 i = 0; i < HTTP2_FRAME_HDR; i++) {
+			if (i < have) {
+				fh[i] = fs->hdr_partial[i];
+			} else {
+				u8 b = 0;
+				bpf_probe_read_user(&b, 1, (u8 *)c->base + off + (i - have));
+				fh[i] = b;
+			}
+		}
+		off += need;
+		fs->hdr_have = 0;
+	} else {
+		if (off + HTTP2_FRAME_HDR > c->avail) {
+			u32 tail = c->avail - off;
+#pragma clang loop unroll(full)
+			for (u32 i = 0; i < HTTP2_FRAME_HDR; i++) {
+				if (i < tail) {
+					u8 b = 0;
+					bpf_probe_read_user(&b, 1, (u8 *)c->base + off + i);
+					fs->hdr_partial[i] = b;
+				}
+			}
+			fs->hdr_have = (u8)tail;
+			s->off = c->avail;
+			return 1;
+		}
+		if (bpf_probe_read_user(fh, sizeof(fh), (u8 *)c->base + off) != 0)
+			return 1;
+		off += HTTP2_FRAME_HDR;
+	}
 	u32 flen = ((u32)fh[0] << 16) | ((u32)fh[1] << 8) | (u32)fh[2];
 	u8 type = fh[3];
 	u8 flags = fh[4];
 	u32 sid = (((u32)fh[5] << 24) | ((u32)fh[6] << 16) |
 		   ((u32)fh[7] << 8) | (u32)fh[8]) & 0x7fffffff;
-	off += HTTP2_FRAME_HDR;
 
 	u8 pad_bytes = 0;
 	if (type == HTTP2_HEADERS) {
@@ -154,8 +188,9 @@ static long h2_frames_cb(u32 idx, void *vctx)
 			if (bpf_probe_read_user(&pb, 1, (u8 *)c->base + off) == 0) {
 				off += 1;
 				flen = flen >= 1 ? flen - 1 : 0;
-				flen = flen >= pb ? flen - pb : 0;
-				pad_bytes = pb;
+				u32 pad = pb <= flen ? pb : flen;
+				flen -= pad;
+				pad_bytes = (u8)pad;
 			}
 		}
 		if (flags & HTTP2_FLAG_PRIORITY) {
@@ -254,11 +289,43 @@ int kprobe_h2_tcp_sendmsg(struct pt_regs *ctx)
 	if (!http_should_trace())
 		return 0;
 
-	u64 conn = (u64)PT_REGS_PARM1(ctx);
 	struct msghdr *msg = (struct msghdr *)PT_REGS_PARM2(ctx);
 	u64 avail = 0;
 	void *base = msghdr_user_base(msg, &avail);
-	h2_emit_frames(base, avail, conn, H2_DIR_EGRESS, HTTP_TRANSPORT_H2C);
+	if (!base)
+		return 0;
+
+	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 tid = (u32)bpf_get_current_pid_tgid();
+	u64 key = get_key(pid, tid);
+
+	struct h2_recv_info info = {
+		.base = (u64)base,
+		.conn_id = (u64)PT_REGS_PARM1(ctx),
+	};
+	bpf_map_update_elem(&h2_send_base, &key, &info, BPF_ANY);
+	return 0;
+}
+
+SEC("kretprobe/tcp_sendmsg")
+int kretprobe_h2_tcp_sendmsg(struct pt_regs *ctx)
+{
+	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 tid = (u32)bpf_get_current_pid_tgid();
+	u64 key = get_key(pid, tid);
+
+	struct h2_recv_info *info = bpf_map_lookup_elem(&h2_send_base, &key);
+	if (!info)
+		return 0;
+	void *base = (void *)info->base;
+	u64 conn = info->conn_id;
+	bpf_map_delete_elem(&h2_send_base, &key);
+
+	s64 ret = PT_REGS_RC(ctx);
+	if (ret <= 0)
+		return 0;
+
+	h2_emit_frames(base, (u64)ret, conn, H2_DIR_EGRESS, HTTP_TRANSPORT_H2C);
 	return 0;
 }
 
@@ -339,6 +406,9 @@ int kprobe_h2_tcp_close(struct pt_regs *ctx)
 
 SEC("kprobe/tcp_sendmsg")
 int kprobe_h2_tcp_sendmsg(struct pt_regs *ctx) { return 0; }
+
+SEC("kretprobe/tcp_sendmsg")
+int kretprobe_h2_tcp_sendmsg(struct pt_regs *ctx) { return 0; }
 
 SEC("kprobe/tcp_recvmsg")
 int kprobe_h2_tcp_recvmsg(struct pt_regs *ctx) { return 0; }

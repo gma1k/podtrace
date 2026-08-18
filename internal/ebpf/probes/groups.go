@@ -132,6 +132,7 @@ var probeGroupMap = map[string]ProbeGroup{
 
 	// HTTP/2 h2c (HPACK endpoint capture)
 	"kprobe_h2_tcp_sendmsg":    GroupNetwork,
+	"kretprobe_h2_tcp_sendmsg": GroupNetwork,
 	"kprobe_h2_tcp_recvmsg":    GroupNetwork,
 	"kretprobe_h2_tcp_recvmsg": GroupNetwork,
 	"kprobe_h2_tcp_close":      GroupNetwork,
