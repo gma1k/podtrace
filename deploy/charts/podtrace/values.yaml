@@ -127,6 +127,10 @@ metrics:
     interval: 30s
     path: /metrics
 
+networkPolicy:
+  enabled: false
+  metricsFrom: []
+
 tracerConfig:
   create: true
   name: default

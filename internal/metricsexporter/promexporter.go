@@ -298,22 +298,6 @@ var (
 		[]string{"pool_id", "process_name", "namespace"},
 	)
 
-	poolConnectionsGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "podtrace_pool_connections_current",
-			Help: "Current number of connections in pool.",
-		},
-		[]string{"pool_id", "process_name", "namespace"},
-	)
-
-	poolUtilizationGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "podtrace_pool_utilization_percent",
-			Help: "Pool utilization percentage (current/max * 100).",
-		},
-		[]string{"pool_id", "process_name", "namespace"},
-	)
-
 	eventChannelDepthGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "podtrace_event_channel_depth",
@@ -445,8 +429,6 @@ func init() {
 	prometheus.MustRegister(poolReleasesCounter)
 	prometheus.MustRegister(poolExhaustedCounter)
 	prometheus.MustRegister(poolWaitTimeHistogram)
-	prometheus.MustRegister(poolConnectionsGauge)
-	prometheus.MustRegister(poolUtilizationGauge)
 	prometheus.MustRegister(eventChannelDepthGauge)
 	prometheus.MustRegister(bpfMapUtilizationGauge)
 	prometheus.MustRegister(redisLatencyHistogram)
@@ -864,7 +846,22 @@ func addrIsLoopback(addr string) bool {
 }
 
 type Server struct {
-	server *http.Server
+	server   *http.Server
+	stop     chan struct{}
+	stopOnce sync.Once
+}
+
+const resetLatestGaugeInterval = 5 * time.Minute
+
+// ResetLatestGauges clears the "latest value" gauges so a dead process's last
+// sample stops being reported as the current value.
+func ResetLatestGauges() {
+	dnsGauge.Reset()
+	fsGauge.Reset()
+	cpuGauge.Reset()
+	rttGauge.Reset()
+	latencyGauge.Reset()
+	tlsGauge.Reset()
 }
 
 func StartServer() *Server {
@@ -900,7 +897,20 @@ func StartServer() *Server {
 		WriteTimeout: config.DefaultMetricsWriteTimeout,
 	}
 
-	srv := &Server{server: server}
+	srv := &Server{server: server, stop: make(chan struct{})}
+
+	go func() {
+		t := time.NewTicker(resetLatestGaugeInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-srv.stop:
+				return
+			case <-t.C:
+				ResetLatestGauges()
+			}
+		}
+	}()
 
 	go func() {
 		defer func() {
@@ -923,6 +933,11 @@ func StartServer() *Server {
 }
 
 func (s *Server) Shutdown() {
+	s.stopOnce.Do(func() {
+		if s.stop != nil {
+			close(s.stop)
+		}
+	})
 	if s.server != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), config.DefaultMetricsShutdownTimeout)
 		defer cancel()

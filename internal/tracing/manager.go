@@ -272,46 +272,45 @@ func (m *Manager) exporterTargets() []exporterTarget {
 // interval). force (shutdown) flushes spans of traces that are still
 // settling.
 func (m *Manager) exportTraces(force bool) {
-	traces := m.traceTracker.SnapshotForExport(m.exportInterval, force)
-	if len(traces) == 0 {
+	for _, target := range m.exporterTargets() {
+		traces := m.traceTracker.SnapshotForExport(m.exportInterval, force, target.name)
+		if len(traces) == 0 {
+			continue
+		}
+		if err := target.export(traces); err != nil {
+			m.reportExporterFailure(target, err)
+			continue
+		}
+		// Advance only this exporter's watermark, on its own success.
+		m.traceTracker.CommitExport(traces, target.name)
+	}
+}
+
+// reportExporterFailure logs and (unless suppressed) raises an alert for a
+// failed export.
+func (m *Manager) reportExporterFailure(target exporterTarget, err error) {
+	safeErr := alerting.RedactURLsInText(err.Error())
+	logger.Warn("Failed to export traces", zap.String("exporter", target.name), zap.String("error", safeErr))
+	if target.suppressAlert {
 		return
 	}
-
-	allSucceeded := true
-	for _, target := range m.exporterTargets() {
-		err := target.export(traces)
-		if err == nil {
-			continue
-		}
-		allSucceeded = false
-		logger.Warn("Failed to export traces", zap.String("exporter", target.name), zap.Error(err))
-		if target.suppressAlert {
-			continue
-		}
-		manager := alerting.GetGlobalManager()
-		if manager == nil {
-			continue
-		}
-		manager.SendAlert(&alerting.Alert{
-			Severity:  alerting.SeverityWarning,
-			Title:     fmt.Sprintf("%s Exporter Failure", strings.ToUpper(target.name[:1])+target.name[1:]),
-			Message:   fmt.Sprintf("Failed to export traces to %s: %v", target.name, err),
-			Timestamp: time.Now(),
-			Source:    "exporter",
-			Context: map[string]interface{}{
-				"exporter": target.name,
-				"endpoint": target.endpoint,
-				"error":    err.Error(),
-			},
-			Recommendations: target.recommendations,
-		})
+	manager := alerting.GetGlobalManager()
+	if manager == nil {
+		return
 	}
-
-	// Advance the per-trace watermark only when every exporter accepted the
-	// spans.
-	if allSucceeded {
-		m.traceTracker.CommitExport(traces)
-	}
+	manager.SendAlert(&alerting.Alert{
+		Severity:  alerting.SeverityWarning,
+		Title:     fmt.Sprintf("%s Exporter Failure", strings.ToUpper(target.name[:1])+target.name[1:]),
+		Message:   fmt.Sprintf("Failed to export traces to %s: %s", target.name, safeErr),
+		Timestamp: time.Now(),
+		Source:    "exporter",
+		Context: map[string]interface{}{
+			"exporter": target.name,
+			"endpoint": alerting.RedactURLForLog(target.endpoint),
+			"error":    safeErr,
+		},
+		Recommendations: target.recommendations,
+	})
 }
 
 func (m *Manager) GetRequestFlowGraph() *graph.RequestFlowGraph {

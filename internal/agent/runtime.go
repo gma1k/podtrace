@@ -237,6 +237,16 @@ func buildBackend(opts Options, logger logr.Logger) (tracer.TracerBackend, error
 	return backend, nil
 }
 
+func newMetricsServer(handler http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+}
+
 // serveMetrics exposes the agent's Prometheus registry on the
 // metrics-addr port. Short-circuit when the address is empty — useful
 // in tests.
@@ -251,10 +261,7 @@ func serveMetrics(ctx context.Context, addr string, metrics *Metrics, logger log
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", addr, err)
 	}
-	srv := &http.Server{
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
+	srv := newMetricsServer(mux)
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)

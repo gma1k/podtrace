@@ -29,8 +29,9 @@ type Handler struct {
 	profiler    *PodProfiler
 	mu          sync.RWMutex
 	result      *CorrelatedResult
-	triggered   atomic.Bool // rate-limit: only one auto-trigger per session
+	triggered   atomic.Bool
 	triggerChan chan triggerReq
+	sem         chan struct{}
 	podIP       string
 }
 
@@ -42,11 +43,29 @@ type triggerReq struct {
 // NewHandler creates a Handler for the pod at podIP. ports is the list of
 // candidate pprof HTTP ports to probe.
 func NewHandler(podIP string, ports []int) *Handler {
+	concurrency := config.ProfilingMaxConcurrent
+	if concurrency < 1 {
+		concurrency = 1
+	}
 	return &Handler{
 		profiler:    NewPodProfiler(podIP, ports),
-		triggerChan: make(chan triggerReq, config.ProfilingMaxConcurrent),
+		triggerChan: make(chan triggerReq, concurrency),
+		sem:         make(chan struct{}, concurrency),
 		podIP:       podIP,
 	}
+}
+
+// clampProfileDuration bounds a requested profile duration to a sane maximum so
+// an on-demand request cannot pin a profile fetch (and its worker slot) open
+// for an arbitrarily long time.
+func clampProfileDuration(d time.Duration) time.Duration {
+	if d <= 0 {
+		return config.ProfilingDefaultDuration
+	}
+	if max := config.ProfilingMaxDuration; max > 0 && d > max {
+		return max
+	}
+	return d
 }
 
 // Run consumes eventChan, watching for latency spikes that auto-trigger a
@@ -61,7 +80,11 @@ func (h *Handler) Run(ctx context.Context, eventChan <-chan *events.Event) {
 		case <-ctx.Done():
 			return
 		case req := <-h.triggerChan:
-			h.doProfile(ctx, req.ptype, req.duration)
+			go func(req triggerReq) {
+				h.sem <- struct{}{}
+				defer func() { <-h.sem }()
+				h.doProfile(ctx, req.ptype, req.duration)
+			}(req)
 		case e, ok := <-eventChan:
 			if !ok {
 				return
@@ -103,9 +126,7 @@ func (h *Handler) checkSpike(ctx context.Context, e *events.Event) {
 
 // doProfile fetches the requested profile type and stores/updates the result.
 func (h *Handler) doProfile(ctx context.Context, ptype ProfileType, duration time.Duration) {
-	if duration == 0 {
-		duration = config.ProfilingDefaultDuration
-	}
+	duration = clampProfileDuration(duration)
 
 	var heap, goroutine *ProfileResult
 
@@ -229,7 +250,7 @@ func (h *Handler) HTTPStart(w http.ResponseWriter, r *http.Request) {
 	dur := config.ProfilingDefaultDuration
 	if durationStr != "" {
 		if d, err := time.ParseDuration(durationStr); err == nil && d > 0 {
-			dur = d
+			dur = clampProfileDuration(d)
 		}
 	}
 

@@ -183,13 +183,28 @@ func (d *Diagnostician) CalculateRate(count int, duration time.Duration) float64
 	return 0
 }
 
+// FilterEvents returns the events of a given type.
 func (d *Diagnostician) FilterEvents(eventType events.EventType) []*events.Event {
-	allEvents := d.GetEvents()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
 	var filtered []*events.Event
-	for _, e := range allEvents {
-		if e.Type == eventType {
+	match := func(e *events.Event) {
+		if e != nil && e.Type == eventType {
 			filtered = append(filtered, e)
 		}
+	}
+	if !d.wrapped {
+		for _, e := range d.events {
+			match(e)
+		}
+		return filtered
+	}
+	for _, e := range d.events[d.evHead:] {
+		match(e)
+	}
+	for _, e := range d.events[:d.evHead] {
+		match(e)
 	}
 	return filtered
 }
@@ -215,7 +230,9 @@ func (d *Diagnostician) FSSlowThreshold() float64 {
 }
 
 func (d *Diagnostician) GenerateReport() string {
-	return d.GenerateReportWithContext(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), config.ReportGenerationTimeout)
+	defer cancel()
+	return d.GenerateReportWithContext(ctx)
 }
 
 func (d *Diagnostician) GenerateReportWithContext(ctx context.Context) string {

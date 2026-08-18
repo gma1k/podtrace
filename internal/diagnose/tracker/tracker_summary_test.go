@@ -129,7 +129,7 @@ func TestProcessEvent_NonMapContextIgnored(t *testing.T) {
 
 func TestCommitExport_UnknownTraceSkipped(t *testing.T) {
 	tt := NewTraceTracker()
-	tt.CommitExport([]*Trace{{TraceID: "does-not-exist", Spans: []*Span{{SpanID: "x"}}}})
+	tt.CommitExport([]*Trace{{TraceID: "does-not-exist", Spans: []*Span{{SpanID: "x"}}}}, "otlp")
 	if tt.GetTraceCount() != 0 {
 		t.Error("committing an unknown trace must not create state")
 	}
@@ -140,9 +140,9 @@ func TestCommitExport_ClampsExportedSpans(t *testing.T) {
 	tt.ProcessEvent(&events.Event{Type: events.EventHTTPReq, TraceID: "t1", SpanID: "s1"}, nil)
 
 	overClaim := &Trace{TraceID: "t1", Spans: []*Span{{SpanID: "a"}, {SpanID: "b"}, {SpanID: "c"}}}
-	tt.CommitExport([]*Trace{overClaim})
+	tt.CommitExport([]*Trace{overClaim}, "otlp")
 
-	if got := tt.SnapshotForExport(time.Hour, true); len(got) != 0 {
+	if got := tt.SnapshotForExport(time.Hour, true, "otlp"); len(got) != 0 {
 		t.Errorf("watermark must clamp to the live span count; re-export = %d traces", len(got))
 	}
 }

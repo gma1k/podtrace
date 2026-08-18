@@ -71,7 +71,7 @@ func TestSplunkExporter_exportTrace_NoSpans(t *testing.T) {
 		TraceID: "test",
 		Spans:   []*tracker.Span{},
 	}
-	err := exporter.exportTrace(trace)
+	err := exporter.ExportTraces([]*tracker.Trace{trace})
 	if err != nil {
 		t.Errorf("exportTrace() error = %v", err)
 	}
@@ -102,7 +102,7 @@ func TestSplunkExporter_exportTrace_WithSpans(t *testing.T) {
 			},
 		},
 	}
-	err = exporter.exportTrace(trace)
+	err = exporter.ExportTraces([]*tracker.Trace{trace})
 	if err == nil {
 		t.Log("exportTrace() succeeded (may fail in CI without server)")
 	} else {
@@ -193,7 +193,7 @@ func TestSplunkExporter_exportTrace_WithErrorSpan(t *testing.T) {
 		},
 	}
 
-	err = exporter.exportTrace(trace)
+	err = exporter.ExportTraces([]*tracker.Trace{trace})
 	if err != nil {
 		t.Logf("exportTrace() error (expected for test without server): %v", err)
 	}
@@ -219,7 +219,7 @@ func TestSplunkExporter_exportTrace_WithToken(t *testing.T) {
 		},
 	}
 
-	err = exporter.exportTrace(trace)
+	err = exporter.ExportTraces([]*tracker.Trace{trace})
 	if err != nil {
 		t.Logf("exportTrace() error (expected for test without server): %v", err)
 	}
@@ -246,7 +246,7 @@ func TestSplunkExporter_exportTrace_WithParentSpanID(t *testing.T) {
 		},
 	}
 
-	err = exporter.exportTrace(trace)
+	err = exporter.ExportTraces([]*tracker.Trace{trace})
 	if err != nil {
 		t.Logf("exportTrace() error (expected for test without server): %v", err)
 	}
