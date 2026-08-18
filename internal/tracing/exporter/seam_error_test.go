@@ -28,8 +28,8 @@ func TestExportTrace_MarshalError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sp.exportTrace(newTestTrace()); err == nil || !strings.Contains(err.Error(), "marshal") {
-		t.Errorf("splunk exportTrace: err=%v, want marshal error", err)
+	if err := sp.sendBatch(sp.buildEvents(newTestTrace())); err == nil || !strings.Contains(err.Error(), "marshal") {
+		t.Errorf("splunk sendBatch: err=%v, want marshal error", err)
 	}
 
 	zp, err := NewZipkinExporter("https://collector.example.com", 1.0)

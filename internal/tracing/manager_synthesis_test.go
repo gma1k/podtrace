@@ -55,7 +55,7 @@ func httpResp(corr uint64, tsNS, latencyNS uint64) *events.Event {
 
 func onlySpan(t *testing.T, m *Manager) *tracker.Span {
 	t.Helper()
-	traces := m.traceTracker.SnapshotForExport(0, true)
+	traces := m.traceTracker.SnapshotForExport(0, true, "otlp")
 	if len(traces) != 1 {
 		t.Fatalf("expected 1 trace, got %d", len(traces))
 	}

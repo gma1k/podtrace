@@ -13,6 +13,13 @@ import (
 	"github.com/gma1k/podtrace/internal/sanitize"
 )
 
+// maxCorrelatedSlowEvents caps the slow events retained for reporting and, more
+// importantly, the number of time windows the SchedSwitch scan tests each event
+// against, keeping that scan O(N_sched * maxCorrelatedSlowEvents) rather than
+// O(N_sched * N_slow), which blows up on a busy pod where both counts reach
+// config.MaxEvents.
+const maxCorrelatedSlowEvents = 20
+
 func safeInt64(v uint64) int64 {
 	if v > math.MaxInt64 {
 		return math.MaxInt64
@@ -39,29 +46,21 @@ type ProcessCPU struct {
 // slow events, CPU hot-path frames from SchedSwitch stacks, memory page-fault
 // data, and optional pprof endpoint results fetched from the pod.
 type CorrelatedResult struct {
-	// Slow events that exceeded the latency trigger threshold.
 	SlowEvents []*events.Event
 
-	// CPU hot frames aggregated from EventSchedSwitch events whose time windows
-	// overlap with slow events (matched using BPF-to-wall-clock alignment).
 	HotFrames []FrameCount
 
-	// All SchedSwitch events aggregated by process.
 	CPUHotProcesses []ProcessCPU
 
-	// Memory — BPF-observed page faults and OOM kills.
 	PageFaultCounts map[uint32]int // PID → fault count
 	OOMEvents       []*events.Event
 
-	// Optional pprof endpoint data (nil if pod has no pprof server).
 	HeapProfile      *ProfileResult
 	GoroutineProfile *ProfileResult
 
-	// Whether a pprof endpoint was found on the pod.
 	PprofAvailable bool
 	PodIP          string
 
-	// Time range covered by the correlation.
 	StartTime time.Time
 	EndTime   time.Time
 }
@@ -94,10 +93,7 @@ func Correlate(
 
 	triggerNS := uint64(cpuTriggerMS * float64(config.NSPerMS))
 
-	// Collect slow events and build time windows around them.
-	type window struct{ start, end time.Time }
-	var slowWindows []window
-
+	// Collect slow events (windows are built after capping, below).
 	for _, e := range allEvents {
 		if e == nil {
 			continue
@@ -114,23 +110,26 @@ func Correlate(
 
 		if e.LatencyNS >= triggerNS && isSlowEventType(e.Type) {
 			result.SlowEvents = append(result.SlowEvents, e)
-			eventWall := clock.BPFTimestampToWall(e.Timestamp)
-			slowWindows = append(slowWindows, window{
-				start: eventWall.Add(-50 * time.Millisecond),
-				end:   eventWall.Add(time.Duration(safeInt64(e.LatencyNS)) + 50*time.Millisecond),
-			})
 		}
 	}
 
-	// Sort slow events by latency (highest first).
 	sort.Slice(result.SlowEvents, func(i, j int) bool {
 		return result.SlowEvents[i].LatencyNS > result.SlowEvents[j].LatencyNS
 	})
-	if len(result.SlowEvents) > 20 {
-		result.SlowEvents = result.SlowEvents[:20]
+	if len(result.SlowEvents) > maxCorrelatedSlowEvents {
+		result.SlowEvents = result.SlowEvents[:maxCorrelatedSlowEvents]
 	}
 
-	// Aggregate SchedSwitch events: per-process stats + hot frames during slow windows.
+	type window struct{ start, end time.Time }
+	slowWindows := make([]window, 0, len(result.SlowEvents))
+	for _, e := range result.SlowEvents {
+		eventWall := clock.BPFTimestampToWall(e.Timestamp)
+		slowWindows = append(slowWindows, window{
+			start: eventWall.Add(-50 * time.Millisecond),
+			end:   eventWall.Add(time.Duration(safeInt64(e.LatencyNS)) + 50*time.Millisecond),
+		})
+	}
+
 	pidStats := map[uint32]*ProcessCPU{}
 	frameAgg := map[string]int{}
 
@@ -171,7 +170,6 @@ func Correlate(
 		}
 	}
 
-	// Finalise per-process averages.
 	for _, ps := range pidStats {
 		if ps.SchedCount > 0 {
 			ps.AvgBlockNS /= float64(ps.SchedCount)
@@ -185,7 +183,6 @@ func Correlate(
 		result.CPUHotProcesses = result.CPUHotProcesses[:10]
 	}
 
-	// Convert frame map to sorted slice.
 	for frame, count := range frameAgg {
 		result.HotFrames = append(result.HotFrames, FrameCount{Frame: frame, Count: count})
 	}
@@ -236,7 +233,6 @@ func GenerateSection(cr *CorrelatedResult, duration time.Duration) string {
 	var sb strings.Builder
 	sb.WriteString("Performance Profiling Correlation:\n")
 
-	// pprof availability notice.
 	if cr.PprofAvailable {
 		fmt.Fprintf(&sb, "  pprof endpoint: available (pod %s)\n", cr.PodIP)
 	} else {
@@ -246,7 +242,6 @@ func GenerateSection(cr *CorrelatedResult, duration time.Duration) string {
 	}
 	sb.WriteString("\n")
 
-	// Slow events summary.
 	if len(cr.SlowEvents) > 0 {
 		fmt.Fprintf(&sb, "  Slow events (> threshold) count: %d\n", len(cr.SlowEvents))
 		sb.WriteString("  Top slow events:\n")
@@ -264,7 +259,6 @@ func GenerateSection(cr *CorrelatedResult, duration time.Duration) string {
 		sb.WriteString("\n")
 	}
 
-	// CPU hot processes from SchedSwitch.
 	if len(cr.CPUHotProcesses) > 0 {
 		sb.WriteString("  CPU Scheduling Activity (from BPF sched_switch):\n")
 		fmt.Fprintf(&sb, "    %-8s  %-16s  %-10s  %s\n",
@@ -277,7 +271,6 @@ func GenerateSection(cr *CorrelatedResult, duration time.Duration) string {
 		sb.WriteString("\n")
 	}
 
-	// Hot frames correlated with slow events.
 	if len(cr.HotFrames) > 0 {
 		sb.WriteString("  CPU hot frames during slow-event windows (BPF stacks):\n")
 		for i, f := range cr.HotFrames {
@@ -289,7 +282,6 @@ func GenerateSection(cr *CorrelatedResult, duration time.Duration) string {
 		sb.WriteString("  (Use addr2line or go tool pprof to resolve addresses to function names)\n\n")
 	}
 
-	// Goroutine data.
 	if cr.GoroutineProfile != nil && cr.GoroutineProfile.Available {
 		fmt.Fprintf(&sb, "  Goroutines: %d total, %d blocked\n",
 			cr.GoroutineProfile.GoroutineCount,
@@ -300,7 +292,6 @@ func GenerateSection(cr *CorrelatedResult, duration time.Duration) string {
 		sb.WriteString("\n")
 	}
 
-	// Heap data.
 	if cr.HeapProfile != nil && cr.HeapProfile.Available && len(cr.HeapProfile.TopFunctions) > 0 {
 		sb.WriteString("  Top heap allocating functions (from pprof heap profile):\n")
 		for i, f := range cr.HeapProfile.TopFunctions {
@@ -313,7 +304,6 @@ func GenerateSection(cr *CorrelatedResult, duration time.Duration) string {
 		sb.WriteString("\n")
 	}
 
-	// Page faults.
 	if len(cr.PageFaultCounts) > 0 {
 		type kv struct {
 			pid   uint32
@@ -334,7 +324,6 @@ func GenerateSection(cr *CorrelatedResult, duration time.Duration) string {
 		sb.WriteString("\n")
 	}
 
-	// OOM events.
 	if len(cr.OOMEvents) > 0 {
 		fmt.Fprintf(&sb, "  OOM Kill events: %d\n", len(cr.OOMEvents))
 		for _, e := range cr.OOMEvents {

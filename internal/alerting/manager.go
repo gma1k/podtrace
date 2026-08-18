@@ -3,6 +3,8 @@ package alerting
 import (
 	"context"
 	"net/url"
+	"regexp"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -55,7 +57,8 @@ func deliveryBudget() time.Duration {
 	return budget + 5*time.Second
 }
 
-// redactURLForLog returns a URL safe to log (query and fragment stripped).
+// redactURLForLog returns a URL safe to log (userinfo, query and fragment
+// stripped, only scheme://host retained).
 func redactURLForLog(raw string) string {
 	if raw == "" {
 		return ""
@@ -65,6 +68,19 @@ func redactURLForLog(raw string) string {
 		return "[invalid-url]"
 	}
 	return u.Scheme + "://" + u.Host
+}
+
+func RedactURLForLog(raw string) string {
+	return redactURLForLog(raw)
+}
+
+var embeddedURLPattern = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^\s"'<>` + "`" + `]+`)
+
+func RedactURLsInText(s string) string {
+	return embeddedURLPattern.ReplaceAllStringFunc(s, func(match string) string {
+		trimmed := strings.TrimRight(match, `.,:;!?)]}"'`)
+		return redactURLForLog(trimmed) + match[len(trimmed):]
+	})
 }
 
 func NewManager() (*Manager, error) {

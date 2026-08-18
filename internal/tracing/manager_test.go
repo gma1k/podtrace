@@ -215,8 +215,7 @@ func TestManager_Start_Enabled(t *testing.T) {
 	}
 
 	time.Sleep(10 * time.Millisecond)
-	cancel()
-	time.Sleep(10 * time.Millisecond)
+	_ = manager.Shutdown(context.Background())
 }
 
 func TestManager_Start_StopCh(t *testing.T) {
@@ -237,7 +236,7 @@ func TestManager_Start_StopCh(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 	close(manager.stopCh)
-	time.Sleep(10 * time.Millisecond)
+	manager.wg.Wait()
 }
 
 func TestManager_ExportLoop_Ticker(t *testing.T) {
@@ -261,8 +260,7 @@ func TestManager_ExportLoop_Ticker(t *testing.T) {
 	}
 
 	time.Sleep(30 * time.Millisecond)
-	cancel()
-	time.Sleep(10 * time.Millisecond)
+	_ = manager.Shutdown(context.Background())
 }
 
 func TestManager_CleanupLoop_Ticker(t *testing.T) {
@@ -286,8 +284,7 @@ func TestManager_CleanupLoop_Ticker(t *testing.T) {
 	}
 
 	time.Sleep(30 * time.Millisecond)
-	cancel()
-	time.Sleep(10 * time.Millisecond)
+	_ = manager.Shutdown(context.Background())
 }
 
 func TestManager_ExportTraces_Empty(t *testing.T) {

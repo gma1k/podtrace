@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/gma1k/podtrace/internal/config"
@@ -144,6 +145,7 @@ func (e *ZipkinExporter) exportTrace(t *tracker.Trace) error {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
 	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
 	}()
 

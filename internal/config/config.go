@@ -139,6 +139,9 @@ var (
 	ProfilingAutoTriggerMS   = getPositiveFloatEnvOrDefault("PODTRACE_PROFILING_AUTO_TRIGGER_MS", DefaultProfilingAutoTriggerMS)
 	ProfilingDefaultDuration = getDurationEnvOrDefault("PODTRACE_PROFILING_DEFAULT_DURATION", DefaultProfilingDuration)
 	ProfilingMaxConcurrent   = getIntEnvOrDefault("PODTRACE_PROFILING_MAX_CONCURRENT", DefaultProfilingMaxConcurrent)
+	ProfilingMaxDuration     = getDurationEnvOrDefault("PODTRACE_PROFILING_MAX_DURATION", DefaultProfilingMaxDuration)
+
+	ReportGenerationTimeout = getDurationEnvOrDefault("PODTRACE_REPORT_GENERATION_TIMEOUT", DefaultReportGenerationTimeout)
 )
 
 const (
@@ -149,6 +152,7 @@ const (
 	DefaultRealtimeUpdateInterval  = 5 * time.Second
 	DefaultErrorLogInterval        = 5 * time.Second
 	DefaultAddr2lineTimeout        = 500 * time.Millisecond
+	DefaultReportGenerationTimeout = 25 * time.Second
 	MinBurstWindowDuration         = 100 * time.Millisecond
 	MaxDiagnoseDuration            = 24 * time.Hour
 	DefaultK8sAPITimeout           = 500 * time.Millisecond
@@ -199,6 +203,7 @@ const (
 	DefaultProfilingAutoTriggerMS = 500.0
 	DefaultProfilingDuration      = 30 * time.Second
 	DefaultProfilingMaxConcurrent = 1
+	DefaultProfilingMaxDuration   = 5 * time.Minute
 )
 
 const (

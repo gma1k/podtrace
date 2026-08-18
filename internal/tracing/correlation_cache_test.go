@@ -126,7 +126,7 @@ func TestManager_ExportTraces_SuccessAdvancesWatermark(t *testing.T) {
 	}, nil)
 
 	m.exportTraces(true)
-	if got := m.traceTracker.SnapshotForExport(m.exportInterval, true); len(got) != 0 {
+	if got := m.traceTracker.SnapshotForExport(m.exportInterval, true, "otlp"); len(got) != 0 {
 		t.Errorf("a successful export must advance the watermark; re-export snapshot = %d traces", len(got))
 	}
 }
@@ -180,7 +180,7 @@ func TestManager_ExportTraces_SplunkFailureAlertSuppressed(t *testing.T) {
 	}, nil)
 
 	m.exportTraces(true)
-	if got := m.traceTracker.SnapshotForExport(m.exportInterval, true); len(got) == 0 {
+	if got := m.traceTracker.SnapshotForExport(m.exportInterval, true, "splunk"); len(got) == 0 {
 		t.Error("a failed export must not advance the watermark; the trace should remain exportable")
 	}
 }
