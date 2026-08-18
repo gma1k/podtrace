@@ -386,7 +386,7 @@ func TestSDKEventExporter_NameIncludesBackend(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			b := &BundlePayload{Type: "otlp", Endpoint: cs.endpointHostPort(), Insecure: true}
+			b := &BundlePayload{Type: "otlp", Endpoint: cs.endpointHostPort(), Insecure: true, HeaderName: "X-Auth", Credential: []byte("test-token")}
 			exp, err := tc.build(CRKey{"ns", "cr"}, b)
 			if err != nil {
 				t.Fatalf("build: %v", err)

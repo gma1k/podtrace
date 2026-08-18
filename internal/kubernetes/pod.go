@@ -406,7 +406,7 @@ func resolveCgroupPathCRI(ctx context.Context, containerID string) (string, erro
 	roots := cgroupRootCandidates()
 
 	if strings.HasPrefix(cg, "/") {
-		if _, err := os.Stat(cg); err == nil {
+		if statCgroupDirHasProcs(cg) {
 			if cg != config.CgroupBasePath {
 				return cg, nil
 			}
@@ -433,7 +433,7 @@ func resolveCgroupPathCRI(ctx context.Context, containerID string) (string, erro
 		if fullPath == root {
 			continue
 		}
-		if _, err := os.Stat(fullPath); err == nil {
+		if statCgroupDirHasProcs(fullPath) {
 			return fullPath, nil
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/metricsexporter"
@@ -13,19 +14,40 @@ import (
 
 var readFile = os.ReadFile
 
+type pidCacheEntry struct {
+	result bool
+	at     time.Time
+}
+
 type CgroupFilter struct {
 	cgroupPath  string
 	cgroupPaths map[string]struct{}
-	pidCache    map[uint32]bool
+	pidCache    map[uint32]pidCacheEntry
 	pidCacheMu  sync.RWMutex
 	pathsMu     sync.RWMutex
+	now         func() time.Time
+	ttl         time.Duration
 }
 
 func NewCgroupFilter() *CgroupFilter {
 	return &CgroupFilter{
 		cgroupPaths: make(map[string]struct{}),
-		pidCache:    make(map[uint32]bool),
+		pidCache:    make(map[uint32]pidCacheEntry),
 	}
+}
+
+func (f *CgroupFilter) clock() time.Time {
+	if f.now != nil {
+		return f.now()
+	}
+	return time.Now()
+}
+
+func (f *CgroupFilter) cacheTTL() time.Duration {
+	if f.ttl > 0 {
+		return f.ttl
+	}
+	return time.Duration(config.PIDCacheTTLSeconds) * time.Second
 }
 
 func (f *CgroupFilter) SetCgroupPath(path string) {
@@ -37,7 +59,7 @@ func (f *CgroupFilter) SetCgroupPath(path string) {
 	}
 	f.pathsMu.Unlock()
 	f.pidCacheMu.Lock()
-	f.pidCache = make(map[uint32]bool)
+	f.pidCache = make(map[uint32]pidCacheEntry)
 	f.pidCacheMu.Unlock()
 }
 
@@ -53,7 +75,7 @@ func (f *CgroupFilter) SetCgroupPaths(paths []string) {
 	}
 	f.pathsMu.Unlock()
 	f.pidCacheMu.Lock()
-	f.pidCache = make(map[uint32]bool)
+	f.pidCache = make(map[uint32]pidCacheEntry)
 	f.pidCacheMu.Unlock()
 }
 
@@ -102,10 +124,10 @@ func (f *CgroupFilter) IsPIDInCgroup(pid uint32) bool {
 	}
 
 	f.pidCacheMu.RLock()
-	if cached, ok := f.pidCache[pid]; ok {
+	if cached, ok := f.pidCache[pid]; ok && f.clock().Sub(cached.at) < f.cacheTTL() {
 		f.pidCacheMu.RUnlock()
 		metricsexporter.RecordPIDCacheHit()
-		return cached
+		return cached.result
 	}
 	f.pidCacheMu.RUnlock()
 	metricsexporter.RecordPIDCacheMiss()
@@ -117,7 +139,7 @@ func (f *CgroupFilter) IsPIDInCgroup(pid uint32) bool {
 	data, err := readFile(cgroupFile)
 	if err != nil {
 		f.pidCacheMu.Lock()
-		f.pidCache[pid] = false
+		f.pidCache[pid] = pidCacheEntry{result: false, at: f.clock()}
 		if len(f.pidCache) > config.MaxPIDCacheSize {
 			evictCount := len(f.pidCache) / 10
 			if evictCount < 1 {
@@ -139,7 +161,7 @@ func (f *CgroupFilter) IsPIDInCgroup(pid uint32) bool {
 	pidCgroupPath := ExtractCgroupPathFromProc(cgroupContent)
 	if pidCgroupPath == "" {
 		f.pidCacheMu.Lock()
-		f.pidCache[pid] = false
+		f.pidCache[pid] = pidCacheEntry{result: false, at: f.clock()}
 		if len(f.pidCache) > config.MaxPIDCacheSize {
 			evictCount := len(f.pidCache) / 10
 			if evictCount < 1 {
@@ -183,7 +205,7 @@ func (f *CgroupFilter) IsPIDInCgroup(pid uint32) bool {
 			}
 		}
 	}
-	f.pidCache[pid] = result
+	f.pidCache[pid] = pidCacheEntry{result: result, at: f.clock()}
 	f.pidCacheMu.Unlock()
 
 	return result

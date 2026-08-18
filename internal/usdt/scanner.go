@@ -19,6 +19,8 @@ type Probe struct {
 	Args     []Arg
 }
 
+const maxScannedProbes = 4096
+
 // Scan parses the .note.stapsdt section of exePath and returns all USDT probes.
 // Returns nil, nil when no USDT probes are present.
 func Scan(exePath string) (probes []Probe, err error) {
@@ -53,6 +55,9 @@ func parseStapsdtNotes(data []byte, order binary.ByteOrder) []Probe {
 	dlen := uint64(len(data))
 	var offset uint64
 	for offset+12 <= dlen {
+		if len(probes) >= maxScannedProbes {
+			break
+		}
 		nameSz := uint64(order.Uint32(data[offset:]))
 		descSz := uint64(order.Uint32(data[offset+4:]))
 		noteType := order.Uint32(data[offset+8:])

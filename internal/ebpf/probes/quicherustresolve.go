@@ -14,17 +14,16 @@ import (
 	"github.com/gma1k/podtrace/internal/logger"
 )
 
-// quicheRustSendRequestPattern matches quiche::h3::Connection::send_request
-// in both Rust manglings via the length-prefixed identifiers.
 var quicheRustSendRequestPattern = []string{"6quiche", "2h3", "12send_request"}
 
-// maxQuicheRustAttachments bounds how many send_request monomorphizations
-// get a probe; typical binaries have exactly one (T = quiche::h3::Header).
 const maxQuicheRustAttachments = 4
 
 // findSymbolsContaining returns the virtual addresses of up to max defined
 // function symbols whose names contain every given substring.
 func findSymbolsContaining(f *elf.File, max int, subs ...string) []uint64 {
+	if !symbolSectionWithinCap(f, ".symtab") {
+		return nil
+	}
 	syms, err := f.Symbols()
 	if err != nil {
 		return nil
@@ -46,8 +45,8 @@ func findSymbolsContaining(f *elf.File, max int, subs ...string) []uint64 {
 
 // AttachQuicheRustProbes attaches a uprobe on
 // quiche::h3::Connection::send_request in a statically-linked Rust binary.
-func AttachQuicheRustProbes(coll *ebpf.Collection, pid uint32) []link.Link {
-	var links []link.Link
+func AttachQuicheRustProbes(coll *ebpf.Collection, pid uint32) (links []link.Link) {
+	defer recoverParse("AttachQuicheRustProbes")
 	if pid == 0 || runtime.GOARCH != "amd64" {
 		return links
 	}
@@ -57,7 +56,7 @@ func AttachQuicheRustProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 	}
 
 	exePath := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "exe")
-	f, err := elf.Open(exePath)
+	f, err := openELFCapped(exePath)
 	if err != nil {
 		return links
 	}

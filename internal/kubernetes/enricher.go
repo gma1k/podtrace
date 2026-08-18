@@ -57,7 +57,6 @@ const negativeCacheTTL = 30 * time.Second
 type ContextEnricher struct {
 	clientset       kubernetes.Interface
 	podCache        *sync.Map
-	serviceCache    *sync.Map
 	podInfo         *PodInfo
 	serviceResolver *ServiceResolver
 	cacheTTL        time.Duration
@@ -70,7 +69,6 @@ func NewContextEnricher(clientset kubernetes.Interface, podInfo *PodInfo) *Conte
 	return &ContextEnricher{
 		clientset:       clientset,
 		podCache:        &sync.Map{},
-		serviceCache:    &sync.Map{},
 		podInfo:         podInfo,
 		serviceResolver: NewServiceResolverWithCache(clientset, ic),
 		cacheTTL:        ttl,
@@ -120,6 +118,11 @@ func (ce *ContextEnricher) EnrichEvent(ctx context.Context, event *events.Event)
 }
 
 func (ce *ContextEnricher) enrichNetworkTarget(ctx context.Context, enriched *EnrichedEvent, ip string, port int) {
+	if !isPrivateIP(ip) {
+		enriched.KubernetesContext.IsExternal = true
+		return
+	}
+
 	enrichCtx, cancel := context.WithTimeout(ctx, config.K8sAPITimeout)
 	defer cancel()
 
@@ -135,11 +138,6 @@ func (ce *ContextEnricher) enrichNetworkTarget(ctx context.Context, enriched *En
 		enriched.KubernetesContext.TargetPodName = podMeta.Name
 		enriched.KubernetesContext.TargetNamespace = podMeta.Namespace
 		enriched.KubernetesContext.TargetLabels = podMeta.Labels
-		return
-	}
-
-	if !isPrivateIP(ip) {
-		enriched.KubernetesContext.IsExternal = true
 	}
 }
 

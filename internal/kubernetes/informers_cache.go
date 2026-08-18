@@ -44,7 +44,6 @@ func NewInformerCache(clientset kubernetes.Interface) *InformerCache {
 }
 
 func (ic *InformerCache) Enabled() bool {
-	// Default enabled; can be disabled explicitly.
 	return config.K8sUseInformers()
 }
 
@@ -67,6 +66,7 @@ func (ic *InformerCache) Start(ctx context.Context) {
 	factory := informers.NewSharedInformerFactoryWithOptions(ic.clientset, resync, informers.WithNamespace(metav1.NamespaceAll))
 
 	podInf := factory.Core().V1().Pods().Informer()
+	_ = podInf.SetTransform(trimPodForCache)
 	_ = podInf.AddIndexers(cache.Indexers{
 		podIPIndex: func(obj interface{}) ([]string, error) {
 			pod, ok := obj.(*corev1.Pod)
@@ -81,6 +81,7 @@ func (ic *InformerCache) Start(ctx context.Context) {
 	})
 
 	esInf := factory.Discovery().V1().EndpointSlices().Informer()
+	_ = esInf.SetTransform(trimEndpointSliceForCache)
 	_ = esInf.AddIndexers(cache.Indexers{
 		ipOnlyIndex: func(obj interface{}) ([]string, error) {
 			es, ok := obj.(*discoveryv1.EndpointSlice)
@@ -237,4 +238,35 @@ func (ic *InformerCache) GetServiceByEndpoint(ip string, port int) *ServiceInfo 
 		return nil
 	}
 	return &ServiceInfo{Name: svcName, Namespace: es.Namespace, Port: port}
+}
+
+// trimPodForCache drops everything the enricher never reads before a Pod is
+// stored in the shared informer.
+func trimPodForCache(obj interface{}) (interface{}, error) {
+	pod, ok := obj.(*corev1.Pod)
+	if !ok {
+		return obj, nil
+	}
+	pod.ManagedFields = nil
+	pod.Annotations = nil
+	pod.OwnerReferences = nil
+	pod.Finalizers = nil
+	pod.Spec = corev1.PodSpec{}
+	pod.Status = corev1.PodStatus{PodIP: pod.Status.PodIP, PodIPs: pod.Status.PodIPs}
+	return pod, nil
+}
+
+// trimEndpointSliceForCache clears the heavy metadata the resolver never reads.
+// Endpoints, Ports and Labels (indexed by ipOnlyIndex/ipPortIndex and read by
+// GetServiceByEndpoint) are preserved.
+func trimEndpointSliceForCache(obj interface{}) (interface{}, error) {
+	es, ok := obj.(*discoveryv1.EndpointSlice)
+	if !ok {
+		return obj, nil
+	}
+	es.ManagedFields = nil
+	es.Annotations = nil
+	es.OwnerReferences = nil
+	es.Finalizers = nil
+	return es, nil
 }

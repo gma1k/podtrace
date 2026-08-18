@@ -55,8 +55,7 @@ type AgentReconciler struct {
 
 	exporterCacheMu sync.Mutex
 	exporterCache   map[CRKey]cachedExporter
-	// pendingClose accumulates exporters displaced during a reconcile.
-	pendingClose []tracer.Exporter
+	pendingClose    []tracer.Exporter
 }
 
 // exporterCloseTimeout bounds the asynchronous flush+shutdown of displaced
@@ -370,6 +369,9 @@ func resolveCgroupIDs(pods []*corev1.Pod) (map[uint64]struct{}, error) {
 	out := make(map[uint64]struct{}, len(entries))
 	for _, e := range entries {
 		out[e.CgroupID] = struct{}{}
+	}
+	if len(pods) > 0 && len(out) == 0 {
+		return out, fmt.Errorf("no cgroups resolved for %d matched pod(s)", len(pods))
 	}
 	return out, nil
 }
