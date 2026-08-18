@@ -29,7 +29,7 @@ func TestRunNormalModeWithSource_ConsumesEventsThenReturnsOnCancel(t *testing.T)
 	reporter := &fakeProfilingReporter{}
 	done := make(chan error, 1)
 	go func() {
-		done <- runNormalModeWithSource(ctx, ch, nil, nil, nil, nil, false, nil, reporter)
+		done <- runNormalModeWithSource(ctx, ch, nil, nil, nil, nil, reporter)
 	}()
 
 	time.Sleep(50 * time.Millisecond)
@@ -58,7 +58,7 @@ func TestRunNormalMode_WrapperReturnsOnCancel(t *testing.T) {
 	podInfo := &kubernetes.PodInfo{PodName: "p", Namespace: "default"}
 	done := make(chan error, 1)
 	go func() {
-		done <- runNormalMode(ctx, ch, podInfo, nil, nil, nil, false)
+		done <- runNormalMode(ctx, ch, podInfo, nil, nil)
 	}()
 
 	cancel()

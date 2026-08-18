@@ -23,9 +23,6 @@ func tc(mod func(*podtracev1alpha1.TracerConfig)) *podtracev1alpha1.TracerConfig
 }
 
 func TestBuildAgentDaemonSetSpec_SelectorStability(t *testing.T) {
-	// The DaemonSet selector is IMMUTABLE after creation — agent pods
-	// would orphan themselves if it changed. Lock in the key labels the
-	// selector depends on.
 	spec := buildAgentDaemonSetSpec(tc(nil), "podtrace-system")
 	want := map[string]string{
 		LabelManagedBy:    ManagedByValue,
@@ -55,6 +52,12 @@ func TestBuildAgentDaemonSetSpec_CapabilitiesNotPrivileged(t *testing.T) {
 	}
 	if c.SecurityContext.RunAsUser == nil || *c.SecurityContext.RunAsUser != 0 {
 		t.Error("agent must run as root (user 0)")
+	}
+	if c.SecurityContext.AllowPrivilegeEscalation == nil || *c.SecurityContext.AllowPrivilegeEscalation {
+		t.Error("agent must set allowPrivilegeEscalation=false")
+	}
+	if c.SecurityContext.SeccompProfile == nil || c.SecurityContext.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
+		t.Errorf("agent must set seccompProfile RuntimeDefault, got %+v", c.SecurityContext.SeccompProfile)
 	}
 	wantCaps := map[corev1.Capability]bool{
 		"BPF": false, "SYS_ADMIN": false, "PERFMON": false, "SYS_RESOURCE": false, "NET_ADMIN": false,
@@ -153,7 +156,6 @@ func TestBuildAgentDaemonSetSpec_PriorityClassDefault(t *testing.T) {
 	if spec.Template.Spec.PriorityClassName != "system-node-critical" {
 		t.Errorf("priorityClassName=%q want system-node-critical", spec.Template.Spec.PriorityClassName)
 	}
-	// Explicit override wins.
 	spec = buildAgentDaemonSetSpec(tc(func(x *podtracev1alpha1.TracerConfig) {
 		x.Spec.Agent.PriorityClassName = "podtrace-high"
 	}), "podtrace-system")

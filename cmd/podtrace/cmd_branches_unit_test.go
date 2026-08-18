@@ -46,7 +46,7 @@ func TestRunDiagnoseModeWithSource_InvalidDuration(t *testing.T) {
 
 	ch := make(chan *events.Event)
 	err := runDiagnoseModeWithSource(context.Background(), ch, "not-a-duration",
-		nil, nil, nil, nil, false, nil, nil)
+		nil, nil, nil, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "invalid duration") {
 		t.Fatalf("expected invalid duration error, got %v", err)
 	}
@@ -58,7 +58,7 @@ func TestRunDiagnoseModeWithSource_NonPositiveDuration(t *testing.T) {
 
 	ch := make(chan *events.Event)
 	err := runDiagnoseModeWithSource(context.Background(), ch, "0s",
-		nil, nil, nil, nil, false, nil, nil)
+		nil, nil, nil, nil, nil)
 	if err == nil {
 		t.Fatalf("expected validation error for non-positive duration, got nil")
 	}
@@ -77,7 +77,7 @@ func TestRunDiagnoseModeWithSource_TimeoutFinishDrainsEvents(t *testing.T) {
 
 	out := captureStdout(t, func() {
 		if err := runDiagnoseModeWithSource(context.Background(), ch, "120ms",
-			nil, nil, nil, nil, false, nil, nil); err != nil {
+			nil, nil, nil, nil, nil); err != nil {
 			t.Fatalf("unexpected error from timeout finish: %v", err)
 		}
 	})
@@ -103,7 +103,7 @@ func TestRunDiagnoseModeWithSource_ContextCancelFinish(t *testing.T) {
 
 	out := captureStdout(t, func() {
 		if err := runDiagnoseModeWithSource(ctx, ch, "30s",
-			nil, nil, nil, nil, false, nil, nil); err != nil {
+			nil, nil, nil, nil, nil); err != nil {
 			t.Fatalf("ctx-cancel finish should return nil, got %v", err)
 		}
 	})
@@ -127,7 +127,7 @@ func TestRunDiagnoseModeWithSource_ExportJSONOnTimeout(t *testing.T) {
 
 	out := captureStdout(t, func() {
 		if err := runDiagnoseModeWithSource(context.Background(), ch, "100ms",
-			nil, nil, nil, nil, false, nil, nil); err != nil {
+			nil, nil, nil, nil, nil); err != nil {
 			t.Fatalf("unexpected error exporting JSON: %v", err)
 		}
 	})

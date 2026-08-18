@@ -30,6 +30,11 @@ crds:
 image:
   repository: ghcr.io/gma1k/podtrace
   tag: ""
+  # digest pins the image immutably (e.g. "sha256:abc..."). When set it takes
+  # precedence over tag for every podtrace workload, including the agent
+  # DaemonSet bootstrapped from PODTRACE_BOOTSTRAP_IMAGE. Released digests are
+  # published with each chart version.
+  digest: ""
   pullPolicy: IfNotPresent
   pullSecrets: []
 
@@ -127,6 +132,10 @@ metrics:
     interval: 30s
     path: /metrics
 
+# Opt-in ingress NetworkPolicies for the agent and operator pods (metrics/health,
+# plus webhook for the operator). metricsFrom gates only the metrics port; empty
+# allows any source. Health/webhook stay open so probes and admission are never
+# blocked. Requires a CNI that enforces NetworkPolicy.
 networkPolicy:
   enabled: false
   metricsFrom: []

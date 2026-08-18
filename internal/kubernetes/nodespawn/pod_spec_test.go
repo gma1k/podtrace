@@ -1,6 +1,7 @@
 package nodespawn
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -68,6 +69,24 @@ func TestBuildPodSpec_NodeNameSanitized(t *testing.T) {
 	}
 }
 
+func TestBuildPodSpec_RequiresImage(t *testing.T) {
+	o := baseOpts()
+	o.Image = ""
+	if _, err := BuildPodSpec(o); err == nil {
+		t.Fatal("BuildPodSpec must require a non-empty Image")
+	}
+}
+
+func TestBuildPodSpec_PropagatesSuffixError(t *testing.T) {
+	orig := randomSuffix
+	defer func() { randomSuffix = orig }()
+	randomSuffix = func() (string, error) { return "", errors.New("boom") }
+
+	if _, err := BuildPodSpec(baseOpts()); err == nil {
+		t.Fatal("BuildPodSpec must propagate a randomSuffix error")
+	}
+}
+
 func TestBuildPodSpec_SecurityContext(t *testing.T) {
 	got, err := BuildPodSpec(baseOpts())
 	if err != nil {
@@ -76,12 +95,18 @@ func TestBuildPodSpec_SecurityContext(t *testing.T) {
 	if !got.Spec.HostPID {
 		t.Errorf("expected HostPID=true")
 	}
-	if got.Spec.Containers[0].SecurityContext.Privileged == nil || !*got.Spec.Containers[0].SecurityContext.Privileged {
-		t.Errorf("expected privileged container")
+	sc := got.Spec.Containers[0].SecurityContext
+	if sc.Privileged == nil || *sc.Privileged {
+		t.Errorf("expected non-privileged container (capabilities suffice, matching the DaemonSet/session Job)")
 	}
-	caps := got.Spec.Containers[0].SecurityContext.Capabilities.Add
-	wantCaps := map[string]bool{"BPF": true, "SYS_ADMIN": true, "PERFMON": true, "SYS_RESOURCE": true, "NET_ADMIN": true}
-	for _, c := range caps {
+	if sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation {
+		t.Errorf("expected AllowPrivilegeEscalation=false")
+	}
+	if sc.SeccompProfile == nil || sc.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
+		t.Errorf("expected seccompProfile RuntimeDefault, got %+v", sc.SeccompProfile)
+	}
+	wantCaps := map[string]bool{"BPF": true, "SYS_ADMIN": true, "PERFMON": true, "SYS_RESOURCE": true, "NET_ADMIN": true, "SYS_PTRACE": true}
+	for _, c := range sc.Capabilities.Add {
 		delete(wantCaps, string(c))
 	}
 	if len(wantCaps) > 0 {

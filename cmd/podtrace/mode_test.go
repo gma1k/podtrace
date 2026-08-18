@@ -10,7 +10,6 @@ import (
 
 	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/internal/kubernetes"
-	"github.com/gma1k/podtrace/internal/tracing"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -49,7 +48,7 @@ func TestRunNormalMode_WithEvents(t *testing.T) {
 		r, w, _ := os.Pipe()
 		os.Stdout = w
 
-		err := runNormalMode(ctx, eventChan, nil, nil, nil, nil, false)
+		err := runNormalMode(ctx, eventChan, nil, nil, nil)
 
 		_ = w.Close()
 		os.Stdout = originalStdout
@@ -101,7 +100,7 @@ func TestRunNormalMode_Interrupt(t *testing.T) {
 			cancel()
 		}()
 
-		err := runNormalMode(ctx, eventChan, nil, nil, nil, nil, false)
+		err := runNormalMode(ctx, eventChan, nil, nil, nil)
 
 		_ = w.Close()
 		os.Stdout = originalStdout
@@ -153,7 +152,7 @@ func TestRunNormalMode_TickerBeforeInterrupt(t *testing.T) {
 			cancel()
 		}()
 
-		err := runNormalMode(ctx, eventChan, nil, nil, nil, nil, false)
+		err := runNormalMode(ctx, eventChan, nil, nil, nil)
 
 		_ = w.Close()
 		os.Stdout = originalStdout
@@ -205,7 +204,7 @@ func TestRunNormalMode_HasPrintedReport(t *testing.T) {
 			cancel()
 		}()
 
-		err := runNormalMode(ctx, eventChan, nil, nil, nil, nil, false)
+		err := runNormalMode(ctx, eventChan, nil, nil, nil)
 
 		_ = w.Close()
 		os.Stdout = originalStdout
@@ -257,7 +256,7 @@ func TestRunNormalMode_NoEvents(t *testing.T) {
 			cancel()
 		}()
 
-		err := runNormalMode(ctx, eventChan, nil, nil, nil, nil, false)
+		err := runNormalMode(ctx, eventChan, nil, nil, nil)
 
 		_ = w.Close()
 		os.Stdout = originalStdout
@@ -310,7 +309,7 @@ func TestRunNormalMode_WithTicker(t *testing.T) {
 			cancel()
 		}()
 
-		err := runNormalMode(ctx, eventChan, nil, nil, nil, nil, false)
+		err := runNormalMode(ctx, eventChan, nil, nil, nil)
 
 		_ = w.Close()
 		os.Stdout = originalStdout
@@ -356,7 +355,7 @@ func TestRunDiagnoseMode_Timeout(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := runDiagnoseMode(context.Background(), eventChan, "100ms", nil, nil, nil, nil, false)
+	err := runDiagnoseMode(context.Background(), eventChan, "100ms", nil, nil, nil)
 	_ = w.Close()
 	os.Stdout = originalStdout
 	stdoutMutex.Unlock()
@@ -393,7 +392,7 @@ func TestRunDiagnoseMode_WithExport(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := runDiagnoseMode(context.Background(), eventChan, "100ms", nil, nil, nil, nil, false)
+	err := runDiagnoseMode(context.Background(), eventChan, "100ms", nil, nil, nil)
 	_ = w.Close()
 	os.Stdout = originalStdout
 	stdoutMutex.Unlock()
@@ -412,7 +411,7 @@ func TestRunDiagnoseMode_InvalidDuration(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := runDiagnoseMode(context.Background(), eventChan, "invalid", nil, nil, nil, nil, false)
+	err := runDiagnoseMode(context.Background(), eventChan, "invalid", nil, nil, nil)
 	_ = w.Close()
 	os.Stdout = originalStdout
 	stdoutMutex.Unlock()
@@ -449,7 +448,7 @@ func TestRunDiagnoseMode_WithExportFormat(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := runDiagnoseMode(context.Background(), eventChan, "100ms", nil, nil, nil, nil, false)
+	err := runDiagnoseMode(context.Background(), eventChan, "100ms", nil, nil, nil)
 	_ = w.Close()
 	os.Stdout = originalStdout
 	stdoutMutex.Unlock()
@@ -486,7 +485,7 @@ func TestRunDiagnoseMode_WithExportFormatCSV(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := runDiagnoseMode(context.Background(), eventChan, "100ms", nil, nil, nil, nil, false)
+	err := runDiagnoseMode(context.Background(), eventChan, "100ms", nil, nil, nil)
 	_ = w.Close()
 	os.Stdout = originalStdout
 	stdoutMutex.Unlock()
@@ -532,7 +531,7 @@ func TestRunDiagnoseMode_Interrupt(t *testing.T) {
 			cancel()
 		}()
 
-		err := runDiagnoseMode(ctx, eventChan, "10s", nil, nil, nil, nil, false)
+		err := runDiagnoseMode(ctx, eventChan, "10s", nil, nil, nil)
 
 		_ = w.Close()
 		os.Stdout = originalStdout
@@ -587,7 +586,7 @@ func TestRunDiagnoseMode_InterruptWithExport(t *testing.T) {
 			cancel()
 		}()
 
-		err := runDiagnoseMode(ctx, eventChan, "10s", nil, nil, nil, nil, false)
+		err := runDiagnoseMode(ctx, eventChan, "10s", nil, nil, nil)
 
 		_ = w.Close()
 		os.Stdout = originalStdout
@@ -648,7 +647,7 @@ func TestRunNormalMode_WithEnricher(t *testing.T) {
 			cancel()
 		}()
 
-		err := runNormalMode(ctx, eventChan, podInfo, enricher, nil, nil, false)
+		err := runNormalMode(ctx, eventChan, podInfo, enricher, nil)
 
 		_ = w.Close()
 		os.Stdout = originalStdout
@@ -688,7 +687,6 @@ func TestRunNormalMode_WithTracing(t *testing.T) {
 		fsSlowThreshold = origFSThreshold
 	}()
 
-	tracingManager, _ := tracing.NewManager()
 
 	go func() {
 		stdoutMutex.Lock()
@@ -703,7 +701,7 @@ func TestRunNormalMode_WithTracing(t *testing.T) {
 			cancel()
 		}()
 
-		err := runNormalMode(ctx, eventChan, nil, nil, nil, tracingManager, true)
+		err := runNormalMode(ctx, eventChan, nil, nil, nil)
 
 		_ = w.Close()
 		os.Stdout = originalStdout
@@ -758,7 +756,7 @@ func TestRunDiagnoseMode_WithEnricher(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := runDiagnoseMode(context.Background(), eventChan, "100ms", podInfo, enricher, nil, nil, false)
+	err := runDiagnoseMode(context.Background(), eventChan, "100ms", podInfo, enricher, nil)
 	_ = w.Close()
 	os.Stdout = originalStdout
 	stdoutMutex.Unlock()
@@ -787,7 +785,6 @@ func TestRunDiagnoseMode_WithTracing(t *testing.T) {
 		exportFormat = origExportFormat
 	}()
 
-	tracingManager, _ := tracing.NewManager()
 
 	go func() {
 		eventChan <- &events.Event{Type: events.EventDNS, LatencyNS: 5000000, Target: "example.com"}
@@ -798,7 +795,7 @@ func TestRunDiagnoseMode_WithTracing(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := runDiagnoseMode(context.Background(), eventChan, "100ms", nil, nil, nil, tracingManager, true)
+	err := runDiagnoseMode(context.Background(), eventChan, "100ms", nil, nil, nil)
 	_ = w.Close()
 	os.Stdout = originalStdout
 	stdoutMutex.Unlock()
@@ -838,7 +835,7 @@ func TestRunDiagnoseMode_BatchProcessing(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := runDiagnoseMode(context.Background(), eventChan, "200ms", nil, nil, nil, nil, false)
+	err := runDiagnoseMode(context.Background(), eventChan, "200ms", nil, nil, nil)
 	_ = w.Close()
 	os.Stdout = originalStdout
 	stdoutMutex.Unlock()

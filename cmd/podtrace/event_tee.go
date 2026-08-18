@@ -3,16 +3,14 @@ package main
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/logger"
+	"github.com/gma1k/podtrace/internal/metricsexporter"
 )
 
-// teeEvents fans every event from source out to one primary channel plus
-// `auxiliary` additional channels. Go channels deliver each value to exactly
-// one receiver, so the report loop, metrics handler, tracing handler, and
-// profiling correlator — which all used to receive from the same channel —
-// each saw only a random disjoint subset of events, and with --filter events
-// randomly bypassed the filter pipeline entirely.
 func teeEvents(ctx context.Context, source <-chan *events.Event, auxiliary int) (chan *events.Event, []chan *events.Event) {
 	primary := make(chan *events.Event, config.EventChannelBufferSize)
 	aux := make([]chan *events.Event, auxiliary)
@@ -25,6 +23,7 @@ func teeEvents(ctx context.Context, source <-chan *events.Event, auxiliary int) 
 		for _, c := range aux {
 			defer close(c)
 		}
+		var auxDrops uint64
 		for {
 			select {
 			case <-ctx.Done():
@@ -38,11 +37,19 @@ func teeEvents(ctx context.Context, source <-chan *events.Event, auxiliary int) 
 				case <-ctx.Done():
 					return
 				}
-				for _, c := range aux {
+				for i, c := range aux {
 					evCopy := *ev
 					select {
 					case c <- &evCopy:
 					default:
+						auxDrops++
+						metricsexporter.RecordTeeAuxDrop()
+						if auxDrops == 1 || auxDrops%uint64(config.DroppedEventsLogRate) == 0 {
+							logger.Warn("Auxiliary event channel full; dropping event for a secondary consumer (metrics/tracing/profiling will undercount)",
+								zap.Int("aux_index", i),
+								zap.Uint64("total_aux_drops", auxDrops),
+								zap.String("event_type", ev.TypeString()))
+						}
 					}
 				}
 			}

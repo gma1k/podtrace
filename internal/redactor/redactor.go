@@ -105,6 +105,13 @@ func (r *Redactor) Redact(e *events.Event) {
 	}
 }
 
+func (r *Redactor) RedactText(s string) string {
+	for _, rule := range r.rules {
+		s = rule.Pattern.ReplaceAllString(s, rule.Replace)
+	}
+	return s
+}
+
 // credentialKeyNames is the single source of truth for the key names whose
 // values are treated as secrets, shared by the key=value, JSON, and YAML
 // rules so coverage cannot drift between formats.

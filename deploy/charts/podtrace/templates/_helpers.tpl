@@ -58,10 +58,17 @@ all live here regardless of the Helm release namespace.
 {{- end }}
 
 {{/*
-Resolved container image reference (repository:tag).
+Resolved container image reference. Prefers an immutable digest when
+image.digest is set (repository@sha256:...); otherwise falls back to
+repository:tag. Pinning by digest closes the mutable-tag supply-chain gap for
+the root+CAP_SYS_ADMIN workload.
 */}}
 {{- define "podtrace.image" -}}
 {{- $repo := .Values.image.repository -}}
-{{- $tag  := default .Chart.AppVersion .Values.image.tag -}}
+{{- if .Values.image.digest -}}
+{{- printf "%s@%s" $repo .Values.image.digest -}}
+{{- else -}}
+{{- $tag := default .Chart.AppVersion .Values.image.tag -}}
 {{- printf "%s:%s" $repo $tag -}}
+{{- end -}}
 {{- end }}

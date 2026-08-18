@@ -69,7 +69,7 @@ func BuildPodSpec(opts PodSpecOptions) (*corev1.Pod, error) {
 		return nil, fmt.Errorf("nodespawn: Image is required")
 	}
 
-	priv := true
+	priv := false
 	runAsRoot := int64(0)
 
 	suffix, err := randomSuffix()
@@ -154,10 +154,12 @@ func BuildPodSpec(opts PodSpecOptions) (*corev1.Pod, error) {
 		TTY:                      false,
 		TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
 		SecurityContext: &corev1.SecurityContext{
-			Privileged: &priv,
-			RunAsUser:  &runAsRoot,
+			Privileged:               &priv,
+			RunAsUser:                &runAsRoot,
+			AllowPrivilegeEscalation: ptrBool(false),
+			SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 			Capabilities: &corev1.Capabilities{
-				Add: []corev1.Capability{"BPF", "SYS_ADMIN", "PERFMON", "SYS_RESOURCE", "NET_ADMIN"},
+				Add: []corev1.Capability{"BPF", "SYS_ADMIN", "PERFMON", "SYS_RESOURCE", "NET_ADMIN", "SYS_PTRACE"},
 			},
 		},
 		VolumeMounts: mounts,
@@ -255,7 +257,9 @@ func sanitizeLabelValue(s string) string {
 	return out
 }
 
-func randomSuffix() (string, error) {
+// randomSuffix is a var so tests can force its (otherwise unreachable)
+// crypto/rand error path.
+var randomSuffix = func() (string, error) {
 	var b [4]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", fmt.Errorf("nodespawn: random suffix: %w", err)
