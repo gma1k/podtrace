@@ -5,11 +5,16 @@ package qpackdecode
 import (
 	"errors"
 	"fmt"
+	"math"
 
 	"golang.org/x/net/http2/hpack"
 
 	"github.com/gma1k/podtrace/internal/safeconv"
 )
+
+func postBaseOverflows(base, index uint64) bool {
+	return base > math.MaxUint64-index
+}
 
 // HeaderField is one decoded name/value pair.
 type HeaderField struct {
@@ -294,6 +299,12 @@ func (d *Decoder) decodeFieldSection(p []byte, bestEffort bool) ([]HeaderField, 
 		}
 		return d.absoluteEntry(absolute)
 	}
+	postBaseEntry := func(index uint64) (tableEntry, error) {
+		if postBaseOverflows(base, index) {
+			return tableEntry{}, fmt.Errorf("qpackdecode: post-base index overflow (base %d, index %d)", base, index)
+		}
+		return dynamicEntry(base+index, baseKnown)
+	}
 
 	for len(p) > 0 {
 		switch b := p[0]; {
@@ -373,7 +384,7 @@ func (d *Decoder) decodeFieldSection(p []byte, bestEffort bool) ([]HeaderField, 
 			if err != nil {
 				return nil, 0, sectionError(err)
 			}
-			entry, lookupErr := dynamicEntry(base+index, baseKnown)
+			entry, lookupErr := postBaseEntry(index)
 			if err := appendEntry(entry, lookupErr); err != nil {
 				return nil, 0, err
 			}
@@ -388,7 +399,7 @@ func (d *Decoder) decodeFieldSection(p []byte, bestEffort bool) ([]HeaderField, 
 			if err != nil {
 				return nil, 0, sectionError(err)
 			}
-			entry, lookupErr := dynamicEntry(base+index, baseKnown)
+			entry, lookupErr := postBaseEntry(index)
 			if lookupErr == nil {
 				fields = append(fields, HeaderField{Name: entry.name, Value: value})
 			} else if bestEffort {

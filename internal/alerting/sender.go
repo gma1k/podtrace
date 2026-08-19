@@ -26,6 +26,24 @@ func NewRetrySender(sender Sender, maxRetries int, backoffBase time.Duration) *R
 	}
 }
 
+const maxAlertBackoff = 30 * time.Second
+
+// cappedBackoff returns base * 2^(attempt-1) capped at maxAlertBackoff.
+// attempt is 1-based.
+func cappedBackoff(base time.Duration, attempt int) time.Duration {
+	backoff := base
+	for i := 1; i < attempt; i++ {
+		if backoff >= maxAlertBackoff {
+			return maxAlertBackoff
+		}
+		backoff *= 2
+	}
+	if backoff <= 0 || backoff > maxAlertBackoff {
+		return maxAlertBackoff
+	}
+	return backoff
+}
+
 func (rs *RetrySender) Send(ctx context.Context, alert *Alert) error {
 	if alert == nil {
 		return fmt.Errorf("alert is nil")
@@ -37,10 +55,7 @@ func (rs *RetrySender) Send(ctx context.Context, alert *Alert) error {
 	var lastErr error
 	for attempt := 0; attempt <= rs.maxRetries; attempt++ {
 		if attempt > 0 {
-			backoff := rs.backoffBase * time.Duration(1<<uint(attempt-1))
-			if backoff > 30*time.Second {
-				backoff = 30 * time.Second
-			}
+			backoff := cappedBackoff(rs.backoffBase, attempt)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -62,5 +77,3 @@ func (rs *RetrySender) Send(ctx context.Context, alert *Alert) error {
 func (rs *RetrySender) Name() string {
 	return rs.sender.Name()
 }
-
-

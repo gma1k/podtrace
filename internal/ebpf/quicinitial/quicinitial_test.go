@@ -145,7 +145,8 @@ func buildClientInitial(t *testing.T, dcid, hs []byte) []byte {
 
 	nonce := make([]byte, 12)
 	copy(nonce, keys.IV)
-	gcm, err := cipher.NewGCM(block2(keys.Key))
+	blk, _ := block2(keys.Key)
+	gcm, err := cipher.NewGCM(blk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +240,8 @@ func buildClientInitialV(t *testing.T, dcid, hs []byte, version uint32) []byte {
 
 	nonce := make([]byte, 12)
 	copy(nonce, keys.IV)
-	gcm, err := cipher.NewGCM(block2(keys.Key))
+	blk, _ := block2(keys.Key)
+	gcm, err := cipher.NewGCM(blk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +384,8 @@ func buildClientInitialChunk(t *testing.T, dcid, hs []byte, off, n int) []byte {
 
 	nonce := make([]byte, 12)
 	copy(nonce, keys.IV)
-	gcm, err := cipher.NewGCM(block2(keys.Key))
+	blk, _ := block2(keys.Key)
+	gcm, err := cipher.NewGCM(blk)
 	if err != nil {
 		t.Fatal(err)
 	}

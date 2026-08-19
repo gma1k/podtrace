@@ -241,6 +241,9 @@ func decryptInitial(b []byte) ([]byte, uint32, error) {
 	}
 	scidLen := int(b[p])
 	p++
+	if p+scidLen > len(b) {
+		return nil, 0, fmt.Errorf("scid out of range")
+	}
 	p += scidLen
 	tokenLen, n, ok := readVarint(b, p)
 	if !ok {
@@ -296,7 +299,11 @@ func decryptInitial(b []byte) ([]byte, uint32, error) {
 	for i := 0; i < 8; i++ {
 		nonce[4+i] ^= pnbuf[i]
 	}
-	gcm, err := cipher.NewGCM(block2(keys.Key))
+	block, err = block2(keys.Key)
+	if err != nil {
+		return nil, 0, fmt.Errorf("payload cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -313,9 +320,8 @@ func decryptInitial(b []byte) ([]byte, uint32, error) {
 }
 
 // block2 builds an AES cipher for the GCM key.
-func block2(key []byte) cipher.Block {
-	b, _ := aes.NewCipher(key)
-	return b
+func block2(key []byte) (cipher.Block, error) {
+	return aes.NewCipher(key)
 }
 
 // reassembleCrypto merges the CRYPTO frames (type 0x06) of one or more
