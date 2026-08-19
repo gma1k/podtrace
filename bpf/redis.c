@@ -65,8 +65,6 @@ static __always_inline int redis_emit(struct pt_regs *ctx, u32 pair, u32 pid, u3
 SEC("uprobe/redisCommand")
 int uprobe_redisCommand(struct pt_regs *ctx)
 {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_REDIS_COMMAND);
 	u64 ts  = bpf_ktime_get_ns();
 
@@ -87,8 +85,6 @@ int uretprobe_redisCommand(struct pt_regs *ctx)
 SEC("uprobe/redisCommandArgv")
 int uprobe_redisCommandArgv(struct pt_regs *ctx)
 {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_REDIS_COMMAND_ARGV);
 	u64 ts  = bpf_ktime_get_ns();
 

@@ -81,8 +81,6 @@ static __always_inline int mc_emit(struct pt_regs *ctx, u32 pid, u32 tid, int re
 SEC("uprobe/memcached_get")
 int uprobe_memcached_get(struct pt_regs *ctx)
 {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_MEMCACHED);
 	const char *mc_key = (const char *)PT_REGS_PARM2(ctx);
 	if (!mc_key) return 0;
@@ -101,8 +99,6 @@ int uretprobe_memcached_get(struct pt_regs *ctx)
 SEC("uprobe/memcached_set")
 int uprobe_memcached_set(struct pt_regs *ctx)
 {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_MEMCACHED);
 	const char *mc_key = (const char *)PT_REGS_PARM2(ctx);
 	if (!mc_key) return 0;
@@ -122,8 +118,6 @@ int uretprobe_memcached_set(struct pt_regs *ctx)
 SEC("uprobe/memcached_delete")
 int uprobe_memcached_delete(struct pt_regs *ctx)
 {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_MEMCACHED);
 	const char *mc_key = (const char *)PT_REGS_PARM2(ctx);
 	if (!mc_key) return 0;

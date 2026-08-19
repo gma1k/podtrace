@@ -131,8 +131,6 @@ int tracepoint_sched_switch(void *ctx) {
 
 SEC("kprobe/do_futex")
 int kprobe_do_futex(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_FUTEX);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
@@ -204,8 +202,6 @@ int kretprobe_do_futex(struct pt_regs *ctx) {
 
 SEC("uprobe/pthread_mutex_lock")
 int uprobe_pthread_mutex_lock(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_PTHREAD_MUTEX);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);

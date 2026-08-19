@@ -87,8 +87,6 @@ int tracepoint_sched_process_fork(void *ctx) {
 
 SEC("kprobe/do_sys_openat2")
 int kprobe_do_sys_openat2(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_OPENAT);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
@@ -146,8 +144,6 @@ int kretprobe_do_sys_openat2(struct pt_regs *ctx) {
 
 SEC("kprobe/vfs_unlink")
 int kprobe_vfs_unlink(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_VFS_UNLINK);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
@@ -212,8 +208,6 @@ int kretprobe_vfs_unlink(struct pt_regs *ctx) {
 
 SEC("kprobe/vfs_rename")
 int kprobe_vfs_rename(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_VFS_RENAME);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
