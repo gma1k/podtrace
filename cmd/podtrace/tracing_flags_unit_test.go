@@ -107,6 +107,25 @@ func TestApplyTracingFlags_InvalidSampleRateErrors(t *testing.T) {
 	}
 }
 
+func TestApplyTracingFlags_EnvMasterSwitchEnablesGate(t *testing.T) {
+	restoreTracingFlagGlobals(t)
+	defer resetTracingConfig()
+
+	cmd := newTracingFlagsCommand()
+	enableTracing = false
+	config.TracingEnabled = true
+
+	if err := applyTracingFlags(cmd); err != nil {
+		t.Fatalf("applyTracingFlags: %v", err)
+	}
+	if !enableTracing {
+		t.Error("PODTRACE_TRACING_ENABLED must bridge into the flag gate so the CLI tracing manager is actually started/fed/shut down")
+	}
+	if !config.TracingEnabled {
+		t.Error("TracingEnabled must remain true")
+	}
+}
+
 func TestApplyTracingFlags_DisabledIsNoOp(t *testing.T) {
 	restoreTracingFlagGlobals(t)
 	defer resetTracingConfig()

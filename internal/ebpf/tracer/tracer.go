@@ -838,6 +838,22 @@ func (t *Tracer) idleDeny() bool {
 		len(t.loadCgroupIDs()) == 0 && !t.filter.HasTargets()
 }
 
+// cgroupAllows reports whether an event passes the active cgroup target gate.
+func (t *Tracer) cgroupAllows(event *events.Event) bool {
+	cgroupIDs := t.loadCgroupIDs()
+	switch {
+	case len(cgroupIDs) > 0 && event.CgroupID != 0:
+		_, ok := cgroupIDs[event.CgroupID]
+		return ok
+	case t.idleDeny():
+		return false
+	case t.useUserspaceCgroupFilter.Load():
+		return t.filter.IsPIDInCgroup(event.PID)
+	default:
+		return true
+	}
+}
+
 // SetCgroups replaces the tracer's entire cgroup filter set with the
 // given paths.
 // setCgroupPaths atomically publishes the current cgroup target set. Callers
