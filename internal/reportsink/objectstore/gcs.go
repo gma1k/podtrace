@@ -35,9 +35,8 @@ func newGCSSink(ctx context.Context, cfg Config, d destination) (Sink, error) {
 	var opts []option.ClientOption
 	saJSON := stringFromCreds(creds, gcsSecretKeyServiceAccountJSON)
 	if saJSON != "" {
-		ac, err := credentials.DetectDefault(&credentials.DetectOptions{
-			CredentialsJSON: []byte(saJSON),
-			Scopes:          gcsScopes,
+		ac, err := credentials.NewCredentialsFromJSON(credentials.ServiceAccount, []byte(saJSON), &credentials.DetectOptions{
+			Scopes: gcsScopes,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("gcs: load service account JSON: %w", err)

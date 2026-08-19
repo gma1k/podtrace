@@ -31,11 +31,11 @@ var stuckPodEventThreshold = 5 * time.Second
 func waitForPodRunningOrTerminated(ctx context.Context, clientset kubernetes.Interface, namespace, name string) (*corev1.Pod, error) {
 	fieldSel := fields.OneTermEqualSelector("metadata.name", name).String()
 	lw := &cache.ListWatch{
-		ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
+		ListWithContextFunc: func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 			opts.FieldSelector = fieldSel
 			return clientset.CoreV1().Pods(namespace).List(ctx, opts)
 		},
-		WatchFunc: func(opts metav1.ListOptions) (watch.Interface, error) {
+		WatchFuncWithContext: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
 			opts.FieldSelector = fieldSel
 			return clientset.CoreV1().Pods(namespace).Watch(ctx, opts)
 		},
