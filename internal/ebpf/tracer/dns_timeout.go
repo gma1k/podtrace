@@ -11,6 +11,8 @@ import (
 	"github.com/gma1k/podtrace/internal/logger"
 	"github.com/gma1k/podtrace/internal/metricsexporter"
 	"github.com/gma1k/podtrace/internal/safeconv"
+	"github.com/gma1k/podtrace/internal/sanitize"
+	"github.com/gma1k/podtrace/internal/validation"
 	"go.uber.org/zap"
 )
 
@@ -116,19 +118,12 @@ func (t *Tracer) sweepDNSTimeouts(ctx context.Context, eventChan chan<- *events.
 		if age <= dnsTimeoutThresholdNS {
 			continue
 		}
-		ev := &events.Event{
-			Timestamp:   now,
-			PID:         val.PID,
-			Type:        events.EventDNS,
-			LatencyNS:   age,
-			CgroupID:    key.CgroupID,
-			TCPState:    val.QType,
-			Target:      string(bytes.TrimRight(val.Name[:], "\x00")),
-			Details:     "timeout",
-			ProcessName: string(bytes.TrimRight(val.Comm[:], "\x00")),
-		}
-		if t.piiRedactor != nil {
-			t.piiRedactor.Redact(ev)
+		staleKey = key
+		stale = append(stale, staleKey)
+
+		ev := t.buildDNSTimeoutEvent(key, val, now, age)
+		if ev == nil {
+			continue
 		}
 		select {
 		case <-ctx.Done():
@@ -136,8 +131,6 @@ func (t *Tracer) sweepDNSTimeouts(ctx context.Context, eventChan chan<- *events.
 		case eventChan <- ev:
 		default:
 		}
-		staleKey = key
-		stale = append(stale, staleKey)
 	}
 	if err := iter.Err(); err != nil {
 		logger.Debug("dns_inflight iterate error", zap.Error(err))
@@ -145,4 +138,29 @@ func (t *Tracer) sweepDNSTimeouts(ctx context.Context, eventChan chan<- *events.
 	for i := range stale {
 		_ = m.Delete(&stale[i])
 	}
+}
+
+// buildDNSTimeoutEvent turns one timed-out dns_inflight entry into an event,
+// applying the same protections as the main pipeline.
+func (t *Tracer) buildDNSTimeoutEvent(key dnsFlowKey, val dnsQueryState, now, age uint64) *events.Event {
+	ev := &events.Event{
+		Timestamp:   now,
+		PID:         val.PID,
+		Type:        events.EventDNS,
+		LatencyNS:   age,
+		CgroupID:    key.CgroupID,
+		TCPState:    val.QType,
+		Target:      sanitize.Terminal(string(bytes.TrimRight(val.Name[:], "\x00"))),
+		Details:     "timeout",
+		ProcessName: string(bytes.TrimRight(val.Comm[:], "\x00")),
+	}
+	t.attributeProcessName(ev)
+	ev.ProcessName = validation.SanitizeProcessName(ev.ProcessName)
+	if t.piiRedactor != nil {
+		t.piiRedactor.Redact(ev)
+	}
+	if !t.cgroupAllows(ev) {
+		return nil
+	}
+	return ev
 }

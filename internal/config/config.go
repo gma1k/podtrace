@@ -33,6 +33,7 @@ const (
 	DefaultAlertDedupWindow      = 5 * time.Minute
 	DefaultAlertRateLimitPerMin  = 10
 	DefaultAlertMaxRetries       = 3
+	MaxAlertRetries              = 20
 	DefaultAlertRetryBackoffBase = 1 * time.Second
 	DefaultAlertMaxPayloadSize   = 1024 * 1024
 )
@@ -79,7 +80,7 @@ var (
 	AlertDeduplicationWindow  = getDurationEnvOrDefault("PODTRACE_ALERT_DEDUP_WINDOW", DefaultAlertDedupWindow)
 	AlertRateLimitPerMinute   = getIntEnvOrDefault("PODTRACE_ALERT_RATE_LIMIT", DefaultAlertRateLimitPerMin)
 	AlertHTTPTimeout          = getDurationEnvOrDefault("PODTRACE_ALERT_HTTP_TIMEOUT", DefaultAlertHTTPTimeout)
-	AlertMaxRetries           = getIntEnvOrDefault("PODTRACE_ALERT_MAX_RETRIES", DefaultAlertMaxRetries)
+	AlertMaxRetries           = min(getIntEnvOrDefault("PODTRACE_ALERT_MAX_RETRIES", DefaultAlertMaxRetries), MaxAlertRetries)
 	AlertMaxPayloadSize       = getInt64EnvOrDefault("PODTRACE_ALERT_MAX_PAYLOAD_SIZE", DefaultAlertMaxPayloadSize)
 	K8sAPITimeout             = getDurationEnvOrDefault("PODTRACE_K8S_API_TIMEOUT", DefaultK8sAPITimeout)
 	BatchProcessingInterval   = getDurationEnvOrDefault("PODTRACE_BATCH_INTERVAL", DefaultBatchProcessingInterval)

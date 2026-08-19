@@ -126,13 +126,14 @@ type streamKey struct {
 
 // dirState is the ordered decode state for one (connection, direction).
 type dirState struct {
-	dec      *lateJoinDecoder
-	role     uint8
-	nextSeq  uint32
-	pending  map[uint32]*RawRecord
-	asm      []byte
-	lastSeen time.Time
-	stalled  time.Time
+	dec        *lateJoinDecoder
+	role       uint8
+	nextSeq    uint32
+	pending    map[uint32]*RawRecord
+	asm        []byte
+	lastSeen   time.Time
+	stalled    time.Time
+	discarding bool
 }
 
 // pendingReq is a request awaiting its response, for latency + endpoint stitching.
@@ -249,10 +250,21 @@ func (d *Decoder) drainLocked(st *dirState) []*events.Event {
 		st.nextSeq++
 		st.stalled = time.Time{}
 
+		if st.discarding {
+			if rec.endHeaders() {
+				st.discarding = false
+			}
+			continue
+		}
+
 		st.asm = append(st.asm, rec.Frag...)
 		if len(st.asm) > d.maxAssembly {
 			st.asm = nil
 			d.decodeErrors++
+			st.dec.resetEpoch()
+			if !rec.endHeaders() {
+				st.discarding = true
+			}
 			continue
 		}
 		if !rec.endHeaders() {
@@ -486,6 +498,9 @@ func (d *Decoder) skipGapLocked(st *dirState) {
 		return
 	}
 	st.nextSeq = lowest
+	if len(st.asm) > 0 {
+		st.discarding = true
+	}
 	st.asm = nil
 	st.stalled = time.Time{}
 	st.dec.resetEpoch()

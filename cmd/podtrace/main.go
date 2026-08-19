@@ -189,6 +189,9 @@ func main() {
 // applyTracingFlags copies the --tracing-* flag values into the process-
 // global config knobs.
 func applyTracingFlags(cmd *cobra.Command) error {
+	if config.TracingEnabled {
+		enableTracing = true
+	}
 	if !enableTracing {
 		return nil
 	}
@@ -217,6 +220,8 @@ func applyTracingFlags(cmd *cobra.Command) error {
 	}
 	return nil
 }
+
+const secondSignalGracePeriod = 3 * time.Second
 
 func runPodtrace(cmd *cobra.Command, args []string) error {
 	if showVersion {
@@ -379,7 +384,11 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		}
 		select {
 		case <-sigChan:
-			_, _ = fmt.Fprintln(os.Stderr, "second interrupt — exiting immediately")
+			_, _ = fmt.Fprintln(os.Stderr, "second interrupt — finishing up (up to 3s) then exiting")
+			select {
+			case <-handlerDone:
+			case <-time.After(secondSignalGracePeriod):
+			}
 			logger.Sync()
 			exitFunc(130)
 		case <-handlerDone:
