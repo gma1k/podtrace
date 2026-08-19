@@ -8,8 +8,6 @@
 SEC("uprobe/rd_kafka_topic_new")
 int uprobe_rd_kafka_topic_new(struct pt_regs *ctx)
 {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_KAFKA_TOPIC_NEW);
 
 	const char *topic = (const char *)PT_REGS_PARM2(ctx);
@@ -25,8 +23,6 @@ int uprobe_rd_kafka_topic_new(struct pt_regs *ctx)
 SEC("uretprobe/rd_kafka_topic_new")
 int uretprobe_rd_kafka_topic_new(struct pt_regs *ctx)
 {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_KAFKA_TOPIC_NEW);
 
 	u64 topic_ptr = (u64)PT_REGS_RC(ctx);
@@ -46,8 +42,6 @@ int uretprobe_rd_kafka_topic_new(struct pt_regs *ctx)
 SEC("uprobe/rd_kafka_produce")
 int uprobe_rd_kafka_produce(struct pt_regs *ctx)
 {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_KAFKA_PRODUCE);
 	u64 ts  = bpf_ktime_get_ns();
 
@@ -116,8 +110,6 @@ int uretprobe_rd_kafka_produce(struct pt_regs *ctx)
 SEC("uprobe/rd_kafka_consumer_poll")
 int uprobe_rd_kafka_consumer_poll(struct pt_regs *ctx)
 {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_KAFKA_POLL);
 	u64 ts  = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);

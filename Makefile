@@ -11,6 +11,7 @@ LLC ?= llc
 GO ?= $(shell if [ -f /usr/local/go/bin/go ]; then echo /usr/local/go/bin/go; else echo go; fi)
 BPF_SRC = bpf/podtrace.bpf.c bpf/network.c bpf/filesystem.c bpf/cpu.c bpf/memory.c
 BPF_OBJ = internal/ebpf/embedded/podtrace.$(BPF_GOARCH).bpf.o
+BPF_LOADTEST_BIN = bin/bpf-loadtest.test
 BPF_GEN_DIR = bpf/.generated
 VMLINUX_GEN = $(BPF_GEN_DIR)/vmlinux.h
 BINARY = bin/podtrace
@@ -36,6 +37,7 @@ endif
 
 LIBBPF_INCLUDE ?= /usr/include
 BPF_CFLAGS = -O2 -g -target bpf $(BPF_ARCH_DEFINE) -mcpu=$(BPF_MCPU) \
+	-Wall -Werror=unused-variable \
 	-Wno-missing-declarations \
 	-I$(LIBBPF_INCLUDE) -I$(BPF_GEN_DIR)
 
@@ -191,7 +193,17 @@ clean:
 	rm -rf bin
 	rm -rf $(RELEASE_DIR)
 	rm -f coverage.out coverage.unit.out coverage.html
-	rm -rf "$(BPF_GEN_DIR)"
+	@if [ -e "$(BPF_GEN_DIR)" ] && ! rm -rf "$(BPF_GEN_DIR)" 2>/dev/null; then \
+		echo ""; \
+		echo "WARNING: could not remove $(BPF_GEN_DIR), it is owned by another user"; \
+		echo "         (typically left by a prior 'sudo make'). Remove it with:"; \
+		echo ""; \
+		echo "             sudo rm -rf $(BPF_GEN_DIR)"; \
+		echo ""; \
+		echo "         Then re-run. (Newer 'make test-bpf-load' no longer runs the"; \
+		echo "         build under sudo, so this should not recur.)"; \
+		echo ""; \
+	fi
 
 deps:
 	$(GO) mod download
@@ -218,12 +230,18 @@ test-integration:
 test-bpf-load: $(BPF_OBJ)
 	@echo "Running BPF loader tests against the freshly built object..."
 	$(GO) test -count=1 ./internal/ebpf/loader/...
+	@echo "Compiling the kernel verifier load-test as $$(id -un)..."
+	@mkdir -p $(dir $(BPF_LOADTEST_BIN))
+	$(GO) test -c -count=1 -tags bpf_loadtest -o $(BPF_LOADTEST_BIN) ./internal/ebpf/loader/
 	@if [ "$$(id -u)" = "0" ]; then \
-		echo ">>> root detected: running kernel verifier load-test"; \
-		$(GO) test -count=1 -tags bpf_loadtest -run TestLoadPodtrace_KernelVerifierAccepts ./internal/ebpf/loader/...; \
+		echo ">>> root: running kernel verifier load-test"; \
+		./$(BPF_LOADTEST_BIN) -test.v -test.run TestLoadPodtrace_KernelVerifierAccepts; \
+	elif command -v sudo >/dev/null 2>&1; then \
+		echo ">>> running kernel verifier load-test under sudo (binary only; the build stays owned by $$(id -un))"; \
+		sudo ./$(BPF_LOADTEST_BIN) -test.v -test.run TestLoadPodtrace_KernelVerifierAccepts; \
 	else \
-		echo ">>> not root: skipping kernel verifier load-test"; \
-		echo ">>> to include it: sudo -E env \"PATH=\$$PATH\" make test-bpf-load"; \
+		echo ">>> sudo not available: skipping kernel verifier load-test"; \
+		echo ">>> to run it: sudo ./$(BPF_LOADTEST_BIN) -test.run TestLoadPodtrace_KernelVerifierAccepts"; \
 	fi
 
 test-bench:
