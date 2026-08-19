@@ -18,8 +18,8 @@ func TestPodCommunicationTracker_ProcessEvent(t *testing.T) {
 	}
 
 	k8sContext := map[string]interface{}{
-		"target_pod":      "target-pod",
-		"target_service":  "test-service",
+		"target_pod":       "target-pod",
+		"target_service":   "test-service",
 		"target_namespace": "default",
 	}
 
@@ -112,7 +112,6 @@ func containsMiddle(s, substr string) bool {
 	}
 	return false
 }
-
 
 // TestFormatBytes exercises all branches of formatBytes.
 func TestFormatBytes(t *testing.T) {

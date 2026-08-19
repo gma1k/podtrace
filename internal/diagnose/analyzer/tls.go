@@ -57,4 +57,3 @@ func AnalyzeTLS(events []*events.Event) (
 
 	return
 }
-

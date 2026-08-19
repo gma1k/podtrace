@@ -74,9 +74,9 @@ func TestCgroupStat_Subdir(t *testing.T) {
 func TestCgroupRelative(t *testing.T) {
 	withCgroupBase(t, "/sys/fs/cgroup")
 	cases := []struct {
-		in   string
-		rel  string
-		ok   bool
+		in  string
+		rel string
+		ok  bool
 	}{
 		{"/sys/fs/cgroup", ".", true},
 		{"/sys/fs/cgroup/kubepods/pod-1", "kubepods/pod-1", true},

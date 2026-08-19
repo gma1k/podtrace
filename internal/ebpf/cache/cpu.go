@@ -12,7 +12,7 @@ import (
 // ProcessCPUTime is a snapshot of /proc/<pid>/stat's utime+stime, captured at
 // event-arrival time when the process is still alive.
 type ProcessCPUTime struct {
-	TotalNS uint64 // latest (utime + stime) in nanoseconds
+	TotalNS    uint64 // latest (utime + stime) in nanoseconds
 	BaselineNS uint64
 }
 
@@ -20,7 +20,7 @@ const maxCPUTimeEntries = 16384
 
 var (
 	cpuTimeMu    sync.RWMutex
-	cpuTimes     = map[uint32]ProcessCPUTime{}
+	cpuTimes            = map[uint32]ProcessCPUTime{}
 	clockTicks   uint64 = 100
 	clockTicksOK bool
 )

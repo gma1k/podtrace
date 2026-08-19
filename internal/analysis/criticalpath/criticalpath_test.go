@@ -129,7 +129,7 @@ func TestCriticalPath_Breakdown_AggregatesAndDedupes(t *testing.T) {
 			{Label: "DNS", Fraction: 0.03},
 			{Label: "NET", Fraction: 0.4}, // duplicate label → must aggregate
 			{Label: "CPU", Fraction: 0.25},
-			{Label: "FS", Fraction: 0.0},  // duplicate label
+			{Label: "FS", Fraction: 0.0}, // duplicate label
 		},
 	}
 	got := cp.Breakdown(5)

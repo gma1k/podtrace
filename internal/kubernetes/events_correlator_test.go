@@ -50,7 +50,7 @@ func TestIsPermissionError(t *testing.T) {
 func TestNewEventsCorrelator(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	correlator := NewEventsCorrelator(clientset, "test-pod", "default")
-	
+
 	if correlator == nil {
 		t.Fatal("NewEventsCorrelator returned nil")
 		return
@@ -74,7 +74,7 @@ func TestNewEventsCorrelator(t *testing.T) {
 
 func TestEventsCorrelator_Start_NilClientset(t *testing.T) {
 	correlator := NewEventsCorrelator(nil, "test-pod", "default")
-	
+
 	err := correlator.Start(context.Background())
 	if err != nil {
 		t.Errorf("Start() should return nil for nil clientset, got %v", err)
@@ -84,21 +84,21 @@ func TestEventsCorrelator_Start_NilClientset(t *testing.T) {
 func TestEventsCorrelator_Start_WithClientset(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	correlator := NewEventsCorrelator(clientset, "test-pod", "default")
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	
+
 	err := correlator.Start(ctx)
 	if err != nil {
 		t.Logf("Start() returned error (expected for fake client): %v", err)
 	}
-	
+
 	correlator.Stop()
 }
 
 func TestEventsCorrelator_AddEvent(t *testing.T) {
 	correlator := NewEventsCorrelator(nil, "test-pod", "default")
-	
+
 	event := &corev1.Event{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "test-event",
@@ -112,9 +112,9 @@ func TestEventsCorrelator_AddEvent(t *testing.T) {
 		FirstTimestamp: metav1.NewTime(time.Now()),
 		Count:          1,
 	}
-	
+
 	correlator.addEvent(event)
-	
+
 	events := correlator.GetEvents()
 	if len(events) != 1 {
 		t.Errorf("Expected 1 event, got %d", len(events))
@@ -129,7 +129,7 @@ func TestEventsCorrelator_AddEvent(t *testing.T) {
 
 func TestEventsCorrelator_AddEvent_WrongPodName(t *testing.T) {
 	correlator := NewEventsCorrelator(nil, "test-pod", "default")
-	
+
 	event := &corev1.Event{
 		InvolvedObject: corev1.ObjectReference{
 			Name: "other-pod",
@@ -140,9 +140,9 @@ func TestEventsCorrelator_AddEvent_WrongPodName(t *testing.T) {
 		FirstTimestamp: metav1.NewTime(time.Now()),
 		Count:          1,
 	}
-	
+
 	correlator.addEvent(event)
-	
+
 	events := correlator.GetEvents()
 	if len(events) != 0 {
 		t.Errorf("Expected 0 events for wrong pod name, got %d", len(events))
@@ -151,7 +151,7 @@ func TestEventsCorrelator_AddEvent_WrongPodName(t *testing.T) {
 
 func TestEventsCorrelator_AddEvent_MaxEvents(t *testing.T) {
 	correlator := NewEventsCorrelator(nil, "test-pod", "default")
-	
+
 	for i := 0; i < 150; i++ {
 		event := &corev1.Event{
 			InvolvedObject: corev1.ObjectReference{
@@ -165,7 +165,7 @@ func TestEventsCorrelator_AddEvent_MaxEvents(t *testing.T) {
 		}
 		correlator.addEvent(event)
 	}
-	
+
 	events := correlator.GetEvents()
 	if len(events) > 100 {
 		t.Errorf("Expected max 100 events, got %d", len(events))
@@ -174,7 +174,7 @@ func TestEventsCorrelator_AddEvent_MaxEvents(t *testing.T) {
 
 func TestEventsCorrelator_GetEvents(t *testing.T) {
 	correlator := NewEventsCorrelator(nil, "test-pod", "default")
-	
+
 	event := &corev1.Event{
 		InvolvedObject: corev1.ObjectReference{
 			Name: "test-pod",
@@ -185,14 +185,14 @@ func TestEventsCorrelator_GetEvents(t *testing.T) {
 		FirstTimestamp: metav1.NewTime(time.Now()),
 		Count:          1,
 	}
-	
+
 	correlator.addEvent(event)
-	
+
 	events := correlator.GetEvents()
 	if len(events) != 1 {
 		t.Errorf("Expected 1 event, got %d", len(events))
 	}
-	
+
 	events2 := correlator.GetEvents()
 	if len(events2) != 1 {
 		t.Errorf("Expected 1 event on second call, got %d", len(events2))
@@ -204,9 +204,9 @@ func TestEventsCorrelator_GetEvents(t *testing.T) {
 
 func TestEventsCorrelator_Stop(t *testing.T) {
 	correlator := NewEventsCorrelator(nil, "test-pod", "default")
-	
+
 	correlator.Stop()
-	
+
 	select {
 	case <-correlator.stopCh:
 	default:
@@ -216,7 +216,7 @@ func TestEventsCorrelator_Stop(t *testing.T) {
 
 func TestEventsCorrelator_CorrelateWithAppEvents(t *testing.T) {
 	correlator := NewEventsCorrelator(nil, "test-pod", "default")
-	
+
 	now := time.Now()
 	event1 := &corev1.Event{
 		InvolvedObject: corev1.ObjectReference{
@@ -248,11 +248,11 @@ func TestEventsCorrelator_CorrelateWithAppEvents(t *testing.T) {
 		FirstTimestamp: metav1.NewTime(now.Add(20 * time.Second)),
 		Count:          1,
 	}
-	
+
 	correlator.addEvent(event1)
 	correlator.addEvent(event2)
 	correlator.addEvent(event3)
-	
+
 	correlated := correlator.CorrelateWithAppEvents(now, 10*time.Second)
 	if len(correlated) != 2 {
 		t.Errorf("Expected 2 correlated events, got %d", len(correlated))
@@ -261,7 +261,7 @@ func TestEventsCorrelator_CorrelateWithAppEvents(t *testing.T) {
 
 func TestEventsCorrelator_CorrelateWithAppEvents_NoMatches(t *testing.T) {
 	correlator := NewEventsCorrelator(nil, "test-pod", "default")
-	
+
 	now := time.Now()
 	event := &corev1.Event{
 		InvolvedObject: corev1.ObjectReference{
@@ -273,9 +273,9 @@ func TestEventsCorrelator_CorrelateWithAppEvents_NoMatches(t *testing.T) {
 		FirstTimestamp: metav1.NewTime(now.Add(-30 * time.Second)),
 		Count:          1,
 	}
-	
+
 	correlator.addEvent(event)
-	
+
 	correlated := correlator.CorrelateWithAppEvents(now, 10*time.Second)
 	if len(correlated) != 0 {
 		t.Errorf("Expected 0 correlated events, got %d", len(correlated))
@@ -284,13 +284,12 @@ func TestEventsCorrelator_CorrelateWithAppEvents_NoMatches(t *testing.T) {
 
 func TestEventsCorrelator_CorrelateWithAppEvents_EmptyEvents(t *testing.T) {
 	correlator := NewEventsCorrelator(nil, "test-pod", "default")
-	
+
 	correlated := correlator.CorrelateWithAppEvents(time.Now(), 10*time.Second)
 	if len(correlated) != 0 {
 		t.Errorf("Expected 0 correlated events, got %d", len(correlated))
 	}
 }
-
 
 // TestEventsCorrelator_AddEvent_EventTimeFallback is a regression guard for the
 // events.k8s.io/v1 event shape: those events carry EventTime (a MicroTime) and

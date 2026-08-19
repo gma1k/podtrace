@@ -163,16 +163,16 @@ func TestSplunkAlertSender_Send_WithAllFields(t *testing.T) {
 	}
 
 	alert := &Alert{
-		Severity:       SeverityWarning,
-		Title:          "Test Alert",
-		Message:        "Test message",
-		Timestamp:      time.Now(),
-		Source:         "test",
-		PodName:        "test-pod",
-		Namespace:      "test-ns",
-		ErrorCode:      "ERR001",
+		Severity:        SeverityWarning,
+		Title:           "Test Alert",
+		Message:         "Test message",
+		Timestamp:       time.Now(),
+		Source:          "test",
+		PodName:         "test-pod",
+		Namespace:       "test-ns",
+		ErrorCode:       "ERR001",
 		Recommendations: []string{"rec1", "rec2"},
-		Context:        map[string]interface{}{
+		Context: map[string]interface{}{
 			"key1": "value1",
 			"key2": 123,
 			"very_long_key_name_that_exceeds_64_characters_limit_should_be_ignored": "value",
@@ -325,5 +325,3 @@ func TestSplunkAlertSender_Send_ContextKeysTooLong(t *testing.T) {
 		t.Errorf("Send() error = %v", err)
 	}
 }
-
-

@@ -254,7 +254,6 @@ func TestCalculateRate(t *testing.T) {
 	}
 }
 
-
 // errorWriter always returns an error on Write.
 type errorWriter struct{}
 
@@ -266,7 +265,7 @@ func (e *errorWriter) Write(p []byte) (int, error) {
 // inline closure inside buildDNSExportData when len(dnsEvents) == 0.
 func TestBuildDNSExportData_ZeroEvents(t *testing.T) {
 	data := buildDNSExportData(
-		[]*events.Event{},   // 0 events → closure returns 0
+		[]*events.Event{}, // 0 events → closure returns 0
 		time.Second,
 		0, 0, 0, 0, 0, 0,
 		[]analyzer.TargetCount{},

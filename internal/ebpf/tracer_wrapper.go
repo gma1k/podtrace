@@ -15,4 +15,3 @@ func NewTracer() (TracerInterface, error) {
 func WaitForInterrupt() {
 	tracer.WaitForInterrupt()
 }
-

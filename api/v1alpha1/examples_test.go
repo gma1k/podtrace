@@ -224,4 +224,3 @@ func validateStructuralNotEmpty(obj runtime.Object, kind string) error {
 	}
 	return nil
 }
-

@@ -218,7 +218,6 @@ func TestRetrySender_Name(t *testing.T) {
 	}
 }
 
-
 func TestRetrySender_Send_ContextDeadlineExceededDuringBackoff(t *testing.T) {
 	attempts := 0
 	mock := &mockSender{
@@ -243,5 +242,3 @@ func TestRetrySender_Send_ContextDeadlineExceededDuringBackoff(t *testing.T) {
 		t.Errorf("Send() error = %v, want context.DeadlineExceeded", err)
 	}
 }
-
-

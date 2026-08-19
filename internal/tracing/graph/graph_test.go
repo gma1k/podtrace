@@ -114,18 +114,18 @@ func TestRequestFlowGraph_ToDOT(t *testing.T) {
 	graph := &RequestFlowGraph{
 		Nodes: []Node{
 			{
-				ID:          "node1",
-				Service:     "service1",
+				ID:           "node1",
+				Service:      "service1",
 				RequestCount: 10,
 				ErrorCount:   1,
 			},
 		},
 		Edges: []Edge{
 			{
-				Source:      "node1",
-				Target:      "node2",
+				Source:       "node1",
+				Target:       "node2",
 				RequestCount: 5,
-				AvgLatency:  100 * time.Millisecond,
+				AvgLatency:   100 * time.Millisecond,
 			},
 		},
 	}
@@ -200,8 +200,8 @@ func TestGraphBuilder_ensureNode(t *testing.T) {
 func TestGraphBuilder_updateNode(t *testing.T) {
 	gb := NewGraphBuilder()
 	gb.nodes["node1"] = &Node{
-		ID:          "node1",
-		Service:     "service1",
+		ID:           "node1",
+		Service:      "service1",
 		RequestCount: 0,
 		ErrorCount:   0,
 	}
@@ -249,4 +249,3 @@ func TestGraphBuilder_updateEdge(t *testing.T) {
 		t.Errorf("ErrorCount = %d, want 1", edge.ErrorCount)
 	}
 }
-

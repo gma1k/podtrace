@@ -58,7 +58,6 @@ func TestGenerateCPUUsageReport(t *testing.T) {
 	}
 }
 
-
 func TestCPUUsageReportWithKernelThreads(t *testing.T) {
 	duration := 10 * time.Second
 
@@ -88,4 +87,3 @@ func TestCPUUsageReportWithKernelThreads(t *testing.T) {
 	}
 	_ = report
 }
-

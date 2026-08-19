@@ -18,20 +18,20 @@ type cacheEntry struct {
 }
 
 type LRUCache struct {
-	cache      map[uint32]*list.Element
-	list       *list.List
-	maxSize    int
-	ttl        time.Duration
-	mutex      sync.RWMutex
+	cache       map[uint32]*list.Element
+	list        *list.List
+	maxSize     int
+	ttl         time.Duration
+	mutex       sync.RWMutex
 	stopCleanup chan struct{}
 }
 
 func NewLRUCache(maxSize int, ttl time.Duration) *LRUCache {
 	c := &LRUCache{
-		cache:      make(map[uint32]*list.Element),
-		list:       list.New(),
-		maxSize:    maxSize,
-		ttl:        ttl,
+		cache:       make(map[uint32]*list.Element),
+		list:        list.New(),
+		maxSize:     maxSize,
+		ttl:         ttl,
 		stopCleanup: make(chan struct{}),
 	}
 	go c.cleanupExpired()
@@ -137,4 +137,3 @@ func (c *LRUCache) cleanupExpired() {
 func (c *LRUCache) Close() {
 	close(c.stopCleanup)
 }
-

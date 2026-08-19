@@ -196,6 +196,3 @@ func TestNewResolverWithEndpoint_ExistingSocketBadServer(t *testing.T) {
 		t.Log("NewResolverWithEndpoint succeeded (may have fast-pathed connection)")
 	}
 }
-
-
-

@@ -58,4 +58,3 @@ func NewInvalidEventError(reason string) *TracerError {
 		Message: fmt.Sprintf("invalid event: %s", reason),
 	}
 }
-

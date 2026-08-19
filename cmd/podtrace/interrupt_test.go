@@ -46,4 +46,3 @@ func TestInterruptChan_PanicRecovery(t *testing.T) {
 		t.Error("interruptChan did not receive signal in time")
 	}
 }
-

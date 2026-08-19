@@ -150,7 +150,7 @@ func TestCircuitBreaker_RecordSuccess(t *testing.T) {
 func TestClassifyError_Transient(t *testing.T) {
 	err := errors.New("EAGAIN error")
 	err2 := errors.New("temporary failure")
-	
+
 	category := classifyError(err)
 	if category != ErrorCategoryTransient {
 		t.Errorf("Expected ErrorCategoryTransient for EAGAIN, got %d", category)
@@ -272,7 +272,7 @@ func TestSlidingWindow_BucketCreation(t *testing.T) {
 
 func TestSlidingWindow_MultipleBuckets(t *testing.T) {
 	window := newSlidingWindow(1*time.Second, 10)
-	
+
 	for i := 0; i < 5; i++ {
 		window.addError()
 		time.Sleep(50 * time.Millisecond)
@@ -291,7 +291,7 @@ func TestSlidingWindow_BucketExpiration(t *testing.T) {
 	window := newSlidingWindow(100*time.Millisecond, 10)
 	window.addError()
 	window.addError()
-	
+
 	time.Sleep(50 * time.Millisecond)
 	rate := window.getErrorRate()
 	if rate != 2 {
@@ -401,4 +401,3 @@ func TestClassifyError_Denied(t *testing.T) {
 		t.Errorf("Expected ErrorCategoryPermanent for denied, got %d", category)
 	}
 }
-

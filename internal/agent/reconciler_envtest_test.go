@@ -172,11 +172,11 @@ func TestAgentEnvtest_TwoOverlappingCRs_ProduceScopedStreams(t *testing.T) {
 	}
 
 	batch := []*events.Event{
-		{CgroupID: 1001, Type: events.EventDNS},      // A only (B does not filter DNS)
-		{CgroupID: 1001, Type: events.EventConnect},  // B only (A does not filter Connect)
-		{CgroupID: 1002, Type: events.EventDNS},      // A only
-		{CgroupID: 1002, Type: events.EventTCPSend},  // B only
-		{CgroupID: 9999, Type: events.EventDNS},      // neither (cgroup unclaimed)
+		{CgroupID: 1001, Type: events.EventDNS},     // A only (B does not filter DNS)
+		{CgroupID: 1001, Type: events.EventConnect}, // B only (A does not filter Connect)
+		{CgroupID: 1002, Type: events.EventDNS},     // A only
+		{CgroupID: 1002, Type: events.EventTCPSend}, // B only
+		{CgroupID: 9999, Type: events.EventDNS},     // neither (cgroup unclaimed)
 	}
 	if err := router.Export(ctx, batch); err != nil {
 		t.Fatalf("router.Export: %v", err)

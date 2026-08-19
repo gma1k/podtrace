@@ -57,7 +57,6 @@ func TestLogFunctions(t *testing.T) {
 	Error("test error message", zap.String("key", "value"))
 }
 
-
 func TestSync(t *testing.T) {
 	Sync()
 }
@@ -134,5 +133,3 @@ func TestParseLogLevel(t *testing.T) {
 		})
 	}
 }
-
-

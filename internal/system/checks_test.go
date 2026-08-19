@@ -10,9 +10,9 @@ import (
 // TestKernelVersionAtLeast exercises the AtLeast comparison logic.
 func TestKernelVersionAtLeast(t *testing.T) {
 	cases := []struct {
-		v          KernelVersion
+		v            KernelVersion
 		major, minor int
-		want       bool
+		want         bool
 	}{
 		{KernelVersion{6, 1, 0}, 5, 8, true},
 		{KernelVersion{5, 8, 0}, 5, 8, true},

@@ -73,9 +73,9 @@ func TestContextEnricher_EnrichEvent_NonNetwork(t *testing.T) {
 
 func TestParseTarget(t *testing.T) {
 	tests := []struct {
-		name     string
-		target   string
-		expectedIP string
+		name         string
+		target       string
+		expectedIP   string
 		expectedPort int
 	}{
 		{"IPv4 with port", "192.168.1.1:8080", "192.168.1.1", 8080},
@@ -192,9 +192,9 @@ func TestGetIntEnvOrDefault_EmptyValue(t *testing.T) {
 			_ = os.Unsetenv("TEST_ENV_VAR")
 		}
 	}()
-	
+
 	_ = os.Unsetenv("TEST_ENV_VAR")
-	
+
 	result := getIntEnvOrDefault("TEST_ENV_VAR", 100)
 	if result != 100 {
 		t.Errorf("Expected default value 100, got %d", result)
@@ -210,9 +210,9 @@ func TestGetIntEnvOrDefault_ValidValue(t *testing.T) {
 			_ = os.Unsetenv("TEST_ENV_VAR")
 		}
 	}()
-	
+
 	_ = os.Setenv("TEST_ENV_VAR", "200")
-	
+
 	result := getIntEnvOrDefault("TEST_ENV_VAR", 100)
 	if result != 200 {
 		t.Errorf("Expected value 200, got %d", result)
@@ -228,9 +228,9 @@ func TestGetIntEnvOrDefault_InvalidValue(t *testing.T) {
 			_ = os.Unsetenv("TEST_ENV_VAR")
 		}
 	}()
-	
+
 	_ = os.Setenv("TEST_ENV_VAR", "invalid")
-	
+
 	result := getIntEnvOrDefault("TEST_ENV_VAR", 100)
 	if result != 100 {
 		t.Errorf("Expected default value 100 for invalid input, got %d", result)
@@ -246,9 +246,9 @@ func TestGetIntEnvOrDefault_ZeroValue(t *testing.T) {
 			_ = os.Unsetenv("TEST_ENV_VAR")
 		}
 	}()
-	
+
 	_ = os.Setenv("TEST_ENV_VAR", "0")
-	
+
 	result := getIntEnvOrDefault("TEST_ENV_VAR", 100)
 	if result != 100 {
 		t.Errorf("Expected default value 100 for zero input, got %d", result)
@@ -382,7 +382,6 @@ func TestContextEnricher_EnrichEvent_UnknownTarget(t *testing.T) {
 		}
 	}
 }
-
 
 // ─── resolvePodByIP: cache hit ────────────────────────────────────────────────
 

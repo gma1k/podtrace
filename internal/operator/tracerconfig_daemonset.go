@@ -189,7 +189,7 @@ func mountPropagationHostToContainer() *corev1.MountPropagationMode {
 func ptrInt64(v int64) *int64 { return &v }
 
 func boolPtr(b bool) *bool { return &b }
-func itoa(n int) string       { return strconv.Itoa(n) }
+func itoa(n int) string    { return strconv.Itoa(n) }
 
 // intstrFromString returns an IntOrString whose StrVal names a port by
 // name.

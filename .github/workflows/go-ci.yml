@@ -64,6 +64,9 @@ jobs:
           version: v2.12.2
           args: --timeout=5m
 
+      - name: Check gofmt
+        run: make fmt-check
+
       - name: Run govulncheck
         timeout-minutes: 5
         run: |

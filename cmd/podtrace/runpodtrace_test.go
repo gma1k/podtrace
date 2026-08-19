@@ -10,9 +10,9 @@ import (
 	"github.com/gma1k/podtrace/internal/ebpf"
 	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/internal/kubernetes"
+	"github.com/spf13/cobra"
 	k8s "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
-	"github.com/spf13/cobra"
 )
 
 func TestRunPodtrace_InvalidPodName(t *testing.T) {
