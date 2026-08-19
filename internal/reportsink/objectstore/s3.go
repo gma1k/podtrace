@@ -22,8 +22,8 @@ const (
 	s3SecretKeySecretAccessKey = "secret_access_key"
 	s3SecretKeySessionToken    = "session_token"
 	s3SecretKeyRegion          = "region"
-	s3SecretKeyEndpoint = "endpoint"
-	s3SecretKeyForcePath = "force_path_style"
+	s3SecretKeyEndpoint        = "endpoint"
+	s3SecretKeyForcePath       = "force_path_style"
 )
 
 // s3Sink uploads to AWS S3 or any S3-compatible bucket via the

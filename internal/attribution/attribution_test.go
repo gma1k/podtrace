@@ -8,8 +8,8 @@ import (
 )
 
 type fixedClock struct {
-	mu  sync.Mutex
-	t   time.Time
+	mu sync.Mutex
+	t  time.Time
 }
 
 func (c *fixedClock) now() time.Time {

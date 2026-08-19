@@ -15,9 +15,9 @@ import (
 // skStorageCrossContextResult holds the outcome of the one-shot
 // HaveSkStorageCrossContext capability probe.
 type skStorageCrossContextResult struct {
-	mapType        bool
-	cgroupSkbRead  bool
-	kprobeWrite    bool
+	mapType       bool
+	cgroupSkbRead bool
+	kprobeWrite   bool
 }
 
 var (

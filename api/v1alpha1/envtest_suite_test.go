@@ -12,12 +12,12 @@
 // works in environments where the envtest binaries (kube-apiserver,
 // etcd) are not installed. Run with:
 //
-//   make envtest
+//	make envtest
 //
 // or directly:
 //
-//   KUBEBUILDER_ASSETS=$(setup-envtest use 1.30.x -p path) \
-//     go test -tags=envtest -timeout 120s ./api/v1alpha1/...
+//	KUBEBUILDER_ASSETS=$(setup-envtest use 1.30.x -p path) \
+//	  go test -tags=envtest -timeout 120s ./api/v1alpha1/...
 package v1alpha1_test
 
 import (

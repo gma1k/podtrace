@@ -82,4 +82,3 @@ func NewCgroupNotFoundError(containerID string) *KubernetesError {
 		Message: fmt.Sprintf("cgroup path not found for container %s", containerID),
 	}
 }
-

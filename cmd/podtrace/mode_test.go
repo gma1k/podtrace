@@ -687,7 +687,6 @@ func TestRunNormalMode_WithTracing(t *testing.T) {
 		fsSlowThreshold = origFSThreshold
 	}()
 
-
 	go func() {
 		stdoutMutex.Lock()
 		originalStdout := os.Stdout
@@ -784,7 +783,6 @@ func TestRunDiagnoseMode_WithTracing(t *testing.T) {
 		fsSlowThreshold = origFSThreshold
 		exportFormat = origExportFormat
 	}()
-
 
 	go func() {
 		eventChan <- &events.Event{Type: events.EventDNS, LatencyNS: 5000000, Target: "example.com"}

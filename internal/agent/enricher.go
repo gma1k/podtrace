@@ -14,14 +14,14 @@ import (
 // PodEnricher maps kernel cgroup inode IDs to a frozen, six-attribute
 // Kubernetes metadata bundle used to enrich exported spans.
 type PodEnricher struct {
-	mu    sync.RWMutex
+	mu       sync.RWMutex
 	byCgroup map[uint64]events.K8sMetadata
 
-	hits           atomic.Int64
-	misses         atomic.Int64
-	snapshots      atomic.Int64
-	ownerResolved  atomic.Int64
-	ownerOrphaned  atomic.Int64
+	hits          atomic.Int64
+	misses        atomic.Int64
+	snapshots     atomic.Int64
+	ownerResolved atomic.Int64
+	ownerOrphaned atomic.Int64
 }
 
 // NewPodEnricher returns an empty enricher.
@@ -157,7 +157,7 @@ type PodCgroupEntry struct {
 	Pod           *corev1.Pod
 	ContainerName string
 	ContainerID   string
-	ContainerPID uint32
+	ContainerPID  uint32
 }
 
 // buildK8sMetadata projects a PodCgroupEntry onto the frozen v1

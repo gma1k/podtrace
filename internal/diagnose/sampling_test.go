@@ -125,4 +125,3 @@ func TestShouldSampleEvent_NilEvent(t *testing.T) {
 		t.Error("Expected nil event not to be sampled")
 	}
 }
-

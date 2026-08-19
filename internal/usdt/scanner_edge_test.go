@@ -66,21 +66,21 @@ func buildELFWithNoteData(t *testing.T, noteData []byte) string {
 
 	// ELF magic + header.
 	copy(buf[0:], []byte{0x7f, 'E', 'L', 'F'})
-	buf[4] = 2 // ELFCLASS64
-	buf[5] = 1 // ELFDATA2LSB
-	buf[6] = 1 // EV_CURRENT
-	buf[7] = 0 // ELFOSABI_NONE
-	le.PutUint16(buf[16:], 2)              // ET_EXEC
-	le.PutUint16(buf[18:], 62)             // EM_X86_64
-	le.PutUint32(buf[20:], 1)              // EV_CURRENT
-	le.PutUint64(buf[40:], shOff)          // e_shoff
-	le.PutUint32(buf[48:], 0)             // e_flags
-	le.PutUint16(buf[52:], elfHeaderSize)  // e_ehsize
-	le.PutUint16(buf[54:], 56)            // e_phentsize
-	le.PutUint16(buf[56:], 0)             // e_phnum
-	le.PutUint16(buf[58:], shEntrySize)   // e_shentsize
+	buf[4] = 2                                  // ELFCLASS64
+	buf[5] = 1                                  // ELFDATA2LSB
+	buf[6] = 1                                  // EV_CURRENT
+	buf[7] = 0                                  // ELFOSABI_NONE
+	le.PutUint16(buf[16:], 2)                   // ET_EXEC
+	le.PutUint16(buf[18:], 62)                  // EM_X86_64
+	le.PutUint32(buf[20:], 1)                   // EV_CURRENT
+	le.PutUint64(buf[40:], shOff)               // e_shoff
+	le.PutUint32(buf[48:], 0)                   // e_flags
+	le.PutUint16(buf[52:], elfHeaderSize)       // e_ehsize
+	le.PutUint16(buf[54:], 56)                  // e_phentsize
+	le.PutUint16(buf[56:], 0)                   // e_phnum
+	le.PutUint16(buf[58:], shEntrySize)         // e_shentsize
 	le.PutUint16(buf[60:], uint16(numSections)) // e_shnum
-	le.PutUint16(buf[62:], 2)             // e_shstrndx
+	le.PutUint16(buf[62:], 2)                   // e_shstrndx
 
 	// Note data.
 	copy(buf[noteOff:], noteData)

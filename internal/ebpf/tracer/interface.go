@@ -15,4 +15,3 @@ type TracerInterface interface {
 	Start(ctx context.Context, eventChan chan<- *events.Event) error
 	Stop() error
 }
-

@@ -161,16 +161,16 @@ func TestWebhookSender_Send_WithAllFields(t *testing.T) {
 	}
 
 	alert := &Alert{
-		Severity:       SeverityWarning,
-		Title:          "Test Alert",
-		Message:        "Test message",
-		Timestamp:      time.Now(),
-		Source:         "test",
-		PodName:        "test-pod",
-		Namespace:      "test-ns",
-		ErrorCode:      "ERR001",
+		Severity:        SeverityWarning,
+		Title:           "Test Alert",
+		Message:         "Test message",
+		Timestamp:       time.Now(),
+		Source:          "test",
+		PodName:         "test-pod",
+		Namespace:       "test-ns",
+		ErrorCode:       "ERR001",
 		Recommendations: []string{"rec1", "rec2"},
-		Context:        map[string]interface{}{"key": "value"},
+		Context:         map[string]interface{}{"key": "value"},
 	}
 
 	err = sender.Send(context.Background(), alert)
@@ -287,4 +287,3 @@ func TestWebhookSender_Send_MarshalError(t *testing.T) {
 		t.Error("Send() should return error for invalid JSON")
 	}
 }
-

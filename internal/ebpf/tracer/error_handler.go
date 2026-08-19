@@ -134,18 +134,18 @@ const (
 )
 
 type circuitBreaker struct {
-	state         circuitBreakerState
-	failureCount  int
-	lastFailure   time.Time
-	threshold     int
-	timeout       time.Duration
-	successCount  int
-	mu            sync.Mutex
+	state        circuitBreakerState
+	failureCount int
+	lastFailure  time.Time
+	threshold    int
+	timeout      time.Duration
+	successCount int
+	mu           sync.Mutex
 }
 
 func newCircuitBreaker(threshold int, timeout time.Duration) *circuitBreaker {
 	return &circuitBreaker{
-		state:    circuitBreakerClosed,
+		state:     circuitBreakerClosed,
 		threshold: threshold,
 		timeout:   timeout,
 	}
@@ -235,4 +235,3 @@ func errorCategoryString(category ErrorCategory) string {
 		return "unknown"
 	}
 }
-

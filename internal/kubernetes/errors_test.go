@@ -8,7 +8,7 @@ import (
 func TestNewKubeconfigError(t *testing.T) {
 	originalErr := errors.New("kubeconfig error")
 	err := NewKubeconfigError(originalErr)
-	
+
 	if err == nil {
 		t.Fatal("NewKubeconfigError returned nil")
 		return
@@ -27,7 +27,7 @@ func TestNewKubeconfigError(t *testing.T) {
 func TestNewClientsetError(t *testing.T) {
 	originalErr := errors.New("clientset error")
 	err := NewClientsetError(originalErr)
-	
+
 	if err == nil {
 		t.Fatal("NewClientsetError returned nil")
 		return
@@ -50,7 +50,7 @@ func TestKubernetesError_Error_WithErr(t *testing.T) {
 		Message: "test message",
 		Err:     originalErr,
 	}
-	
+
 	errStr := kerr.Error()
 	if errStr == "" {
 		t.Error("Error() should return non-empty string")
@@ -66,7 +66,7 @@ func TestKubernetesError_Error_WithoutErr(t *testing.T) {
 		Message: "test message",
 		Err:     nil,
 	}
-	
+
 	errStr := kerr.Error()
 	if errStr != "test message" {
 		t.Errorf("Expected error string 'test message', got %q", errStr)
@@ -74,7 +74,7 @@ func TestKubernetesError_Error_WithoutErr(t *testing.T) {
 }
 
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || 
+	return len(s) >= len(substr) && (s == substr ||
 		(len(s) > len(substr) && containsMiddle(s, substr)))
 }
 
@@ -86,4 +86,3 @@ func containsMiddle(s, substr string) bool {
 	}
 	return false
 }
-

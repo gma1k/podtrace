@@ -18,4 +18,3 @@ type ClientsetProvider interface {
 type RestConfigProvider interface {
 	GetRestConfig() *rest.Config
 }
-

@@ -156,4 +156,3 @@ func TestNewInvalidEventError(t *testing.T) {
 		t.Errorf("Expected nil wrapped error, got %v", err.Err)
 	}
 }
-

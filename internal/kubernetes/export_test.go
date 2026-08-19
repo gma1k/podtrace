@@ -7,4 +7,3 @@ func NewPodResolverForTesting(clientset kubernetes.Interface) *PodResolver {
 		clientset: clientset,
 	}
 }
-

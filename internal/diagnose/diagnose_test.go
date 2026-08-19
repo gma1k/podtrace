@@ -496,7 +496,7 @@ func TestDiagnostician_GenerateIssuesSection_WithIssues(t *testing.T) {
 	d := NewDiagnostician()
 	d.errorRateThreshold = 10.0
 	d.rttSpikeThreshold = 100.0
-	
+
 	for i := 0; i < 11; i++ {
 		errorVal := int32(0)
 		if i < 9 {
@@ -1279,7 +1279,6 @@ func TestExportCSV_NilEvent(t *testing.T) {
 		t.Errorf("ExportCSV should not return error, got %v", err)
 	}
 }
-
 
 func TestGenerateTCPStateSection_WithManyStates(t *testing.T) {
 	d := NewDiagnostician()

@@ -67,4 +67,3 @@ func (pc *PathCache) CleanupExpired() {
 		}
 	}
 }
-

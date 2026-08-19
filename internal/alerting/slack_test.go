@@ -13,40 +13,40 @@ import (
 
 func TestNewSlackSender(t *testing.T) {
 	tests := []struct {
-		name      string
+		name       string
 		webhookURL string
-		channel   string
-		wantErr   bool
+		channel    string
+		wantErr    bool
 	}{
 		{
-			name:      "valid Slack webhook",
+			name:       "valid Slack webhook",
 			webhookURL: "https://hooks.slack.com/services/EXAMPLE/WEBHOOK/URL",
-			channel:   "#alerts",
-			wantErr:   false,
+			channel:    "#alerts",
+			wantErr:    false,
 		},
 		{
-			name:      "empty webhook URL",
+			name:       "empty webhook URL",
 			webhookURL: "",
-			channel:   "#alerts",
-			wantErr:   true,
+			channel:    "#alerts",
+			wantErr:    true,
 		},
 		{
-			name:      "http webhook URL",
+			name:       "http webhook URL",
 			webhookURL: "http://hooks.slack.com/services/EXAMPLE/WEBHOOK/URL",
-			channel:   "#alerts",
-			wantErr:   true,
+			channel:    "#alerts",
+			wantErr:    true,
 		},
 		{
-			name:      "invalid webhook URL",
+			name:       "invalid webhook URL",
 			webhookURL: "not-a-slack-url",
-			channel:   "#alerts",
-			wantErr:   true,
+			channel:    "#alerts",
+			wantErr:    true,
 		},
 		{
-			name:      "empty channel uses default",
+			name:       "empty channel uses default",
 			webhookURL: "https://hooks.slack.com/services/EXAMPLE/WEBHOOK/URL",
-			channel:   "",
-			wantErr:   false,
+			channel:    "",
+			wantErr:    false,
 		},
 	}
 	for _, tt := range tests {
@@ -236,16 +236,16 @@ func TestSlackSender_Send_WithAllFields(t *testing.T) {
 	}
 
 	alert := &Alert{
-		Severity:       SeverityWarning,
-		Title:          "Test Alert",
-		Message:        "Test message",
-		Timestamp:      time.Now(),
-		Source:         "test",
-		PodName:        "test-pod",
-		Namespace:      "test-ns",
-		ErrorCode:      "ERR001",
+		Severity:        SeverityWarning,
+		Title:           "Test Alert",
+		Message:         "Test message",
+		Timestamp:       time.Now(),
+		Source:          "test",
+		PodName:         "test-pod",
+		Namespace:       "test-ns",
+		ErrorCode:       "ERR001",
 		Recommendations: []string{"rec1", "rec2", "rec3", "rec4", "rec5"},
-		Context:        map[string]interface{}{"key": "value"},
+		Context:         map[string]interface{}{"key": "value"},
 	}
 
 	err = sender.Send(context.Background(), alert)
@@ -272,11 +272,11 @@ func TestSlackSender_Send_WithFewRecommendations(t *testing.T) {
 	}
 
 	alert := &Alert{
-		Severity:       SeverityWarning,
-		Title:          "Test Alert",
-		Message:        "Test message",
-		Timestamp:      time.Now(),
-		Source:         "test",
+		Severity:        SeverityWarning,
+		Title:           "Test Alert",
+		Message:         "Test message",
+		Timestamp:       time.Now(),
+		Source:          "test",
 		Recommendations: []string{"rec1", "rec2"},
 	}
 
@@ -311,34 +311,34 @@ func TestSlackSender_Send_HTTPError(t *testing.T) {
 
 func TestNewSlackSender_InvalidURLScheme(t *testing.T) {
 	tests := []struct {
-		name      string
+		name       string
 		webhookURL string
-		wantErr   bool
+		wantErr    bool
 	}{
 		{
-			name:      "http scheme",
+			name:       "http scheme",
 			webhookURL: "http://hooks.slack.com/services/EXAMPLE/WEBHOOK/URL",
-			wantErr:   true,
+			wantErr:    true,
 		},
 		{
-			name:      "ftp scheme",
+			name:       "ftp scheme",
 			webhookURL: "ftp://hooks.slack.com/services/EXAMPLE/WEBHOOK/URL",
-			wantErr:   true,
+			wantErr:    true,
 		},
 		{
-			name:      "invalid format - no hooks.slack.com",
+			name:       "invalid format - no hooks.slack.com",
 			webhookURL: "https://example.com/webhook",
-			wantErr:   true,
+			wantErr:    true,
 		},
 		{
-			name:      "invalid format - wrong domain",
+			name:       "invalid format - wrong domain",
 			webhookURL: "https://hooks.example.com/services/EXAMPLE/WEBHOOK/URL",
-			wantErr:   true,
+			wantErr:    true,
 		},
 		{
-			name:      "invalid URL parse",
+			name:       "invalid URL parse",
 			webhookURL: "://invalid-url",
-			wantErr:   true,
+			wantErr:    true,
 		},
 	}
 
@@ -378,14 +378,14 @@ func TestSlackSender_Send_MarshalError(t *testing.T) {
 
 func TestBuildSlackFields(t *testing.T) {
 	alert := &Alert{
-		Severity:       SeverityWarning,
-		Title:          "Test Alert",
-		Message:        "Test message",
-		Timestamp:      time.Now(),
-		Source:         "test",
-		PodName:        "test-pod",
-		Namespace:      "test-ns",
-		ErrorCode:      "ERR001",
+		Severity:        SeverityWarning,
+		Title:           "Test Alert",
+		Message:         "Test message",
+		Timestamp:       time.Now(),
+		Source:          "test",
+		PodName:         "test-pod",
+		Namespace:       "test-ns",
+		ErrorCode:       "ERR001",
 		Recommendations: []string{"rec1", "rec2", "rec3", "rec4", "rec5"},
 	}
 
@@ -486,4 +486,3 @@ func TestMin(t *testing.T) {
 		})
 	}
 }
-

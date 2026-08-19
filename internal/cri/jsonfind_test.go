@@ -127,6 +127,3 @@ func TestFindJSONString_EmptyValue(t *testing.T) {
 		t.Error("expected ok=false for empty string value")
 	}
 }
-
-
-

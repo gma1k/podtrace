@@ -61,5 +61,3 @@ func TestAlertDeduplicator_Reset(t *testing.T) {
 		t.Error("Alert should be sendable after reset")
 	}
 }
-
-

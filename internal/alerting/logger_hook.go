@@ -75,4 +75,3 @@ func CreateAlertFromLog(level zapcore.Level, msg string, fields []zap.Field, pod
 	}
 	return alert
 }
-

@@ -29,7 +29,7 @@ func TestWaitForInterrupt(t *testing.T) {
 		WaitForInterrupt()
 		done <- true
 	}()
-	
+
 	select {
 	case <-done:
 		t.Log("WaitForInterrupt completed")
@@ -67,4 +67,3 @@ func (m *mockTracerForInterface) Start(ctx context.Context, eventChan chan<- *ev
 func (m *mockTracerForInterface) Stop() error {
 	return nil
 }
-

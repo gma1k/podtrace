@@ -113,6 +113,7 @@ func TestPreResolvedSkip_CauseIsUnwrappable(t *testing.T) {
 		t.Error("cause must be a real error, not nil")
 	}
 }
+
 // TestNormalizeContainerID guards the pre-resolved container-ID validation:
 // the ID is substring-matched against cgroup paths, so a short or non-hex
 // value could match — and attach to — the wrong container.

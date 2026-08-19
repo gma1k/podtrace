@@ -12,22 +12,22 @@ import (
 )
 
 type PodCommunication struct {
-	SourcePod      string
-	TargetPod      string
-	TargetService  string
-	Namespace      string
+	SourcePod       string
+	TargetPod       string
+	TargetService   string
+	Namespace       string
 	ConnectionCount int
-	TotalBytes     uint64
-	TotalLatency   time.Duration
-	ErrorCount     int
-	LastSeen       time.Time
-	FirstSeen      time.Time
+	TotalBytes      uint64
+	TotalLatency    time.Duration
+	ErrorCount      int
+	LastSeen        time.Time
+	FirstSeen       time.Time
 }
 
 type PodCommunicationTracker struct {
-	mu             sync.RWMutex
-	communications map[string]*PodCommunication
-	sourcePod      string
+	mu              sync.RWMutex
+	communications  map[string]*PodCommunication
+	sourcePod       string
 	sourceNamespace string
 }
 
@@ -75,12 +75,12 @@ func (pct *PodCommunicationTracker) ProcessEvent(event *events.Event, k8sContext
 	comm, exists := pct.communications[key]
 	if !exists {
 		comm = &PodCommunication{
-			SourcePod:      pct.sourcePod,
-			TargetPod:      targetPod,
-			TargetService:  targetService,
-			Namespace:      targetNamespace,
-			FirstSeen:      timestamp,
-			LastSeen:       timestamp,
+			SourcePod:     pct.sourcePod,
+			TargetPod:     targetPod,
+			TargetService: targetService,
+			Namespace:     targetNamespace,
+			FirstSeen:     timestamp,
+			LastSeen:      timestamp,
 		}
 		pct.communications[key] = comm
 	}
@@ -215,4 +215,3 @@ func formatBytes(bytes uint64) string {
 		return fmt.Sprintf("%d B", bytes)
 	}
 }
-

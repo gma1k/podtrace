@@ -9,7 +9,7 @@ import (
 //
 // Bundle expectations:
 //   - Endpoint  — Jaeger's OTLP HTTP receiver, default port 4318
-//                 (e.g. "jaeger-collector.observability:4318").
+//     (e.g. "jaeger-collector.observability:4318").
 //   - Insecure  — typically true for in-cluster collectors.
 //   - Sample    — honored via sdkEventExporter's sampler.
 func newJaegerEventExporter(cr CRKey, b *BundlePayload, opts ...sdkOption) (tracer.Exporter, error) {

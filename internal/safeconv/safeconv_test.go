@@ -32,8 +32,8 @@ func TestUint64BitsToInt64(t *testing.T) {
 	}{
 		{0, 0},
 		{42, 42},
-		{0x8000000000000000, math.MinInt64},        // high bit only
-		{0xFFFFFFFFFFFFFFFF, -1},                   // all-ones → -1
+		{0x8000000000000000, math.MinInt64}, // high bit only
+		{0xFFFFFFFFFFFFFFFF, -1},            // all-ones → -1
 		{math.MaxInt64, math.MaxInt64},
 	}
 	for _, c := range cases {

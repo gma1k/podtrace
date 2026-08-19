@@ -32,4 +32,3 @@ func NewLoadError(path string, err error) *LoaderError {
 		Err:     err,
 	}
 }
-

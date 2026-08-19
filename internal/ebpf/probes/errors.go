@@ -32,4 +32,3 @@ func NewProbeAttachError(probeName string, err error) *ProbeError {
 		Err:     err,
 	}
 }
-

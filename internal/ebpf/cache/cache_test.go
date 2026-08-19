@@ -454,7 +454,7 @@ func TestPathCache_Get_NotFound(t *testing.T) {
 func TestPathCache_Get_Found(t *testing.T) {
 	pc := NewPathCache()
 	pc.Set("test-key", "/path/to/file")
-	
+
 	path, ok := pc.Get("test-key")
 	if !ok {
 		t.Error("Expected true, got false")
@@ -467,13 +467,13 @@ func TestPathCache_Get_Found(t *testing.T) {
 func TestPathCache_Get_Expired(t *testing.T) {
 	pc := NewPathCache()
 	pc.Set("test-key", "/path/to/file")
-	
+
 	pc.mu.Lock()
 	if entry, ok := pc.cache["test-key"]; ok {
 		entry.timestamp = time.Now().Add(-pc.ttl - time.Second)
 	}
 	pc.mu.Unlock()
-	
+
 	path, ok := pc.Get("test-key")
 	if ok {
 		t.Error("Expected false for expired entry, got true")
@@ -486,7 +486,7 @@ func TestPathCache_Get_Expired(t *testing.T) {
 func TestPathCache_Set_EmptyPath(t *testing.T) {
 	pc := NewPathCache()
 	pc.Set("test-key", "")
-	
+
 	path, ok := pc.Get("test-key")
 	if ok {
 		t.Error("Expected false for empty path, got true")
@@ -499,7 +499,7 @@ func TestPathCache_Set_EmptyPath(t *testing.T) {
 func TestPathCache_Set_ValidPath(t *testing.T) {
 	pc := NewPathCache()
 	pc.Set("test-key", "/path/to/file")
-	
+
 	path, ok := pc.Get("test-key")
 	if !ok {
 		t.Error("Expected true, got false")
@@ -513,7 +513,7 @@ func TestPathCache_Set_Overwrite(t *testing.T) {
 	pc := NewPathCache()
 	pc.Set("test-key", "/path/to/file1")
 	pc.Set("test-key", "/path/to/file2")
-	
+
 	path, ok := pc.Get("test-key")
 	if !ok {
 		t.Error("Expected true, got false")
@@ -527,9 +527,9 @@ func TestPathCache_Clear(t *testing.T) {
 	pc := NewPathCache()
 	pc.Set("key1", "/path1")
 	pc.Set("key2", "/path2")
-	
+
 	pc.Clear()
-	
+
 	path, ok := pc.Get("key1")
 	if ok {
 		t.Error("Expected false after Clear, got true")
@@ -537,7 +537,7 @@ func TestPathCache_Clear(t *testing.T) {
 	if path != "" {
 		t.Errorf("Expected empty path after Clear, got %q", path)
 	}
-	
+
 	_, ok = pc.Get("key2")
 	if ok {
 		t.Error("Expected false after Clear, got true")
@@ -548,20 +548,20 @@ func TestPathCache_CleanupExpired(t *testing.T) {
 	pc := NewPathCache()
 	pc.Set("key1", "/path1")
 	pc.Set("key2", "/path2")
-	
+
 	pc.mu.Lock()
 	if entry, ok := pc.cache["key1"]; ok {
 		entry.timestamp = time.Now().Add(-pc.ttl - time.Second)
 	}
 	pc.mu.Unlock()
-	
+
 	pc.CleanupExpired()
-	
+
 	_, ok := pc.Get("key1")
 	if ok {
 		t.Error("Expected false for expired entry, got true")
 	}
-	
+
 	path, ok := pc.Get("key2")
 	if !ok {
 		t.Error("Expected true for non-expired entry, got false")
@@ -574,9 +574,9 @@ func TestPathCache_CleanupExpired(t *testing.T) {
 func TestLRUCache_Get_Valid(t *testing.T) {
 	cache := NewLRUCache(10, time.Minute)
 	defer cache.Close()
-	
+
 	cache.Set(123, "test-process")
-	
+
 	name, ok := cache.Get(123)
 	if !ok {
 		t.Error("Expected true for valid entry, got false")
@@ -589,11 +589,11 @@ func TestLRUCache_Get_Valid(t *testing.T) {
 func TestLRUCache_Get_Expired(t *testing.T) {
 	cache := NewLRUCache(10, 100*time.Millisecond)
 	defer cache.Close()
-	
+
 	cache.Set(123, "test-process")
-	
+
 	time.Sleep(150 * time.Millisecond)
-	
+
 	name, ok := cache.Get(123)
 	if ok {
 		t.Error("Expected false for expired entry, got true")
@@ -606,7 +606,7 @@ func TestLRUCache_Get_Expired(t *testing.T) {
 func TestLRUCache_Get_InvalidPID(t *testing.T) {
 	cache := NewLRUCache(10, time.Minute)
 	defer cache.Close()
-	
+
 	name, ok := cache.Get(0)
 	if ok {
 		t.Error("Expected false for invalid PID, got true")
@@ -614,7 +614,7 @@ func TestLRUCache_Get_InvalidPID(t *testing.T) {
 	if name != "" {
 		t.Errorf("Expected empty name for invalid PID, got %q", name)
 	}
-	
+
 	_, ok = cache.Get(4194304)
 	if ok {
 		t.Error("Expected false for invalid PID, got true")
@@ -624,10 +624,10 @@ func TestLRUCache_Get_InvalidPID(t *testing.T) {
 func TestLRUCache_Set_InvalidPID(t *testing.T) {
 	cache := NewLRUCache(10, time.Minute)
 	defer cache.Close()
-	
+
 	cache.Set(0, "test")
 	cache.Set(4194304, "test")
-	
+
 	_, ok := cache.Get(0)
 	if ok {
 		t.Error("Expected false for invalid PID, got true")
@@ -637,10 +637,10 @@ func TestLRUCache_Set_InvalidPID(t *testing.T) {
 func TestLRUCache_Set_UpdateExisting(t *testing.T) {
 	cache := NewLRUCache(10, time.Minute)
 	defer cache.Close()
-	
+
 	cache.Set(123, "process1")
 	cache.Set(123, "process2")
-	
+
 	name, ok := cache.Get(123)
 	if !ok {
 		t.Error("Expected true, got false")
@@ -653,16 +653,16 @@ func TestLRUCache_Set_UpdateExisting(t *testing.T) {
 func TestLRUCache_Set_Eviction(t *testing.T) {
 	cache := NewLRUCache(5, time.Minute)
 	defer cache.Close()
-	
+
 	for i := uint32(1); i <= 6; i++ {
 		cache.Set(i, fmt.Sprintf("process-%d", i))
 	}
-	
+
 	name, ok := cache.Get(1)
 	if ok {
 		t.Logf("Cache entry for PID 1 still exists (may be evicted): %q", name)
 	}
-	
+
 	name, ok = cache.Get(6)
 	if !ok {
 		t.Error("Expected true for most recently added entry, got false")
@@ -675,9 +675,9 @@ func TestLRUCache_Set_Eviction(t *testing.T) {
 func TestLRUCache_Evict_EmptyList(t *testing.T) {
 	cache := NewLRUCache(10, time.Minute)
 	defer cache.Close()
-	
+
 	cache.evict()
-	
+
 	if len(cache.cache) != 0 {
 		t.Errorf("Expected empty cache, got %d entries", len(cache.cache))
 	}
@@ -686,13 +686,13 @@ func TestLRUCache_Evict_EmptyList(t *testing.T) {
 func TestLRUCache_Evict_Partial(t *testing.T) {
 	cache := NewLRUCache(10, time.Minute)
 	defer cache.Close()
-	
+
 	for i := uint32(1); i <= 15; i++ {
 		cache.Set(i, fmt.Sprintf("process-%d", i))
 	}
-	
+
 	cache.evict()
-	
+
 	if len(cache.cache) >= 10 {
 		t.Errorf("Expected cache size < 10 after eviction, got %d", len(cache.cache))
 	}
@@ -701,12 +701,12 @@ func TestLRUCache_Evict_Partial(t *testing.T) {
 func TestLRUCache_CleanupExpired(t *testing.T) {
 	cache := NewLRUCache(10, 50*time.Millisecond)
 	defer cache.Close()
-	
+
 	cache.Set(123, "process1")
 	cache.Set(456, "process2")
-	
+
 	time.Sleep(60 * time.Millisecond)
-	
+
 	cache.mutex.Lock()
 	now := time.Now()
 	var toRemove []*list.Element
@@ -722,7 +722,7 @@ func TestLRUCache_CleanupExpired(t *testing.T) {
 		cache.list.Remove(elem)
 	}
 	cache.mutex.Unlock()
-	
+
 	_, ok := cache.Get(123)
 	if ok {
 		t.Log("Entry still exists after cleanup")
@@ -732,13 +732,13 @@ func TestLRUCache_CleanupExpired(t *testing.T) {
 func TestLRUCache_Get_MoveToFront(t *testing.T) {
 	cache := NewLRUCache(10, time.Minute)
 	defer cache.Close()
-	
+
 	cache.Set(1, "process1")
 	cache.Set(2, "process2")
 	cache.Set(3, "process3")
-	
+
 	cache.Get(1)
-	
+
 	if cache.list.Front().Value.(*cacheEntry).pid != 1 {
 		t.Error("Expected PID 1 to be at front after Get")
 	}
@@ -747,13 +747,12 @@ func TestLRUCache_Get_MoveToFront(t *testing.T) {
 func TestLRUCache_Set_MoveToFront(t *testing.T) {
 	cache := NewLRUCache(10, time.Minute)
 	defer cache.Close()
-	
+
 	cache.Set(1, "process1")
 	cache.Set(2, "process2")
 	cache.Set(1, "process1-updated")
-	
+
 	if cache.list.Front().Value.(*cacheEntry).pid != 1 {
 		t.Error("Expected PID 1 to be at front after Set")
 	}
 }
-
