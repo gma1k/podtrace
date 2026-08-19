@@ -1,6 +1,6 @@
 module github.com/gma1k/podtrace
 
-go 1.26.7
+go 1.27.0
 
 require (
 	cloud.google.com/go/auth v0.23.1
