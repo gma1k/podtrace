@@ -64,6 +64,9 @@ jobs:
       - name: Check gofmt
         run: make fmt-check
 
+      - name: Check go.mod tidiness
+        run: GOTOOLCHAIN=auto go mod tidy -diff
+
       - name: Run govulncheck
         timeout-minutes: 5
         run: |
