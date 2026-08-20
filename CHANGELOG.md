@@ -9,6 +9,33 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.14.6](https://github.com/gma1k/podtrace/compare/v0.14.5...v0.14.6) (2026-08-20)
+
+
+### Bug Fixes
+
+* harden agent runtime, resource use, and exporter/alert paths ([#433](https://github.com/gma1k/podtrace/issues/433)) ([e3090f5](https://github.com/gma1k/podtrace/commit/e3090f569e209c8c222b16e68eeb48ba0129846e))
+* harden GCS credential loading and unblock lint on go 1.27 ([#444](https://github.com/gma1k/podtrace/issues/444)) ([d134073](https://github.com/gma1k/podtrace/commit/d134073d9b5a1df71e87e34016a0fb2fcf1b61cb))
+* harden L7 decoders, redaction, alerting, and CLI lifecycle ([#438](https://github.com/gma1k/podtrace/issues/438)) ([d384143](https://github.com/gma1k/podtrace/commit/d3841430d6f408ea4d357bce672859b2f4e0bccf))
+* harden pod specs, redact reports, and close filter/tee gaps ([#436](https://github.com/gma1k/podtrace/issues/436)) ([4d814d2](https://github.com/gma1k/podtrace/commit/4d814d254ef3a4fd28b48bbf0c181368ea88674c))
+* harden trace export, metrics, and diagnose resource bounds ([#435](https://github.com/gma1k/podtrace/issues/435)) ([341619e](https://github.com/gma1k/podtrace/commit/341619e0410d29764e32a914a47c460ff28b256f))
+
+
+### Build System
+
+* remove dead BPF pid/tid stores, gate warnings, fix sudo hygiene ([#441](https://github.com/gma1k/podtrace/issues/441)) ([03652b9](https://github.com/gma1k/podtrace/commit/03652b90e8fbc71479a963ab211a2dafbfc88fcc))
+
+
+### Maintenance
+
+* **deps:** update dependency golangci/golangci-lint to v2.13.0 ([#445](https://github.com/gma1k/podtrace/issues/445)) ([40413cf](https://github.com/gma1k/podtrace/commit/40413cf24ee1b6104e4022b5a572b08fb7e2394a))
+* **deps:** update docker/setup-buildx-action action to v4.3.0 ([#439](https://github.com/gma1k/podtrace/issues/439)) ([9a722c9](https://github.com/gma1k/podtrace/commit/9a722c9241731c7c4a2b77fdae8f0f9940dc852c))
+* **deps:** update go modules (non-major) ([#442](https://github.com/gma1k/podtrace/issues/442)) ([c56b912](https://github.com/gma1k/podtrace/commit/c56b912766c8b20fbf83b3e1202985e12a6936f1))
+* **deps:** update module google.golang.org/grpc to v1.83.1 ([#437](https://github.com/gma1k/podtrace/issues/437)) ([64a42b4](https://github.com/gma1k/podtrace/commit/64a42b44c3a8d041fbff4235284681253c61c616))
+* gofmt the repo and gate formatting in CI ([#440](https://github.com/gma1k/podtrace/issues/440)) ([43b4c4c](https://github.com/gma1k/podtrace/commit/43b4c4c4154d816b623354db51024d9b9dbfe7f3))
+* tidy go.mod and gate tidiness in CI ([#447](https://github.com/gma1k/podtrace/issues/447)) ([e487ed7](https://github.com/gma1k/podtrace/commit/e487ed7f60f31e494b0c51b1f6ab7120941b4cde))
+* update go to 1.27.0 and golangci-lint to 2.13.0 ([#446](https://github.com/gma1k/podtrace/issues/446)) ([9b26e0b](https://github.com/gma1k/podtrace/commit/9b26e0b1c571925dd89f9d66e4037531be833d62))
+
 ## [0.14.5](https://github.com/gma1k/podtrace/compare/v0.14.4...v0.14.5) (2026-08-18)
 
 
