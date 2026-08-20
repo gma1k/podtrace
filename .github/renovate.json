@@ -16,6 +16,9 @@
   "prHourlyLimit": 2,
   "rebaseWhen": "behind-base-branch",
   "rangeStrategy": "bump",
+  "postUpdateOptions": [
+    "gomodTidy"
+  ],
   "platformAutomerge": false,
   "configMigration": true,
   "lockFileMaintenance": {
