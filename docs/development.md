@@ -46,7 +46,7 @@ podtrace/
 
 ### Prerequisites
 
-- Go 1.26+ (or any earlier 1.x with `GOTOOLCHAIN=auto`, which downloads
+- Go 1.27+ (or any earlier 1.x with `GOTOOLCHAIN=auto`, which downloads
   the toolchain version declared in `go.mod` automatically)
 - Clang and LLVM
 - Linux kernel 5.8+ with BTF (full L7 tracing needs the `bpf_loop` helper,

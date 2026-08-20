@@ -105,7 +105,7 @@
       "allowedVersions": "<4.2.1 || >4.2.1"
     },
     {
-      "description": "The go.mod language directive gates golangci-lint: it refuses to lint a module targeting a newer Go than the release binary was built with, and staticcheck (honnef.co/go/tools v0.7.0, vendored by golangci-lint v2.12.2) panics on Go 1.27 stdlib source.",
+      "description": "The Go version also lives in the Dockerfile, the Makefile lint pin and the docs, and golangci-lint must be built with it first. Bump the directive deliberately via the dashboard; patch bumps stay automatic.",
       "matchManagers": [
         "gomod"
       ],
