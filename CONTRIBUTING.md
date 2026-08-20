@@ -142,19 +142,19 @@ them locally and you will not be surprised by CI.
 
 ### Go
 
-`make lint` runs **golangci-lint v2.12.2** — the same version CI pins — against
+`make lint` runs **golangci-lint v2.13.0** — the same version CI pins — against
 [`.golangci.yml`](.golangci.yml), which selects the v2 `standard` linter set:
 `errcheck`, `govet`, `ineffassign`, `staticcheck`, `unused`. Because both the
 version and the linter set are pinned in-repo, a clean `make lint` locally means
 a clean lint job in CI.
 
-> **Do not install golangci-lint with `go install`.** golangci-lint v2.12.2
-> declares `go 1.25.0`, so `go install` builds it with a Go 1.25 toolchain, and
+> **Do not install golangci-lint with `go install`.** golangci-lint v2.13.0
+> declares `go 1.26.0`, so `go install` builds it with a Go 1.26 toolchain, and
 > the resulting binary refuses to run against this module:
-> `the Go language version (go1.25) used to build golangci-lint is lower than
-> the targeted Go version (1.26.5)`. It fails with or without a config file.
+> `the Go language version (go1.26) used to build golangci-lint is lower than
+> the targeted Go version (1.27.0)`. It fails with or without a config file.
 > `make lint` avoids this by downloading the official prebuilt release binary
-> (built with Go 1.26) into `bin/`, checksum-verified against the release's
+> (built with Go 1.27) into `bin/`, checksum-verified against the release's
 > `checksums.txt`.
 
 Formatting is plain `gofmt` — `make fmt` is `go fmt ./...`. It is deliberately

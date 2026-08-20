@@ -349,7 +349,7 @@ envtest:
 	  $(GO) test -tags=envtest -count=1 -timeout 300s \
 	    ./api/v1alpha1/... ./internal/operator/... ./internal/agent/...
 
-GOLANGCI_LINT_VERSION ?= 2.12.2
+GOLANGCI_LINT_VERSION ?= 2.13.0
 GOLANGCI_LINT ?= bin/golangci-lint
 
 $(GOLANGCI_LINT):
