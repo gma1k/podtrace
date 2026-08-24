@@ -10,7 +10,7 @@
 # Validating admission webhook for podtrace.io/v1alpha1.
 #
 # The paths below are authoritative: they match the kubebuilder markers on
-# the Go webhook types in api/v1alpha1/*_webhook.go. `make manifests`
+# the webhook handlers in internal/webhook/v1alpha1/. `make manifests`
 # regenerates hack/reference/ from those markers, and the manifests-drift CI
 # job fails if the committed reference is stale. Keep this hand-authored
 # template in sync with hack/reference/ (a manual diff — CI does not compare

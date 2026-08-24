@@ -33,18 +33,26 @@ Full support matrix, including which probes need BTF, is in
 
 Small, well-defined work that unblocks the larger items below.
 
-1. **Reconcile the CRD inventory.** [STABILITY.md](STABILITY.md) describes
-   four CRDs. There are six: `PodTrace`, `PodTraceSession`,
-   `PodTraceSchedule`, `ExporterConfig`, `TracerConfig`, and
-   `ApplicationTrace`. The `v1.0.0` criteria inherit the same undercount and
-   need the same correction.
-
-2. **Publish a per-CRD `v1beta1` readiness table.** The three graduation
+1. **Publish a per-CRD `v1beta1` readiness table.** The three graduation
    gates already exist in [STABILITY.md](STABILITY.md). What is missing is an
    honest assessment of each CRD against them, so adopters can see which
    parts of the API are close to stable and which are still moving.
 
-3. **Finish the supply-chain baseline.** OpenSSF Scorecard now runs and
+2. **Use the `v1alpha1` cleanup window.** Alpha versions can drop and rename
+   fields with no notice owed; `v1beta1` cannot, and anything graduated is
+   carried until `v1`. So awkward field names and shapes get fixed now or
+   they get fixed never. Reviewing the six schemas with that deadline in
+   mind is the highest-value API work available, and the least likely to be
+   possible later. Rationale in
+   [docs/api-versioning.md](docs/api-versioning.md).
+
+3. **Build the graduation machinery.** The procedure is decided; the tooling
+   for it does not exist. Storage migration to move stored objects to a new
+   version, a schema-identity check across served versions, and a chainsaw
+   scenario that proves round-tripping against a live API server in both the
+   read and the write direction.
+
+4. **Finish the supply-chain baseline.** OpenSSF Scorecard now runs and
    publishes. Remaining: SLSA provenance attached to releases, and an
    [OpenSSF Security Insights](https://github.com/ossf/security-insights-spec)
    manifest that states the inherent risk of a privileged kernel-level agent
@@ -52,39 +60,33 @@ Small, well-defined work that unblocks the larger items below.
 
 ## Next
 
-4. **A formal API deprecation policy.** [STABILITY.md](STABILITY.md) lists
-   this as a condition for `v1.0.0` but does not yet define it. It needs to
-   say how long a deprecated field or CRD version is served, how deprecation
-   is announced, and what an adopter is entitled to rely on.
+5. **Graduate the CRDs that clear their gates to `v1beta1`.** Graduation is
+   per-CRD and spans two releases — add the new version and migrate stored
+   objects, then retire the old one — so this lands incrementally rather
+   than as one event. The first graduation is also the test of whether the
+   procedure in [docs/api-versioning.md](docs/api-versioning.md) survives
+   contact with a real cluster, so it should be a small CRD rather than
+   `PodTrace`.
 
-5. **Graduate the CRDs that clear their gates to `v1beta1`,** served
-   alongside `v1alpha1` during transition. Graduation is per-CRD, so this
-   lands incrementally rather than as one event.
-
-6. **Decide the conversion story.** Today podtrace ships no conversion
-   webhooks and expects adopters to edit manifests by hand. Serving
-   `v1alpha1` and `v1beta1` simultaneously makes that choice load-bearing, so
-   it needs to be either committed to explicitly or replaced with conversion.
-
-7. **Make the Go API usable from outside.** `api/v1alpha1` and `pkg/client`
+6. **Make the Go API usable from outside.** `api/v1alpha1` and `pkg/client`
    are importable, which means anyone can build a controller or integration
    against podtrace CRs. Runnable godoc examples are the cheapest way to make
    that real, and `go test` keeps them from rotting.
 
 ## Later
 
-8. **`v1.0.0`,** once the four conditions in [STABILITY.md](STABILITY.md)
+7. **`v1.0.0`,** once the four conditions in [STABILITY.md](STABILITY.md)
    hold. This is downstream of everything above and is not near.
 
-9. **State platform support in tiers.** [docs/compatibility.md](docs/compatibility.md)
+8. **State platform support in tiers.** [docs/compatibility.md](docs/compatibility.md)
    already documents what is required. The gap is a clear statement of what
    is CI-verified against what is best-effort, particularly for kernels
    without BTF, where a meaningful subset of probes is unavailable.
 
-10. **Project sustainability.** Podtrace has one maintainer. That is the
-    single largest risk to anyone adopting it, more than any individual
-    feature, and it is worth naming plainly rather than leaving implicit. A
-    second maintainer with real review authority is the goal.
+9. **Project sustainability.** Podtrace has one maintainer. That is the
+   single largest risk to anyone adopting it, more than any individual
+   feature, and it is worth naming plainly rather than leaving implicit. A
+   second maintainer with real review authority is the goal.
 
 ## Non-goals
 
@@ -114,5 +116,7 @@ list, especially from anyone running podtrace against real traffic.
 - [CHANGELOG.md](CHANGELOG.md), what already shipped
 - [GOVERNANCE.md](GOVERNANCE.md), how decisions get made
 - [CONTRIBUTING.md](CONTRIBUTING.md), how to work on any of the above
+- [docs/api-versioning.md](docs/api-versioning.md), the CRD graduation
+  contract, deprecation policy, and cutover procedure
 - [docs/compatibility.md](docs/compatibility.md), kernel, Kubernetes, and
   architecture support
