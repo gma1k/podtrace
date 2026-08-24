@@ -12,6 +12,6 @@ bashate==2.1.1 \
     --hash=sha256:3104d565a7a0f7ee2cf4028cc584c723a202f52a8ddffe4a39b8cbb0ac5d3e94 \
     --hash=sha256:4bab6e977f8305a720535f8f93f1fb42c521fcbc4a6c2b3d3d7671f42f221f4c
 
-pbr==7.0.3 \
-    --hash=sha256:ff223894eb1cd271a98076b13d3badff3bb36c424074d26334cd25aebeecea6b \
-    --hash=sha256:b46004ec30a5324672683ec848aed9e8fc500b0d261d40a3229c2d2bbfcedc29
+pbr==7.1.1 \
+    --hash=sha256:8e36e7b36cd0d081cca95c7b50d5760b17d7dd7d58a86044186d916e8be1f09d \
+    --hash=sha256:973da2aee9961d7cb278aa74e1829f6daafec9dd8ee8c1655cbf3f5843bfe083
