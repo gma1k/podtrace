@@ -9,6 +9,7 @@ on:
       - "go.sum"
       - "cmd/**"
       - "internal/**"
+      - "deploy/charts/podtrace/templates/crds/**"
       - "Makefile"
       - ".github/workflows/go-ci.yml"
   pull_request:
@@ -19,6 +20,7 @@ on:
       - "go.sum"
       - "cmd/**"
       - "internal/**"
+      - "deploy/charts/podtrace/templates/crds/**"
       - "Makefile"
       - ".github/workflows/go-ci.yml"
   workflow_dispatch:
@@ -262,3 +264,77 @@ jobs:
             echo "::error::Generated manifests are stale. Run 'make manifests generate' and commit the result." >&2
             exit 1
           fi
+
+  crd-schema-compat:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Materialize the base revision's CRD manifests
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/crd-base
+          crd_dir=deploy/charts/podtrace/templates/crds
+          # A CRD added by this PR has no base revision; absence is not a break.
+          git ls-tree --name-only -z "${BASE_SHA}" "${crd_dir}/" \
+            | while IFS= read -r -d '' path; do
+                git show "${BASE_SHA}:${path}" > "/tmp/crd-base/$(basename "${path}")"
+              done
+
+      - name: Compare served schemas
+        id: compare
+        run: |
+          set +e
+          output=$(go run ./hack/crdcompat \
+            -base /tmp/crd-base \
+            -head deploy/charts/podtrace/templates/crds 2>&1)
+          status=$?
+          set -e
+          echo "${output}"
+          {
+            echo "report<<CRDCOMPAT"
+            echo "${output}"
+            echo "CRDCOMPAT"
+          } >> "$GITHUB_OUTPUT"
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          if [ "${status}" -gt 1 ]; then
+            echo "::error::crdcompat failed to run" >&2
+            exit 1
+          fi
+
+      - name: Require a recorded break
+        if: steps.compare.outputs.status == '1'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPORT: ${{ steps.compare.outputs.report }}
+        run: |
+          set -euo pipefail
+          if git log --format=%B "${BASE_SHA}..${HEAD_SHA}" | grep -qE '^BREAKING[ -]CHANGE:'; then
+            echo "::notice::Breaking CRD schema change, declared by a BREAKING CHANGE footer."
+            echo "${REPORT}"
+            echo
+            echo "Record it in the history table in docs/api-versioning.md before merging."
+            exit 0
+          fi
+          echo "::error::This PR removes or retypes a field in a served CRD version:" >&2
+          echo "${REPORT}" >&2
+          echo >&2
+          echo "Served versions are a compatibility promise — see docs/api-versioning.md." >&2
+          echo "If the change is intended, add a BREAKING CHANGE footer to a commit in" >&2
+          echo "this PR and add a row to the history table in docs/api-versioning.md." >&2
+          exit 1

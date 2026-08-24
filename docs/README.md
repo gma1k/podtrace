@@ -19,6 +19,7 @@ Welcome to the `Podtrace` documentation. This directory contains comprehensive g
 ### Operator (CRD-driven workflows)
 - **[Operator](operator.md)** - Operator + agent architecture, helm install, key invariants
 - **[Migration](migration.md)** - CLI binary → CR walkthrough with a translation table
+- **[API Versioning](api-versioning.md)** - CRD graduation contract, deprecation policy, version cutover procedure, breaking-change history
 - **[PodTrace CR](crd-podtrace.md)** - Continuous tracing via a Custom Resource
 - **[PodTraceSession CR](crd-podtracesession.md)** - Bounded diagnose with a report artifact
 - **[PodTraceSchedule CR](crd-podtraceschedule.md)** - Recurring diagnose on a cron schedule

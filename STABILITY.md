@@ -26,8 +26,12 @@ podtrace specifically:
 
 - **Schemas may change** between minor releases. Field renames, removals,
   and semantic changes are allowed.
-- **No conversion webhooks** are provided. You upgrade by editing your
-  manifests, not by relying on automatic conversion.
+- **No conversion webhooks**, by design rather than by omission. Versions
+  are graduated as identical schemas, so `conversion.strategy: None` is
+  correct and there is nothing for a webhook to convert. Shape changes
+  happen while a CRD is at `v1alpha1`, never at a version boundary. The
+  contract and the cutover procedure are in
+  [docs/api-versioning.md](docs/api-versioning.md).
 - **Best-effort backward compatibility within a minor release line.** A
   patch release (e.g. `v0.11.0` → `v0.11.1`) will not break existing
   manifests. Minor releases (`v0.11.0` → `v0.12.0`) may.
@@ -84,15 +88,23 @@ After `v1.0.0`, the standard semver rules apply: `feat:` bumps minor,
 A CRD graduates from `v1alpha1` to `v1beta1` when **all** of the following
 hold for that CRD:
 
-1. Schema has been stable across at least 2 consecutive minor releases.
-2. Conversion is documented (manual or webhook-based) for any past
-   breaking change.
+1. The CRD's generated schema has not changed in the last 3 releases.
+   Verifiable from the committed CRD manifests, not from judgement.
+2. Every past breaking change for that CRD is recorded in the history
+   table in [docs/api-versioning.md](docs/api-versioning.md), with what
+   an adopter had to do.
 3. The control plane reconciler for the CRD has end-to-end test coverage
    in the [chainsaw e2e suite](.github/workflows/chainsaw.yml).
 
 A `v1beta1` graduation can land for one CRD without graduating the
-others. CRDs at `v1beta1` and `v1alpha1` will be served simultaneously
-during transition.
+others.
+
+Graduation copies the schema unchanged — a `v1beta1` that differs from its
+`v1alpha1` is not a graduation, it is a breaking change wearing a new
+label. Both versions are served during the transition, which spans two
+releases while stored objects are migrated, and the older version is then
+removed. The procedure and the reasoning are in
+[docs/api-versioning.md](docs/api-versioning.md).
 
 ### Path to `v1.0.0`
 
@@ -102,7 +114,11 @@ The repository tags `v1.0.0` when:
    months.
 2. CLI flag surface has been stable for ≥6 months.
 3. Helm chart values have been stable for ≥6 months.
-4. A formal API deprecation policy is in place.
+4. A formal API deprecation policy is in place. Satisfied by
+   [docs/api-versioning.md](docs/api-versioning.md), which adopts the
+   upstream [Kubernetes deprecation
+   policy](https://kubernetes.io/docs/reference/using-api/deprecation-policy/)
+   rather than defining a competing scheme.
 
 Until then, expect `v0.x` cadence with the rules above.
 
@@ -112,6 +128,9 @@ Until then, expect `v0.x` cadence with the rules above.
   every breaking change.
 - [docs/compatibility.md](docs/compatibility.md) — kernel, Kubernetes,
   architecture, and distro support matrix.
+- [docs/api-versioning.md](docs/api-versioning.md) — the graduation
+  contract, the deprecation policy, the version cutover procedure, and the
+  breaking-change history.
 - [docs/migration.md](docs/migration.md) — how to move between the CLI and
   CRD models. Not the same as schema migration.
 - [docs/crd-podtrace.md](docs/crd-podtrace.md),
