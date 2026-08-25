@@ -9,6 +9,38 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.14.7](https://github.com/gma1k/podtrace/compare/v0.14.6...v0.14.7) (2026-08-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* PodTrace, PodTraceSession, PodTraceSchedule, ApplicationTrace,ExporterConfig and TracerConfig all rename fields.
+
+### Refactors
+
+* unify CRD field naming before v1beta1 graduation ([#459](https://github.com/gma1k/podtrace/issues/459)) ([19ecfd3](https://github.com/gma1k/podtrace/commit/19ecfd368d0e1576502f6617e2d609e396c53901))
+
+
+### Documentation
+
+* define API versioning and CRD graduation policy ([#455](https://github.com/gma1k/podtrace/issues/455)) ([217aaf0](https://github.com/gma1k/podtrace/commit/217aaf0b52fbd9285ca9f3fe4c6e954102b96955))
+
+
+### Maintenance
+
+* **deps:** update dependency golangci/golangci-lint to v2.13.1 ([#448](https://github.com/gma1k/podtrace/issues/448)) ([c498c45](https://github.com/gma1k/podtrace/commit/c498c45071f2d15be23a7f9d66fdf9811b8343a9))
+* **deps:** update dependency pbr to v7.1.1 ([#456](https://github.com/gma1k/podtrace/issues/456)) ([413bec1](https://github.com/gma1k/podtrace/commit/413bec1b11cea29839034e959af055a1e90f730b))
+* **deps:** update dependency pbr to v7.1.2 ([#461](https://github.com/gma1k/podtrace/issues/461)) ([09af68f](https://github.com/gma1k/podtrace/commit/09af68f39710ae91bef4b38daa845ef0df2d1ab9))
+* **deps:** update gcr.io/distroless/static-debian12:nonroot docker digest to afa5c87 ([#454](https://github.com/gma1k/podtrace/issues/454)) ([c1fc582](https://github.com/gma1k/podtrace/commit/c1fc58288291c623f12eda60de352e306735a5cb))
+* **deps:** update github/codeql-action action to v4.37.8 ([#453](https://github.com/gma1k/podtrace/issues/453)) ([32ca3f8](https://github.com/gma1k/podtrace/commit/32ca3f824d0fe352c48d47ea7678abaa7145e8b3))
+* **deps:** update go modules (non-major) ([#449](https://github.com/gma1k/podtrace/issues/449)) ([cbaa07d](https://github.com/gma1k/podtrace/commit/cbaa07d8fb4547c3d15d31968f933da7d8f375ff))
+* **deps:** update go modules (non-major) ([#462](https://github.com/gma1k/podtrace/issues/462)) ([d2a9ee4](https://github.com/gma1k/podtrace/commit/d2a9ee40e749eebbcbe6aec1f8d29f03687c53e9))
+* **deps:** update golang:1.27.0-trixie docker digest to 41967f5 ([#457](https://github.com/gma1k/podtrace/issues/457)) ([4c17090](https://github.com/gma1k/podtrace/commit/4c17090ed976f4bbc14071fbcb91d8caf7551aac))
+* **deps:** update golang:1.27.0-trixie docker digest to ae28539 ([#458](https://github.com/gma1k/podtrace/issues/458)) ([6d1e2ac](https://github.com/gma1k/podtrace/commit/6d1e2acb67509c525cd2eeedc5c2d5eff048bd79))
+* **deps:** update kubernetes ecosystem to v0.36.4 ([#450](https://github.com/gma1k/podtrace/issues/450)) ([1eeee0e](https://github.com/gma1k/podtrace/commit/1eeee0e7a591094eee6262a2b5aa7be534c576fc))
+* release 0.14.7 ([#460](https://github.com/gma1k/podtrace/issues/460)) ([a37d013](https://github.com/gma1k/podtrace/commit/a37d0134f5fa3b833534b8b12017d4cb3968e2b8))
+* run go mod tidy in renovate updates to satisfy the CI tidiness gate ([#451](https://github.com/gma1k/podtrace/issues/451)) ([6d83686](https://github.com/gma1k/podtrace/commit/6d8368600bc4ca2e2fbf71126b7e4c4d82f5badb))
+
 ## [0.14.6](https://github.com/gma1k/podtrace/compare/v0.14.5...v0.14.6) (2026-08-20)
 
 
