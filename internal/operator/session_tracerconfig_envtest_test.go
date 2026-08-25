@@ -54,7 +54,7 @@ func createSessionFixture(t *testing.T, c client.Client, ns, node string, mutate
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "target"}},
 			Duration:    metav1.Duration{Duration: time.Minute},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ec"},
 		},
 	}
 	if mutate != nil {
@@ -140,7 +140,7 @@ func TestEnvtestSessionRefOverridesNodeFleet(t *testing.T) {
 	})
 
 	s := createSessionFixture(t, c, ns, "sess-pinned", func(s *podtracev1alpha1.PodTraceSession) {
-		s.Spec.TracerConfigRef = &podtracev1alpha1.LocalObjectReference{Name: "default"}
+		s.Spec.TracerConfigRef = &corev1.LocalObjectReference{Name: "default"}
 	})
 
 	r := &PodTraceSessionReconciler{Client: c, Scheme: scheme, SystemNamespace: systemNS}

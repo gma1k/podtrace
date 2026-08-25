@@ -24,7 +24,9 @@ import (
 // PodTraceScheduleSpecApplyConfiguration represents a declarative configuration of the PodTraceScheduleSpec type for use
 // with apply.
 //
-// PodTraceScheduleSpec describes a PodTraceSession source.
+// PodTraceScheduleSpec describes a PodTraceSession source. Exactly one of
+// Schedule (recurring, cron-driven) or Trigger (event-driven, fired by an
+// agent-detected alert) must be set; the validating webhook enforces this.
 type PodTraceScheduleSpecApplyConfiguration struct {
 	// Schedule is the cron expression that triggers session creation.
 	// Accepts the standard 5-field form ("*/5 * * * *") and the 6-field
@@ -32,8 +34,11 @@ type PodTraceScheduleSpecApplyConfiguration struct {
 	// "@hourly", "@daily" and "@every 5m" are also accepted.
 	//
 	// Mutually exclusive with Trigger; exactly one of the two must be set.
-	Schedule *string                        `json:"schedule,omitempty"`
-	Trigger  *TriggerSpecApplyConfiguration `json:"trigger,omitempty"`
+	Schedule *string `json:"schedule,omitempty"`
+	// Trigger fires a session in response to an agent-detected alert
+	// (resource-limit breach, OOM kill, error-rate spike) rather than on a
+	// clock — the "flight recorder" mode. Mutually exclusive with Schedule.
+	Trigger *TriggerSpecApplyConfiguration `json:"trigger,omitempty"`
 	// TimeZone is an IANA time-zone name (e.g. "Europe/Amsterdam") used
 	// to interpret Schedule.
 	TimeZone                       *string                                        `json:"timeZone,omitempty"`
@@ -62,6 +67,7 @@ func (b *PodTraceScheduleSpecApplyConfiguration) WithSchedule(value string) *Pod
 
 // WithTrigger sets the Trigger field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Trigger field is set to the value of the last call.
 func (b *PodTraceScheduleSpecApplyConfiguration) WithTrigger(value *TriggerSpecApplyConfiguration) *PodTraceScheduleSpecApplyConfiguration {
 	b.Trigger = value
 	return b

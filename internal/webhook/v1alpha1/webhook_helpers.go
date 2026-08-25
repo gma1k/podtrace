@@ -161,7 +161,7 @@ func validateCrossNamespaceGrants(
 // fail the session terminally at run time, long after apply.
 //
 // TracerConfig is cluster-scoped, so the lookup carries no namespace.
-func resolveTracerConfigRef(ctx context.Context, c client.Client, ref *podtracev1alpha1.LocalObjectReference, sourceNamespace, operatorNamespace string) error {
+func resolveTracerConfigRef(ctx context.Context, c client.Client, ref *corev1.LocalObjectReference, sourceNamespace, operatorNamespace string) error {
 	if ref == nil || ref.Name == "" {
 		return nil
 	}

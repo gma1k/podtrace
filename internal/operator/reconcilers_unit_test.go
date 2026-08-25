@@ -168,7 +168,7 @@ func TestPodTraceReconciler_FinalizerAddedThenReconciled(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: ns, UID: "uid-1"},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ec"},
 		},
 	}
 	ec := &podtracev1alpha1.ExporterConfig{
@@ -226,7 +226,7 @@ func TestPodTraceReconciler_ExporterNotFound(t *testing.T) {
 		},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "missing-ec"},
+			ExporterRef: corev1.LocalObjectReference{Name: "missing-ec"},
 		},
 	}
 	scheme := newOperatorScheme(t)
@@ -256,7 +256,7 @@ func TestPodTraceReconciler_PausedSetsCondition(t *testing.T) {
 		},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ec"},
 			Paused:      true,
 		},
 	}
@@ -295,7 +295,7 @@ func TestPodTraceReconciler_DeletionRunsCleanup(t *testing.T) {
 		},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ec"},
 		},
 	}
 	bundleName := ExporterBundleName(pt.UID)
@@ -325,11 +325,11 @@ func TestExporterConfigToPodTraces(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
 		&podtracev1alpha1.PodTrace{
 			ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
-			Spec:       podtracev1alpha1.PodTraceSpec{ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"}},
+			Spec:       podtracev1alpha1.PodTraceSpec{ExporterRef: corev1.LocalObjectReference{Name: "ec"}},
 		},
 		&podtracev1alpha1.PodTrace{
 			ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "ns"},
-			Spec:       podtracev1alpha1.PodTraceSpec{ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "other"}},
+			Spec:       podtracev1alpha1.PodTraceSpec{ExporterRef: corev1.LocalObjectReference{Name: "other"}},
 		},
 	).Build()
 	r := &PodTraceReconciler{Client: c, Scheme: scheme}
@@ -463,7 +463,7 @@ func TestSessionReconciler_FinalizerAdded(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}},
 			Duration:    metav1.Duration{Duration: time.Minute},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ec"},
 		},
 	}
 	scheme := newOperatorScheme(t)
@@ -500,7 +500,7 @@ func TestSessionReconciler_NoMatchedPodsStaysPending(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}},
 			Duration:    metav1.Duration{Duration: time.Minute},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ec"},
 		},
 	}
 	scheme := newOperatorScheme(t)
@@ -539,7 +539,7 @@ func TestSessionReconciler_TerminalSession_TTLNotExpiredKeepsAlive(t *testing.T)
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			Selector:                &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}},
 			Duration:                metav1.Duration{Duration: time.Minute},
-			ExporterRef:             podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			ExporterRef:             corev1.LocalObjectReference{Name: "ec"},
 			TTLSecondsAfterFinished: &ttl,
 		},
 		Status: podtracev1alpha1.PodTraceSessionStatus{
@@ -579,7 +579,7 @@ func TestSessionReconciler_TerminalSession_TTLExpiredDeletes(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			Selector:                &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}},
 			Duration:                metav1.Duration{Duration: time.Minute},
-			ExporterRef:             podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			ExporterRef:             corev1.LocalObjectReference{Name: "ec"},
 			TTLSecondsAfterFinished: &ttl,
 		},
 		Status: podtracev1alpha1.PodTraceSessionStatus{

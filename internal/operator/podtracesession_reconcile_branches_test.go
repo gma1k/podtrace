@@ -49,7 +49,7 @@ func TestSessionBranch_SetFinalizerConflictRequeues(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}},
 			Duration:    metav1.Duration{Duration: time.Minute},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ec"},
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).
@@ -83,7 +83,7 @@ func TestSessionBranch_SecretToSessionsListError(t *testing.T) {
 			OTLP: &podtracev1alpha1.OTLPExporter{
 				Endpoint:          "otel:4318",
 				Protocol:          podtracev1alpha1.OTLPProtocolHTTP,
-				HeadersFromSecret: &podtracev1alpha1.LocalObjectReference{Name: "creds"},
+				HeadersFromSecret: &corev1.LocalObjectReference{Name: "creds"},
 			},
 		},
 	}

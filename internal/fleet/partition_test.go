@@ -231,8 +231,8 @@ func TestComputePartitionOverlapIsSymmetric(t *testing.T) {
 }
 
 func TestComputePartitionWinnerByPriority(t *testing.T) {
-	low := config("low", podtracev1alpha1.TracerConfigSpec{Priority: 1})
-	high := config("high", podtracev1alpha1.TracerConfigSpec{Priority: 10})
+	low := config("low", podtracev1alpha1.TracerConfigSpec{FleetPriority: 1})
+	high := config("high", podtracev1alpha1.TracerConfigSpec{FleetPriority: 10})
 	nodes := []corev1.Node{node("n1", nil)}
 
 	p := ComputePartition([]podtracev1alpha1.TracerConfig{low, high}, nodes)
@@ -314,13 +314,13 @@ func TestOutranksPrefersTargetedFleetOverClusterWide(t *testing.T) {
 }
 
 func TestOutranksPriorityStillBeatsSpecificity(t *testing.T) {
-	catchAll := config("default", podtracev1alpha1.TracerConfigSpec{Priority: 100})
+	catchAll := config("default", podtracev1alpha1.TracerConfigSpec{FleetPriority: 100})
 	targeted := config("regulated", podtracev1alpha1.TracerConfigSpec{
 		NodeSelector: map[string]string{"pool": "regulated"},
 	})
 
 	if !Outranks(&catchAll, &targeted) {
-		t.Error("an explicit spec.priority must override the specificity heuristic")
+		t.Error("an explicit spec.fleetPriority must override the specificity heuristic")
 	}
 }
 

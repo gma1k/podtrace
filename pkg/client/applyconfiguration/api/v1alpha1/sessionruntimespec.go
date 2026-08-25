@@ -27,12 +27,12 @@ import (
 //
 // SessionRuntimeSpec tunes the per-session Job pods the operator creates.
 type SessionRuntimeSpecApplyConfiguration struct {
-	Resources                   *v1.ResourceRequirements `json:"resources,omitempty"`
-	TTLSecondsAfterFinished     *int32                   `json:"ttlSecondsAfterFinished,omitempty"`
-	ActiveDeadlineSecondsOffset *int32                   `json:"activeDeadlineSecondsOffset,omitempty"`
-	BackoffLimit                *int32                   `json:"backoffLimit,omitempty"`
-	MaxDuration                 *metav1.Duration         `json:"maxDuration,omitempty"`
-	SidecarUploader             *bool                    `json:"sidecarUploader,omitempty"`
+	Resources               *v1.ResourceRequirements `json:"resources,omitempty"`
+	TTLSecondsAfterFinished *int32                   `json:"ttlSecondsAfterFinished,omitempty"`
+	ActiveDeadlineOffset    *metav1.Duration         `json:"activeDeadlineOffset,omitempty"`
+	BackoffLimit            *int32                   `json:"backoffLimit,omitempty"`
+	MaxDuration             *metav1.Duration         `json:"maxDuration,omitempty"`
+	SidecarUploader         *bool                    `json:"sidecarUploader,omitempty"`
 }
 
 // SessionRuntimeSpecApplyConfiguration constructs a declarative configuration of the SessionRuntimeSpec type for use with
@@ -57,11 +57,11 @@ func (b *SessionRuntimeSpecApplyConfiguration) WithTTLSecondsAfterFinished(value
 	return b
 }
 
-// WithActiveDeadlineSecondsOffset sets the ActiveDeadlineSecondsOffset field in the declarative configuration to the given value
+// WithActiveDeadlineOffset sets the ActiveDeadlineOffset field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the ActiveDeadlineSecondsOffset field is set to the value of the last call.
-func (b *SessionRuntimeSpecApplyConfiguration) WithActiveDeadlineSecondsOffset(value int32) *SessionRuntimeSpecApplyConfiguration {
-	b.ActiveDeadlineSecondsOffset = &value
+// If called multiple times, the ActiveDeadlineOffset field is set to the value of the last call.
+func (b *SessionRuntimeSpecApplyConfiguration) WithActiveDeadlineOffset(value metav1.Duration) *SessionRuntimeSpecApplyConfiguration {
+	b.ActiveDeadlineOffset = &value
 	return b
 }
 

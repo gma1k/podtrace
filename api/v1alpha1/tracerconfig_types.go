@@ -106,9 +106,8 @@ type SessionRuntimeSpec struct {
 	// +optional
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
 
-	// +kubebuilder:validation:Minimum=0
 	// +optional
-	ActiveDeadlineSecondsOffset int32 `json:"activeDeadlineSecondsOffset,omitempty"`
+	ActiveDeadlineOffset *metav1.Duration `json:"activeDeadlineOffset,omitempty"`
 
 	// +kubebuilder:validation:Minimum=0
 	// +optional
@@ -168,7 +167,7 @@ type TracerConfigSpec struct {
 	SystemNamespace string `json:"systemNamespace,omitempty"`
 
 	// +optional
-	Priority int32 `json:"priority,omitempty"`
+	FleetPriority int32 `json:"fleetPriority,omitempty"`
 }
 
 // TracerConfigStatus reflects the observed state of a TracerConfig.

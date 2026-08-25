@@ -26,7 +26,7 @@ func TestEnricher_FullPipeline(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: ns, UID: uid},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "x"},
+			ExporterRef: corev1.LocalObjectReference{Name: "x"},
 		},
 	}
 	pod := &corev1.Pod{

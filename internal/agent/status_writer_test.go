@@ -24,8 +24,8 @@ func TestComputeNodeReport_DedupsCgroups(t *testing.T) {
 	if rep.ActiveCgroups != 3 {
 		t.Errorf("ActiveCgroups=%d want 3 (deduped)", rep.ActiveCgroups)
 	}
-	if rep.EventsTotal != 15 {
-		t.Errorf("EventsTotal=%d want 15", rep.EventsTotal)
+	if rep.TotalEvents != 15 {
+		t.Errorf("TotalEvents=%d want 15", rep.TotalEvents)
 	}
 	if !rep.Ready {
 		t.Error("Ready=false, want true")
@@ -38,7 +38,7 @@ func TestComputeNodeReport_DedupsCgroups(t *testing.T) {
 func TestComputeNodeReport_EmptyRouterIsZeroed(t *testing.T) {
 	router := NewRouter(nil)
 	rep := ComputeNodeReport("node-x", router, false)
-	if rep.ActiveCgroups != 0 || rep.EventsTotal != 0 || rep.DroppedEvents != 0 {
+	if rep.ActiveCgroups != 0 || rep.TotalEvents != 0 || rep.DroppedEvents != 0 {
 		t.Errorf("empty router not zero: %+v", rep)
 	}
 	if rep.Ready {
@@ -245,8 +245,8 @@ func TestBuildNodeStatusEntry(t *testing.T) {
 			if got.ActiveCgroups != tc.wantCgroups {
 				t.Errorf("ActiveCgroups = %d, want %d", got.ActiveCgroups, tc.wantCgroups)
 			}
-			if got.EventsTotal != tc.wantEvents {
-				t.Errorf("EventsTotal = %d, want %d", got.EventsTotal, tc.wantEvents)
+			if got.TotalEvents != tc.wantEvents {
+				t.Errorf("TotalEvents = %d, want %d", got.TotalEvents, tc.wantEvents)
 			}
 			if got.DroppedEvents != tc.wantDropped {
 				t.Errorf("DroppedEvents = %d, want %d", got.DroppedEvents, tc.wantDropped)

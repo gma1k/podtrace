@@ -14,12 +14,6 @@ type PodRef struct {
 	Name string `json:"name"`
 }
 
-// LocalObjectReference references an object in the same namespace as the referent.
-type LocalObjectReference struct {
-	// +kubebuilder:validation:Required
-	Name string `json:"name"`
-}
-
 // SecretKeySelector selects a key from a Secret in the same namespace.
 type SecretKeySelector struct {
 	// +kubebuilder:validation:Required
@@ -63,7 +57,7 @@ type Thresholds struct {
 
 	// +kubebuilder:validation:Minimum=0
 	// +optional
-	FSSlowMs *int32 `json:"fsSlowMs,omitempty"`
+	FilesystemLatencyMs *int32 `json:"filesystemLatencyMs,omitempty"`
 }
 
 // ReportReference describes where a session's diagnose report is persisted.

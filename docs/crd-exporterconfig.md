@@ -182,7 +182,6 @@ status fresh:
 
 ```yaml
 status:
-  ready: true
   referencedBy: 3
   observedGeneration: 4
   conditions:
@@ -200,7 +199,6 @@ status:
 
 | Field | Meaning |
 |---|---|
-| `ready` | `true` when the spec variant validates AND every referenced Secret (and required key, if any) exists. |
 | `referencedBy` | Count of `PodTrace` + non-terminal `PodTraceSession` objects in the same namespace whose `spec.exporterRef.name` matches this EC. Terminal sessions (`Completed`, `Failed`) are excluded so the count reflects active load. |
 | `observedGeneration` | Mirrors `metadata.generation` on the last successful reconcile. |
 

@@ -230,8 +230,8 @@ func TestOverlappingFleetsReportConflict(t *testing.T) {
 	c, _ := reconcileFleets(t,
 		[]client.Object{
 			fleetConfig("by-pool", podtracev1alpha1.TracerConfigSpec{
-				NodeSelector: map[string]string{"pool": "a"},
-				Priority:     5,
+				NodeSelector:  map[string]string{"pool": "a"},
+				FleetPriority: 5,
 			}),
 			fleetConfig("by-zone", podtracev1alpha1.TracerConfigSpec{
 				NodeSelector: map[string]string{"zone": "eu-1"},

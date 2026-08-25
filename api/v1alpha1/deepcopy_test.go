@@ -32,11 +32,11 @@ func populatedPodTrace() *PodTrace {
 			NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
 			ContainerName:     "c0",
 			Filters:           []EventFilter{FilterDNS, FilterNet},
-			ExporterRef:       LocalObjectReference{Name: "ec"},
+			ExporterRef:       corev1.LocalObjectReference{Name: "ec"},
 			Thresholds: &Thresholds{
-				ErrorRatePercent: ptrI32(5),
-				RTTSpikeMs:       ptrI32(100),
-				FSSlowMs:         ptrI32(50),
+				ErrorRatePercent:    ptrI32(5),
+				RTTSpikeMs:          ptrI32(100),
+				FilesystemLatencyMs: ptrI32(50),
 			},
 			SamplePercent: &rate,
 			Paused:        true,
@@ -46,7 +46,7 @@ func populatedPodTrace() *PodTrace {
 				{Type: "Ready", Status: metav1.ConditionTrue, LastTransitionTime: tt},
 			},
 			NodeStatus: []PodTraceNodeStatus{
-				{Node: "n1", Ready: true, ActiveCgroups: 2, EventsTotal: 100, LastHeartbeat: tt},
+				{Node: "n1", Ready: true, ActiveCgroups: 2, TotalEvents: 100, LastHeartbeat: tt},
 			},
 			MatchedPods:        2,
 			ObservedGeneration: 7,
@@ -70,7 +70,7 @@ func populatedPodTraceSession() *PodTraceSession {
 			NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
 			Duration:          metav1.Duration{Duration: 60_000_000_000}, // 60s
 			Filters:           []EventFilter{FilterFS, FilterCPU},
-			ExporterRef:       LocalObjectReference{Name: "ec"},
+			ExporterRef:       corev1.LocalObjectReference{Name: "ec"},
 			Thresholds:        &Thresholds{ErrorRatePercent: ptrI32(10)},
 			SamplePercent:     &rate,
 			ReportRef: &ReportReference{
@@ -85,9 +85,9 @@ func populatedPodTraceSession() *PodTraceSession {
 			StartTime:      &tt,
 			CompletionTime: &tt,
 			Jobs: []SessionJobRef{
-				{Node: "n1", Name: "j1", Completed: true, EventCount: 10, StartTime: &tt, CompletionTime: &tt, Message: "ok"},
+				{Node: "n1", Name: "j1", Completed: true, TotalEvents: 10, StartTime: &tt, CompletionTime: &tt, Message: "ok"},
 			},
-			Summary: &SessionSummary{TotalEvents: 10, DNSEvents: 4, ErrorsDetected: 1},
+			Summary: &SessionSummary{TotalEvents: 10, EventsByFilter: map[string]int64{"dns": 4}, ErrorsDetected: 1},
 			Conditions: []metav1.Condition{
 				{Type: "Ready", Status: metav1.ConditionTrue, LastTransitionTime: tt},
 			},
@@ -123,10 +123,9 @@ func populatedTracerConfig() *TracerConfig {
 				BackoffLimit:            &bl,
 				MaxDuration:             &d,
 			},
-			NodeSelector:    map[string]string{"role": "trace"},
-			Tolerations:     []corev1.Toleration{{Key: "k", Operator: corev1.TolerationOpEqual, Value: "v"}},
-			Affinity:        &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{}},
-			SystemNamespace: "podtrace-system",
+			NodeSelector: map[string]string{"role": "trace"},
+			Tolerations:  []corev1.Toleration{{Key: "k", Operator: corev1.TolerationOpEqual, Value: "v"}},
+			Affinity:     &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{}},
 		},
 		Status: TracerConfigStatus{
 			Conditions: []metav1.Condition{{Type: "Ready", Status: metav1.ConditionTrue}},
@@ -149,7 +148,7 @@ func populatedExporterConfig() *ExporterConfig {
 					{Name: "X-Env", Value: "prod"},
 					{Name: "Auth", ValueFrom: &SecretKeySelector{Name: "sec", Key: "tok"}},
 				},
-				HeadersFromSecret: &LocalObjectReference{Name: "h"},
+				HeadersFromSecret: &corev1.LocalObjectReference{Name: "h"},
 			},
 			Jaeger:        &JaegerExporter{Endpoint: "j"},
 			Zipkin:        &ZipkinExporter{Endpoint: "z"},
@@ -214,16 +213,16 @@ func populatedApplicationTrace() *ApplicationTrace {
 			Labels: map[string]string{"l": "1"},
 		},
 		Spec: ApplicationTraceSpec{
-			Selectors:         []metav1.LabelSelector{{MatchLabels: map[string]string{"app": "x"}}},
+			AppSelector:       AppSelector{MatchSelectors: []metav1.LabelSelector{{MatchLabels: map[string]string{"app": "x"}}}},
 			NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
-			ExporterRef:       LocalObjectReference{Name: "ec"},
+			ExporterRef:       corev1.LocalObjectReference{Name: "ec"},
 			Filters:           []EventFilter{FilterDNS, FilterNet},
 			SamplePercent:     &rate,
 			Thresholds:        &Thresholds{ErrorRatePercent: ptrI32(5)},
 			Paused:            true,
 		},
 		Status: ApplicationTraceStatus{
-			PodTraceRef:      "app-pt",
+			PodTraceRef:      &corev1.LocalObjectReference{Name: "app-pt"},
 			MatchedPods:      4,
 			TargetNamespaces: []string{"ns", "other"},
 			Conditions: []metav1.Condition{
@@ -344,7 +343,7 @@ func TestDeepCopy_NilSafety(t *testing.T) {
 	if (*ObjectStoreReference)(nil).DeepCopy() != nil {
 		t.Error("ObjectStoreReference nil DeepCopy")
 	}
-	if (*LocalObjectReference)(nil).DeepCopy() != nil {
+	if (*corev1.LocalObjectReference)(nil).DeepCopy() != nil {
 		t.Error("LocalObjectReference nil DeepCopy")
 	}
 	if (*SecretKeySelector)(nil).DeepCopy() != nil {
@@ -486,8 +485,8 @@ func TestDeepCopy_ApplicationTraceRoundTrip(t *testing.T) {
 	cp := src.DeepCopy()
 	assertDeepCopyOK(t, src, cp)
 
-	cp.Spec.Selectors[0].MatchLabels["app"] = "MUTATED"
-	if src.Spec.Selectors[0].MatchLabels["app"] == "MUTATED" {
+	cp.Spec.AppSelector.MatchSelectors[0].MatchLabels["app"] = "MUTATED"
+	if src.Spec.AppSelector.MatchSelectors[0].MatchLabels["app"] == "MUTATED" {
 		t.Fatal("Selectors slice aliased")
 	}
 	cp.Status.TargetNamespaces[0] = "MUTATED"
@@ -664,7 +663,7 @@ func TestDeepCopy_LeafTypes(t *testing.T) {
 
 	t.Run("Scalar wrappers", func(t *testing.T) {
 		_ = (&PodRef{Name: "p"}).DeepCopy()
-		_ = (&LocalObjectReference{Name: "l"}).DeepCopy()
+		_ = (&corev1.LocalObjectReference{Name: "l"}).DeepCopy()
 		_ = (&SecretKeySelector{Name: "s", Key: "k"}).DeepCopy()
 		_ = (&SessionSummary{TotalEvents: 1}).DeepCopy()
 		_ = (&PodTraceNodeStatus{Node: "n"}).DeepCopy()

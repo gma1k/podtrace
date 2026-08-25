@@ -40,7 +40,7 @@ func TestResolveTracerConfigRefSurfacesNonNotFoundErrors(t *testing.T) {
 		},
 	})
 
-	err := resolveTracerConfigRef(context.Background(), c, &podtracev1alpha1.LocalObjectReference{Name: "regulated"}, "team-a", "podtrace-system")
+	err := resolveTracerConfigRef(context.Background(), c, &corev1.LocalObjectReference{Name: "regulated"}, "team-a", "podtrace-system")
 	if err == nil {
 		t.Fatal("an apiserver failure must not be mistaken for a missing TracerConfig")
 	}
@@ -164,7 +164,7 @@ func scheduleWithTemplate(mutate func(*podtracev1alpha1.PodTraceSessionSpec)) *p
 	spec := podtracev1alpha1.PodTraceSessionSpec{
 		Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
 		Duration:    metav1.Duration{Duration: 60000000000},
-		ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+		ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 	}
 	mutate(&spec)
 	return &podtracev1alpha1.PodTraceSchedule{

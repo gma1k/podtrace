@@ -19,6 +19,7 @@ package v1alpha1
 
 import (
 	apiv1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
@@ -29,17 +30,28 @@ import (
 // PodTraceSessionSpec defines a bounded diagnose-mode trace. The operator
 // reconciles this into one privileged Job per node hosting matched pods.
 type PodTraceSessionSpecApplyConfiguration struct {
-	Selector                *v1.LabelSelectorApplyConfiguration     `json:"selector,omitempty"`
-	PodRefs                 []PodRefApplyConfiguration              `json:"podRefs,omitempty"`
-	NamespaceSelector       *v1.LabelSelectorApplyConfiguration     `json:"namespaceSelector,omitempty"`
-	ContainerName           *string                                 `json:"containerName,omitempty"`
-	Duration                *metav1.Duration                        `json:"duration,omitempty"`
-	Filters                 []apiv1alpha1.EventFilter               `json:"filters,omitempty"`
-	ExporterRef             *LocalObjectReferenceApplyConfiguration `json:"exporterRef,omitempty"`
-	Thresholds              *ThresholdsApplyConfiguration           `json:"thresholds,omitempty"`
-	SamplePercent           *int32                                  `json:"samplePercent,omitempty"`
-	ReportRef               *ReportReferenceApplyConfiguration      `json:"reportRef,omitempty"`
-	TTLSecondsAfterFinished *int32                                  `json:"ttlSecondsAfterFinished,omitempty"`
+	Selector          *v1.LabelSelectorApplyConfiguration `json:"selector,omitempty"`
+	PodRefs           []PodRefApplyConfiguration          `json:"podRefs,omitempty"`
+	NamespaceSelector *v1.LabelSelectorApplyConfiguration `json:"namespaceSelector,omitempty"`
+	ContainerName     *string                             `json:"containerName,omitempty"`
+	Duration          *metav1.Duration                    `json:"duration,omitempty"`
+	Filters           []apiv1alpha1.EventFilter           `json:"filters,omitempty"`
+	ExporterRef       *corev1.LocalObjectReference        `json:"exporterRef,omitempty"`
+	// TracerConfigRef pins every Job this session spawns to one
+	// TracerConfig, overriding the per-node fleet lookup.
+	//
+	// Left unset, each per-node Job takes the config of the fleet that
+	// targets its node, so a session spanning two node pools picks up each
+	// pool's own image and redaction policy. Set this when a session must
+	// run under one known configuration regardless of placement.
+	//
+	// TracerConfig is cluster-scoped, so this is a bare name with no
+	// namespace.
+	TracerConfigRef         *corev1.LocalObjectReference       `json:"tracerConfigRef,omitempty"`
+	Thresholds              *ThresholdsApplyConfiguration      `json:"thresholds,omitempty"`
+	SamplePercent           *int32                             `json:"samplePercent,omitempty"`
+	ReportRef               *ReportReferenceApplyConfiguration `json:"reportRef,omitempty"`
+	TTLSecondsAfterFinished *int32                             `json:"ttlSecondsAfterFinished,omitempty"`
 }
 
 // PodTraceSessionSpecApplyConfiguration constructs a declarative configuration of the PodTraceSessionSpec type for use with
@@ -106,8 +118,16 @@ func (b *PodTraceSessionSpecApplyConfiguration) WithFilters(values ...apiv1alpha
 // WithExporterRef sets the ExporterRef field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the ExporterRef field is set to the value of the last call.
-func (b *PodTraceSessionSpecApplyConfiguration) WithExporterRef(value *LocalObjectReferenceApplyConfiguration) *PodTraceSessionSpecApplyConfiguration {
-	b.ExporterRef = value
+func (b *PodTraceSessionSpecApplyConfiguration) WithExporterRef(value corev1.LocalObjectReference) *PodTraceSessionSpecApplyConfiguration {
+	b.ExporterRef = &value
+	return b
+}
+
+// WithTracerConfigRef sets the TracerConfigRef field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the TracerConfigRef field is set to the value of the last call.
+func (b *PodTraceSessionSpecApplyConfiguration) WithTracerConfigRef(value corev1.LocalObjectReference) *PodTraceSessionSpecApplyConfiguration {
+	b.TracerConfigRef = &value
 	return b
 }
 

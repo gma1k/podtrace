@@ -24,5 +24,6 @@ kind: ApplicationTrace
 metadata:
   name: shop
 status:
-  podTraceRef: shop
+  podTraceRef:
+    name: shop
   (conditions[?type == 'Reconciled'].status | [0]): "True"

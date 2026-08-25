@@ -32,10 +32,11 @@ metadata:
   namespace: my-app
 spec:
   # An application of three workloads, traced as one (union, de-duplicated).
-  selectors:
-    - matchLabels: { app.kubernetes.io/name: checkout, tier: frontend }
-    - matchLabels: { app.kubernetes.io/name: checkout, tier: cart }
-    - matchLabels: { app.kubernetes.io/name: checkout, tier: payment }
+  appSelector:
+    matchSelectors:
+      - matchLabels: { app.kubernetes.io/name: checkout, tier: frontend }
+      - matchLabels: { app.kubernetes.io/name: checkout, tier: cart }
+      - matchLabels: { app.kubernetes.io/name: checkout, tier: payment }
   filters: [dns, net]
   exporterRef:
     name: prod-otlp
@@ -54,7 +55,7 @@ podtrace watch --application --name checkout \
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `selectors` | `[]LabelSelector` | yes (≥1) | The application's workloads. A pod matching **any** selector is traced (union). Become `PodTrace.spec.appSelector.matchSelectors`. |
+| `appSelector.matchSelectors` | `[]LabelSelector` | yes (≥1) | The application's workloads. A pod matching **any** selector is traced (union). Become `PodTrace.spec.appSelector.matchSelectors`. |
 | `namespaceSelector` | LabelSelector | optional | Widen across namespaces. Empty (set) = every namespace; nil = the application's own namespace. |
 | `exporterRef.name` | string | yes | Names an `ExporterConfig` in the same namespace; inherited by the generated `PodTrace`. |
 | `filters` | `[dns,net,fs,cpu,proc,crypto]` | optional | Empty = all categories. |
@@ -66,7 +67,7 @@ podtrace watch --application --name checkout \
 
 | Field | Notes |
 |---|---|
-| `podTraceRef` | Name of the generated child `PodTrace` (same namespace). |
+| `podTraceRef` | Reference to the generated child `PodTrace` (same namespace). |
 | `matchedPods` | Live pod count, aggregated from the child. |
 | `targetNamespaces` | Resolved namespace set, from the child. |
 | `conditions` | `Ready` (mirrors the child), `Reconciled`, `Degraded`, `Paused`. |

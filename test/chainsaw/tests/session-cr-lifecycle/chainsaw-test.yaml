@@ -10,7 +10,7 @@ spec:
       3. Job runs the embedded eBPF tracer, captures events, writes
          a termination message and patches the reportRef ConfigMap.
       4. Session reaches phase=Completed, status.summary populated,
-         status.jobs[].eventCount > 0.
+         status.jobs[].totalEvents > 0.
   timeouts:
     apply: 30s
     assert: 120s

@@ -195,9 +195,9 @@ func TestRenderBundlePayload_FullPolicyPropagation(t *testing.T) {
 			Filters:       []podtracev1alpha1.EventFilter{podtracev1alpha1.FilterFS, podtracev1alpha1.FilterDNS},
 			SamplePercent: &crPct,
 			Thresholds: &podtracev1alpha1.Thresholds{
-				ErrorRatePercent: &errPct,
-				RTTSpikeMs:       &rttMs,
-				FSSlowMs:         &fsMs,
+				ErrorRatePercent:    &errPct,
+				RTTSpikeMs:          &rttMs,
+				FilesystemLatencyMs: &fsMs,
 			},
 		},
 	}

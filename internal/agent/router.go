@@ -251,9 +251,9 @@ func clonePolicySnapshot(in PolicySnapshot) PolicySnapshot {
 			v := *t.RTTSpikeMs
 			out.Thresholds.RTTSpikeMs = &v
 		}
-		if t.FSSlowMs != nil {
-			v := *t.FSSlowMs
-			out.Thresholds.FSSlowMs = &v
+		if t.FilesystemLatencyMs != nil {
+			v := *t.FilesystemLatencyMs
+			out.Thresholds.FilesystemLatencyMs = &v
 		}
 	}
 	return out

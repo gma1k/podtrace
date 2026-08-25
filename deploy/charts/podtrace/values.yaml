@@ -95,7 +95,7 @@ agent:
 
 session:
   ttlSecondsAfterFinished: 300
-  activeDeadlineSecondsOffset: 30
+  activeDeadlineOffset: 30s
   backoffLimit: 0
   maxConcurrentSessionsPerNode: 2
   maxDuration: ""

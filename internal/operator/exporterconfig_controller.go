@@ -79,7 +79,6 @@ func (r *ExporterConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	if err := validateManagedCRName("ExporterConfig", ec.Name); err != nil {
 		ec.Status.ObservedGeneration = ec.Generation
-		ec.Status.Ready = false
 		setCondition(&ec.Status.Conditions, ec.Generation, metav1.Condition{
 			Type:    ConditionReady,
 			Status:  metav1.ConditionFalse,
@@ -98,7 +97,7 @@ func (r *ExporterConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, nil
 	}
 
-	ready, readyStatus, readyReason, readyMessage := r.evaluateReadiness(ctx, &ec)
+	_, readyStatus, readyReason, readyMessage := r.evaluateReadiness(ctx, &ec)
 
 	refs, err := r.countReferences(ctx, &ec)
 	if err != nil {
@@ -107,7 +106,6 @@ func (r *ExporterConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	ec.Status.ObservedGeneration = ec.Generation
-	ec.Status.Ready = ready
 	ec.Status.ReferencedBy = refs
 
 	setCondition(&ec.Status.Conditions, ec.Generation, metav1.Condition{
@@ -343,8 +341,7 @@ func clampMessage(s string) string {
 // indistinguishable from the API server's perspective. Used to skip
 // no-op Patch calls in the reconcile loop.
 func statusEqual(a, b podtracev1alpha1.ExporterConfigStatus) bool {
-	if a.Ready != b.Ready ||
-		a.ReferencedBy != b.ReferencedBy ||
+	if a.ReferencedBy != b.ReferencedBy ||
 		a.ObservedGeneration != b.ObservedGeneration {
 		return false
 	}

@@ -305,7 +305,7 @@ EOF
 	echo
 	kubectl -n "${SAMPLE_NS}" get podtrace,podtracesession,exporterconfig
 	echo
-	kubectl -n "${SAMPLE_NS}" get podtrace -o jsonpath='{range .items[*]}{.metadata.name}: nodeStatus={range .status.nodeStatus[*]}{.node}(ready={.ready},events={.eventsTotal}){end}{"\n"}{end}'
+	kubectl -n "${SAMPLE_NS}" get podtrace -o jsonpath='{range .items[*]}{.metadata.name}: nodeStatus={range .status.nodeStatus[*]}{.node}(ready={.ready},events={.totalEvents}){end}{"\n"}{end}'
 	echo
 	kubectl -n "${SYSTEM_NS}" get deploy,daemonset,job,cm -l app.kubernetes.io/part-of=podtrace
 }

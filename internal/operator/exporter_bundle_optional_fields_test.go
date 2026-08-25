@@ -12,9 +12,8 @@ import (
 )
 
 func TestRenderBundlePayload_SynthesizeSpansStamped(t *testing.T) {
-	enabled := true
 	spec := otlpSpec(&podtracev1alpha1.OTLPExporter{Endpoint: "collector:4318"})
-	spec.SynthesizeSpans = &enabled
+	spec.SynthesizeSpans = true
 	data, _, _, err := renderBundlePayload(nil, ec("otlp-synth", spec), nil)
 	if err != nil {
 		t.Fatalf("renderBundlePayload: %v", err)
@@ -25,9 +24,8 @@ func TestRenderBundlePayload_SynthesizeSpansStamped(t *testing.T) {
 }
 
 func TestRenderBundlePayload_SynthesizeSpansDisabledOmitsKey(t *testing.T) {
-	disabled := false
 	spec := otlpSpec(&podtracev1alpha1.OTLPExporter{Endpoint: "collector:4318"})
-	spec.SynthesizeSpans = &disabled
+	spec.SynthesizeSpans = false
 	data, _, _, err := renderBundlePayload(nil, ec("otlp-nosynth", spec), nil)
 	if err != nil {
 		t.Fatalf("renderBundlePayload: %v", err)
@@ -40,7 +38,7 @@ func TestRenderBundlePayload_SynthesizeSpansDisabledOmitsKey(t *testing.T) {
 func TestRenderBundlePayload_HeadersFromSecretReturned(t *testing.T) {
 	_, _, headersFrom, err := renderBundlePayload(nil, ec("otlp-hfs", otlpSpec(&podtracev1alpha1.OTLPExporter{
 		Endpoint:          "collector:4318",
-		HeadersFromSecret: &podtracev1alpha1.LocalObjectReference{Name: "extra-headers"},
+		HeadersFromSecret: &corev1.LocalObjectReference{Name: "extra-headers"},
 	})), nil)
 	if err != nil {
 		t.Fatalf("renderBundlePayload: %v", err)
@@ -53,7 +51,7 @@ func TestRenderBundlePayload_HeadersFromSecretReturned(t *testing.T) {
 func TestRenderBundlePayload_HeadersFromSecretEmptyNameIgnored(t *testing.T) {
 	_, _, headersFrom, err := renderBundlePayload(nil, ec("otlp-hfs-empty", otlpSpec(&podtracev1alpha1.OTLPExporter{
 		Endpoint:          "collector:4318",
-		HeadersFromSecret: &podtracev1alpha1.LocalObjectReference{Name: ""},
+		HeadersFromSecret: &corev1.LocalObjectReference{Name: ""},
 	})), nil)
 	if err != nil {
 		t.Fatalf("renderBundlePayload: %v", err)
@@ -80,7 +78,7 @@ func TestBuildBundleSecretData_HeadersFromSecretNotFound(t *testing.T) {
 	c := fake.NewClientBuilder().Build()
 
 	if _, err := buildBundleSecretData(context.Background(), c, "user-ns",
-		nil, &podtracev1alpha1.LocalObjectReference{Name: "absent-headers"}); err == nil {
+		nil, &corev1.LocalObjectReference{Name: "absent-headers"}); err == nil {
 		t.Fatal("expected error when headersFromSecret is not found")
 	}
 }

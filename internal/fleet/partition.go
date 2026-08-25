@@ -144,18 +144,18 @@ func (p Partition) ConflictMessage(name string) string {
 		"shares node(s) %s%s with TracerConfig %s; this config is %s. "+
 			"Both agent DaemonSets run on a contested node, so its events are "+
 			"counted once per fleet — give the configs disjoint nodeSelectors, "+
-			"or set spec.priority to record which should win",
+			"or set spec.fleetPriority to record which should win",
 		strings.Join(shown, ", "), suffix,
 		strings.Join(p.Rivals[name], ", "),
 		outcome)
 }
 
 // Outranks reports whether a beats b for a node both target: explicit
-// spec.priority, then specificity, then the older resource, then the
+// spec.fleetPriority, then specificity, then the older resource, then the
 // lexicographically smaller name.
 func Outranks(a, b *podtracev1alpha1.TracerConfig) bool {
-	if a.Spec.Priority != b.Spec.Priority {
-		return a.Spec.Priority > b.Spec.Priority
+	if a.Spec.FleetPriority != b.Spec.FleetPriority {
+		return a.Spec.FleetPriority > b.Spec.FleetPriority
 	}
 	if aWide, bWide := IsClusterWide(&a.Spec), IsClusterWide(&b.Spec); aWide != bWide {
 		return !aWide

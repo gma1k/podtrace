@@ -27,6 +27,8 @@ import (
 // TriggerSource selects one alert category and the minimum severity that
 // arms the trigger.
 type TriggerSourceApplyConfiguration struct {
+	// TriggerSourceKind names an agent-detected alert category that can fire a
+	// triggered session.
 	Kind *apiv1alpha1.TriggerSourceKind `json:"kind,omitempty"`
 	// MinSeverity is the minimum alert severity that fires, ordered
 	// warning < critical < fatal. Defaults to critical so noisy warnings

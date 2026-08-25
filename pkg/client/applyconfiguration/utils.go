@@ -55,8 +55,6 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1alpha1.ExporterConfigStatusApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("JaegerExporter"):
 		return &apiv1alpha1.JaegerExporterApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("LocalObjectReference"):
-		return &apiv1alpha1.LocalObjectReferenceApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("ObjectStoreReference"):
 		return &apiv1alpha1.ObjectStoreReferenceApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("OTLPExporter"):

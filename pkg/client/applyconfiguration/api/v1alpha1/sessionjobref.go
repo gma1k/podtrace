@@ -29,7 +29,7 @@ type SessionJobRefApplyConfiguration struct {
 	Node           *string  `json:"node,omitempty"`
 	Name           *string  `json:"name,omitempty"`
 	Completed      *bool    `json:"completed,omitempty"`
-	EventCount     *int64   `json:"eventCount,omitempty"`
+	TotalEvents    *int64   `json:"totalEvents,omitempty"`
 	StartTime      *v1.Time `json:"startTime,omitempty"`
 	CompletionTime *v1.Time `json:"completionTime,omitempty"`
 	Message        *string  `json:"message,omitempty"`
@@ -65,11 +65,11 @@ func (b *SessionJobRefApplyConfiguration) WithCompleted(value bool) *SessionJobR
 	return b
 }
 
-// WithEventCount sets the EventCount field in the declarative configuration to the given value
+// WithTotalEvents sets the TotalEvents field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the EventCount field is set to the value of the last call.
-func (b *SessionJobRefApplyConfiguration) WithEventCount(value int64) *SessionJobRefApplyConfiguration {
-	b.EventCount = &value
+// If called multiple times, the TotalEvents field is set to the value of the last call.
+func (b *SessionJobRefApplyConfiguration) WithTotalEvents(value int64) *SessionJobRefApplyConfiguration {
+	b.TotalEvents = &value
 	return b
 }
 

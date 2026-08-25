@@ -39,7 +39,7 @@ func TestPodTraceReconciler_NamespaceSelectorAllowlist(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "ns-selector", Namespace: ns},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "otlp"},
+			ExporterRef: corev1.LocalObjectReference{Name: "otlp"},
 			NamespaceSelector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{tracedKey: "yes"},
 			},
@@ -118,7 +118,7 @@ func TestPodTraceReconciler_NamespaceSelector_EmptyMatch(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "ns-empty", Namespace: ns},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "otlp"},
+			ExporterRef: corev1.LocalObjectReference{Name: "otlp"},
 			NamespaceSelector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
 					"podtrace.io/never-set-by-anyone": "definitely-not",
@@ -169,7 +169,7 @@ func TestPodTraceReconciler_NamespaceToPodTraces_EnqueuesOnlySelectorUsers(t *te
 		ObjectMeta: metav1.ObjectMeta{Name: "with-sel", Namespace: ns},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:          &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
-			ExporterRef:       podtracev1alpha1.LocalObjectReference{Name: "otlp"},
+			ExporterRef:       corev1.LocalObjectReference{Name: "otlp"},
 			NamespaceSelector: &metav1.LabelSelector{},
 		},
 	}
@@ -177,7 +177,7 @@ func TestPodTraceReconciler_NamespaceToPodTraces_EnqueuesOnlySelectorUsers(t *te
 		ObjectMeta: metav1.ObjectMeta{Name: "without-sel", Namespace: ns},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "y"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "otlp"},
+			ExporterRef: corev1.LocalObjectReference{Name: "otlp"},
 		},
 	}
 	if err := c.Create(ctx, withSel); err != nil {

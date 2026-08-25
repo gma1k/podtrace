@@ -298,9 +298,11 @@ generate: operator-tools
 CLIENT_GEN_VERSION ?= v0.36.1
 CLIENT_GEN ?= $(shell go env GOPATH 2>/dev/null)/bin/client-gen
 APPLYCONFIGURATION_GEN ?= $(shell go env GOPATH 2>/dev/null)/bin/applyconfiguration-gen
+
+CODEGEN_TOOLCHAIN ?= go$(shell $(GO) list -m -f '{{.GoVersion}}')
 clientset:
-	@GOBIN=$(dir $(CLIENT_GEN)) $(GO) install k8s.io/code-generator/cmd/client-gen@$(CLIENT_GEN_VERSION)
-	@GOBIN=$(dir $(APPLYCONFIGURATION_GEN)) $(GO) install k8s.io/code-generator/cmd/applyconfiguration-gen@$(CLIENT_GEN_VERSION)
+	@GOBIN=$(dir $(CLIENT_GEN)) GOTOOLCHAIN=$(CODEGEN_TOOLCHAIN) $(GO) install k8s.io/code-generator/cmd/client-gen@$(CLIENT_GEN_VERSION)
+	@GOBIN=$(dir $(APPLYCONFIGURATION_GEN)) GOTOOLCHAIN=$(CODEGEN_TOOLCHAIN) $(GO) install k8s.io/code-generator/cmd/applyconfiguration-gen@$(CLIENT_GEN_VERSION)
 	$(APPLYCONFIGURATION_GEN) \
 	  --go-header-file=$(BOILERPLATE) \
 	  --output-dir=pkg/client/applyconfiguration \

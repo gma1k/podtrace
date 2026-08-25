@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"context"
+	corev1 "k8s.io/api/core/v1"
 	"strings"
 	"testing"
 
@@ -33,7 +34,7 @@ func TestResolveTracerConfigRef_CrossTenantWithoutConsentRejected(t *testing.T) 
 	}
 	c := entitlementClient(t, config)
 
-	err := resolveTracerConfigRef(context.Background(), c, &podtracev1alpha1.LocalObjectReference{Name: "regulated"}, "team-a", "podtrace-system")
+	err := resolveTracerConfigRef(context.Background(), c, &corev1.LocalObjectReference{Name: "regulated"}, "team-a", "podtrace-system")
 	if err == nil {
 		t.Fatal("a cross-tenant pin without consent must be rejected at admission")
 	}
@@ -52,7 +53,7 @@ func TestResolveTracerConfigRef_CrossTenantWithConsentAccepted(t *testing.T) {
 	}
 	c := entitlementClient(t, config)
 
-	if err := resolveTracerConfigRef(context.Background(), c, &podtracev1alpha1.LocalObjectReference{Name: "regulated"}, "team-a", "podtrace-system"); err != nil {
+	if err := resolveTracerConfigRef(context.Background(), c, &corev1.LocalObjectReference{Name: "regulated"}, "team-a", "podtrace-system"); err != nil {
 		t.Fatalf("a consented cross-tenant pin must pass admission, got %v", err)
 	}
 }

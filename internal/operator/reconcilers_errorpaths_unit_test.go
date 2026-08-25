@@ -775,7 +775,7 @@ func runnableSession() *podtracev1alpha1.PodTraceSession {
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}},
 			Duration:    metav1.Duration{Duration: time.Minute},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ec"},
 		},
 	}
 }
@@ -808,7 +808,7 @@ func podTraceWithFinalizer() *podtracev1alpha1.PodTrace {
 			Finalizers: []string{FinalizerCleanup},
 		},
 		Spec: podtracev1alpha1.PodTraceSpec{
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ec"},
 		},
 	}
 }

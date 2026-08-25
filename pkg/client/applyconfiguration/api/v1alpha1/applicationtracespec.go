@@ -19,22 +19,23 @@ package v1alpha1
 
 import (
 	apiv1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
 // ApplicationTraceSpecApplyConfiguration represents a declarative configuration of the ApplicationTraceSpec type for use
 // with apply.
 //
-// ApplicationTraceSpec declares continuous tracing for a whole application,
-// a set of workloads (selectors), optionally across namespaces.
+// ApplicationTraceSpec declares continuous tracing for a whole application:
+// the set of workloads its AppSelector matches, optionally across namespaces.
 type ApplicationTraceSpecApplyConfiguration struct {
-	Selectors         []v1.LabelSelectorApplyConfiguration    `json:"selectors,omitempty"`
-	NamespaceSelector *v1.LabelSelectorApplyConfiguration     `json:"namespaceSelector,omitempty"`
-	ExporterRef       *LocalObjectReferenceApplyConfiguration `json:"exporterRef,omitempty"`
-	Filters           []apiv1alpha1.EventFilter               `json:"filters,omitempty"`
-	SamplePercent     *int32                                  `json:"samplePercent,omitempty"`
-	Thresholds        *ThresholdsApplyConfiguration           `json:"thresholds,omitempty"`
-	Paused            *bool                                   `json:"paused,omitempty"`
+	AppSelector       *AppSelectorApplyConfiguration      `json:"appSelector,omitempty"`
+	NamespaceSelector *v1.LabelSelectorApplyConfiguration `json:"namespaceSelector,omitempty"`
+	ExporterRef       *corev1.LocalObjectReference        `json:"exporterRef,omitempty"`
+	Filters           []apiv1alpha1.EventFilter           `json:"filters,omitempty"`
+	SamplePercent     *int32                              `json:"samplePercent,omitempty"`
+	Thresholds        *ThresholdsApplyConfiguration       `json:"thresholds,omitempty"`
+	Paused            *bool                               `json:"paused,omitempty"`
 }
 
 // ApplicationTraceSpecApplyConfiguration constructs a declarative configuration of the ApplicationTraceSpec type for use with
@@ -43,16 +44,11 @@ func ApplicationTraceSpec() *ApplicationTraceSpecApplyConfiguration {
 	return &ApplicationTraceSpecApplyConfiguration{}
 }
 
-// WithSelectors adds the given value to the Selectors field in the declarative configuration
-// and returns the receiver, so that objects can be build by chaining "With" function invocations.
-// If called multiple times, values provided by each call will be appended to the Selectors field.
-func (b *ApplicationTraceSpecApplyConfiguration) WithSelectors(values ...*v1.LabelSelectorApplyConfiguration) *ApplicationTraceSpecApplyConfiguration {
-	for i := range values {
-		if values[i] == nil {
-			panic("nil value passed to WithSelectors")
-		}
-		b.Selectors = append(b.Selectors, *values[i])
-	}
+// WithAppSelector sets the AppSelector field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the AppSelector field is set to the value of the last call.
+func (b *ApplicationTraceSpecApplyConfiguration) WithAppSelector(value *AppSelectorApplyConfiguration) *ApplicationTraceSpecApplyConfiguration {
+	b.AppSelector = value
 	return b
 }
 
@@ -67,8 +63,8 @@ func (b *ApplicationTraceSpecApplyConfiguration) WithNamespaceSelector(value *v1
 // WithExporterRef sets the ExporterRef field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the ExporterRef field is set to the value of the last call.
-func (b *ApplicationTraceSpecApplyConfiguration) WithExporterRef(value *LocalObjectReferenceApplyConfiguration) *ApplicationTraceSpecApplyConfiguration {
-	b.ExporterRef = value
+func (b *ApplicationTraceSpecApplyConfiguration) WithExporterRef(value corev1.LocalObjectReference) *ApplicationTraceSpecApplyConfiguration {
+	b.ExporterRef = &value
 	return b
 }
 

@@ -177,12 +177,12 @@ func TestEnvtestOverlappingFleetsReportConflict(t *testing.T) {
 
 	createFleetNode(t, c, "contested-1", map[string]string{"pool": "shared", "zone": "shared-eu"})
 	createFleetConfig(t, c, "wins", podtracev1alpha1.TracerConfigSpec{
-		NodeSelector: map[string]string{"pool": "shared"},
-		Priority:     10,
+		NodeSelector:  map[string]string{"pool": "shared"},
+		FleetPriority: 10,
 	})
 	createFleetConfig(t, c, "loses", podtracev1alpha1.TracerConfigSpec{
-		NodeSelector: map[string]string{"zone": "shared-eu"},
-		Priority:     1,
+		NodeSelector:  map[string]string{"zone": "shared-eu"},
+		FleetPriority: 1,
 	})
 
 	r := &TracerConfigReconciler{Client: c, Scheme: scheme, SystemNamespace: systemNS}

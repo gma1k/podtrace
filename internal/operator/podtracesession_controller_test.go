@@ -59,7 +59,7 @@ func TestPodTraceSessionReconciler_EnvtestFanOutByNode(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
 			Duration:    metav1.Duration{Duration: 30 * time.Second},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+			ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 		},
 	}
 	if err := c.Create(ctx, session); err != nil {
@@ -124,7 +124,7 @@ func TestPodTraceSessionReconciler_CrossNamespaceGrant(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			PodRefs:     []podtracev1alpha1.PodRef{{Namespace: victimNS, Name: "victim"}},
 			Duration:    metav1.Duration{Duration: 30 * time.Second},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+			ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 		},
 	}
 	if err := c.Create(ctx, session); err != nil {
@@ -219,7 +219,7 @@ func TestPodTraceSessionReconciler_EnvtestStatusReflectsJobCompletion(t *testing
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "one"}},
 			Duration:    metav1.Duration{Duration: 10 * time.Second},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+			ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 		},
 	}
 	if err := c.Create(ctx, session); err != nil {

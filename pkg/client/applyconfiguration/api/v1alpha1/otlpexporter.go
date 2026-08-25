@@ -19,6 +19,7 @@ package v1alpha1
 
 import (
 	apiv1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	v1 "k8s.io/api/core/v1"
 )
 
 // OTLPExporterApplyConfiguration represents a declarative configuration of the OTLPExporter type for use
@@ -37,7 +38,7 @@ type OTLPExporterApplyConfiguration struct {
 	Headers []OTLPHeaderApplyConfiguration `json:"headers,omitempty"`
 	// HeadersFromSecret pulls additional headers from a Secret in the same
 	// namespace. Each key in the secret becomes a header; values are used verbatim.
-	HeadersFromSecret *LocalObjectReferenceApplyConfiguration `json:"headersFromSecret,omitempty"`
+	HeadersFromSecret *v1.LocalObjectReference `json:"headersFromSecret,omitempty"`
 }
 
 // OTLPExporterApplyConfiguration constructs a declarative configuration of the OTLPExporter type for use with
@@ -86,7 +87,7 @@ func (b *OTLPExporterApplyConfiguration) WithHeaders(values ...*OTLPHeaderApplyC
 // WithHeadersFromSecret sets the HeadersFromSecret field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the HeadersFromSecret field is set to the value of the last call.
-func (b *OTLPExporterApplyConfiguration) WithHeadersFromSecret(value *LocalObjectReferenceApplyConfiguration) *OTLPExporterApplyConfiguration {
-	b.HeadersFromSecret = value
+func (b *OTLPExporterApplyConfiguration) WithHeadersFromSecret(value v1.LocalObjectReference) *OTLPExporterApplyConfiguration {
+	b.HeadersFromSecret = &value
 	return b
 }

@@ -29,6 +29,8 @@ type TracerConfigStatusApplyConfiguration struct {
 	DesiredAgents      *int32                           `json:"desiredAgents,omitempty"`
 	ReadyAgents        *int32                           `json:"readyAgents,omitempty"`
 	ActiveSessions     *int32                           `json:"activeSessions,omitempty"`
+	MatchedNodes       *int32                           `json:"matchedNodes,omitempty"`
+	ContestedNodes     *int32                           `json:"contestedNodes,omitempty"`
 	Conditions         []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 	ObservedGeneration *int64                           `json:"observedGeneration,omitempty"`
 }
@@ -60,6 +62,22 @@ func (b *TracerConfigStatusApplyConfiguration) WithReadyAgents(value int32) *Tra
 // If called multiple times, the ActiveSessions field is set to the value of the last call.
 func (b *TracerConfigStatusApplyConfiguration) WithActiveSessions(value int32) *TracerConfigStatusApplyConfiguration {
 	b.ActiveSessions = &value
+	return b
+}
+
+// WithMatchedNodes sets the MatchedNodes field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the MatchedNodes field is set to the value of the last call.
+func (b *TracerConfigStatusApplyConfiguration) WithMatchedNodes(value int32) *TracerConfigStatusApplyConfiguration {
+	b.MatchedNodes = &value
+	return b
+}
+
+// WithContestedNodes sets the ContestedNodes field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ContestedNodes field is set to the value of the last call.
+func (b *TracerConfigStatusApplyConfiguration) WithContestedNodes(value int32) *TracerConfigStatusApplyConfiguration {
+	b.ContestedNodes = &value
 	return b
 }
 

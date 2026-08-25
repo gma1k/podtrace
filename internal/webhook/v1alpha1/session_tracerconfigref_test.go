@@ -2,6 +2,7 @@ package v1alpha1_test
 
 import (
 	"context"
+	corev1 "k8s.io/api/core/v1"
 	"strings"
 	"testing"
 	"time"
@@ -18,11 +19,11 @@ func sessionWithTracerConfigRef(name string) *podtracev1alpha1.PodTraceSession {
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			Selector:    validSelector(),
 			Duration:    metav1.Duration{Duration: time.Minute},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+			ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 		},
 	}
 	if name != "" {
-		s.Spec.TracerConfigRef = &podtracev1alpha1.LocalObjectReference{Name: name}
+		s.Spec.TracerConfigRef = &corev1.LocalObjectReference{Name: name}
 	}
 	return s
 }
@@ -67,7 +68,7 @@ func TestSessionTracerConfigRefEmptyNameIsUnset(t *testing.T) {
 	v := &webhookv1alpha1.PodTraceSessionCustomValidator{Client: c}
 
 	s := sessionWithTracerConfigRef("")
-	s.Spec.TracerConfigRef = &podtracev1alpha1.LocalObjectReference{Name: ""}
+	s.Spec.TracerConfigRef = &corev1.LocalObjectReference{Name: ""}
 	if _, err := v.ValidateCreate(context.Background(), s); err != nil {
 		t.Errorf("an empty ref name must behave as unset rather than as a lookup for %q, got %v", "", err)
 	}

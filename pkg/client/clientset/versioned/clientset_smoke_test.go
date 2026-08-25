@@ -2,6 +2,7 @@ package versioned_test
 
 import (
 	"context"
+	corev1 "k8s.io/api/core/v1"
 	"testing"
 	"time"
 
@@ -32,7 +33,7 @@ func TestClientset_CreateListGet_RoundTrip(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: ns},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+			ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 		},
 	}
 	if _, err := cs.PodtraceV1alpha1().PodTraces(ns).Create(ctx, pt, metav1.CreateOptions{}); err != nil {
@@ -49,7 +50,7 @@ func TestClientset_CreateListGet_RoundTrip(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
 			Duration:    metav1.Duration{Duration: time.Minute},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+			ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 		},
 	}
 	if _, err := cs.PodtraceV1alpha1().PodTraceSessions(ns).Create(ctx, pts, metav1.CreateOptions{}); err != nil {

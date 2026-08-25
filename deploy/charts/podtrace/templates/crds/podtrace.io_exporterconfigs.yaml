@@ -26,9 +26,9 @@ spec:
     - jsonPath: .spec.type
       name: Type
       type: string
-    - jsonPath: .status.ready
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
-      type: boolean
+      type: string
     - jsonPath: .status.referencedBy
       name: Refs
       type: integer
@@ -150,10 +150,16 @@ spec:
                       namespace. Each key in the secret becomes a header; values are used verbatim.
                     properties:
                       name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
                         type: string
-                    required:
-                    - name
                     type: object
+                    x-kubernetes-map-type: atomic
                   insecure:
                     description: Insecure disables TLS. Do not use in production.
                     type: boolean
@@ -289,14 +295,9 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
-              ready:
-                default: false
-                type: boolean
               referencedBy:
                 format: int32
                 type: integer
-            required:
-            - ready
             type: object
         type: object
     served: true

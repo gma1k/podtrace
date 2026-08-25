@@ -1096,6 +1096,9 @@ spec:
                     maxItems: 4
                     type: array
                 type: object
+              fleetPriority:
+                format: int32
+                type: integer
               image:
                 maxLength: 512
                 minLength: 1
@@ -1135,9 +1138,6 @@ spec:
                 additionalProperties:
                   type: string
                 type: object
-              priority:
-                format: int32
-                type: integer
               redaction:
                 description: |-
                   RedactionSpec configures PII redaction applied to event Target and Details
@@ -1173,10 +1173,8 @@ spec:
                 description: SessionRuntimeSpec tunes the per-session Job pods the
                   operator creates.
                 properties:
-                  activeDeadlineSecondsOffset:
-                    format: int32
-                    minimum: 0
-                    type: integer
+                  activeDeadlineOffset:
+                    type: string
                   backoffLimit:
                     format: int32
                     minimum: 0

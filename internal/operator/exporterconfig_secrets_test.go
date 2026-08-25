@@ -1,6 +1,7 @@
 package operator
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	"testing"
 
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
@@ -42,7 +43,7 @@ func TestCollectSecretRefs(t *testing.T) {
 				Type: podtracev1alpha1.ExporterTypeOTLP,
 				OTLP: &podtracev1alpha1.OTLPExporter{
 					Endpoint:          "otel:4317",
-					HeadersFromSecret: &podtracev1alpha1.LocalObjectReference{Name: "otel-headers"},
+					HeadersFromSecret: &corev1.LocalObjectReference{Name: "otel-headers"},
 				},
 			},
 			want: []secretRef{{Name: "otel-headers", Required: true}},
@@ -88,7 +89,7 @@ func TestCollectSecretRefs(t *testing.T) {
 				Type: podtracev1alpha1.ExporterTypeOTLP,
 				OTLP: &podtracev1alpha1.OTLPExporter{
 					Endpoint:          "otel:4317",
-					HeadersFromSecret: &podtracev1alpha1.LocalObjectReference{Name: ""},
+					HeadersFromSecret: &corev1.LocalObjectReference{Name: ""},
 				},
 			},
 			want: nil,
@@ -112,7 +113,7 @@ func TestCollectSecretRefs(t *testing.T) {
 				Type: podtracev1alpha1.ExporterTypeOTLP,
 				OTLP: &podtracev1alpha1.OTLPExporter{
 					Endpoint:          "otel:4317",
-					HeadersFromSecret: &podtracev1alpha1.LocalObjectReference{Name: "bulk"},
+					HeadersFromSecret: &corev1.LocalObjectReference{Name: "bulk"},
 					Headers: []podtracev1alpha1.OTLPHeader{
 						{Name: "X-A", ValueFrom: &podtracev1alpha1.SecretKeySelector{Name: "a", Key: "k"}},
 					},

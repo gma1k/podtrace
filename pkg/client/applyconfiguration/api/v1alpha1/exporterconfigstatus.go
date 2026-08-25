@@ -26,7 +26,6 @@ import (
 //
 // ExporterConfigStatus reports the observed state of an ExporterConfig.
 type ExporterConfigStatusApplyConfiguration struct {
-	Ready              *bool                            `json:"ready,omitempty"`
 	Conditions         []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 	ReferencedBy       *int32                           `json:"referencedBy,omitempty"`
 	ObservedGeneration *int64                           `json:"observedGeneration,omitempty"`
@@ -36,14 +35,6 @@ type ExporterConfigStatusApplyConfiguration struct {
 // apply.
 func ExporterConfigStatus() *ExporterConfigStatusApplyConfiguration {
 	return &ExporterConfigStatusApplyConfiguration{}
-}
-
-// WithReady sets the Ready field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Ready field is set to the value of the last call.
-func (b *ExporterConfigStatusApplyConfiguration) WithReady(value bool) *ExporterConfigStatusApplyConfiguration {
-	b.Ready = &value
-	return b
 }
 
 // WithConditions adds the given value to the Conditions field in the declarative configuration

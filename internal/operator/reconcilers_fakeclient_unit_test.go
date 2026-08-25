@@ -15,11 +15,6 @@ import (
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 )
 
-// ─── ExporterConfigReconciler watch-handler map functions ────────────
-
-// TestFakeReconcile_SecretToExporterConfigs verifies the Secret watch
-// handler enqueues only ECs in the Secret's namespace that reference
-// the changed Secret by name, and returns nil for a non-Secret object.
 func TestFakeReconcile_SecretToExporterConfigs(t *testing.T) {
 	const ns = "team-a"
 	scheme := newOperatorScheme(t)
@@ -31,7 +26,7 @@ func TestFakeReconcile_SecretToExporterConfigs(t *testing.T) {
 			OTLP: &podtracev1alpha1.OTLPExporter{
 				Endpoint:          "o:4317",
 				Protocol:          podtracev1alpha1.OTLPProtocolHTTP,
-				HeadersFromSecret: &podtracev1alpha1.LocalObjectReference{Name: "creds"},
+				HeadersFromSecret: &corev1.LocalObjectReference{Name: "creds"},
 			},
 		},
 	}
@@ -60,9 +55,6 @@ func TestFakeReconcile_SecretToExporterConfigs(t *testing.T) {
 	}
 }
 
-// TestFakeReconcile_PodTraceToExporterConfig verifies the PodTrace watch
-// handler maps to the referenced ExporterConfig and short-circuits on
-// empty ExporterRef / wrong type.
 func TestFakeReconcile_PodTraceToExporterConfig(t *testing.T) {
 	scheme := newOperatorScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
@@ -70,7 +62,7 @@ func TestFakeReconcile_PodTraceToExporterConfig(t *testing.T) {
 
 	pt := &podtracev1alpha1.PodTrace{
 		ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: "ns"},
-		Spec:       podtracev1alpha1.PodTraceSpec{ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"}},
+		Spec:       podtracev1alpha1.PodTraceSpec{ExporterRef: corev1.LocalObjectReference{Name: "ec"}},
 	}
 	got := r.podTraceToExporterConfig(context.Background(), pt)
 	if len(got) != 1 || got[0].Name != "ec" || got[0].Namespace != "ns" {
@@ -88,8 +80,6 @@ func TestFakeReconcile_PodTraceToExporterConfig(t *testing.T) {
 	}
 }
 
-// TestFakeReconcile_SessionToExporterConfig mirrors the PodTrace handler
-// for PodTraceSession objects.
 func TestFakeReconcile_SessionToExporterConfig(t *testing.T) {
 	scheme := newOperatorScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
@@ -97,7 +87,7 @@ func TestFakeReconcile_SessionToExporterConfig(t *testing.T) {
 
 	s := &podtracev1alpha1.PodTraceSession{
 		ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "ns"},
-		Spec:       podtracev1alpha1.PodTraceSessionSpec{ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"}},
+		Spec:       podtracev1alpha1.PodTraceSessionSpec{ExporterRef: corev1.LocalObjectReference{Name: "ec"}},
 	}
 	got := r.sessionToExporterConfig(context.Background(), s)
 	if len(got) != 1 || got[0].Name != "ec" || got[0].Namespace != "ns" {
@@ -115,22 +105,18 @@ func TestFakeReconcile_SessionToExporterConfig(t *testing.T) {
 	}
 }
 
-// ─── PodTraceReconciler helpers ──────────────────────────────────────
-
-// TestFakeReconcile_NamespaceToPodTraces enqueues only PodTraces that
-// declare a NamespaceSelector.
 func TestFakeReconcile_NamespaceToPodTraces(t *testing.T) {
 	scheme := newOperatorScheme(t)
 	withSelector := &podtracev1alpha1.PodTrace{
 		ObjectMeta: metav1.ObjectMeta{Name: "with-sel", Namespace: "ns"},
 		Spec: podtracev1alpha1.PodTraceSpec{
-			ExporterRef:       podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			ExporterRef:       corev1.LocalObjectReference{Name: "ec"},
 			NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
 		},
 	}
 	withoutSelector := &podtracev1alpha1.PodTrace{
 		ObjectMeta: metav1.ObjectMeta{Name: "no-sel", Namespace: "ns"},
-		Spec:       podtracev1alpha1.PodTraceSpec{ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"}},
+		Spec:       podtracev1alpha1.PodTraceSpec{ExporterRef: corev1.LocalObjectReference{Name: "ec"}},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(withSelector, withoutSelector).Build()
 	r := &PodTraceReconciler{Client: c, Scheme: scheme}
@@ -143,8 +129,6 @@ func TestFakeReconcile_NamespaceToPodTraces(t *testing.T) {
 	}
 }
 
-// TestFakeReconcile_LoadCredentialSecret covers the happy path plus both
-// error branches (missing Secret, missing key).
 func TestFakeReconcile_LoadCredentialSecret(t *testing.T) {
 	const ns = "team-a"
 	scheme := newOperatorScheme(t)
@@ -175,30 +159,26 @@ func TestFakeReconcile_LoadCredentialSecret(t *testing.T) {
 	}
 }
 
-// ─── PodTraceSessionReconciler helpers ───────────────────────────────
-
-// TestFakeReconcile_NamespaceToPodTraceSessions enqueues only non-terminal
-// PodTraceSessions that declare a NamespaceSelector.
 func TestFakeReconcile_NamespaceToPodTraceSessions(t *testing.T) {
 	scheme := newOperatorScheme(t)
 	active := &podtracev1alpha1.PodTraceSession{
 		ObjectMeta: metav1.ObjectMeta{Name: "active", Namespace: "ns"},
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
-			ExporterRef:       podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			ExporterRef:       corev1.LocalObjectReference{Name: "ec"},
 			NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
 		},
 	}
 	terminal := &podtracev1alpha1.PodTraceSession{
 		ObjectMeta: metav1.ObjectMeta{Name: "done", Namespace: "ns"},
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
-			ExporterRef:       podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			ExporterRef:       corev1.LocalObjectReference{Name: "ec"},
 			NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
 		},
 		Status: podtracev1alpha1.PodTraceSessionStatus{State: podtracev1alpha1.SessionStateCompleted},
 	}
 	noSelector := &podtracev1alpha1.PodTraceSession{
 		ObjectMeta: metav1.ObjectMeta{Name: "no-sel", Namespace: "ns"},
-		Spec:       podtracev1alpha1.PodTraceSessionSpec{ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"}},
+		Spec:       podtracev1alpha1.PodTraceSessionSpec{ExporterRef: corev1.LocalObjectReference{Name: "ec"}},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(active, terminal, noSelector).Build()
 	r := &PodTraceSessionReconciler{Client: c, Scheme: scheme}
@@ -211,9 +191,6 @@ func TestFakeReconcile_NamespaceToPodTraceSessions(t *testing.T) {
 	}
 }
 
-// TestFakeReconcile_NodesAtCapacity verifies node-capacity accounting:
-// a node with cap active Jobs from OTHER sessions is over; the
-// reconciling session's own Jobs and completed Jobs don't count.
 func TestFakeReconcile_NodesAtCapacity(t *testing.T) {
 	const ns = "team-a"
 	scheme := newOperatorScheme(t)
@@ -252,8 +229,6 @@ func TestFakeReconcile_NodesAtCapacity(t *testing.T) {
 	}
 }
 
-// TestFakeReconcile_EnsureJobs creates one Job per target node in the
-// system namespace and returns every Job owned by the session.
 func TestFakeReconcile_EnsureJobs(t *testing.T) {
 	const ns, sysNS = "team-a", "podtrace-system"
 	scheme := newOperatorScheme(t)
@@ -265,7 +240,7 @@ func TestFakeReconcile_EnsureJobs(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}},
 			Duration:    metav1.Duration{Duration: time.Minute},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ec"},
 		},
 	}
 
@@ -299,8 +274,6 @@ func TestFakeReconcile_EnsureJobs(t *testing.T) {
 		t.Errorf("expected ensureJobs to stay at 2 Jobs, got %d", len(jobs2))
 	}
 }
-
-// ─── runtime.go pure helpers ─────────────────────────────────────────
 
 func TestFakeReconcile_DefaultOptions(t *testing.T) {
 	opts := DefaultOptions()

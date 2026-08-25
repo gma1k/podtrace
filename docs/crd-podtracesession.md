@@ -59,7 +59,7 @@ spec:
 | `ttlSecondsAfterFinished` | int | optional | When to GC the CR after Completed/Failed (default 300). |
 | `thresholds.errorRatePercent` | int 0-100 | optional | The session Job tags spans for events carrying a non-zero error code; identical semantics to [PodTrace thresholds](crd-podtrace.md#spec-reference). |
 | `thresholds.rttSpikeMs` | int ≥0 | optional | Tag network-latency spans whose source event latency exceeds this threshold. |
-| `thresholds.fsSlowMs` | int ≥0 | optional | Tag FS spans whose source event latency exceeds this threshold. |
+| `thresholds.filesystemLatencyMs` | int ≥0 | optional | Tag FS spans whose source event latency exceeds this threshold. |
 
 Per-session policy is also surfaced on `status.policy` (`effectiveSampleRate`,
 `filters`, `thresholds`, `generation`, `hash`) with the same semantics as
@@ -87,7 +87,7 @@ can introspect a finished session without scraping pod logs:
 1. **Termination message** — kubelet captures a compact JSON the CLI
    writes to `/dev/termination-log` (≤4KB). The operator reads it from
    `Pod.Status.ContainerStatuses[].State.Terminated.Message` and
-   populates `status.summary` + `status.jobs[].eventCount`.
+   populates `status.summary` + `status.jobs[].totalEvents`.
 2. **CLI self-upload** — the CLI directly patches the configured
    `reportRef.configMap` or `.secret` using a narrow per-session
    RoleBinding granting `get/update/create` on exactly that object.
@@ -102,8 +102,8 @@ can introspect a finished session without scraping pod logs:
 |---|---|
 | `state` | `Pending` → `Running` → `Completed` / `Failed`. |
 | `startTime`, `completionTime` | Set when the first Job starts and last completes. |
-| `jobs[]` | One entry per node hosting a matched pod. Carries `node`, `name`, `completed`, `eventCount`, `startTime`, `completionTime`. |
-| `summary` | Aggregated `{totalEvents, dnsEvents, netEvents, fsEvents, cpuEvents, procEvents, errorsDetected}` across all Jobs. |
+| `jobs[]` | One entry per node hosting a matched pod. Carries `node`, `name`, `completed`, `totalEvents`, `startTime`, `completionTime`. |
+| `summary` | Aggregated `{totalEvents, eventsByFilter, errorsDetected}` across all Jobs. `eventsByFilter` is keyed by filter name (`dns`, `net`, ...), so a new filter needs no schema change. |
 | `conditions` | Standard `Reconciled`, `Degraded`. |
 
 ## Lifecycle
@@ -130,7 +130,7 @@ kubectl get podtracesession diag-api -n my-app -w
 kubectl get podtracesession diag-api -n my-app -o jsonpath='{.status.summary}{"\n"}'
 
 # Per-node breakdown
-kubectl get podtracesession diag-api -n my-app -o jsonpath='{range .status.jobs[*]}{.node}: {.eventCount} events{"\n"}{end}'
+kubectl get podtracesession diag-api -n my-app -o jsonpath='{range .status.jobs[*]}{.node}: {.totalEvents} events{"\n"}{end}'
 
 # Read the full report
 kubectl get cm api-diag-report -n my-app -o jsonpath='{.data.report\.txt}' | less

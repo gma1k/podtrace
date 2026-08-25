@@ -94,6 +94,7 @@ func (b *AgentSpecApplyConfiguration) WithDNSPacketCapture(value bool) *AgentSpe
 
 // WithDNSFullAnswers sets the DNSFullAnswers field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the DNSFullAnswers field is set to the value of the last call.
 func (b *AgentSpecApplyConfiguration) WithDNSFullAnswers(value bool) *AgentSpecApplyConfiguration {
 	b.DNSFullAnswers = &value
 	return b
@@ -101,6 +102,7 @@ func (b *AgentSpecApplyConfiguration) WithDNSFullAnswers(value bool) *AgentSpecA
 
 // WithUSDT sets the USDT field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the USDT field is set to the value of the last call.
 func (b *AgentSpecApplyConfiguration) WithUSDT(value bool) *AgentSpecApplyConfiguration {
 	b.USDT = &value
 	return b
@@ -108,6 +110,7 @@ func (b *AgentSpecApplyConfiguration) WithUSDT(value bool) *AgentSpecApplyConfig
 
 // WithAlerting sets the Alerting field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Alerting field is set to the value of the last call.
 func (b *AgentSpecApplyConfiguration) WithAlerting(value *AgentAlertingSpecApplyConfiguration) *AgentSpecApplyConfiguration {
 	b.Alerting = value
 	return b

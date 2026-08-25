@@ -15,5 +15,5 @@ spec:
     name: prod-otlp
   thresholds:
     rttSpikeMs: 200
-    fsSlowMs: 50
+    filesystemLatencyMs: 50
   samplePercent: 100

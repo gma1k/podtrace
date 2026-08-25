@@ -26,7 +26,7 @@ func TestDeepReconcile_Session_BadObjectStoreURI(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}},
 			Duration:    metav1.Duration{Duration: time.Minute},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ec"},
 			ReportRef: &podtracev1alpha1.ReportReference{
 				ObjectStore: &podtracev1alpha1.ObjectStoreReference{URI: "ftp://nope"},
 			},
@@ -70,7 +70,7 @@ func TestDeepReconcile_Session_ExporterNotFound(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}},
 			Duration:    metav1.Duration{Duration: time.Minute},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "missing-ec"},
+			ExporterRef: corev1.LocalObjectReference{Name: "missing-ec"},
 		},
 	}
 	scheme := newOperatorScheme(t)
@@ -119,7 +119,7 @@ func TestDeepReconcile_Session_FullFanOut(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}},
 			Duration:    metav1.Duration{Duration: time.Minute},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ec"},
 		},
 	}
 	ec := &podtracev1alpha1.ExporterConfig{
@@ -177,7 +177,7 @@ func TestDeepReconcile_Session_DeletionRunsCleanup(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}},
 			Duration:    metav1.Duration{Duration: time.Minute},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ec"},
 		},
 	}
 	scheme := newOperatorScheme(t)
@@ -609,8 +609,8 @@ func TestDeepReconcile_ApplicationTrace_HappyPath(t *testing.T) {
 	app := &podtracev1alpha1.ApplicationTrace{
 		ObjectMeta: metav1.ObjectMeta{Name: "app1", Namespace: ns, UID: "app-uid", Generation: 2},
 		Spec: podtracev1alpha1.ApplicationTraceSpec{
-			Selectors:   []metav1.LabelSelector{{MatchLabels: map[string]string{"app": "x"}}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			AppSelector: podtracev1alpha1.AppSelector{MatchSelectors: []metav1.LabelSelector{{MatchLabels: map[string]string{"app": "x"}}}},
+			ExporterRef: corev1.LocalObjectReference{Name: "ec"},
 		},
 	}
 	scheme := newOperatorScheme(t)
@@ -640,7 +640,7 @@ func TestDeepReconcile_ApplicationTrace_HappyPath(t *testing.T) {
 	if err := c.Get(context.Background(), client.ObjectKeyFromObject(app), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Status.PodTraceRef != app.Name {
+	if got.Status.PodTraceRef == nil || got.Status.PodTraceRef.Name != app.Name {
 		t.Errorf("PodTraceRef = %q, want %q", got.Status.PodTraceRef, app.Name)
 	}
 	if got.Status.ObservedGeneration != app.Generation {
@@ -659,8 +659,8 @@ func TestDeepReconcile_ApplicationTrace_Paused(t *testing.T) {
 	app := &podtracev1alpha1.ApplicationTrace{
 		ObjectMeta: metav1.ObjectMeta{Name: "app-paused", Namespace: ns, UID: "appp-uid"},
 		Spec: podtracev1alpha1.ApplicationTraceSpec{
-			Selectors:   []metav1.LabelSelector{{MatchLabels: map[string]string{"app": "x"}}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			AppSelector: podtracev1alpha1.AppSelector{MatchSelectors: []metav1.LabelSelector{{MatchLabels: map[string]string{"app": "x"}}}},
+			ExporterRef: corev1.LocalObjectReference{Name: "ec"},
 			Paused:      true,
 		},
 	}
@@ -702,7 +702,7 @@ func TestDeepReconcile_PodTrace_DataDogBundleWithSecret(t *testing.T) {
 		},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:      &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}},
-			ExporterRef:   podtracev1alpha1.LocalObjectReference{Name: "dd"},
+			ExporterRef:   corev1.LocalObjectReference{Name: "dd"},
 			SamplePercent: &pct,
 			Filters:       []podtracev1alpha1.EventFilter{"network", "filesystem"},
 		},
@@ -773,7 +773,7 @@ func TestDeepReconcile_PodTrace_BundleSyncError(t *testing.T) {
 		},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "dd"},
+			ExporterRef: corev1.LocalObjectReference{Name: "dd"},
 		},
 	}
 	ec := &podtracev1alpha1.ExporterConfig{
