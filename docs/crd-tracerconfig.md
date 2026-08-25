@@ -34,7 +34,7 @@ applies the CR from `values.yaml` via a post-install hook Job:
 | `agent.tolerations` | `spec.tolerations` |
 | `session.resources` | `spec.session.resources` |
 | `session.ttlSecondsAfterFinished` | `spec.session.ttlSecondsAfterFinished` |
-| `session.activeDeadlineSecondsOffset` | `spec.session.activeDeadlineSecondsOffset` |
+| `session.activeDeadlineOffset` | `spec.session.activeDeadlineOffset` |
 | `session.backoffLimit` | `spec.session.backoffLimit` |
 | `session.maxConcurrentSessionsPerNode` | `spec.maxConcurrentSessionsPerNode` |
 | `tracerConfig.sidecarUploader` | `spec.session.sidecarUploader` |
@@ -59,7 +59,7 @@ spec:
   btfMode: auto                # auto | host | embedded
   nodeSelector: {}
   tolerations: []
-  priority: 0                  # tie-break when fleets overlap
+  fleetPriority: 0             # tie-break when fleets overlap
 
   agent:
     priorityClassName: system-node-critical
@@ -71,7 +71,7 @@ spec:
 
   session:
     ttlSecondsAfterFinished: 300
-    activeDeadlineSecondsOffset: 30
+    activeDeadlineOffset: 30s
     backoffLimit: 0
     sidecarUploader: false
     resources:
@@ -91,7 +91,7 @@ spec:
   - `embedded`: force the embedded stub even if host BTF is available.
 - **`maxConcurrentSessionsPerNode`** — protects nodes from privileged
   Job pile-ups when many sessions land on the same node.
-- **`priority`** — orders fleets that target the same node. Advisory:
+- **`fleetPriority`** — orders fleets that target the same node. Advisory:
   it decides what the `Conflict` condition reports, not which agent
   runs. See [Multiple TracerConfigs](#multiple-tracerconfigs).
 - **`session.sidecarUploader`** — opt-in native sidecar that re-uploads
@@ -252,7 +252,7 @@ $ kubectl describe tracerconfig regulated | grep -A3 Conflict
             has highest priority on 0 of them. …
 ```
 
-`spec.priority` (higher wins; ties broken by the older
+`spec.fleetPriority` (higher wins; ties broken by the older
 `creationTimestamp`, then by name) records which fleet *should* own a
 contested node. It is advisory today — it decides what the Conflict
 condition reports, nothing more.

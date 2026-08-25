@@ -36,9 +36,9 @@ func TestAppendThresholdAttributes_Branches(t *testing.T) {
 	e := &sdkEventExporter{
 		cr: CRKey{"ns", "cr"},
 		thresholds: &PolicyThresholds{
-			FSSlowMs:         int32Ptr(ms),
-			RTTSpikeMs:       int32Ptr(ms),
-			ErrorRatePercent: int32Ptr(50),
+			FilesystemLatencyMs: int32Ptr(ms),
+			RTTSpikeMs:          int32Ptr(ms),
+			ErrorRatePercent:    int32Ptr(50),
 		},
 	}
 

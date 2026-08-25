@@ -41,7 +41,7 @@ func TestPodTraceReconciler_EnvtestBundleSync_OTLPLiteral(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "trace", Namespace: ns},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "otlp"},
+			ExporterRef: corev1.LocalObjectReference{Name: "otlp"},
 		},
 	}
 	if err := c.Create(ctx, pt); err != nil {
@@ -108,7 +108,7 @@ func TestPodTraceReconciler_EnvtestBundleSync_SecretCredentials(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "dd-trace", Namespace: ns},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "dd"},
+			ExporterRef: corev1.LocalObjectReference{Name: "dd"},
 		},
 	}
 	if err := c.Create(ctx, pt); err != nil {
@@ -156,7 +156,7 @@ func TestPodTraceReconciler_EnvtestExporterRefMissing(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "orphan", Namespace: ns},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "does-not-exist"},
+			ExporterRef: corev1.LocalObjectReference{Name: "does-not-exist"},
 		},
 	}
 	if err := c.Create(ctx, pt); err != nil {
@@ -211,7 +211,7 @@ func TestPodTraceReconciler_DegradedRollupFromNodeStatus(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "with-agent-failure", Namespace: ns},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "otlp"},
+			ExporterRef: corev1.LocalObjectReference{Name: "otlp"},
 		},
 	}
 	if err := c.Create(ctx, pt); err != nil {
@@ -247,7 +247,7 @@ func TestPodTraceReconciler_DegradedRollupFromNodeStatus(t *testing.T) {
 				WithNode("broken-1").
 				WithReady(false).
 				WithActiveCgroups(0).
-				WithEventsTotal(0).
+				WithTotalEvents(0).
 				WithDroppedEvents(0).
 				WithMessage("build exporter: exporter type \"jaeger\" not yet implemented in agent mode").
 				WithLastHeartbeat(metav1.Now())))

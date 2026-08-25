@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	corev1 "k8s.io/api/core/v1"
 	"os"
 	"strings"
 	"time"
@@ -322,7 +323,7 @@ func buildPodTrace(opts watchOptions) (*podtracev1alpha1.PodTrace, error) {
 			Selector:          &selector,
 			NamespaceSelector: nsSelector,
 			Filters:           filters,
-			ExporterRef:       podtracev1alpha1.LocalObjectReference{Name: opts.Exporter},
+			ExporterRef:       corev1.LocalObjectReference{Name: opts.Exporter},
 			SamplePercent:     sample,
 		},
 	}
@@ -353,10 +354,10 @@ func buildApplicationTrace(opts watchOptions) (*podtracev1alpha1.ApplicationTrac
 			Labels:    map[string]string{"app.kubernetes.io/managed-by": "podtrace-cli"},
 		},
 		Spec: podtracev1alpha1.ApplicationTraceSpec{
-			Selectors:         sels,
+			AppSelector:       podtracev1alpha1.AppSelector{MatchSelectors: sels},
 			NamespaceSelector: nsSelector,
 			Filters:           filters,
-			ExporterRef:       podtracev1alpha1.LocalObjectReference{Name: opts.Exporter},
+			ExporterRef:       corev1.LocalObjectReference{Name: opts.Exporter},
 			SamplePercent:     sample,
 		},
 	}

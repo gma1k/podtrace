@@ -1,6 +1,7 @@
 package main
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	"strings"
 	"testing"
 	"time"
@@ -27,7 +28,7 @@ func mkSchedule() *podtracev1alpha1.PodTraceSchedule {
 				Spec: podtracev1alpha1.PodTraceSessionSpec{
 					Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
 					Duration:    metav1.Duration{Duration: 30 * time.Second},
-					ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+					ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 				},
 			},
 		},

@@ -407,8 +407,8 @@ func TestThresholds_TriStateRoundTrip(t *testing.T) {
 	}{
 		{name: "nil", in: nil},
 		{name: "only_error_rate", in: &Thresholds{ErrorRatePercent: &five}},
-		{name: "zero_is_distinct_from_unset", in: &Thresholds{FSSlowMs: &zero}},
-		{name: "all", in: &Thresholds{ErrorRatePercent: &five, RTTSpikeMs: &five, FSSlowMs: &five}},
+		{name: "zero_is_distinct_from_unset", in: &Thresholds{FilesystemLatencyMs: &zero}},
+		{name: "all", in: &Thresholds{ErrorRatePercent: &five, RTTSpikeMs: &five, FilesystemLatencyMs: &five}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -429,7 +429,7 @@ func TestThresholds_TriStateRoundTrip(t *testing.T) {
 			}
 			if !int32PtrEq(parsed.Thresholds.ErrorRatePercent, tc.in.ErrorRatePercent) ||
 				!int32PtrEq(parsed.Thresholds.RTTSpikeMs, tc.in.RTTSpikeMs) ||
-				!int32PtrEq(parsed.Thresholds.FSSlowMs, tc.in.FSSlowMs) {
+				!int32PtrEq(parsed.Thresholds.FilesystemLatencyMs, tc.in.FilesystemLatencyMs) {
 				t.Errorf("threshold round-trip mismatch:\ngot  %+v\nwant %+v", parsed.Thresholds, tc.in)
 			}
 		})
@@ -467,13 +467,13 @@ func TestPolicyHash_StableAcrossEquivalentPolicies(t *testing.T) {
 		Type: TypeOTLP, Endpoint: "a:4318",
 		Sample:     samplePtr(0.5),
 		Filters:    []FilterCategory{FilterDNS, FilterNet},
-		Thresholds: &Thresholds{FSSlowMs: &five},
+		Thresholds: &Thresholds{FilesystemLatencyMs: &five},
 	}
 	b := &Payload{
 		Type: TypeJaeger, Endpoint: "b:14268",
 		Sample:     samplePtr(0.5),
 		Filters:    []FilterCategory{FilterNet, FilterDNS}, // unsorted
-		Thresholds: &Thresholds{FSSlowMs: &five},
+		Thresholds: &Thresholds{FilesystemLatencyMs: &five},
 	}
 	if PolicyHash(a) != PolicyHash(b) {
 		t.Errorf("equivalent policies produced different hashes:\nA=%s\nB=%s", PolicyHash(a), PolicyHash(b))
@@ -489,12 +489,12 @@ func TestPolicyHash_ChangesWhenAnyPolicyFieldChanges(t *testing.T) {
 		Type: TypeOTLP, Endpoint: "x:4318",
 		Sample:     samplePtr(0.5),
 		Filters:    []FilterCategory{FilterDNS},
-		Thresholds: &Thresholds{FSSlowMs: &five},
+		Thresholds: &Thresholds{FilesystemLatencyMs: &five},
 	}
 	mutations := map[string]func(*Payload){
 		"sample_changed":    func(p *Payload) { p.Sample = samplePtr(0.25) },
 		"filter_added":      func(p *Payload) { p.Filters = append(p.Filters, FilterNet) },
-		"threshold_changed": func(p *Payload) { p.Thresholds.FSSlowMs = &ten },
+		"threshold_changed": func(p *Payload) { p.Thresholds.FilesystemLatencyMs = &ten },
 		"threshold_removed": func(p *Payload) { p.Thresholds = nil },
 	}
 	baseHash := PolicyHash(base)

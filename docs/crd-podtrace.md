@@ -55,14 +55,14 @@ spec:
 | `samplePercent` | int 0-100 | optional | Workload-owner sampling intent. The operator combines this with `ExporterConfig.spec.samplePercent` (platform-owner cap) and writes the **minimum** of the two to the bundle — that minimum is what every exporter applies. Unset on either side is treated as 100%. The resolved value is echoed at `status.policy.effectiveSampleRate`. |
 | `thresholds.errorRatePercent` | int 0-100 | optional | When set, the agent stamps `podtrace.threshold.error_rate.observed=true` on every span whose source event carries a non-zero error code and bumps `podtrace_agent_threshold_tripped_total{threshold="error_rate"}`. |
 | `thresholds.rttSpikeMs` | int ≥0 | optional | When set, the agent tags spans whose source event latency exceeds this threshold (Connect/TCPSend/TCPRecv/UDPSend/UDPRecv) and bumps `podtrace_agent_threshold_tripped_total{threshold="rtt_spike"}`. |
-| `thresholds.fsSlowMs` | int ≥0 | optional | When set, the agent tags FS-event spans (Open/Read/Write/Close/Fsync/Unlink/Rename) whose latency exceeds the threshold and bumps `podtrace_agent_threshold_tripped_total{threshold="fs_slow"}`. |
+| `thresholds.filesystemLatencyMs` | int ≥0 | optional | When set, the agent tags FS-event spans (Open/Read/Write/Close/Fsync/Unlink/Rename) whose latency exceeds the threshold and bumps `podtrace_agent_threshold_tripped_total{threshold="fs_slow"}`. |
 
 ## Status reference
 
 | Field | Notes |
 |---|---|
 | `matchedPods` | Sum of `activeCgroups` across all reporting nodes. |
-| `nodeStatus[]` | One entry per node hosting a matched pod. Each carries `node`, `ready`, `activeCgroups`, `eventsTotal`, `droppedEvents`, `lastHeartbeat`, `message`, and `policyHash` (the hash of the bundle the agent last observed — see "Verifying policy propagation" below). |
+| `nodeStatus[]` | One entry per node hosting a matched pod. Each carries `node`, `ready`, `activeCgroups`, `totalEvents`, `droppedEvents`, `lastHeartbeat`, `message`, and `policyHash` (the hash of the bundle the agent last observed — see "Verifying policy propagation" below). |
 | `conditions` | Standard Kubernetes condition objects. `Ready=True` once at least one node reports healthy. `Degraded=True` on bundle sync errors. `Paused` mirrors `spec.paused`. `PolicyApplied=True` once the operator has resolved `spec.filters`/`spec.samplePercent`/`spec.thresholds` and written them to the bundle. |
 | `observedGeneration` | Most recent generation reconciled. |
 | `policy.effectiveSampleRate` | The operator-resolved sample rate (0–100), already reduced to the minimum of `spec.samplePercent` and `ExporterConfig.spec.samplePercent`. This is what every agent and exporter actually applies — do not infer effective sampling from `spec` alone. |
@@ -97,7 +97,7 @@ process per node. The agent merges:
   own exporter (router filters by event type per CR).
 
 Result: overlapping CRs share kernel resources, do not double-trace, and
-each independently reports `eventsTotal` on its own `nodeStatus`.
+each independently reports `totalEvents` on its own `nodeStatus`.
 
 ## Creating a PodTrace with the CLI (`podtrace watch`)
 
@@ -165,7 +165,7 @@ kubectl apply -f my-podtrace.yaml
 kubectl get podtraces.podtrace.io -A -w
 
 # Inspect per-node rollup
-kubectl get podtrace watch-api -n my-app -o jsonpath='{range .status.nodeStatus[*]}{.node}: ready={.ready} events={.eventsTotal}{"\n"}{end}'
+kubectl get podtrace watch-api -n my-app -o jsonpath='{range .status.nodeStatus[*]}{.node}: ready={.ready} events={.totalEvents}{"\n"}{end}'
 
 # Pause without deleting
 kubectl patch podtrace watch-api -n my-app --type=merge -p '{"spec":{"paused":true}}'

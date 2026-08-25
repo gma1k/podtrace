@@ -22,13 +22,9 @@ package v1alpha1
 //
 // SessionSummary is a compact roll-up of what the session observed.
 type SessionSummaryApplyConfiguration struct {
-	TotalEvents    *int64 `json:"totalEvents,omitempty"`
-	DNSEvents      *int64 `json:"dnsEvents,omitempty"`
-	NetEvents      *int64 `json:"netEvents,omitempty"`
-	FSEvents       *int64 `json:"fsEvents,omitempty"`
-	CPUEvents      *int64 `json:"cpuEvents,omitempty"`
-	ProcEvents     *int64 `json:"procEvents,omitempty"`
-	ErrorsDetected *int32 `json:"errorsDetected,omitempty"`
+	TotalEvents    *int64           `json:"totalEvents,omitempty"`
+	EventsByFilter map[string]int64 `json:"eventsByFilter,omitempty"`
+	ErrorsDetected *int32           `json:"errorsDetected,omitempty"`
 }
 
 // SessionSummaryApplyConfiguration constructs a declarative configuration of the SessionSummary type for use with
@@ -45,43 +41,17 @@ func (b *SessionSummaryApplyConfiguration) WithTotalEvents(value int64) *Session
 	return b
 }
 
-// WithDNSEvents sets the DNSEvents field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the DNSEvents field is set to the value of the last call.
-func (b *SessionSummaryApplyConfiguration) WithDNSEvents(value int64) *SessionSummaryApplyConfiguration {
-	b.DNSEvents = &value
-	return b
-}
-
-// WithNetEvents sets the NetEvents field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the NetEvents field is set to the value of the last call.
-func (b *SessionSummaryApplyConfiguration) WithNetEvents(value int64) *SessionSummaryApplyConfiguration {
-	b.NetEvents = &value
-	return b
-}
-
-// WithFSEvents sets the FSEvents field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the FSEvents field is set to the value of the last call.
-func (b *SessionSummaryApplyConfiguration) WithFSEvents(value int64) *SessionSummaryApplyConfiguration {
-	b.FSEvents = &value
-	return b
-}
-
-// WithCPUEvents sets the CPUEvents field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the CPUEvents field is set to the value of the last call.
-func (b *SessionSummaryApplyConfiguration) WithCPUEvents(value int64) *SessionSummaryApplyConfiguration {
-	b.CPUEvents = &value
-	return b
-}
-
-// WithProcEvents sets the ProcEvents field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the ProcEvents field is set to the value of the last call.
-func (b *SessionSummaryApplyConfiguration) WithProcEvents(value int64) *SessionSummaryApplyConfiguration {
-	b.ProcEvents = &value
+// WithEventsByFilter puts the entries into the EventsByFilter field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, the entries provided by each call will be put on the EventsByFilter field,
+// overwriting an existing map entries in EventsByFilter field with the same key.
+func (b *SessionSummaryApplyConfiguration) WithEventsByFilter(entries map[string]int64) *SessionSummaryApplyConfiguration {
+	if b.EventsByFilter == nil && len(entries) > 0 {
+		b.EventsByFilter = make(map[string]int64, len(entries))
+	}
+	for k, v := range entries {
+		b.EventsByFilter[k] = v
+	}
 	return b
 }
 

@@ -23,6 +23,10 @@ import (
 
 // TriggerFiringApplyConfiguration represents a declarative configuration of the TriggerFiring type for use
 // with apply.
+//
+// TriggerFiring records a single triggered-session creation, used to enforce
+// per-pod cooldown and the rolling-hour rate cap idempotently across
+// reconciles.
 type TriggerFiringApplyConfiguration struct {
 	PodName     *string  `json:"podName,omitempty"`
 	Namespace   *string  `json:"namespace,omitempty"`

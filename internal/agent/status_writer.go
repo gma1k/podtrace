@@ -98,7 +98,7 @@ func buildNodeStatusEntry(node string, rule *CRRule, counters crCounters, agentR
 		Ready:         agentReady && rule.Err == nil && backendErr == nil,
 		MatchedPods:   rule.MatchedPods,
 		ActiveCgroups: lenToInt32(len(rule.CgroupIDs)),
-		EventsTotal:   counters.Events,
+		TotalEvents:   counters.Events,
 		DroppedEvents: counters.Dropped,
 		LastHeartbeat: metav1.NewTime(now),
 		PolicyHash:    rule.Policy.Hash,
@@ -143,7 +143,7 @@ func (w *StatusWriter) patchCRStatus(ctx context.Context, key CRKey, entry podtr
 		WithReady(entry.Ready).
 		WithMatchedPods(entry.MatchedPods).
 		WithActiveCgroups(entry.ActiveCgroups).
-		WithEventsTotal(entry.EventsTotal).
+		WithTotalEvents(entry.TotalEvents).
 		WithDroppedEvents(entry.DroppedEvents).
 		WithLastHeartbeat(entry.LastHeartbeat).
 		WithPolicyHash(entry.PolicyHash)
@@ -198,7 +198,7 @@ func ComputeNodeReport(nodeName string, router *Router, ready bool) NodeReport {
 		Node:          nodeName,
 		Ready:         ready,
 		ActiveCgroups: totalCgroups,
-		EventsTotal:   totalEvents,
+		TotalEvents:   totalEvents,
 		DroppedEvents: totalDropped,
 		LastHeartbeat: time.Now(),
 	}

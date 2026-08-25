@@ -448,7 +448,7 @@ func TestSDKEventExporter_ThresholdTripsCounter(t *testing.T) {
 		Endpoint: "x:4318",
 		Insecure: true,
 		Thresholds: &bundle.Thresholds{
-			FSSlowMs: &fsMs,
+			FilesystemLatencyMs: &fsMs,
 		},
 	}
 	cr := CRKey{Namespace: "ns", Name: "cr"}

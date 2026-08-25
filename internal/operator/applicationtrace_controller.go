@@ -3,6 +3,7 @@ package operator
 import (
 	"context"
 	"fmt"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 
@@ -115,7 +116,7 @@ func (r *ApplicationTraceReconciler) ensureChildPodTrace(ctx context.Context, ap
 		})
 		spec := app.Spec.DeepCopy()
 		pt.Spec = podtracev1alpha1.PodTraceSpec{
-			AppSelector:       &podtracev1alpha1.AppSelector{MatchSelectors: spec.Selectors},
+			AppSelector:       spec.AppSelector.DeepCopy(),
 			NamespaceSelector: spec.NamespaceSelector,
 			ExporterRef:       spec.ExporterRef,
 			Filters:           spec.Filters,
@@ -134,7 +135,7 @@ func (r *ApplicationTraceReconciler) ensureChildPodTrace(ctx context.Context, ap
 // aggregateStatus folds the generated PodTrace's observed state up onto the
 // ApplicationTrace, and mirrors the child's Ready condition.
 func (r *ApplicationTraceReconciler) aggregateStatus(app *podtracev1alpha1.ApplicationTrace, pt *podtracev1alpha1.PodTrace) {
-	app.Status.PodTraceRef = pt.Name
+	app.Status.PodTraceRef = &corev1.LocalObjectReference{Name: pt.Name}
 	app.Status.MatchedPods = pt.Status.MatchedPods
 	app.Status.TargetNamespaces = pt.Status.TargetNamespaces
 	app.Status.ObservedGeneration = app.Generation

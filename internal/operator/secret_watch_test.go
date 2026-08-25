@@ -11,10 +11,6 @@ import (
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 )
 
-// TestSecretWatchMapsToReferencingCRs covers the Secret→CR mappers behind
-// the new Secret watches: bundle Secrets are copies of the referenced
-// credential data, so rotating a Secret must enqueue exactly the PodTraces
-// and non-terminal PodTraceSessions whose ExporterConfig references it.
 func TestSecretWatchMapsToReferencingCRs(t *testing.T) {
 	scheme := newOperatorScheme(t)
 
@@ -27,7 +23,7 @@ func TestSecretWatchMapsToReferencingCRs(t *testing.T) {
 			Type: podtracev1alpha1.ExporterTypeOTLP,
 			OTLP: &podtracev1alpha1.OTLPExporter{
 				Endpoint:          "collector:4318",
-				HeadersFromSecret: &podtracev1alpha1.LocalObjectReference{Name: "otlp-creds"},
+				HeadersFromSecret: &corev1.LocalObjectReference{Name: "otlp-creds"},
 			},
 		},
 	}
@@ -43,28 +39,28 @@ func TestSecretWatchMapsToReferencingCRs(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "pt-secret", Namespace: "default"},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "a"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec-with-secret"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ec-with-secret"},
 		},
 	}
 	plainPT := &podtracev1alpha1.PodTrace{
 		ObjectMeta: metav1.ObjectMeta{Name: "pt-plain", Namespace: "default"},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "b"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec-plain"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ec-plain"},
 		},
 	}
 
 	activeSession := &podtracev1alpha1.PodTraceSession{
 		ObjectMeta: metav1.ObjectMeta{Name: "s-active", Namespace: "default"},
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec-with-secret"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ec-with-secret"},
 		},
 		Status: podtracev1alpha1.PodTraceSessionStatus{State: podtracev1alpha1.SessionStateRunning},
 	}
 	doneSession := &podtracev1alpha1.PodTraceSession{
 		ObjectMeta: metav1.ObjectMeta{Name: "s-done", Namespace: "default"},
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec-with-secret"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ec-with-secret"},
 		},
 		Status: podtracev1alpha1.PodTraceSessionStatus{State: podtracev1alpha1.SessionStateCompleted},
 	}

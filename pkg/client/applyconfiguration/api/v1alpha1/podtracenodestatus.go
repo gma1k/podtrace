@@ -27,11 +27,15 @@ import (
 //
 // PodTraceNodeStatus reports one agent's view of this PodTrace.
 type PodTraceNodeStatusApplyConfiguration struct {
-	Node          *string                       `json:"node,omitempty"`
+	Node *string `json:"node,omitempty"`
+	// Ready is a plain bool rather than a Condition on purpose: this is a
+	// per-node entry inside an array, and Conditions cannot be expressed per
+	// array element. It is the only readiness signal available here, so it
+	// duplicates nothing. Object-level readiness is a Condition, as usual.
 	Ready         *bool                         `json:"ready,omitempty"`
 	MatchedPods   *int32                        `json:"matchedPods,omitempty"`
 	ActiveCgroups *int32                        `json:"activeCgroups,omitempty"`
-	EventsTotal   *int64                        `json:"eventsTotal,omitempty"`
+	TotalEvents   *int64                        `json:"totalEvents,omitempty"`
 	DroppedEvents *int64                        `json:"droppedEvents,omitempty"`
 	LastHeartbeat *v1.Time                      `json:"lastHeartbeat,omitempty"`
 	Message       *string                       `json:"message,omitempty"`
@@ -77,11 +81,11 @@ func (b *PodTraceNodeStatusApplyConfiguration) WithActiveCgroups(value int32) *P
 	return b
 }
 
-// WithEventsTotal sets the EventsTotal field in the declarative configuration to the given value
+// WithTotalEvents sets the TotalEvents field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the EventsTotal field is set to the value of the last call.
-func (b *PodTraceNodeStatusApplyConfiguration) WithEventsTotal(value int64) *PodTraceNodeStatusApplyConfiguration {
-	b.EventsTotal = &value
+// If called multiple times, the TotalEvents field is set to the value of the last call.
+func (b *PodTraceNodeStatusApplyConfiguration) WithTotalEvents(value int64) *PodTraceNodeStatusApplyConfiguration {
+	b.TotalEvents = &value
 	return b
 }
 

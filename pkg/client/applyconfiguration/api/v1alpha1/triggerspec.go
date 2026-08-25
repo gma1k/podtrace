@@ -27,9 +27,6 @@ import (
 // with apply.
 //
 // TriggerSpec configures event-driven ("flight recorder") session creation.
-// A session is created when the agent reports an alert matching any of
-// Sources for a selected pod, subject to Cooldown, MaxSessionsPerHour and
-// ConcurrencyPolicy.
 type TriggerSpecApplyConfiguration struct {
 	// Sources are the alert categories that fire a session. A session fires
 	// when an observed alert matches ANY listed source (its Kind and at
@@ -39,20 +36,17 @@ type TriggerSpecApplyConfiguration struct {
 	// selector matches every pod in scope (subject to NamespaceSelector).
 	Selector *v1.LabelSelectorApplyConfiguration `json:"selector,omitempty"`
 	// NamespaceSelector widens matching across namespaces, subject to the
-	// same target-namespace consent model as PodTrace
-	// (podtrace.io/allow-tracing-from).
+	// same target-namespace consent model as PodTrace.
 	NamespaceSelector *v1.LabelSelectorApplyConfiguration `json:"namespaceSelector,omitempty"`
 	// Cooldown is the minimum time after a session fires for a given pod
-	// before another session may fire for that same pod. It bounds a
-	// flapping alert to at most one session per window. Unset applies the
-	// controller default.
+	// before another session may fire for that same pod.
 	Cooldown *metav1.Duration `json:"cooldown,omitempty"`
 	// MaxSessionsPerHour caps how many triggered sessions this schedule may
 	// create per rolling hour across all pods, a fleet-wide backstop against
-	// a broad alert storm. Unset applies the controller default.
+	// a broad alert storm.
 	MaxSessionsPerHour *int32 `json:"maxSessionsPerHour,omitempty"`
 	// ConcurrencyPolicy governs overlap with already-active triggered
-	// sessions. Defaults to Forbid — the safe default for the privileged
+	// sessions. Defaults to Forbid, the safe default for the privileged
 	// Jobs a session runs.
 	ConcurrencyPolicy *apiv1alpha1.ConcurrencyPolicy `json:"concurrencyPolicy,omitempty"`
 }

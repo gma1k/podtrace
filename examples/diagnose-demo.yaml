@@ -8,7 +8,7 @@
 #   kubectl -n podtrace-demo get podtracesession diag-demo -o yaml
 #     → .status.state == Completed
 #     → .status.summary.totalEvents > 0
-#     → .status.jobs[].eventCount > 0
+#     → .status.jobs[].totalEvents > 0
 #
 #   kubectl -n podtrace-demo get cm diag-demo-report
 #     → .data["report-<node>.txt"] carries each node's human-readable report

@@ -288,8 +288,8 @@
         "session": {
             "type": "object",
             "properties": {
-                "activeDeadlineSecondsOffset": {
-                    "type": "integer"
+                "activeDeadlineOffset": {
+                    "type": "string"
                 },
                 "backoffLimit": {
                     "type": "integer"

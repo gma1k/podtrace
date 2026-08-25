@@ -69,7 +69,7 @@ func TestAgentEnvtest_TwoOverlappingCRs_ProduceScopedStreams(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
 			Filters:     []podtracev1alpha1.EventFilter{podtracev1alpha1.FilterDNS},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ignored"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ignored"},
 		},
 	}
 	ptB := &podtracev1alpha1.PodTrace{
@@ -77,7 +77,7 @@ func TestAgentEnvtest_TwoOverlappingCRs_ProduceScopedStreams(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
 			Filters:     []podtracev1alpha1.EventFilter{podtracev1alpha1.FilterNet},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ignored"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ignored"},
 		},
 	}
 	if err := c.Create(ctx, ptA); err != nil {
@@ -220,8 +220,8 @@ func TestAgentEnvtest_TwoOverlappingCRs_ProduceScopedStreams(t *testing.T) {
 		if row.Node != node {
 			t.Errorf("%s node=%q want %q", key, row.Node, node)
 		}
-		if row.EventsTotal != 2 {
-			t.Errorf("%s EventsTotal=%d want 2", key, row.EventsTotal)
+		if row.TotalEvents != 2 {
+			t.Errorf("%s TotalEvents=%d want 2", key, row.TotalEvents)
 		}
 		if !row.Ready {
 			t.Errorf("%s Ready=false", key)
@@ -246,7 +246,7 @@ func TestAgentEnvtest_EngineNoopBackendDispatch(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "svc"}},
 			Filters:     []podtracev1alpha1.EventFilter{podtracev1alpha1.FilterDNS},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "x"},
+			ExporterRef: corev1.LocalObjectReference{Name: "x"},
 		},
 	}
 	if err := c.Create(ctx, pt); err != nil {
@@ -336,7 +336,7 @@ func TestAgentEnvtest_TombstoneSurfacesOnNodeStatus(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "svc"}},
 			Filters:     []podtracev1alpha1.EventFilter{podtracev1alpha1.FilterDNS},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ignored"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ignored"},
 		},
 	}
 	if err := c.Create(ctx, pt); err != nil {

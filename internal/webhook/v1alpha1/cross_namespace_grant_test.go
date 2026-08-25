@@ -79,7 +79,7 @@ func TestPodTraceSessionValidator_CrossNamespaceGrant(t *testing.T) {
 				Spec: podtracev1alpha1.PodTraceSessionSpec{
 					PodRefs:     tc.podRefs,
 					Duration:    metav1.Duration{Duration: 5 * time.Minute},
-					ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+					ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 				},
 			}
 			_, err := v.ValidateCreate(context.Background(), obj)
@@ -114,7 +114,7 @@ func TestPodTraceSessionValidator_NamespaceSelectorGrantWarns(t *testing.T) {
 			Selector:          &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
 			NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"tier": "prod"}},
 			Duration:          metav1.Duration{Duration: 5 * time.Minute},
-			ExporterRef:       podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+			ExporterRef:       corev1.LocalObjectReference{Name: "prod-otlp"},
 		},
 	}
 	warnings, err := v.ValidateCreate(context.Background(), obj)
@@ -137,7 +137,7 @@ func TestPodTraceValidator_CrossNamespaceGrant(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: "default"},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			PodRefs:     []podtracev1alpha1.PodRef{{Namespace: "team-b", Name: "victim"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+			ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 		},
 	}
 	_, err := v.ValidateCreate(context.Background(), obj)
@@ -157,7 +157,7 @@ func TestPodTraceScheduleValidator_CrossNamespaceGrant(t *testing.T) {
 				Spec: podtracev1alpha1.PodTraceSessionSpec{
 					PodRefs:     []podtracev1alpha1.PodRef{{Namespace: "team-b", Name: "victim"}},
 					Duration:    metav1.Duration{Duration: 30 * time.Second},
-					ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+					ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 				},
 			},
 		},
@@ -182,7 +182,7 @@ func triggerScheduleWithNamespaceSelector(sel *metav1.LabelSelector) *podtracev1
 				Spec: podtracev1alpha1.PodTraceSessionSpec{
 					Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
 					Duration:    metav1.Duration{Duration: 30 * time.Second},
-					ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+					ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 				},
 			},
 		},

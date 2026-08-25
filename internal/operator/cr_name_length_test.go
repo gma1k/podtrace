@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	corev1 "k8s.io/api/core/v1"
 	"strings"
 	"testing"
 
@@ -58,7 +59,7 @@ func TestPodTraceReconciler_RejectsTooLongExporterConfigName(t *testing.T) {
 	ecName := strings.Repeat("e", 64)
 	pt := &podtracev1alpha1.PodTrace{
 		ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: "demo", Finalizers: []string{FinalizerCleanup}},
-		Spec:       podtracev1alpha1.PodTraceSpec{ExporterRef: podtracev1alpha1.LocalObjectReference{Name: ecName}},
+		Spec:       podtracev1alpha1.PodTraceSpec{ExporterRef: corev1.LocalObjectReference{Name: ecName}},
 	}
 	ec := &podtracev1alpha1.ExporterConfig{ObjectMeta: metav1.ObjectMeta{Name: ecName, Namespace: "demo"}}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(pt, ec).
@@ -163,9 +164,6 @@ func TestExporterConfigReconciler_RejectsTooLongName(t *testing.T) {
 	var got podtracev1alpha1.ExporterConfig
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "demo", Name: name}, &got); err != nil {
 		t.Fatal(err)
-	}
-	if got.Status.Ready {
-		t.Error("ExporterConfig marked Ready despite over-long name")
 	}
 	cond := findCondition(got.Status.Conditions, ConditionReady)
 	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "NameTooLong" {

@@ -57,9 +57,9 @@ type PolicySnapshot struct {
 // PolicyThresholds is the agent-side counterpart of the bundle's
 // Thresholds struct: same fields, same nil-means-unset semantics.
 type PolicyThresholds struct {
-	ErrorRatePercent *int32
-	RTTSpikeMs       *int32
-	FSSlowMs         *int32
+	ErrorRatePercent    *int32
+	RTTSpikeMs          *int32
+	FilesystemLatencyMs *int32
 }
 
 // NodeReport aggregates the counters the status writer reports on one
@@ -68,7 +68,7 @@ type NodeReport struct {
 	Node          string
 	Ready         bool
 	ActiveCgroups int32
-	EventsTotal   int64
+	TotalEvents   int64
 	DroppedEvents int64
 	LastHeartbeat time.Time
 	Message       string

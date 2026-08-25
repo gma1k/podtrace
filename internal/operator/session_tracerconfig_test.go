@@ -49,7 +49,7 @@ func sessionWithRef(name string) *podtracev1alpha1.PodTraceSession {
 		ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "team-a", UID: "uid-s"},
 	}
 	if name != "" {
-		s.Spec.TracerConfigRef = &podtracev1alpha1.LocalObjectReference{Name: name}
+		s.Spec.TracerConfigRef = &corev1.LocalObjectReference{Name: name}
 	}
 	return s
 }
@@ -174,7 +174,7 @@ func TestSessionPrimaryIsDeterministic(t *testing.T) {
 func TestSessionContestedNodeUsesPartitionWinner(t *testing.T) {
 	low := testTracerConfig("low", "img:low", "", nil)
 	high := testTracerConfig("high", "img:high", "", nil)
-	high.Spec.Priority = 10
+	high.Spec.FleetPriority = 10
 
 	r := sessionResolver(t, low, high,
 		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "n1"}},

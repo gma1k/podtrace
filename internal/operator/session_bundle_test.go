@@ -48,7 +48,7 @@ func TestEnsureSessionExporterBundle_CreatesConfigMap(t *testing.T) {
 	s := &podtracev1alpha1.PodTraceSession{
 		ObjectMeta: metav1.ObjectMeta{Name: "diag", Namespace: "team-a", UID: "sess-abc123"},
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+			ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 		},
 	}
 

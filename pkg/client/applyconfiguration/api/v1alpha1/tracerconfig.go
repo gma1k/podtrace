@@ -26,8 +26,8 @@ import (
 // TracerConfigApplyConfiguration represents a declarative configuration of the TracerConfig type for use
 // with apply.
 //
-// TracerConfig is the cluster-wide infrastructure configuration for the
-// podtrace operator.
+// TracerConfig is the infrastructure configuration for one podtrace agent
+// fleet.
 type TracerConfigApplyConfiguration struct {
 	v1.TypeMetaApplyConfiguration    `json:",inline"`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`

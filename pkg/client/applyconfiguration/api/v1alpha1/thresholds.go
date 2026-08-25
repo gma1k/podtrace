@@ -22,9 +22,9 @@ package v1alpha1
 //
 // Thresholds control anomaly detection on the agent side.
 type ThresholdsApplyConfiguration struct {
-	ErrorRatePercent *int32 `json:"errorRatePercent,omitempty"`
-	RTTSpikeMs       *int32 `json:"rttSpikeMs,omitempty"`
-	FSSlowMs         *int32 `json:"fsSlowMs,omitempty"`
+	ErrorRatePercent    *int32 `json:"errorRatePercent,omitempty"`
+	RTTSpikeMs          *int32 `json:"rttSpikeMs,omitempty"`
+	FilesystemLatencyMs *int32 `json:"filesystemLatencyMs,omitempty"`
 }
 
 // ThresholdsApplyConfiguration constructs a declarative configuration of the Thresholds type for use with
@@ -49,10 +49,10 @@ func (b *ThresholdsApplyConfiguration) WithRTTSpikeMs(value int32) *ThresholdsAp
 	return b
 }
 
-// WithFSSlowMs sets the FSSlowMs field in the declarative configuration to the given value
+// WithFilesystemLatencyMs sets the FilesystemLatencyMs field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the FSSlowMs field is set to the value of the last call.
-func (b *ThresholdsApplyConfiguration) WithFSSlowMs(value int32) *ThresholdsApplyConfiguration {
-	b.FSSlowMs = &value
+// If called multiple times, the FilesystemLatencyMs field is set to the value of the last call.
+func (b *ThresholdsApplyConfiguration) WithFilesystemLatencyMs(value int32) *ThresholdsApplyConfiguration {
+	b.FilesystemLatencyMs = &value
 	return b
 }

@@ -19,6 +19,7 @@ package v1alpha1
 
 import (
 	apiv1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -30,16 +31,19 @@ import (
 // has no bounded duration and remains active until the resource is deleted or
 // paused.
 type PodTraceSpecApplyConfiguration struct {
-	Selector          *v1.LabelSelectorApplyConfiguration     `json:"selector,omitempty"`
-	PodRefs           []PodRefApplyConfiguration              `json:"podRefs,omitempty"`
-	AppSelector       *AppSelectorApplyConfiguration          `json:"appSelector,omitempty"`
-	NamespaceSelector *v1.LabelSelectorApplyConfiguration     `json:"namespaceSelector,omitempty"`
-	ContainerName     *string                                 `json:"containerName,omitempty"`
-	Filters           []apiv1alpha1.EventFilter               `json:"filters,omitempty"`
-	ExporterRef       *LocalObjectReferenceApplyConfiguration `json:"exporterRef,omitempty"`
-	Thresholds        *ThresholdsApplyConfiguration           `json:"thresholds,omitempty"`
-	SamplePercent     *int32                                  `json:"samplePercent,omitempty"`
-	Paused            *bool                                   `json:"paused,omitempty"`
+	Selector          *v1.LabelSelectorApplyConfiguration `json:"selector,omitempty"`
+	PodRefs           []PodRefApplyConfiguration          `json:"podRefs,omitempty"`
+	AppSelector       *AppSelectorApplyConfiguration      `json:"appSelector,omitempty"`
+	NamespaceSelector *v1.LabelSelectorApplyConfiguration `json:"namespaceSelector,omitempty"`
+	// ContainerName narrows tracing to one named container of each matched
+	// pod. Empty means every running container (including restartable-init
+	// sidecars and ephemeral containers) is traced.
+	ContainerName *string                       `json:"containerName,omitempty"`
+	Filters       []apiv1alpha1.EventFilter     `json:"filters,omitempty"`
+	ExporterRef   *corev1.LocalObjectReference  `json:"exporterRef,omitempty"`
+	Thresholds    *ThresholdsApplyConfiguration `json:"thresholds,omitempty"`
+	SamplePercent *int32                        `json:"samplePercent,omitempty"`
+	Paused        *bool                         `json:"paused,omitempty"`
 }
 
 // PodTraceSpecApplyConfiguration constructs a declarative configuration of the PodTraceSpec type for use with
@@ -106,8 +110,8 @@ func (b *PodTraceSpecApplyConfiguration) WithFilters(values ...apiv1alpha1.Event
 // WithExporterRef sets the ExporterRef field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the ExporterRef field is set to the value of the last call.
-func (b *PodTraceSpecApplyConfiguration) WithExporterRef(value *LocalObjectReferenceApplyConfiguration) *PodTraceSpecApplyConfiguration {
-	b.ExporterRef = value
+func (b *PodTraceSpecApplyConfiguration) WithExporterRef(value corev1.LocalObjectReference) *PodTraceSpecApplyConfiguration {
+	b.ExporterRef = &value
 	return b
 }
 

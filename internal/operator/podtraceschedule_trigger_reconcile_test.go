@@ -25,7 +25,7 @@ func triggerScheduleWithTemplate(name, namespace string, mutate func(*podtracev1
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "tgt"}},
 			Duration:    metav1.Duration{Duration: 20 * time.Second},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "sch-otlp"},
+			ExporterRef: corev1.LocalObjectReference{Name: "sch-otlp"},
 		},
 	}
 	if mutate != nil {

@@ -92,7 +92,6 @@ func TestExporterConfigReconciler_ReadyConditions(t *testing.T) {
 		name        string
 		ec          *podtracev1alpha1.ExporterConfig
 		secrets     []*corev1.Secret
-		wantReady   bool
 		wantReason  string
 		wantMsgPart string
 		wantStatus  metav1.ConditionStatus
@@ -106,7 +105,6 @@ func TestExporterConfigReconciler_ReadyConditions(t *testing.T) {
 					OTLP: &podtracev1alpha1.OTLPExporter{Endpoint: "o:4317"},
 				},
 			},
-			wantReady:  true,
 			wantReason: ecReasonSecretsResolved,
 			wantStatus: metav1.ConditionTrue,
 		},
@@ -118,11 +116,10 @@ func TestExporterConfigReconciler_ReadyConditions(t *testing.T) {
 					Type: podtracev1alpha1.ExporterTypeOTLP,
 					OTLP: &podtracev1alpha1.OTLPExporter{
 						Endpoint:          "o:4317",
-						HeadersFromSecret: &podtracev1alpha1.LocalObjectReference{Name: "missing"},
+						HeadersFromSecret: &corev1.LocalObjectReference{Name: "missing"},
 					},
 				},
 			},
-			wantReady:   false,
 			wantReason:  ecReasonSecretMissing,
 			wantMsgPart: "Secret ns/missing not found",
 			wantStatus:  metav1.ConditionFalse,
@@ -144,7 +141,6 @@ func TestExporterConfigReconciler_ReadyConditions(t *testing.T) {
 			secrets: []*corev1.Secret{
 				{ObjectMeta: metav1.ObjectMeta{Name: "auth", Namespace: "ns"}, Data: map[string][]byte{"other-key": []byte("v")}},
 			},
-			wantReady:   false,
 			wantReason:  ecReasonSecretKeyMissing,
 			wantMsgPart: `no key "missing-key"`,
 			wantStatus:  metav1.ConditionFalse,
@@ -164,7 +160,6 @@ func TestExporterConfigReconciler_ReadyConditions(t *testing.T) {
 			secrets: []*corev1.Secret{
 				{ObjectMeta: metav1.ObjectMeta{Name: "hec", Namespace: "ns"}, Data: map[string][]byte{"token": []byte("xxx")}},
 			},
-			wantReady:  true,
 			wantReason: ecReasonSecretsResolved,
 			wantStatus: metav1.ConditionTrue,
 		},
@@ -180,7 +175,6 @@ func TestExporterConfigReconciler_ReadyConditions(t *testing.T) {
 					},
 				},
 			},
-			wantReady:  false,
 			wantReason: ecReasonSecretMissing,
 			wantStatus: metav1.ConditionFalse,
 		},
@@ -196,7 +190,6 @@ func TestExporterConfigReconciler_ReadyConditions(t *testing.T) {
 			secrets: []*corev1.Secret{
 				{ObjectMeta: metav1.ObjectMeta{Name: "dd", Namespace: "ns"}, Data: map[string][]byte{"api-key": []byte("k")}},
 			},
-			wantReady:  true,
 			wantReason: ecReasonSecretsResolved,
 			wantStatus: metav1.ConditionTrue,
 		},
@@ -209,7 +202,6 @@ func TestExporterConfigReconciler_ReadyConditions(t *testing.T) {
 					Jaeger: &podtracev1alpha1.JaegerExporter{Endpoint: "http://j"},
 				},
 			},
-			wantReady:  false,
 			wantReason: ecReasonInvalidSpec,
 			wantStatus: metav1.ConditionFalse,
 		},
@@ -222,7 +214,6 @@ func TestExporterConfigReconciler_ReadyConditions(t *testing.T) {
 					Jaeger: &podtracev1alpha1.JaegerExporter{Endpoint: "http://j:14268"},
 				},
 			},
-			wantReady:  true,
 			wantReason: ecReasonSecretsResolved,
 			wantStatus: metav1.ConditionTrue,
 		},
@@ -237,9 +228,6 @@ func TestExporterConfigReconciler_ReadyConditions(t *testing.T) {
 			c := newECFakeClient(t, scheme, objs...)
 			got := reconcileEC(t, c, scheme, tc.ec.Namespace, tc.ec.Name)
 
-			if got.Status.Ready != tc.wantReady {
-				t.Errorf("Ready: got %v, want %v", got.Status.Ready, tc.wantReady)
-			}
 			cond := ecCondition(got, ConditionReady)
 			if cond == nil {
 				t.Fatalf("Ready condition missing")
@@ -288,7 +276,7 @@ func TestExporterConfigReconciler_ReferenceCounts(t *testing.T) {
 			extra: []client.Object{
 				&podtracev1alpha1.PodTrace{
 					ObjectMeta: metav1.ObjectMeta{Name: "pt1", Namespace: "ns"},
-					Spec:       podtracev1alpha1.PodTraceSpec{ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec1"}},
+					Spec:       podtracev1alpha1.PodTraceSpec{ExporterRef: corev1.LocalObjectReference{Name: "ec1"}},
 				},
 			},
 			wantRefs:   1,
@@ -299,11 +287,11 @@ func TestExporterConfigReconciler_ReferenceCounts(t *testing.T) {
 			extra: []client.Object{
 				&podtracev1alpha1.PodTrace{
 					ObjectMeta: metav1.ObjectMeta{Name: "pt1", Namespace: "ns"},
-					Spec:       podtracev1alpha1.PodTraceSpec{ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec1"}},
+					Spec:       podtracev1alpha1.PodTraceSpec{ExporterRef: corev1.LocalObjectReference{Name: "ec1"}},
 				},
 				&podtracev1alpha1.PodTraceSession{
 					ObjectMeta: metav1.ObjectMeta{Name: "pts1", Namespace: "ns"},
-					Spec:       podtracev1alpha1.PodTraceSessionSpec{ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec1"}},
+					Spec:       podtracev1alpha1.PodTraceSessionSpec{ExporterRef: corev1.LocalObjectReference{Name: "ec1"}},
 					Status:     podtracev1alpha1.PodTraceSessionStatus{State: podtracev1alpha1.SessionStateRunning},
 				},
 			},
@@ -315,11 +303,11 @@ func TestExporterConfigReconciler_ReferenceCounts(t *testing.T) {
 			extra: []client.Object{
 				&podtracev1alpha1.PodTrace{
 					ObjectMeta: metav1.ObjectMeta{Name: "pt1", Namespace: "ns"},
-					Spec:       podtracev1alpha1.PodTraceSpec{ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec1"}},
+					Spec:       podtracev1alpha1.PodTraceSpec{ExporterRef: corev1.LocalObjectReference{Name: "ec1"}},
 				},
 				&podtracev1alpha1.PodTraceSession{
 					ObjectMeta: metav1.ObjectMeta{Name: "done", Namespace: "ns"},
-					Spec:       podtracev1alpha1.PodTraceSessionSpec{ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec1"}},
+					Spec:       podtracev1alpha1.PodTraceSessionSpec{ExporterRef: corev1.LocalObjectReference{Name: "ec1"}},
 					Status:     podtracev1alpha1.PodTraceSessionStatus{State: podtracev1alpha1.SessionStateCompleted},
 				},
 			},
@@ -331,7 +319,7 @@ func TestExporterConfigReconciler_ReferenceCounts(t *testing.T) {
 			extra: []client.Object{
 				&podtracev1alpha1.PodTraceSession{
 					ObjectMeta: metav1.ObjectMeta{Name: "bad", Namespace: "ns"},
-					Spec:       podtracev1alpha1.PodTraceSessionSpec{ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec1"}},
+					Spec:       podtracev1alpha1.PodTraceSessionSpec{ExporterRef: corev1.LocalObjectReference{Name: "ec1"}},
 					Status:     podtracev1alpha1.PodTraceSessionStatus{State: podtracev1alpha1.SessionStateFailed},
 				},
 			},
@@ -343,7 +331,7 @@ func TestExporterConfigReconciler_ReferenceCounts(t *testing.T) {
 			extra: []client.Object{
 				&podtracev1alpha1.PodTrace{
 					ObjectMeta: metav1.ObjectMeta{Name: "pt-other", Namespace: "ns"},
-					Spec:       podtracev1alpha1.PodTraceSpec{ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "other"}},
+					Spec:       podtracev1alpha1.PodTraceSpec{ExporterRef: corev1.LocalObjectReference{Name: "other"}},
 				},
 			},
 			wantRefs:   0,

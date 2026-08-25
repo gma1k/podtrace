@@ -1,20 +1,21 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// ApplicationTraceSpec declares continuous tracing for a whole application,
-// a set of workloads (selectors), optionally across namespaces.
+// ApplicationTraceSpec declares continuous tracing for a whole application:
+// the set of workloads its AppSelector matches, optionally across namespaces.
 type ApplicationTraceSpec struct {
-	// +kubebuilder:validation:MinItems=1
-	Selectors []metav1.LabelSelector `json:"selectors"`
+	// +kubebuilder:validation:Required
+	AppSelector AppSelector `json:"appSelector"`
 
 	// +optional
 	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
 
 	// +kubebuilder:validation:Required
-	ExporterRef LocalObjectReference `json:"exporterRef"`
+	ExporterRef corev1.LocalObjectReference `json:"exporterRef"`
 
 	// +optional
 	Filters []EventFilter `json:"filters,omitempty"`
@@ -35,7 +36,7 @@ type ApplicationTraceSpec struct {
 // aggregated from its generated PodTrace.
 type ApplicationTraceStatus struct {
 	// +optional
-	PodTraceRef string `json:"podTraceRef,omitempty"`
+	PodTraceRef *corev1.LocalObjectReference `json:"podTraceRef,omitempty"`
 
 	// +optional
 	MatchedPods int32 `json:"matchedPods,omitempty"`

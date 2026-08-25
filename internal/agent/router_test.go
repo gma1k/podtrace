@@ -343,7 +343,7 @@ func TestRouter_PolicySnapshotSurvivesPublish(t *testing.T) {
 		Policy: PolicySnapshot{
 			EffectiveSamplePercent: &five,
 			Filters:                []string{"dns"},
-			Thresholds:             &PolicyThresholds{FSSlowMs: &five},
+			Thresholds:             &PolicyThresholds{FilesystemLatencyMs: &five},
 			Hash:                   "h1",
 			Generation:             3,
 		},

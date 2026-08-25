@@ -18,7 +18,8 @@ limitations under the License.
 package v1alpha1
 
 import (
-	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
 // ApplicationTraceStatusApplyConfiguration represents a declarative configuration of the ApplicationTraceStatus type for use
@@ -27,11 +28,11 @@ import (
 // ApplicationTraceStatus reflects the observed state of an ApplicationTrace,
 // aggregated from its generated PodTrace.
 type ApplicationTraceStatusApplyConfiguration struct {
-	PodTraceRef        *string                          `json:"podTraceRef,omitempty"`
-	MatchedPods        *int32                           `json:"matchedPods,omitempty"`
-	TargetNamespaces   []string                         `json:"targetNamespaces,omitempty"`
-	Conditions         []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
-	ObservedGeneration *int64                           `json:"observedGeneration,omitempty"`
+	PodTraceRef        *v1.LocalObjectReference             `json:"podTraceRef,omitempty"`
+	MatchedPods        *int32                               `json:"matchedPods,omitempty"`
+	TargetNamespaces   []string                             `json:"targetNamespaces,omitempty"`
+	Conditions         []metav1.ConditionApplyConfiguration `json:"conditions,omitempty"`
+	ObservedGeneration *int64                               `json:"observedGeneration,omitempty"`
 }
 
 // ApplicationTraceStatusApplyConfiguration constructs a declarative configuration of the ApplicationTraceStatus type for use with
@@ -43,7 +44,7 @@ func ApplicationTraceStatus() *ApplicationTraceStatusApplyConfiguration {
 // WithPodTraceRef sets the PodTraceRef field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the PodTraceRef field is set to the value of the last call.
-func (b *ApplicationTraceStatusApplyConfiguration) WithPodTraceRef(value string) *ApplicationTraceStatusApplyConfiguration {
+func (b *ApplicationTraceStatusApplyConfiguration) WithPodTraceRef(value v1.LocalObjectReference) *ApplicationTraceStatusApplyConfiguration {
 	b.PodTraceRef = &value
 	return b
 }
@@ -69,7 +70,7 @@ func (b *ApplicationTraceStatusApplyConfiguration) WithTargetNamespaces(values .
 // WithConditions adds the given value to the Conditions field in the declarative configuration
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
 // If called multiple times, values provided by each call will be appended to the Conditions field.
-func (b *ApplicationTraceStatusApplyConfiguration) WithConditions(values ...*v1.ConditionApplyConfiguration) *ApplicationTraceStatusApplyConfiguration {
+func (b *ApplicationTraceStatusApplyConfiguration) WithConditions(values ...*metav1.ConditionApplyConfiguration) *ApplicationTraceStatusApplyConfiguration {
 	for i := range values {
 		if values[i] == nil {
 			panic("nil value passed to WithConditions")

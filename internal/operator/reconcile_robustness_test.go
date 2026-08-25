@@ -85,7 +85,7 @@ func TestSessionValidationFailureIsTerminalAndGCable(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
 			Duration:    metav1.Duration{Duration: 30 * time.Second},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ec"},
 			ReportRef: &podtracev1alpha1.ReportReference{
 				ObjectStore: &podtracev1alpha1.ObjectStoreReference{URI: "ftp://not-supported/x"},
 			},
@@ -180,7 +180,7 @@ func TestScheduleSkipsBacklogPastMissedRunBound(t *testing.T) {
 				Spec: podtracev1alpha1.PodTraceSessionSpec{
 					Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
 					Duration:    metav1.Duration{Duration: 30 * time.Second},
-					ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"},
+					ExporterRef: corev1.LocalObjectReference{Name: "ec"},
 				},
 			},
 		},
@@ -219,7 +219,7 @@ func TestApplicationTraceRefusesAdoption(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: app.Name, Namespace: app.Namespace},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "user-owned"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "user-ec"},
+			ExporterRef: corev1.LocalObjectReference{Name: "user-ec"},
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).

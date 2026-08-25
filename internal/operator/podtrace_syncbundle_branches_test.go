@@ -57,7 +57,7 @@ func TestSyncExporterBundle_SecretCreateError(t *testing.T) {
 			OTLP: &podtracev1alpha1.OTLPExporter{
 				Endpoint:          "otel:4318",
 				Protocol:          podtracev1alpha1.OTLPProtocolHTTP,
-				HeadersFromSecret: &podtracev1alpha1.LocalObjectReference{Name: "hdr"},
+				HeadersFromSecret: &corev1.LocalObjectReference{Name: "hdr"},
 			},
 		},
 	}

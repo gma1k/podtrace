@@ -423,8 +423,8 @@ func (rp *recordingPatcher) recordApply(ac *podtraceac.PodTraceApplyConfiguratio
 			if n.ActiveCgroups != nil {
 				row.ActiveCgroups = *n.ActiveCgroups
 			}
-			if n.EventsTotal != nil {
-				row.EventsTotal = *n.EventsTotal
+			if n.TotalEvents != nil {
+				row.TotalEvents = *n.TotalEvents
 			}
 			if n.DroppedEvents != nil {
 				row.DroppedEvents = *n.DroppedEvents
@@ -510,7 +510,7 @@ func TestStatusWriter_EmitOnce_PatchesAllActiveCRs(t *testing.T) {
 		t.Fatalf("status rows = %d, want 1", len(calls[0].pt.Status.NodeStatus))
 	}
 	row := calls[0].pt.Status.NodeStatus[0]
-	if row.Node != "node-1" || !row.Ready || row.ActiveCgroups != 2 || row.EventsTotal != 7 {
+	if row.Node != "node-1" || !row.Ready || row.ActiveCgroups != 2 || row.TotalEvents != 7 {
 		t.Errorf("row = %+v", row)
 	}
 }
@@ -598,7 +598,7 @@ func TestComputeNodeReport_AggregatesUniqueCgroups(t *testing.T) {
 	if r.ActiveCgroups != 3 {
 		t.Errorf("ActiveCgroups = %d, want 3 (deduplicated union)", r.ActiveCgroups)
 	}
-	if r.EventsTotal != 4 || r.DroppedEvents != 1 {
+	if r.TotalEvents != 4 || r.DroppedEvents != 1 {
 		t.Errorf("counters = %+v", r)
 	}
 }

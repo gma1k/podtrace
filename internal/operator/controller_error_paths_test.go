@@ -21,7 +21,7 @@ func ecWithSecretRef() *podtracev1alpha1.ExporterConfig {
 			OTLP: &podtracev1alpha1.OTLPExporter{
 				Endpoint:          "otel:4317",
 				Protocol:          podtracev1alpha1.OTLPProtocolHTTP,
-				HeadersFromSecret: &podtracev1alpha1.LocalObjectReference{Name: "creds"},
+				HeadersFromSecret: &corev1.LocalObjectReference{Name: "creds"},
 			},
 		},
 	}

@@ -23,6 +23,6 @@ spec:
   thresholds:
     errorRatePercent: 5
     rttSpikeMs: 100
-    fsSlowMs: 25
+    filesystemLatencyMs: 25
   exporterRef:
     name: policy-otlp

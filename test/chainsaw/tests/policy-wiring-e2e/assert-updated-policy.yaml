@@ -19,5 +19,5 @@ status:
   policy:
     generation: 2
     thresholds:
-      fsSlowMs: 10
+      filesystemLatencyMs: 10
   (conditions[?type == 'PolicyApplied'].status | [0]): "True"

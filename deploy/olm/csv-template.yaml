@@ -94,10 +94,12 @@ metadata:
           "kind": "ApplicationTrace",
           "metadata": { "name": "trace-storefront", "namespace": "default" },
           "spec": {
-            "selectors": [
-              { "matchLabels": { "app": "frontend" } },
-              { "matchLabels": { "app": "checkout" } }
-            ],
+            "appSelector": {
+              "matchSelectors": [
+                { "matchLabels": { "app": "frontend" } },
+                { "matchLabels": { "app": "checkout" } }
+              ]
+            },
             "filters": ["dns", "net", "http"],
             "exporterRef": { "name": "prod-otlp" }
           }

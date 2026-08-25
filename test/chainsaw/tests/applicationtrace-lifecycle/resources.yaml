@@ -14,9 +14,10 @@ kind: ApplicationTrace
 metadata:
   name: shop
 spec:
-  selectors:
-    - matchLabels: { app.kubernetes.io/name: shop, tier: web }
-    - matchLabels: { app.kubernetes.io/name: shop, tier: api }
+  appSelector:
+    matchSelectors:
+      - matchLabels: { app.kubernetes.io/name: shop, tier: web }
+      - matchLabels: { app.kubernetes.io/name: shop, tier: api }
   exporterRef:
     name: apt-otlp
   filters: [dns, net]

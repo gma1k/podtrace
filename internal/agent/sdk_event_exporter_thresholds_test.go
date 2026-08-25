@@ -16,9 +16,9 @@ func TestPolicyThresholdsFromBundle_Nil(t *testing.T) {
 
 func TestPolicyThresholdsFromBundle_AllFields(t *testing.T) {
 	in := &bundlepkg.Thresholds{
-		ErrorRatePercent: i32p(5),
-		RTTSpikeMs:       i32p(120),
-		FSSlowMs:         i32p(50),
+		ErrorRatePercent:    i32p(5),
+		RTTSpikeMs:          i32p(120),
+		FilesystemLatencyMs: i32p(50),
 	}
 	got := policyThresholdsFromBundle(in)
 	if got == nil {
@@ -31,8 +31,8 @@ func TestPolicyThresholdsFromBundle_AllFields(t *testing.T) {
 	if got.RTTSpikeMs == nil || *got.RTTSpikeMs != 120 {
 		t.Errorf("RTTSpikeMs = %v, want 120", got.RTTSpikeMs)
 	}
-	if got.FSSlowMs == nil || *got.FSSlowMs != 50 {
-		t.Errorf("FSSlowMs = %v, want 50", got.FSSlowMs)
+	if got.FilesystemLatencyMs == nil || *got.FilesystemLatencyMs != 50 {
+		t.Errorf("FilesystemLatencyMs = %v, want 50", got.FilesystemLatencyMs)
 	}
 	*in.ErrorRatePercent = 99
 	if *got.ErrorRatePercent != 5 {
@@ -53,7 +53,7 @@ func TestPolicyThresholdsFromBundle_PartialFields(t *testing.T) {
 	if got.RTTSpikeMs == nil || *got.RTTSpikeMs != 200 {
 		t.Errorf("RTTSpikeMs = %v, want 200", got.RTTSpikeMs)
 	}
-	if got.FSSlowMs != nil {
-		t.Errorf("FSSlowMs should be nil, got %v", *got.FSSlowMs)
+	if got.FilesystemLatencyMs != nil {
+		t.Errorf("FilesystemLatencyMs should be nil, got %v", *got.FilesystemLatencyMs)
 	}
 }

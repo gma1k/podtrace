@@ -201,7 +201,7 @@ func TestReconcile_HappyPath(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
 			Filters:     []podtracev1alpha1.EventFilter{podtracev1alpha1.FilterDNS},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ignored"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ignored"},
 		},
 	}
 	podOnNode := &corev1.Pod{
@@ -297,7 +297,7 @@ func TestReconcile_BundleRotationRebuildsExporter(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: ns, UID: uid},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "x"},
+			ExporterRef: corev1.LocalObjectReference{Name: "x"},
 		},
 	}
 	pod := &corev1.Pod{
@@ -364,7 +364,7 @@ func TestReconcile_PausedCRSkipped(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: ns, UID: "uid-paused"},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "x"},
+			ExporterRef: corev1.LocalObjectReference{Name: "x"},
 			Paused:      true,
 		},
 	}
@@ -410,7 +410,7 @@ func TestReconcile_NoMatchedPodsReleasesExporter(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: ns, UID: uid},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "missing"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "x"},
+			ExporterRef: corev1.LocalObjectReference{Name: "x"},
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(newScheme(t)).
@@ -447,7 +447,7 @@ func TestReconcile_BundleNotFoundIsNonFatal(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: ns, UID: "uid-no-bundle"},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "x"},
+			ExporterRef: corev1.LocalObjectReference{Name: "x"},
 		},
 	}
 	pod := &corev1.Pod{
@@ -490,7 +490,7 @@ func TestReconcile_ExporterBuilderErrorPublishesTombstone(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: ns, UID: uid},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "x"},
+			ExporterRef: corev1.LocalObjectReference{Name: "x"},
 		},
 	}
 	pod := &corev1.Pod{
@@ -555,7 +555,7 @@ func TestReconcile_CgroupResolverErrorPublishesTombstone(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}},
 			Filters:     []podtracev1alpha1.EventFilter{podtracev1alpha1.FilterDNS},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "x"},
+			ExporterRef: corev1.LocalObjectReference{Name: "x"},
 		},
 	}
 	pod := &corev1.Pod{
@@ -603,7 +603,7 @@ func TestReconcile_BundleLoadErrorPublishesTombstone(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: ns, UID: uid},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "x"},
+			ExporterRef: corev1.LocalObjectReference{Name: "x"},
 		},
 	}
 	pod := &corev1.Pod{
@@ -664,7 +664,7 @@ func TestReconcile_MatchPodsErrorPublishesTombstone(t *testing.T) {
 					{Key: "k", Operator: "bogus-op", Values: []string{"v"}},
 				},
 			},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "x"},
+			ExporterRef: corev1.LocalObjectReference{Name: "x"},
 		},
 	}
 	pod := &corev1.Pod{
@@ -732,7 +732,7 @@ func TestReconcile_TargetsChannelKeepLatest(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: ns, UID: uid},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "x"},
+			ExporterRef: corev1.LocalObjectReference{Name: "x"},
 		},
 	}
 	pod := &corev1.Pod{
@@ -985,9 +985,9 @@ func TestPolicySnapshotFromBundle_FullRoundTrip(t *testing.T) {
 			bundlepkg.FilterFS,
 		},
 		Thresholds: &bundlepkg.Thresholds{
-			ErrorRatePercent: &five,
-			RTTSpikeMs:       &hundred,
-			FSSlowMs:         &twenty,
+			ErrorRatePercent:    &five,
+			RTTSpikeMs:          &hundred,
+			FilesystemLatencyMs: &twenty,
 		},
 	}
 	snap := policySnapshotFromBundle(b)
@@ -1000,7 +1000,7 @@ func TestPolicySnapshotFromBundle_FullRoundTrip(t *testing.T) {
 	if snap.Thresholds == nil ||
 		*snap.Thresholds.ErrorRatePercent != 5 ||
 		*snap.Thresholds.RTTSpikeMs != 100 ||
-		*snap.Thresholds.FSSlowMs != 20 {
+		*snap.Thresholds.FilesystemLatencyMs != 20 {
 		t.Errorf("Thresholds=%+v incorrect", snap.Thresholds)
 	}
 	if snap.Generation != 9 {

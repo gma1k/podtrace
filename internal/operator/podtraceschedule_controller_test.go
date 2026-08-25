@@ -5,6 +5,7 @@ package operator
 
 import (
 	"context"
+	corev1 "k8s.io/api/core/v1"
 	"testing"
 	"time"
 
@@ -27,7 +28,7 @@ func makeSchedule(t *testing.T, c client.Client, ns, name string, mutators ...fu
 				Spec: podtracev1alpha1.PodTraceSessionSpec{
 					Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "tgt"}},
 					Duration:    metav1.Duration{Duration: 10 * time.Second},
-					ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "sch-otlp"},
+					ExporterRef: corev1.LocalObjectReference{Name: "sch-otlp"},
 				},
 			},
 		},

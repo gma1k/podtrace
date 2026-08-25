@@ -16,8 +16,6 @@ import (
 	webhookv1alpha1 "github.com/gma1k/podtrace/internal/webhook/v1alpha1"
 )
 
-// newClientWithExporter returns a fake client whose backing store already
-// contains the given ExporterConfig in the given namespace.
 func newClientWithExporter(t *testing.T, namespace, name string, extra ...client.Object) client.Client {
 	t.Helper()
 	scheme := runtime.NewScheme()
@@ -43,7 +41,6 @@ func newClientWithExporter(t *testing.T, namespace, name string, extra ...client
 	return builder.Build()
 }
 
-// validSelector is a reusable valid label selector for test fixtures.
 func validSelector() *metav1.LabelSelector {
 	return &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}}
 }
@@ -59,7 +56,7 @@ func TestPodTraceValidator_Create(t *testing.T) {
 			name: "happy-path-selector",
 			spec: podtracev1alpha1.PodTraceSpec{
 				Selector:    validSelector(),
-				ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+				ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 			},
 			exporter:  "prod-otlp",
 			wantError: "",
@@ -68,7 +65,7 @@ func TestPodTraceValidator_Create(t *testing.T) {
 			name: "happy-path-podrefs",
 			spec: podtracev1alpha1.PodTraceSpec{
 				PodRefs:     []podtracev1alpha1.PodRef{{Namespace: "default", Name: "pod-a"}},
-				ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+				ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 			},
 			exporter:  "prod-otlp",
 			wantError: "",
@@ -76,7 +73,7 @@ func TestPodTraceValidator_Create(t *testing.T) {
 		{
 			name: "neither-selector-nor-podrefs",
 			spec: podtracev1alpha1.PodTraceSpec{
-				ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+				ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 			},
 			exporter:  "prod-otlp",
 			wantError: "one of spec.selector, spec.podRefs, or spec.appSelector must be set",
@@ -86,7 +83,7 @@ func TestPodTraceValidator_Create(t *testing.T) {
 			spec: podtracev1alpha1.PodTraceSpec{
 				Selector:    validSelector(),
 				PodRefs:     []podtracev1alpha1.PodRef{{Name: "pod-a"}},
-				ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+				ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 			},
 			exporter:  "prod-otlp",
 			wantError: "mutually exclusive",
@@ -95,7 +92,7 @@ func TestPodTraceValidator_Create(t *testing.T) {
 			name: "missing-exporter-ref",
 			spec: podtracev1alpha1.PodTraceSpec{
 				Selector:    validSelector(),
-				ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "does-not-exist"},
+				ExporterRef: corev1.LocalObjectReference{Name: "does-not-exist"},
 			},
 			exporter:  "prod-otlp", // pre-created but wrong name requested
 			wantError: "ExporterConfig not found",
@@ -104,7 +101,7 @@ func TestPodTraceValidator_Create(t *testing.T) {
 			name: "empty-exporter-ref",
 			spec: podtracev1alpha1.PodTraceSpec{
 				Selector:    validSelector(),
-				ExporterRef: podtracev1alpha1.LocalObjectReference{Name: ""},
+				ExporterRef: corev1.LocalObjectReference{Name: ""},
 			},
 			exporter:  "prod-otlp",
 			wantError: "exporterRef.name is required",
@@ -113,7 +110,7 @@ func TestPodTraceValidator_Create(t *testing.T) {
 			name: "empty-selector-counts-as-unset",
 			spec: podtracev1alpha1.PodTraceSpec{
 				Selector:    &metav1.LabelSelector{}, // pointer set but no labels
-				ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+				ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 			},
 			exporter:  "prod-otlp",
 			wantError: "one of spec.selector, spec.podRefs, or spec.appSelector must be set",
@@ -151,7 +148,7 @@ func TestPodTraceSessionValidator_Create(t *testing.T) {
 		return podtracev1alpha1.PodTraceSessionSpec{
 			Selector:    validSelector(),
 			Duration:    metav1.Duration{Duration: 5 * time.Minute},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+			ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 		}
 	}
 
@@ -228,15 +225,12 @@ func TestPodTraceSessionValidator_Create(t *testing.T) {
 	}
 }
 
-// TestPodTraceSessionValidator_ObjectStoreReportRef covers the ObjectStore reportRef validation:
-// ObjectStore is no longer blanket-rejected; URI shape is validated
-// instead.
 func TestPodTraceSessionValidator_ObjectStoreReportRef(t *testing.T) {
 	base := func() podtracev1alpha1.PodTraceSessionSpec {
 		return podtracev1alpha1.PodTraceSessionSpec{
 			Selector:    validSelector(),
 			Duration:    metav1.Duration{Duration: 5 * time.Minute},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+			ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 		}
 	}
 	cases := []struct {
@@ -306,16 +300,13 @@ func TestPodTraceSessionValidator_ObjectStoreReportRef(t *testing.T) {
 	}
 }
 
-// TestPodTraceSessionValidator_FinalizerOnlyUpdateOnInvalidSpec locks in the
-// fix for a stuck-finalizer scenario: a session whose spec was created when an
-// older webhook rule allowed two reportRef sinks must still be deletable.
 func TestPodTraceSessionValidator_FinalizerOnlyUpdateOnInvalidSpec(t *testing.T) {
 	c := newClientWithExporter(t, "default", "prod-otlp")
 	v := &webhookv1alpha1.PodTraceSessionCustomValidator{Client: c}
 	legacySpec := podtracev1alpha1.PodTraceSessionSpec{
 		Selector:    validSelector(),
 		Duration:    metav1.Duration{Duration: time.Minute},
-		ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+		ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 		ReportRef: &podtracev1alpha1.ReportReference{
 			ConfigMap:   &corev1.LocalObjectReference{Name: "rpt"},
 			ObjectStore: &podtracev1alpha1.ObjectStoreReference{URI: "s3://b/"},
@@ -344,8 +335,6 @@ func TestPodTraceSessionValidator_FinalizerOnlyUpdateOnInvalidSpec(t *testing.T)
 	}
 }
 
-// TestPodTraceSessionValidator_ReportRefExclusivity locks in that at
-// most one sink can be set.
 func TestPodTraceSessionValidator_ReportRefExclusivity(t *testing.T) {
 	c := newClientWithExporter(t, "default", "prod-otlp")
 	v := &webhookv1alpha1.PodTraceSessionCustomValidator{Client: c}
@@ -354,7 +343,7 @@ func TestPodTraceSessionValidator_ReportRefExclusivity(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			Selector:    validSelector(),
 			Duration:    metav1.Duration{Duration: time.Minute},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+			ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 			ReportRef: &podtracev1alpha1.ReportReference{
 				ConfigMap:   &corev1.LocalObjectReference{Name: "rpt"},
 				ObjectStore: &podtracev1alpha1.ObjectStoreReference{URI: "s3://b/"},
@@ -440,16 +429,13 @@ func TestExporterConfigValidator_Create(t *testing.T) {
 	}
 }
 
-// TestPodTraceValidator_NilClient ensures the webhook fails closed when
-// the operator wires a validator without a client. This guards against a
-// misconfiguration where referential checks would silently succeed.
 func TestPodTraceValidator_NilClient(t *testing.T) {
 	v := &webhookv1alpha1.PodTraceCustomValidator{Client: nil}
 	_, err := v.ValidateCreate(context.Background(), &podtracev1alpha1.PodTrace{
 		ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: "default"},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    validSelector(),
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "x"},
+			ExporterRef: corev1.LocalObjectReference{Name: "x"},
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "webhook client not configured") {
@@ -457,9 +443,6 @@ func TestPodTraceValidator_NilClient(t *testing.T) {
 	}
 }
 
-// TestValidators_DeleteIsNoOp confirms all three validators accept
-// deletion unconditionally. Blocking deletes is a common source of
-// stuck resources; tests lock in the "never block delete" policy.
 func TestValidators_DeleteIsNoOp(t *testing.T) {
 	c := newClientWithExporter(t, "default", "prod-otlp")
 
@@ -479,9 +462,6 @@ func TestValidators_DeleteIsNoOp(t *testing.T) {
 	}
 }
 
-// TestPodTraceValidator_Update exercises the ValidateUpdate path
-// distinctly from Create, since an update to a previously-valid CR with
-// a now-missing exporterRef must still be rejected.
 func TestPodTraceValidator_Update(t *testing.T) {
 	c := newClientWithExporter(t, "default", "prod-otlp")
 	v := &webhookv1alpha1.PodTraceCustomValidator{Client: c}
@@ -490,7 +470,7 @@ func TestPodTraceValidator_Update(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: "default"},
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    validSelector(),
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+			ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 		},
 	}
 	newPT := oldPT.DeepCopy()
@@ -502,17 +482,12 @@ func TestPodTraceValidator_Update(t *testing.T) {
 	}
 }
 
-// TestExporterConfigValidator_EmptyType catches the silent-failure mode
-// where spec.type is the empty string but a typed field is set. The
-// CRD enum marker rejects the empty string at the apiserver, but the
-// webhook must also reject it defensively so unit tests exercising the
-// helper cover the branch.
 func TestExporterConfigValidator_EmptyType(t *testing.T) {
 	v := &webhookv1alpha1.ExporterConfigCustomValidator{}
 	obj := &podtracev1alpha1.ExporterConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "ec", Namespace: "default"},
 		Spec: podtracev1alpha1.ExporterConfigSpec{
-			Type: "", // not a valid enum
+			Type: "",
 			OTLP: &podtracev1alpha1.OTLPExporter{Endpoint: "x:4318"},
 		},
 	}
@@ -547,7 +522,7 @@ func TestPodTraceValidator_RejectsMalformedNamespaceSelector(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: "default"},
 					Spec: podtracev1alpha1.PodTraceSpec{
 						Selector:          validSelector(),
-						ExporterRef:       podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+						ExporterRef:       corev1.LocalObjectReference{Name: "prod-otlp"},
 						NamespaceSelector: badSel,
 					},
 				})
@@ -563,7 +538,7 @@ func TestPodTraceValidator_RejectsMalformedNamespaceSelector(t *testing.T) {
 					Spec: podtracev1alpha1.PodTraceSessionSpec{
 						Selector:          validSelector(),
 						Duration:          metav1.Duration{Duration: time.Minute},
-						ExporterRef:       podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+						ExporterRef:       corev1.LocalObjectReference{Name: "prod-otlp"},
 						NamespaceSelector: badSel,
 					},
 				})
@@ -607,7 +582,7 @@ func TestPodTraceValidator_AcceptsValidNamespaceSelectors(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "pt", Namespace: "default"},
 				Spec: podtracev1alpha1.PodTraceSpec{
 					Selector:          validSelector(),
-					ExporterRef:       podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+					ExporterRef:       corev1.LocalObjectReference{Name: "prod-otlp"},
 					NamespaceSelector: tc.sel,
 				},
 			}

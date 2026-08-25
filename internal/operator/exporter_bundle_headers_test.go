@@ -86,7 +86,7 @@ func TestBuildBundleSecretData_HeadersFromSecret(t *testing.T) {
 
 	got, err := buildBundleSecretData(context.Background(), c, "user-ns",
 		&podtracev1alpha1.SecretKeySelector{Name: "auth", Key: "token"},
-		&podtracev1alpha1.LocalObjectReference{Name: "extra-headers"})
+		&corev1.LocalObjectReference{Name: "extra-headers"})
 	if err != nil {
 		t.Fatalf("buildBundleSecretData: %v", err)
 	}

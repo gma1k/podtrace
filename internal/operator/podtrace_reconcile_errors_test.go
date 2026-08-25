@@ -34,7 +34,7 @@ func ptMoreTrace(mutate func(*podtracev1alpha1.PodTrace)) *podtracev1alpha1.PodT
 			Name: "pt", Namespace: "default", UID: "uid-pt", Generation: 2,
 			Finalizers: []string{FinalizerCleanup},
 		},
-		Spec: podtracev1alpha1.PodTraceSpec{ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"}},
+		Spec: podtracev1alpha1.PodTraceSpec{ExporterRef: corev1.LocalObjectReference{Name: "ec"}},
 	}
 	if mutate != nil {
 		mutate(pt)

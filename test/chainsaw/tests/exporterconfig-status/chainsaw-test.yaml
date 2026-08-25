@@ -5,7 +5,7 @@ metadata:
 spec:
   description: |
     Property tested: the ExporterConfig status reconciler populates
-    .status.ready, .status.referencedBy, and the Ready/Referenced
+    .status.referencedBy and the Ready/Referenced
     conditions in response to changes in (a) referenced Secrets and
     (b) PodTraces / PodTraceSessions pointing at the EC.
 

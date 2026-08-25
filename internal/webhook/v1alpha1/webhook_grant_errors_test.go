@@ -47,7 +47,7 @@ func TestPodTraceSessionValidator_NilClientReportsMisconfiguration(t *testing.T)
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			PodRefs:     []podtracev1alpha1.PodRef{{Name: "pod"}},
 			Duration:    metav1.Duration{Duration: time.Minute},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+			ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 		},
 	}
 	_, err := v.ValidateCreate(context.Background(), obj)
@@ -67,7 +67,7 @@ func TestPodTraceSessionValidator_DeduplicatesGrantChecksAcrossRefs(t *testing.T
 				{Namespace: "team-b", Name: "pod-2"},
 			},
 			Duration:    metav1.Duration{Duration: 5 * time.Minute},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+			ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 		},
 	}
 	if _, err := v.ValidateCreate(context.Background(), obj); err != nil {
@@ -94,7 +94,7 @@ func TestPodTraceSessionValidator_NamespaceGetErrorPropagates(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			PodRefs:     []podtracev1alpha1.PodRef{{Namespace: "team-b", Name: "victim"}},
 			Duration:    metav1.Duration{Duration: 5 * time.Minute},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+			ExporterRef: corev1.LocalObjectReference{Name: "prod-otlp"},
 		},
 	}
 	_, err := v.ValidateCreate(context.Background(), obj)
@@ -123,7 +123,7 @@ func TestPodTraceSessionValidator_NamespaceListErrorPropagates(t *testing.T) {
 			Selector:          &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
 			NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"tier": "prod"}},
 			Duration:          metav1.Duration{Duration: 5 * time.Minute},
-			ExporterRef:       podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+			ExporterRef:       corev1.LocalObjectReference{Name: "prod-otlp"},
 		},
 	}
 	_, err := v.ValidateCreate(context.Background(), obj)

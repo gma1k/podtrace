@@ -58,14 +58,14 @@ const (
 // Thresholds carries the anomaly-detection rules an agent applies to
 // every event it forwards on behalf of a CR.
 type Thresholds struct {
-	ErrorRatePercent *int32 `yaml:"errorRatePercent,omitempty"`
-	RTTSpikeMs       *int32 `yaml:"rttSpikeMs,omitempty"`
-	FSSlowMs         *int32 `yaml:"fsSlowMs,omitempty"`
+	ErrorRatePercent    *int32 `yaml:"errorRatePercent,omitempty"`
+	RTTSpikeMs          *int32 `yaml:"rttSpikeMs,omitempty"`
+	FilesystemLatencyMs *int32 `yaml:"fsSlowMs,omitempty"`
 }
 
 // IsZero reports whether the thresholds carry any configured value.
 func (t *Thresholds) IsZero() bool {
-	return t == nil || (t.ErrorRatePercent == nil && t.RTTSpikeMs == nil && t.FSSlowMs == nil)
+	return t == nil || (t.ErrorRatePercent == nil && t.RTTSpikeMs == nil && t.FilesystemLatencyMs == nil)
 }
 
 type Payload struct {
@@ -249,8 +249,8 @@ func thresholdFields() []thresholdField {
 		},
 		{
 			key: "threshold_fs_slow_ms",
-			get: func(t *Thresholds) *int32 { return t.FSSlowMs },
-			set: func(t *Thresholds, v *int32) { t.FSSlowMs = v },
+			get: func(t *Thresholds) *int32 { return t.FilesystemLatencyMs },
+			set: func(t *Thresholds, v *int32) { t.FilesystemLatencyMs = v },
 		},
 	}
 }

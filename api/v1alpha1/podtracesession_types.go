@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -55,7 +56,7 @@ type PodTraceSessionSpec struct {
 	Filters []EventFilter `json:"filters,omitempty"`
 
 	// +kubebuilder:validation:Required
-	ExporterRef LocalObjectReference `json:"exporterRef"`
+	ExporterRef corev1.LocalObjectReference `json:"exporterRef"`
 
 	// TracerConfigRef pins every Job this session spawns to one
 	// TracerConfig, overriding the per-node fleet lookup.
@@ -68,7 +69,7 @@ type PodTraceSessionSpec struct {
 	// TracerConfig is cluster-scoped, so this is a bare name with no
 	// namespace.
 	// +optional
-	TracerConfigRef *LocalObjectReference `json:"tracerConfigRef,omitempty"`
+	TracerConfigRef *corev1.LocalObjectReference `json:"tracerConfigRef,omitempty"`
 
 	// +optional
 	Thresholds *Thresholds `json:"thresholds,omitempty"`
@@ -97,7 +98,7 @@ type SessionJobRef struct {
 	Completed bool `json:"completed"`
 
 	// +optional
-	EventCount int64 `json:"eventCount,omitempty"`
+	TotalEvents int64 `json:"totalEvents,omitempty"`
 
 	// +optional
 	StartTime *metav1.Time `json:"startTime,omitempty"`
@@ -111,12 +112,12 @@ type SessionJobRef struct {
 
 // SessionSummary is a compact roll-up of what the session observed.
 type SessionSummary struct {
-	TotalEvents    int64 `json:"totalEvents"`
-	DNSEvents      int64 `json:"dnsEvents,omitempty"`
-	NetEvents      int64 `json:"netEvents,omitempty"`
-	FSEvents       int64 `json:"fsEvents,omitempty"`
-	CPUEvents      int64 `json:"cpuEvents,omitempty"`
-	ProcEvents     int64 `json:"procEvents,omitempty"`
+	TotalEvents int64 `json:"totalEvents"`
+
+	// +optional
+	EventsByFilter map[string]int64 `json:"eventsByFilter,omitempty"`
+
+	// +optional
 	ErrorsDetected int32 `json:"errorsDetected,omitempty"`
 }
 

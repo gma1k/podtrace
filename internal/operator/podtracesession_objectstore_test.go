@@ -18,8 +18,6 @@ import (
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 )
 
-// sessionWithObjectStore returns a minimal PodTraceSession whose
-// reportRef points at an ObjectStore.
 func sessionWithObjectStore(credsName string) *podtracev1alpha1.PodTraceSession {
 	ref := &podtracev1alpha1.ObjectStoreReference{URI: "s3://my-bucket/reports/"}
 	if credsName != "" {
@@ -30,17 +28,12 @@ func sessionWithObjectStore(credsName string) *podtracev1alpha1.PodTraceSession 
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			Duration:    metav1.Duration{Duration: time.Minute},
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ec"},
 			ReportRef:   &podtracev1alpha1.ReportReference{ObjectStore: ref},
 		},
 	}
 }
 
-// TestBuildSessionJobSpec_ObjectStoreSidecarWiredWithCredentialsSecret
-// verifies the operator (a) renders the report-uploader sidecar with
-// the resolved ObjectStore URI in --report-to, (b) attaches the
-// CredentialsSecretRef Secret as a Volume on the pod, and (c) mounts
-// that volume on the sidecar only (not the main container).
 func TestBuildSessionJobSpec_ObjectStoreSidecarWiredWithCredentialsSecret(t *testing.T) {
 	tc := &podtracev1alpha1.TracerConfig{
 		Spec: podtracev1alpha1.TracerConfigSpec{
@@ -111,9 +104,6 @@ func TestBuildSessionJobSpec_ObjectStoreSidecarWiredWithCredentialsSecret(t *tes
 	}
 }
 
-// TestBuildSessionJobSpec_ObjectStoreAmbientCreds: with no
-// CredentialsSecretRef the sidecar still renders (ambient creds), but
-// the Volume + mount + env var must NOT be present.
 func TestBuildSessionJobSpec_ObjectStoreAmbientCreds(t *testing.T) {
 	tc := &podtracev1alpha1.TracerConfig{
 		Spec: podtracev1alpha1.TracerConfigSpec{
@@ -139,9 +129,6 @@ func TestBuildSessionJobSpec_ObjectStoreAmbientCreds(t *testing.T) {
 	}
 }
 
-// TestHarvestReportLocation walks the table of pod sidecar states the
-// operator can observe and asserts applyReportUploadStatus persists the
-// right condition + reportLocation.
 func TestHarvestReportLocation(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := podtracev1alpha1.AddToScheme(scheme); err != nil {
@@ -249,8 +236,6 @@ func TestHarvestReportLocation(t *testing.T) {
 	}
 }
 
-// TestHarvestReportLocation_NonObjectStoreIsNoop confirms the harvester
-// silently returns nothing for sessions that don't use ObjectStore.
 func TestHarvestReportLocation_NonObjectStoreIsNoop(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
@@ -276,10 +261,6 @@ func TestHarvestReportLocation_NonObjectStoreIsNoop(t *testing.T) {
 	}
 }
 
-// TestPodTraceSessionReconciler_RejectsBadObjectStoreURI confirms the
-// operator-side defense-in-depth check: even when the validating
-// webhook is off (the chart's default), a malformed ObjectStore URI
-// must not produce a session Job that crash-loops the sidecar.
 func TestPodTraceSessionReconciler_RejectsBadObjectStoreURI(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := podtracev1alpha1.AddToScheme(scheme); err != nil {
@@ -301,7 +282,7 @@ func TestPodTraceSessionReconciler_RejectsBadObjectStoreURI(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
 			Duration:    metav1.Duration{Duration: time.Minute},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "ec"},
+			ExporterRef: corev1.LocalObjectReference{Name: "ec"},
 			ReportRef: &podtracev1alpha1.ReportReference{
 				ObjectStore: &podtracev1alpha1.ObjectStoreReference{
 					URI: "ftp://nope/k", // unsupported scheme
@@ -339,9 +320,6 @@ func TestPodTraceSessionReconciler_RejectsBadObjectStoreURI(t *testing.T) {
 	if deg.Status != metav1.ConditionTrue || deg.Reason != "ObjectStoreURIInvalid" {
 		t.Errorf("Degraded = (%s, %s); want (True, ObjectStoreURIInvalid). Message: %q", deg.Status, deg.Reason, deg.Message)
 	}
-	// A permanently-malformed spec should land in Failed state so
-	// `kubectl get` STATE column reflects the dead state instead of
-	// staying empty until the user describes the resource.
 	if got.Status.State != podtracev1alpha1.SessionStateFailed {
 		t.Errorf("State = %q; want Failed", got.Status.State)
 	}

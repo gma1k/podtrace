@@ -59,7 +59,7 @@ spec:
                 image: ${image}
                 imagePullPolicy: ${policy:-IfNotPresent}
                 systemNamespace: podtrace-system
-                priority: 10
+                fleetPriority: 10
                 nodeSelector:
                   podtrace.io/test-fleet-pool: secondary
               YAML

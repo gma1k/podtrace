@@ -188,7 +188,7 @@ This path runs the same eBPF stack the CLI uses, but as a per-node
 privileged Job. Results land in three parallel channels:
 
 - `status.summary` — aggregated event counts
-- `status.jobs[].eventCount` — per-node breakdown
+- `status.jobs[].totalEvents` — per-node breakdown
 - `reportRef.configMap` (or `.secret`) — full human-readable report
 
 Full reference: [docs/crd-podtracesession.md](docs/crd-podtracesession.md).
@@ -446,6 +446,3 @@ Podtrace is dual-licensed:
 
 - **Go code** is licensed under the [Apache License 2.0](LICENSE).
 - **eBPF programs** under [`bpf/`](bpf/) are licensed under **GPL-2.0** (declared via `SPDX-License-Identifier: GPL-2.0` headers). The GPL declaration is required for BPF programs to access kernel helpers via the BPF verifier.
-
-[![FOSSA Status](https://app.fossa.com/api/projects/custom%2B62379%2Fgithub.com%2Fgma1k%2Fpodtrace.svg?type=small)](https://app.fossa.com/projects/custom%2B62379%2Fgithub.com%2Fgma1k%2Fpodtrace?ref=badge_small)
-

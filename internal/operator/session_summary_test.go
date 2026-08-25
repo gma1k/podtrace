@@ -83,11 +83,11 @@ func TestPopulateSessionSummaries_AggregatesAcrossNodes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := s.Status.Jobs[0].EventCount; got != 100 {
-		t.Errorf("node-a EventCount=%d want 100", got)
+	if got := s.Status.Jobs[0].TotalEvents; got != 100 {
+		t.Errorf("node-a TotalEvents=%d want 100", got)
 	}
-	if got := s.Status.Jobs[1].EventCount; got != 50 {
-		t.Errorf("node-b EventCount=%d want 50", got)
+	if got := s.Status.Jobs[1].TotalEvents; got != 50 {
+		t.Errorf("node-b TotalEvents=%d want 50", got)
 	}
 	if s.Status.Summary == nil {
 		t.Fatal("Summary not populated")
@@ -95,8 +95,8 @@ func TestPopulateSessionSummaries_AggregatesAcrossNodes(t *testing.T) {
 	if s.Status.Summary.TotalEvents != 150 {
 		t.Errorf("TotalEvents=%d want 150", s.Status.Summary.TotalEvents)
 	}
-	if s.Status.Summary.DNSEvents != 40 {
-		t.Errorf("DNSEvents=%d want 40", s.Status.Summary.DNSEvents)
+	if s.Status.Summary.EventsByFilter["dns"] != 40 {
+		t.Errorf("EventsByFilter[dns]=%d want 40", s.Status.Summary.EventsByFilter["dns"])
 	}
 	if s.Status.Summary.ErrorsDetected != 2 {
 		t.Errorf("ErrorsDetected=%d want 2", s.Status.Summary.ErrorsDetected)
@@ -125,8 +125,8 @@ func TestPopulateSessionSummaries_UnfinishedJobsContributeZero(t *testing.T) {
 	if s.Status.Summary != nil {
 		t.Errorf("unfinished jobs should leave Summary nil: %+v", s.Status.Summary)
 	}
-	if s.Status.Jobs[0].EventCount != 0 {
-		t.Errorf("EventCount=%d want 0", s.Status.Jobs[0].EventCount)
+	if s.Status.Jobs[0].TotalEvents != 0 {
+		t.Errorf("TotalEvents=%d want 0", s.Status.Jobs[0].TotalEvents)
 	}
 }
 
@@ -174,8 +174,8 @@ func TestPopulateSessionSummaries_NodeFromSummaryAndSkipsForeignContainers(t *te
 	if err := populateSessionSummaries(context.Background(), c, s, []batchv1.Job{job}); err != nil {
 		t.Fatalf("populateSessionSummaries: %v", err)
 	}
-	if s.Status.Jobs[0].EventCount != 77 {
-		t.Errorf("EventCount=%d want 77 (node resolved from summary.Node)", s.Status.Jobs[0].EventCount)
+	if s.Status.Jobs[0].TotalEvents != 77 {
+		t.Errorf("TotalEvents=%d want 77 (node resolved from summary.Node)", s.Status.Jobs[0].TotalEvents)
 	}
 	if s.Status.Summary == nil || s.Status.Summary.TotalEvents != 77 {
 		t.Errorf("Summary not aggregated: %+v", s.Status.Summary)
@@ -225,7 +225,7 @@ func TestPopulateSessionSummaries_MalformedMessageIsNonFatal(t *testing.T) {
 	if err := populateSessionSummaries(context.Background(), c, s, []batchv1.Job{job}); err != nil {
 		t.Fatalf("malformed message should not error: %v", err)
 	}
-	if s.Status.Jobs[0].EventCount != 0 {
-		t.Errorf("EventCount=%d want 0", s.Status.Jobs[0].EventCount)
+	if s.Status.Jobs[0].TotalEvents != 0 {
+		t.Errorf("TotalEvents=%d want 0", s.Status.Jobs[0].TotalEvents)
 	}
 }

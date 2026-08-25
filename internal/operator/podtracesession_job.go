@@ -29,8 +29,8 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 		if tc.Spec.Session.TTLSecondsAfterFinished != nil {
 			ttlSeconds = *tc.Spec.Session.TTLSecondsAfterFinished
 		}
-		if tc.Spec.Session.ActiveDeadlineSecondsOffset > 0 {
-			deadlineOffset = tc.Spec.Session.ActiveDeadlineSecondsOffset
+		if o := tc.Spec.Session.ActiveDeadlineOffset; o != nil && o.Duration > 0 {
+			deadlineOffset = int32(o.Seconds())
 		}
 		sidecarUploader = tc.Spec.Session.SidecarUploader
 	}

@@ -124,9 +124,9 @@ func policyThresholdsFromBundle(in *bundleThresholds) *PolicyThresholds {
 		v := *in.RTTSpikeMs
 		out.RTTSpikeMs = &v
 	}
-	if in.FSSlowMs != nil {
-		v := *in.FSSlowMs
-		out.FSSlowMs = &v
+	if in.FilesystemLatencyMs != nil {
+		v := *in.FilesystemLatencyMs
+		out.FilesystemLatencyMs = &v
 	}
 	return out
 }
@@ -250,7 +250,7 @@ func (e *sdkEventExporter) remoteParent(ev *events.Event) (trace.SpanContext, bo
 // one event and, for each one tripped, stamps a span attribute and
 // bumps the corresponding Prometheus counter.
 // Threshold semantics (per design):
-//   - fs_slow:    LatencyNS > FSSlowMs       for EventOpen/Read/Write/Fsync/Unlink/Rename/Close
+//   - fs_slow:    LatencyNS > FilesystemLatencyMs       for EventOpen/Read/Write/Fsync/Unlink/Rename/Close
 //   - rtt_spike:  LatencyNS > RTTSpikeMs     for EventTCPRecv/TCPSend/Connect
 //   - error_rate: ev.IsError()              for any event (counts contribute to a future
 //     rolling-window detector; the per-event tag is
@@ -262,12 +262,12 @@ func (e *sdkEventExporter) appendThresholdAttributes(attrs []attribute.KeyValue,
 	if t == nil {
 		return attrs
 	}
-	if t.FSSlowMs != nil && isFilesystemEvent(ev.Type) {
-		thresholdNs := safeconv.Int64ToUint64(int64(*t.FSSlowMs)) * uint64(config.NSPerMS)
+	if t.FilesystemLatencyMs != nil && isFilesystemEvent(ev.Type) {
+		thresholdNs := safeconv.Int64ToUint64(int64(*t.FilesystemLatencyMs)) * uint64(config.NSPerMS)
 		if ev.LatencyNS > thresholdNs {
 			attrs = append(attrs,
 				attribute.Bool("podtrace.threshold.fs_slow.tripped", true),
-				attribute.Int64("podtrace.threshold.fs_slow.ms", int64(*t.FSSlowMs)),
+				attribute.Int64("podtrace.threshold.fs_slow.ms", int64(*t.FilesystemLatencyMs)),
 			)
 			e.recordTrip("fs_slow")
 		}

@@ -676,9 +676,9 @@ func policySnapshotFromBundle(b *BundlePayload) PolicySnapshot {
 			v := *b.Thresholds.RTTSpikeMs
 			t.RTTSpikeMs = &v
 		}
-		if b.Thresholds.FSSlowMs != nil {
-			v := *b.Thresholds.FSSlowMs
-			t.FSSlowMs = &v
+		if b.Thresholds.FilesystemLatencyMs != nil {
+			v := *b.Thresholds.FilesystemLatencyMs
+			t.FilesystemLatencyMs = &v
 		}
 		out.Thresholds = &t
 	}

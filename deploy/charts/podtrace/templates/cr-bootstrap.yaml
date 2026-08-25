@@ -129,7 +129,7 @@ data:
           {{- toYaml . | nindent 10 }}
         {{- end }}
         ttlSecondsAfterFinished: {{ .Values.session.ttlSecondsAfterFinished }}
-        activeDeadlineSecondsOffset: {{ .Values.session.activeDeadlineSecondsOffset }}
+        activeDeadlineOffset: {{ .Values.session.activeDeadlineOffset | quote }}
         backoffLimit: {{ .Values.session.backoffLimit }}
         sidecarUploader: {{ .Values.tracerConfig.sidecarUploader }}
         {{- with .Values.session.maxDuration }}

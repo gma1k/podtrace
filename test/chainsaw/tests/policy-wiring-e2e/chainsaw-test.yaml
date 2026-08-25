@@ -13,7 +13,7 @@ spec:
          is the operator-resolved min(CR, EC), and PodTrace.status.policy
          mirrors those values byte-for-byte (same hash).
 
-      2. Patch spec.thresholds.fsSlowMs. Assert the bundle ConfigMap
+      2. Patch spec.thresholds.filesystemLatencyMs. Assert the bundle ConfigMap
          updates and policy_generation increments — proves the
          end-to-end propagation path triggers on policy edits, not just
          on Create.
@@ -47,7 +47,7 @@ spec:
                 thresholds:
                   errorRatePercent: 5
                   rttSpikeMs: 100
-                  fsSlowMs: 10
+                  filesystemLatencyMs: 10
         - assert:
             file: ./assert-updated-policy.yaml
 

@@ -2,6 +2,7 @@ package v1alpha1_test
 
 import (
 	"encoding/json"
+	corev1 "k8s.io/api/core/v1"
 	"testing"
 	"time"
 
@@ -62,7 +63,7 @@ func TestPodTraceRoundTrip(t *testing.T) {
 			Filters: []podtracev1alpha1.EventFilter{
 				podtracev1alpha1.FilterDNS, podtracev1alpha1.FilterNet,
 			},
-			ExporterRef:   podtracev1alpha1.LocalObjectReference{Name: "prod-otlp"},
+			ExporterRef:   corev1.LocalObjectReference{Name: "prod-otlp"},
 			SamplePercent: &samplePct,
 		},
 	}
@@ -95,7 +96,7 @@ func TestPodTraceSessionDurationEncoded(t *testing.T) {
 	orig := &podtracev1alpha1.PodTraceSession{
 		Spec: podtracev1alpha1.PodTraceSessionSpec{
 			Duration:    metav1.Duration{Duration: 5 * time.Minute},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "x"},
+			ExporterRef: corev1.LocalObjectReference{Name: "x"},
 		},
 	}
 	data, err := json.Marshal(orig)
@@ -137,7 +138,7 @@ func TestDeepCopyPreservesSpec(t *testing.T) {
 		Spec: podtracev1alpha1.PodTraceSpec{
 			Selector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
 			Filters:     []podtracev1alpha1.EventFilter{podtracev1alpha1.FilterDNS},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "x"},
+			ExporterRef: corev1.LocalObjectReference{Name: "x"},
 		},
 	}
 	cp := orig.DeepCopy()

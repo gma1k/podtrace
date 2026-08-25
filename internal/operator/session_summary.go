@@ -30,11 +30,6 @@ type sessionSummaryJSON struct {
 // populateSessionSummaries walks the session's child Jobs, reads the
 // matching Pod's terminationMessage, and rolls the per-Job counts up
 // into the session's status.Summary plus per-Job status.jobs[i].eventCount.
-//
-// Missing termination messages are non-fatal: Jobs that have not yet
-// completed, or that crashed before writing, just contribute zero to
-// the rollup. This keeps a partially-failing session observable
-// instead of silently stuck.
 func populateSessionSummaries(ctx context.Context, c client.Client, session *podtracev1alpha1.PodTraceSession, jobs []batchv1.Job) error {
 	if session == nil {
 		return nil
@@ -44,9 +39,6 @@ func populateSessionSummaries(ctx context.Context, c client.Client, session *pod
 		j := &jobs[i]
 		summary, err := readTerminationSummaryForJob(ctx, c, j)
 		if err != nil {
-			// Log-in-context by returning: reconciler treats the
-			// whole call as transient and re-queues. A missing pod
-			// (GC'd after TTL) returns zero-value, not error.
 			return err
 		}
 		if summary == nil {
@@ -59,14 +51,10 @@ func populateSessionSummaries(ctx context.Context, c client.Client, session *pod
 		summaryByNode[node] = *summary
 	}
 
-	// Fold per-Job EventCount back into the SessionJobRef array. The
-	// array has already been built by makeSessionJobRefs in the main
-	// reconcile path; we only mutate the EventCount field here so we
-	// do not race with state/time fields.
 	for i := range session.Status.Jobs {
 		ref := &session.Status.Jobs[i]
 		if s, ok := summaryByNode[ref.Node]; ok {
-			ref.EventCount = s.TotalEvents
+			ref.TotalEvents = s.TotalEvents
 		}
 	}
 
@@ -76,12 +64,9 @@ func populateSessionSummaries(ctx context.Context, c client.Client, session *pod
 
 // readTerminationSummaryForJob locates the Pod created by a session
 // Job, reads its terminationMessage, and decodes the JSON into
-// sessionSummaryJSON. Returns (nil, nil) when the pod or termination
-// message is missing or malformed — the caller treats that as "no
-// data yet," not an error.
+// sessionSummaryJSON.
 func readTerminationSummaryForJob(ctx context.Context, c client.Client, job *batchv1.Job) (*sessionSummaryJSON, error) {
 	if job.Status.CompletionTime == nil && job.Status.Failed == 0 {
-		// Job has not finished: no terminated container to read from.
 		return nil, nil
 	}
 	var pods corev1.PodList
@@ -105,11 +90,6 @@ func readTerminationSummaryForJob(ctx context.Context, c client.Client, job *bat
 			}
 			var s sessionSummaryJSON
 			if err := json.Unmarshal([]byte(raw), &s); err != nil {
-				// Malformed termination messages do not block status
-				// reconciliation — the CLI may have crashed mid-write
-				// or the container runtime truncated below the 4KB
-				// ceiling. Returning nil leaves the Job's EventCount
-				// at zero without failing the reconcile.
 				return nil, nil
 			}
 			return &s, nil
@@ -125,14 +105,23 @@ func aggregateSessionSummary(byNode map[string]sessionSummaryJSON) *podtracev1al
 		return nil
 	}
 	out := &podtracev1alpha1.SessionSummary{}
+	byFilter := map[string]int64{}
 	for _, s := range byNode {
 		out.TotalEvents += s.TotalEvents
-		out.DNSEvents += s.DNSEvents
-		out.NetEvents += s.NetEvents
-		out.FSEvents += s.FSEvents
-		out.CPUEvents += s.CPUEvents
-		out.ProcEvents += s.ProcEvents
 		out.ErrorsDetected += s.ErrorsDetected
+		byFilter[string(podtracev1alpha1.FilterDNS)] += s.DNSEvents
+		byFilter[string(podtracev1alpha1.FilterNet)] += s.NetEvents
+		byFilter[string(podtracev1alpha1.FilterFS)] += s.FSEvents
+		byFilter[string(podtracev1alpha1.FilterCPU)] += s.CPUEvents
+		byFilter[string(podtracev1alpha1.FilterProc)] += s.ProcEvents
+	}
+	for name, count := range byFilter {
+		if count == 0 {
+			delete(byFilter, name)
+		}
+	}
+	if len(byFilter) > 0 {
+		out.EventsByFilter = byFilter
 	}
 	return out
 }

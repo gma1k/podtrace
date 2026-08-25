@@ -24,9 +24,6 @@ import (
 
 // TracerConfigSpecApplyConfiguration represents a declarative configuration of the TracerConfigSpec type for use
 // with apply.
-//
-// TracerConfigSpec configures the tracer infrastructure. It is cluster-scoped
-// because it governs a fleet-wide DaemonSet and the Jobs the operator spawns.
 type TracerConfigSpecApplyConfiguration struct {
 	Image                        *string                               `json:"image,omitempty"`
 	ImagePullPolicy              *v1.PullPolicy                        `json:"imagePullPolicy,omitempty"`
@@ -41,6 +38,7 @@ type TracerConfigSpecApplyConfiguration struct {
 	BTFMode                      *apiv1alpha1.BTFMode                  `json:"btfMode,omitempty"`
 	MaxConcurrentSessionsPerNode *int32                                `json:"maxConcurrentSessionsPerNode,omitempty"`
 	SystemNamespace              *string                               `json:"systemNamespace,omitempty"`
+	FleetPriority                *int32                                `json:"fleetPriority,omitempty"`
 }
 
 // TracerConfigSpecApplyConfiguration constructs a declarative configuration of the TracerConfigSpec type for use with
@@ -160,5 +158,13 @@ func (b *TracerConfigSpecApplyConfiguration) WithMaxConcurrentSessionsPerNode(va
 // If called multiple times, the SystemNamespace field is set to the value of the last call.
 func (b *TracerConfigSpecApplyConfiguration) WithSystemNamespace(value string) *TracerConfigSpecApplyConfiguration {
 	b.SystemNamespace = &value
+	return b
+}
+
+// WithFleetPriority sets the FleetPriority field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the FleetPriority field is set to the value of the last call.
+func (b *TracerConfigSpecApplyConfiguration) WithFleetPriority(value int32) *TracerConfigSpecApplyConfiguration {
+	b.FleetPriority = &value
 	return b
 }

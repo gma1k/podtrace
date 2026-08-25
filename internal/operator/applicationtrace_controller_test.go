@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	corev1 "k8s.io/api/core/v1"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -16,11 +17,13 @@ func mkApp() *podtracev1alpha1.ApplicationTrace {
 	return &podtracev1alpha1.ApplicationTrace{
 		ObjectMeta: metav1.ObjectMeta{Name: "shop", Namespace: "demo", UID: "app-uid", Generation: 1},
 		Spec: podtracev1alpha1.ApplicationTraceSpec{
-			Selectors: []metav1.LabelSelector{
-				{MatchLabels: map[string]string{"app.kubernetes.io/name": "shop", "tier": "web"}},
-				{MatchLabels: map[string]string{"app.kubernetes.io/name": "shop", "tier": "api"}},
+			AppSelector: podtracev1alpha1.AppSelector{
+				MatchSelectors: []metav1.LabelSelector{
+					{MatchLabels: map[string]string{"app.kubernetes.io/name": "shop", "tier": "web"}},
+					{MatchLabels: map[string]string{"app.kubernetes.io/name": "shop", "tier": "api"}},
+				},
 			},
-			ExporterRef: podtracev1alpha1.LocalObjectReference{Name: "default"},
+			ExporterRef: corev1.LocalObjectReference{Name: "default"},
 			Filters:     []podtracev1alpha1.EventFilter{podtracev1alpha1.FilterDNS, podtracev1alpha1.FilterNet},
 		},
 	}
@@ -74,7 +77,7 @@ func TestApplicationTraceReconciler_GeneratesOwnedPodTrace(t *testing.T) {
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "demo", Name: "shop"}, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Status.PodTraceRef != "shop" {
+	if got.Status.PodTraceRef == nil || got.Status.PodTraceRef.Name != "shop" {
 		t.Fatalf("status.podTraceRef = %q, want shop", got.Status.PodTraceRef)
 	}
 	if !hasCond(got.Status.Conditions, ConditionReconciled, metav1.ConditionTrue) {

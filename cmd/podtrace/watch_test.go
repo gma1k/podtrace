@@ -234,8 +234,8 @@ func TestBuildApplicationTrace_FromApp(t *testing.T) {
 	if app.Name != "shop" || app.Namespace != "default" {
 		t.Fatalf("name/ns = %s/%s, want shop/default", app.Name, app.Namespace)
 	}
-	if len(app.Spec.Selectors) != 1 || app.Spec.Selectors[0].MatchLabels[appNameLabel] != "shop" {
-		t.Fatalf("selectors = %+v, want one app.kubernetes.io/name=shop", app.Spec.Selectors)
+	if len(app.Spec.AppSelector.MatchSelectors) != 1 || app.Spec.AppSelector.MatchSelectors[0].MatchLabels[appNameLabel] != "shop" {
+		t.Fatalf("selectors = %+v, want one app.kubernetes.io/name=shop", app.Spec.AppSelector.MatchSelectors)
 	}
 	if app.Spec.ExporterRef.Name != "default" {
 		t.Fatalf("exporterRef = %q", app.Spec.ExporterRef.Name)
@@ -255,11 +255,11 @@ func TestBuildApplicationTrace_MultipleWorkloads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(app.Spec.Selectors) != 2 {
-		t.Fatalf("selectors = %d, want 2 (web, api)", len(app.Spec.Selectors))
+	if len(app.Spec.AppSelector.MatchSelectors) != 2 {
+		t.Fatalf("selectors = %d, want 2 (web, api)", len(app.Spec.AppSelector.MatchSelectors))
 	}
-	if app.Spec.Selectors[0].MatchLabels["tier"] != "web" || app.Spec.Selectors[1].MatchLabels["tier"] != "api" {
-		t.Fatalf("selectors = %+v", app.Spec.Selectors)
+	if app.Spec.AppSelector.MatchSelectors[0].MatchLabels["tier"] != "web" || app.Spec.AppSelector.MatchSelectors[1].MatchLabels["tier"] != "api" {
+		t.Fatalf("selectors = %+v", app.Spec.AppSelector.MatchSelectors)
 	}
 	if app.Spec.NamespaceSelector == nil || len(app.Spec.NamespaceSelector.MatchLabels) != 0 {
 		t.Fatalf("--all-namespaces should give empty namespaceSelector, got %+v", app.Spec.NamespaceSelector)
@@ -287,7 +287,7 @@ func TestMarshalManagedYAML_ApplicationTrace(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 	s := string(out)
-	if !strings.Contains(s, "kind: ApplicationTrace") || !strings.Contains(s, "selectors:") {
-		t.Fatalf("yaml missing kind/selectors:\n%s", s)
+	if !strings.Contains(s, "kind: ApplicationTrace") || !strings.Contains(s, "matchSelectors:") {
+		t.Fatalf("yaml missing kind/matchSelectors:\n%s", s)
 	}
 }

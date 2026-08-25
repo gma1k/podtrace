@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -32,7 +33,7 @@ type PodTraceSpec struct {
 	Filters []EventFilter `json:"filters,omitempty"`
 
 	// +kubebuilder:validation:Required
-	ExporterRef LocalObjectReference `json:"exporterRef"`
+	ExporterRef corev1.LocalObjectReference `json:"exporterRef"`
 
 	// +optional
 	Thresholds *Thresholds `json:"thresholds,omitempty"`
@@ -69,6 +70,10 @@ type PodTraceNodeStatus struct {
 	// +kubebuilder:validation:Required
 	Node string `json:"node"`
 
+	// Ready is a plain bool rather than a Condition on purpose: this is a
+	// per-node entry inside an array, and Conditions cannot be expressed per
+	// array element. It is the only readiness signal available here, so it
+	// duplicates nothing. Object-level readiness is a Condition, as usual.
 	Ready bool `json:"ready"`
 
 	// +optional
@@ -76,7 +81,7 @@ type PodTraceNodeStatus struct {
 
 	ActiveCgroups int32 `json:"activeCgroups"`
 
-	EventsTotal int64 `json:"eventsTotal"`
+	TotalEvents int64 `json:"totalEvents"`
 
 	DroppedEvents int64 `json:"droppedEvents"`
 
