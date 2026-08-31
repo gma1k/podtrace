@@ -2,14 +2,7 @@ apiVersion: v2
 name: podtrace
 description: |
   Podtrace: a lightweight yet powerful eBPF-driven diagnostic tool for
-  Kubernetes applications. It delivers full-stack observability from
-  kernel events to application-layer behavior, activated on demand with
-  no prior configuration or instrumentation.
-
-  This chart installs the podtrace operator, its v1alpha1 CRDs
-  (PodTrace, PodTraceSession, PodTraceSchedule, ExporterConfig,
-  TracerConfig), and rolls out the podtrace-agent DaemonSet on demand
-  when a TracerConfig is created.
+  Kubernetes applications.
 type: application
 kubeVersion: '>=1.28.0-0'
 version: 0.14.7

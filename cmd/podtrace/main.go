@@ -128,6 +128,7 @@ func main() {
 	rootCmd.AddCommand(newReportUploaderCmd())
 	rootCmd.AddCommand(newScheduleCmd())
 	rootCmd.AddCommand(newWatchCmd())
+	rootCmd.AddCommand(newMigrateStorageCmd())
 
 	rootCmd.Flags().StringVarP(&namespace, "namespace", "n", config.DefaultNamespace, "Kubernetes namespace (defaults to the current kubeconfig context's namespace)")
 	rootCmd.Flags().StringVar(&namespacesCSV, "namespaces", "", "Comma-separated namespaces for multi-pod tracing (e.g., default,prod)")

@@ -1,0 +1,43 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cross-version-roundtrip
+spec:
+  description: |
+    Gate on the guarantee the graduation contract in docs/api-versioning.md
+    rests on: with conversion.strategy: None, an object must survive being
+    read AND written through any served version.
+
+      1. Create a PodTrace in the CRD's storage version.
+      2. Read it back through the other served version and assert the spec
+         and status are identical.
+      3. Write it back through the other served version three ways, and
+         assert the stored object is unchanged each time: client-side apply,
+         and server-side apply with --force-conflicts.
+
+    The read direction is the easy half and passes even when the schemas
+    differ, which is why an "additive-only" superset looks safe and is not.
+    The write direction is the half that catches real breakage: both write
+    paths silently drop fields the older schema does not describe, and both
+    are what a GitOps controller does on a normal sync.
+
+    While every CRD serves a single version this is trivially satisfied and
+    the script says so. It becomes load-bearing the moment a v1beta1 lands
+    beside v1alpha1, with no edit needed here.
+  timeouts:
+    apply: 30s
+    assert: 60s
+    delete: 60s
+  steps:
+    - name: exporter
+      try:
+        - apply:
+            file: ./resources.yaml
+
+    - name: roundtrip
+      try:
+        - script:
+            env:
+              - name: NAMESPACE
+                value: ($namespace)
+            content: bash ./roundtrip.sh
