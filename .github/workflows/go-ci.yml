@@ -316,6 +316,10 @@ jobs:
             exit 1
           fi
 
+      - name: Assert served versions are schema-identical
+        run: |
+          go run ./hack/crdcompat -identity deploy/charts/podtrace/templates/crds
+
       - name: Require a recorded break
         if: steps.compare.outputs.status == '1'
         env:

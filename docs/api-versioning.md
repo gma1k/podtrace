@@ -109,10 +109,17 @@ So there is always an overlap window. Graduation spans two releases.
    carrying the same types, with `+kubebuilder:storageversion` moved to it.
    Both versions `served: true`; `storage: true` on `v1beta1` only.
 2. **Migrate storage.** Write every existing object once so it re-persists
-   in the new version. Any no-op write does it — the operation must be
-   idempotent and safe to re-run.
+   in the new version. `podtrace migrate-storage` does this: it reads each
+   object and writes it back unchanged, which makes the API server re-encode
+   it. Run `--dry-run` first to see the object count.
 3. **Patch `status.storedVersions`** to list only the new version, which
-   unpins the old one.
+   unpins the old one. `podtrace migrate-storage` does this too, once every
+   object has been rewritten, and refuses to do it if any object could not
+   be — dropping a version that still holds data makes those objects
+   unreadable.
+
+Both steps are idempotent: running the command twice is the same as running
+it once, and running it against an already-migrated CRD does nothing.
 
 At this point both versions are served, the schemas are identical, and no
 client can lose data whichever version it writes through.
@@ -141,9 +148,14 @@ policy was a disclaimer with nothing behind it.
 - A CI check fails any PR whose generated CRD diff removes or renames a
   field unless the commit carries a `BREAKING CHANGE` footer. This is what
   keeps the history below complete.
-- Once a CRD serves two versions, a schema-identity check asserts that the
-  served versions are the same shape, and a chainsaw scenario proves it
-  against a live API server in both the read and the write direction.
+- `crdcompat -identity` asserts that every served version of a CRD describes
+  the same schema, and runs in the `crd-schema-compat` CI job. While each CRD
+  serves one version it is trivially satisfied; it becomes load-bearing the
+  moment a `v1beta1` lands beside `v1alpha1`.
+- The `cross-version-roundtrip` chainsaw scenario proves the same thing
+  against a live API server, in the read direction and — the half that
+  actually catches breakage — the write direction, covering client-side apply
+  and server-side apply with `--force-conflicts`.
 
 ## Breaking change history
 
@@ -155,22 +167,31 @@ complete.
 |---|---|---|---|
 | v0.11.10 | PodTraceSession | `.status.phase` renamed to `.status.state`; the `SessionPhase` values became `SessionState` with the same names | Update anything reading `.status.phase` — `kubectl` output columns, scripts, dashboards. No manifest change: the field is status-only. |
 | v0.13.10 | PodTrace, PodTraceSession, PodTraceSchedule | Cross-namespace targeting requires the target namespace to opt in with the `podtrace.io/allow-tracing-from` annotation | Annotate target namespaces. Without it, existing cross-namespace CRs silently narrow to their own namespace. See [cross-namespace-cr-targeting.md](cross-namespace-cr-targeting.md). |
+| v0.14.7 | all six | Field renames across the API, to spend the `v1alpha1` window before graduation locks the names in. `ApplicationTrace.spec.selectors` became `spec.appSelector.matchSelectors`; `thresholds.fsSlowMs` became `thresholds.filesystemLatencyMs`; `status.nodeStatus[].eventsTotal` and `status.jobs[].eventCount` both became `totalEvents`; the per-category counters under `status.summary` became `status.summary.eventsByFilter`, keyed by filter name; `ExporterConfig.status.ready` was removed in favour of the `Ready` condition; `ApplicationTrace.status.podTraceRef` became an object with a `name` field; `TracerConfig.spec.priority` became `spec.fleetPriority`; `spec.session.activeDeadlineSecondsOffset` became `spec.session.activeDeadlineOffset`, taking a duration string | Edit manifests before upgrading: `appSelector.matchSelectors`, `filesystemLatencyMs`, `fleetPriority` and `activeDeadlineOffset` are all spec fields, and unknown fields are refused rather than ignored. The Helm value `session.activeDeadlineSecondsOffset` becomes `session.activeDeadlineOffset` with the same change. Status fields need no action; the operator rewrites them on the next reconcile. |
 
 Two things about this list are worth stating plainly rather than leaving to
 be discovered.
 
-The `v0.11.10` rename shipped in a **patch** release, which the pre-1.0 rules
-in [STABILITY.md](../STABILITY.md) say will not break existing CRDs, and it
-was not recorded under a `BREAKING` heading at the time. The rule was right
-and the release did not follow it. The CI check described under
-[Enforcement](#enforcement) exists because a policy that depends on
-remembering is not a policy.
+**Two of these breaks shipped in patch releases**, which the pre-1.0 rules in
+[STABILITY.md](../STABILITY.md) say will not break existing CRDs. The
+`v0.11.10` rename was not recorded as breaking at all.
+renames were recorded and announced, but the version was still a patch. The
+rule was right both times and the releases did not follow it.
 
-Neither change would have been solved by a conversion webhook. The first is a
-status field, written by the operator and never round-tripped from a
-manifest; the second is behavioral, and conversion only addresses shape. The
-argument for skipping conversion does not rest on this list being short — it
-rests on the graduation contract above.
+Those two failures have different causes and different fixes. Forgetting to
+record a break is now caught by the CI check under
+[Enforcement](#enforcement), because a policy that depends on remembering is
+not a policy. Choosing the wrong version digit is not caught by anything: it
+is a release-time decision, and the only guard is reading this table before
+tagging.
+
+None of these changes would have been solved by a conversion webhook. The
+`v0.11.10` rename is a status field, written by the operator and never
+round-tripped from a manifest. The `v0.13.10` change is behavioral, and
+conversion only addresses shape. The `v0.14.7` renames happened inside one
+version, where there is no second version to convert to. The argument for
+skipping conversion does not rest on this list being short — it rests on the
+graduation contract above.
 
 ## Related documents
 

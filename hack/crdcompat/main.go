@@ -12,10 +12,17 @@ import (
 func main() {
 	base := flag.String("base", "", "directory holding the previous revision of the CRD manifests")
 	head := flag.String("head", "", "directory holding the new revision of the CRD manifests")
+	identity := flag.String("identity", "", "directory of CRD manifests to check for served-version schema identity")
 	flag.Parse()
+
+	if *identity != "" {
+		runIdentityMode(*identity)
+		return
+	}
 
 	if *base == "" || *head == "" {
 		fmt.Fprintln(os.Stderr, "usage: crdcompat -base <dir> -head <dir>")
+		fmt.Fprintln(os.Stderr, "       crdcompat -identity <dir>")
 		os.Exit(2)
 	}
 
@@ -116,4 +123,28 @@ func manifestNames(root *os.Root) (nameSet, error) {
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+// runIdentityMode enforces the graduation contract: every served version of a
+// CRD must describe the same schema, because `conversion.strategy.
+func runIdentityMode(dir string) {
+	divergences, multiVersion, err := runIdentity(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "crdcompat: %v\n", err)
+		os.Exit(2)
+	}
+
+	if len(divergences) == 0 {
+		if multiVersion == 0 {
+			fmt.Println("No CRD serves more than one version; schema identity is trivially satisfied.")
+			return
+		}
+		fmt.Printf("Served versions are schema-identical in %d multi-version CRD(s).\n", multiVersion)
+		return
+	}
+
+	for _, d := range divergences {
+		fmt.Println(d)
+	}
+	os.Exit(1)
 }

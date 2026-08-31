@@ -1,0 +1,10 @@
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: roundtrip-otlp
+spec:
+  type: otlp
+  otlp:
+    endpoint: collector.svc:4318
+    protocol: http
+    insecure: true
