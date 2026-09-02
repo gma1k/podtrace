@@ -9,9 +9,9 @@
 # The same image serves the CLI, the agent DaemonSet, the operator
 # Deployment, and per-session Jobs, one binary, multiple subcommands.
 
-ARG GO_VERSION=1.27.0
+ARG GO_VERSION=1.27.1
 ARG DEBIAN_RELEASE=trixie
-ARG GO_IMAGE_DIGEST=sha256:df98008ecd2b0ecc9f0a94d1b07e3564a9c92b555369b33d9b5f60d0765b2db7
+ARG GO_IMAGE_DIGEST=sha256:137ca8442e368f5f5bb4d4f84d8cc1f6c2d898edf8a380459eb407f89d149b0d
 
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-${DEBIAN_RELEASE}@${GO_IMAGE_DIGEST} AS builder
 

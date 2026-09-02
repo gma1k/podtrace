@@ -40,6 +40,19 @@
       ],
       "depNameTemplate": "alpine/k8s",
       "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "Keep the Makefile golangci-lint pin in sync with the version the CI workflow uses. Without this, Renovate bumps only the workflow and `make lint` silently diverges from CI.",
+      "managerFilePatterns": [
+        "/(^|/)Makefile$/"
+      ],
+      "matchStrings": [
+        "GOLANGCI_LINT_VERSION \\?= (?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "depNameTemplate": "golangci/golangci-lint",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
     }
   ],
   "vulnerabilityAlerts": {

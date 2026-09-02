@@ -142,20 +142,26 @@ them locally and you will not be surprised by CI.
 
 ### Go
 
-`make lint` runs **golangci-lint v2.13.0** — the same version CI pins — against
-[`.golangci.yml`](.golangci.yml), which selects the v2 `standard` linter set:
-`errcheck`, `govet`, `ineffassign`, `staticcheck`, `unused`. Because both the
-version and the linter set are pinned in-repo, a clean `make lint` locally means
-a clean lint job in CI.
+`make lint` runs the golangci-lint version pinned as `GOLANGCI_LINT_VERSION` in
+the [Makefile](Makefile) — the same version CI pins, kept in step by Renovate —
+against [`.golangci.yml`](.golangci.yml), which selects the v2 `standard` linter
+set: `errcheck`, `govet`, `ineffassign`, `staticcheck`, `unused`. Because both
+the version and the linter set are pinned in-repo, a clean `make lint` locally
+means a clean lint job in CI. Run `make lint-version` to see what you have.
 
-> **Do not install golangci-lint with `go install`.** golangci-lint v2.13.0
-> declares `go 1.26.0`, so `go install` builds it with a Go 1.26 toolchain, and
-> the resulting binary refuses to run against this module:
-> `the Go language version (go1.26) used to build golangci-lint is lower than
-> the targeted Go version (1.27.0)`. It fails with or without a config file.
-> `make lint` avoids this by downloading the official prebuilt release binary
-> (built with Go 1.27) into `bin/`, checksum-verified against the release's
-> `checksums.txt`.
+The pin is deliberately not restated here: it lives in exactly two places, the
+Makefile and [`go-ci.yml`](.github/workflows/go-ci.yml), and Renovate updates
+both together.
+
+> **Do not install golangci-lint with `go install`.** golangci-lint declares an
+> older `go` directive than this module does, so `go install` builds it with
+> that older toolchain and the resulting binary then refuses to run against
+> this module, reporting that the Go language version
+> `used to build golangci-lint is lower than the targeted Go version`. It fails
+> with or without a config file, so it is not a config problem. `make lint`
+> avoids this entirely by downloading the official prebuilt release binary into
+> `bin/`, checksum-verified against the release's `checksums.txt`; those
+> releases are built with a toolchain new enough for this module.
 
 Formatting is plain `gofmt` — `make fmt` is `go fmt ./...`. It is deliberately
 **not** a CI gate: enabling gofmt as a linter would fail the build on

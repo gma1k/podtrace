@@ -400,54 +400,62 @@ var (
 	)
 )
 
-func init() {
+// allCollectors is this package's complete metric surface.
+func allCollectors() []prometheus.Collector {
+	return []prometheus.Collector{
+		rttHistogram,
+		latencyHistogram,
+		rttGauge,
+		latencyGauge,
+		dnsHistogram,
+		fsHistogram,
+		cpuHistogram,
+		dnsGauge,
+		fsGauge,
+		cpuGauge,
+		networkBytesCounter,
+		filesystemBytesCounter,
+		ringBufferDropsCounter,
+		dnsDropsCounter,
+		filteredEventDropsCounter,
+		teeAuxDropsCounter,
+		processCacheHitsCounter,
+		processCacheMissesCounter,
+		pidCacheHitsCounter,
+		pidCacheMissesCounter,
+		eventProcessingLatencyHistogram,
+		errorRateCounter,
+		attributionCounter,
+		attributionPidReuseCounter,
+		tlsGauge,
+		tlsHistogram,
+		tlsHandshakesCounter,
+		resourceLimitBytesGauge,
+		resourceUsageBytesGauge,
+		resourceUtilizationPercentGauge,
+		resourceAlertLevelGauge,
+		poolAcquiresCounter,
+		poolReleasesCounter,
+		poolExhaustedCounter,
+		poolWaitTimeHistogram,
+		eventChannelDepthGauge,
+		bpfMapUtilizationGauge,
+		redisLatencyHistogram,
+		memcachedLatencyHistogram,
+		fastcgiLatencyHistogram,
+		grpcLatencyHistogram,
+		kafkaLatencyHistogram,
+		kafkaBytesCounter,
+		profilingGoroutinesGauge,
+		profilingAutoTriggersTotal,
+		profilingFetchErrorsTotal,
+	}
+}
 
-	prometheus.MustRegister(rttHistogram)
-	prometheus.MustRegister(latencyHistogram)
-	prometheus.MustRegister(rttGauge)
-	prometheus.MustRegister(latencyGauge)
-	prometheus.MustRegister(dnsHistogram)
-	prometheus.MustRegister(fsHistogram)
-	prometheus.MustRegister(cpuHistogram)
-	prometheus.MustRegister(dnsGauge)
-	prometheus.MustRegister(fsGauge)
-	prometheus.MustRegister(cpuGauge)
-	prometheus.MustRegister(networkBytesCounter)
-	prometheus.MustRegister(filesystemBytesCounter)
-	prometheus.MustRegister(ringBufferDropsCounter)
-	prometheus.MustRegister(dnsDropsCounter)
-	prometheus.MustRegister(filteredEventDropsCounter)
-	prometheus.MustRegister(teeAuxDropsCounter)
-	prometheus.MustRegister(processCacheHitsCounter)
-	prometheus.MustRegister(processCacheMissesCounter)
-	prometheus.MustRegister(pidCacheHitsCounter)
-	prometheus.MustRegister(pidCacheMissesCounter)
-	prometheus.MustRegister(eventProcessingLatencyHistogram)
-	prometheus.MustRegister(errorRateCounter)
-	prometheus.MustRegister(attributionCounter)
-	prometheus.MustRegister(attributionPidReuseCounter)
-	prometheus.MustRegister(tlsGauge)
-	prometheus.MustRegister(tlsHistogram)
-	prometheus.MustRegister(tlsHandshakesCounter)
-	prometheus.MustRegister(resourceLimitBytesGauge)
-	prometheus.MustRegister(resourceUsageBytesGauge)
-	prometheus.MustRegister(resourceUtilizationPercentGauge)
-	prometheus.MustRegister(resourceAlertLevelGauge)
-	prometheus.MustRegister(poolAcquiresCounter)
-	prometheus.MustRegister(poolReleasesCounter)
-	prometheus.MustRegister(poolExhaustedCounter)
-	prometheus.MustRegister(poolWaitTimeHistogram)
-	prometheus.MustRegister(eventChannelDepthGauge)
-	prometheus.MustRegister(bpfMapUtilizationGauge)
-	prometheus.MustRegister(redisLatencyHistogram)
-	prometheus.MustRegister(memcachedLatencyHistogram)
-	prometheus.MustRegister(fastcgiLatencyHistogram)
-	prometheus.MustRegister(grpcLatencyHistogram)
-	prometheus.MustRegister(kafkaLatencyHistogram)
-	prometheus.MustRegister(kafkaBytesCounter)
-	prometheus.MustRegister(profilingGoroutinesGauge)
-	prometheus.MustRegister(profilingAutoTriggersTotal)
-	prometheus.MustRegister(profilingFetchErrorsTotal)
+func init() {
+	for _, c := range allCollectors() {
+		prometheus.MustRegister(c)
+	}
 }
 
 // RecordProfilingGoroutines records goroutine counts from the last pprof fetch.

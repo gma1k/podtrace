@@ -56,6 +56,7 @@ Three artifacts version on three different cadences:
 | Container image | Mirrors binary tag | `ghcr.io/gma1k/podtrace:vX.Y.Z` (when published) | Same as binary |
 | Helm chart | Semver, independent | `Chart.yaml.version` | Bumps per chart change; `appVersion` always tracks the binary |
 | CRDs (`podtrace.io/vN`) | Kubernetes API conventions | Bumped only on breaking schema change | Independent of binary version |
+| Exported metric surface | Coupled to the binary tag | Snapshot at `internal/metricsexporter/testdata/metric-surface.txt` | Minors may rename or relabel; patches may not |
 
 ### Pre-1.0 (`v0.x.y`) — current
 
@@ -70,6 +71,52 @@ While we are at `v0.x`:
   not.
 - Helm chart values: same rule. Minors may rename or restructure values;
   patches will not.
+- Exported metric names and label keys: same rule. What exactly is covered,
+  and what is deliberately excluded, is defined in [Metrics
+  surface](#metrics-surface) below.
+
+### Metrics surface
+
+Podtrace exports two Prometheus surfaces, and only one of them is a promise.
+
+**Contractual — workload metrics.** Names and label *keys* for metrics derived
+from observed traffic. These follow the rule above: a minor release may rename
+or relabel them with a `### Breaking` entry in [CHANGELOG.md](CHANGELOG.md), a
+patch release may not. Label *values* are not contractual, a cardinality
+limiter may replace a value with a bounded placeholder at any time, which is
+the point of having one.
+
+**Not contractual — collector internals.** Metrics describing podtrace's own
+health: ring-buffer and filter drops, cache hit rates, event-processing
+latency, channel depth, BPF map utilization. These track internal structure
+directly, so freezing them would freeze refactoring. They may change in any
+release, including a patch, and are listed separately in
+[docs/metrics.md](docs/metrics.md) under *Agent and collector internals*.
+
+Outside the promise for both surfaces:
+
+- **Help text.** Wording may change freely.
+- **Histogram bucket boundaries.** Bucket layout is a resolution choice, not
+  an interface, and native histograms make it dynamic by design. Queries
+  should use `histogram_quantile` rather than depend on specific `le` values.
+- **Whether a metric is populated.** A metric may exist and stay at zero when
+  the probe feeding it is unavailable on a given kernel. See
+  [docs/compatibility.md](docs/compatibility.md).
+
+Enforcement is mechanical rather than editorial, in the same spirit as the
+`v1beta1` schema gate below. Every exported metric name and its label keys are
+recorded in a committed snapshot at
+`internal/metricsexporter/testdata/metric-surface.txt`. Three tests fail on
+drift: one when the exported surface diverges from the snapshot, and two when
+[docs/metrics.md](docs/metrics.md) disagrees with the snapshot about names or
+about labels. Changing the surface therefore requires regenerating the
+snapshot in the same commit, which puts the change in the diff where review
+can see it.
+
+Names use two schemes concurrently: native `podtrace_*` names for every
+metric, plus OpenTelemetry semantic-convention names where a convention
+exists. Both are contractual once emitted. The reasoning, and the cardinality
+cost it carries, are in [docs/metrics.md](docs/metrics.md#naming).
 
 ### How releases get versioned (pre-1.0)
 
@@ -114,7 +161,8 @@ The repository tags `v1.0.0` when:
    months.
 2. CLI flag surface has been stable for ≥6 months.
 3. Helm chart values have been stable for ≥6 months.
-4. A formal API deprecation policy is in place. Satisfied by
+4. The contractual metrics surface has been stable for ≥6 months.
+5. A formal API deprecation policy is in place. Satisfied by
    [docs/api-versioning.md](docs/api-versioning.md), which adopts the
    upstream [Kubernetes deprecation
    policy](https://kubernetes.io/docs/reference/using-api/deprecation-policy/)
