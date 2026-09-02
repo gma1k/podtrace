@@ -351,11 +351,14 @@ envtest:
 	  $(GO) test -tags=envtest -count=1 -timeout 300s \
 	    ./api/v1alpha1/... ./internal/operator/... ./internal/agent/...
 
-GOLANGCI_LINT_VERSION ?= 2.13.0
+GOLANGCI_LINT_VERSION ?= 2.13.2
 GOLANGCI_LINT ?= bin/golangci-lint
 
-$(GOLANGCI_LINT):
+GOLANGCI_LINT_STAMP := bin/.golangci-lint-$(GOLANGCI_LINT_VERSION).stamp
+
+$(GOLANGCI_LINT_STAMP):
 	@mkdir -p $(dir $(GOLANGCI_LINT))
+	@rm -f bin/.golangci-lint-*.stamp
 	@tmp=$$(mktemp -d) && \
 	os=$$($(GO) env GOOS) && arch=$$($(GO) env GOARCH) && \
 	pkg="golangci-lint-$(GOLANGCI_LINT_VERSION)-$$os-$$arch" && \
@@ -368,8 +371,9 @@ $(GOLANGCI_LINT):
 	mv "$$tmp/$$pkg/golangci-lint" $(GOLANGCI_LINT) && \
 	rm -rf $$tmp && \
 	$(GOLANGCI_LINT) --version
+	@touch $@
 
-lint: $(GOLANGCI_LINT)
+lint: $(GOLANGCI_LINT_STAMP)
 	$(GOLANGCI_LINT) run ./...
 
 lint-version:

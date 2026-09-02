@@ -395,7 +395,7 @@ You should see usage information.
 
 **Error: "Go version too old"**
 - Upgrade Go to 1.27+, or set `GOTOOLCHAIN=auto` so `go` downloads the
-  exact toolchain (`go 1.27.0` per `go.mod`) on demand.
+  exact toolchain (`go 1.27.1` per `go.mod`) on demand.
 - The Makefile will show upgrade instructions
 
 **Error: "permission denied" when attaching probes**

@@ -2,11 +2,63 @@
 
 ## Overview
 
-Podtrace exposes Prometheus metrics for integration with monitoring systems like Prometheus and Grafana.
+Podtrace exposes Prometheus metrics for integration with monitoring systems
+like Prometheus and Grafana.
+
+This page documents the **diagnostic** metrics surface: the endpoint the CLI
+opens behind `--metrics` for the duration of one tracing run. It is scoped to
+the pods that run is targeting, it lives and dies with the process, and its
+labels are shaped for reading a single investigation, `process_name` and
+`target_pod` are useful over sixty seconds and expensive forever.
+
+The **continuous** surface, exposed by the always-on agent and intended for a
+permanent Prometheus scrape, is a separate surface with a different label
+model. It is not yet implemented; when it lands it will be documented
+separately rather than by extending the tables below. Nothing on this page
+changes as part of that work.
+
+## Surface stability
+
+Metric names and label keys are a compatibility surface, governed by the same
+rule as CLI flags and Helm values: **minor releases may rename or restructure
+them, patch releases will not.** See the *Metrics surface* section of
+[STABILITY.md](../STABILITY.md) for the full statement, including which parts
+carry no promise.
+
+The authoritative inventory is not this page — it is
+[`internal/metricsexporter/testdata/metric-surface.txt`](../internal/metricsexporter/testdata/metric-surface.txt),
+a committed snapshot of every metric name and its label keys. A change to the
+exported surface fails `TestMetricSurfaceMatchesSnapshot` until the snapshot is
+regenerated, and `TestDocumentedMetricsMatchSnapshot` fails if this page and
+the snapshot disagree. Both exist so that surface drift is caught mechanically
+rather than by review.
+
+## Naming
+
+Two naming schemes coexist, deliberately:
+
+- **`podtrace_*`** — the native names. Every metric has one. The names on this
+  page are all of this form and none of them are going away.
+- **OpenTelemetry semantic conventions** — `http.server.request.duration`,
+  `rpc.server.duration`, `db.client.operation.duration` and friends. The
+  continuous surface will emit these *in addition to* the native names, so
+  that stock Grafana, Datadog and Honeycomb dashboards work against podtrace
+  with no configuration.
+
+Dual emission is a deliberate trade: it doubles the series each covered metric
+produces, and the continuous surface's cardinality budget is sized for that
+from the outset rather than discovering it in production.
+
+Semantic conventions only cover protocols the OpenTelemetry project has
+defined conventions for. Podtrace's distinguishing protocol work — HTTP/3 with
+QPACK, FastCGI, rustls, Kafka internals — has no convention to follow, so
+those metrics are `podtrace_*` only. That is a gap in the conventions, not in
+podtrace, and where a convention appears later podtrace adopts it additively.
 
 ## Quick Reference
 
-All metrics are exported per process and per event type.
+Workload metrics, derived from observed traffic. These are the contractual
+surface.
 
 | Metric | Description |
 |---|---|
@@ -29,9 +81,7 @@ All metrics are exported per process and per event type.
 | `podtrace_pool_acquires_total` | Total connection pool acquires |
 | `podtrace_pool_releases_total` | Total connection pool releases |
 | `podtrace_pool_exhausted_total` | Total pool exhaustion events |
-| `podtrace_pool_wait_time_seconds` | Histogram of pool wait times |
-| `podtrace_pool_connections` | Current number of connections in pool |
-| `podtrace_pool_utilization` | Pool utilization percentage |
+| `podtrace_pool_wait_seconds` | Histogram of pool wait times |
 | `podtrace_redis_latency_seconds` | Distribution of Redis command latencies |
 | `podtrace_memcached_latency_seconds` | Distribution of Memcached operation latencies |
 | `podtrace_fastcgi_latency_seconds` | Distribution of FastCGI request latencies |
@@ -40,6 +90,46 @@ All metrics are exported per process and per event type.
 | `podtrace_kafka_bytes_total` | Total bytes in Kafka produce/consume operations |
 | `podtrace_attribution_total` | Process-identity attribution outcome per event, labeled `source` (`event_comm`/`correlator`/`proc_fallback`/`none`) and `event` (`dns`/`quic`/`other`) |
 | `podtrace_attribution_pid_reuse_suspected_total` | Attribution lookups rejected on a cgroup mismatch (suspected pid reuse) |
+
+### Agent and collector internals
+
+These describe podtrace's own health, not the workload. They track internal
+structure and **carry no compatibility promise** — they may be renamed,
+relabelled or removed in any release, including a patch. Alert on them for
+operating podtrace, but do not build a product surface on them.
+
+| Metric | Description |
+|---|---|
+| `podtrace_ring_buffer_drops_total` | Events lost because the BPF ring buffer was full |
+| `podtrace_dns_drops_total` | DNS events dropped in the kernel |
+| `podtrace_filtered_event_drops_total` | Events discarded by the userspace filter |
+| `podtrace_event_tee_aux_drops_total` | Events dropped by the auxiliary tee sink |
+| `podtrace_event_processing_latency_seconds` | Time to process one event in userspace |
+| `podtrace_event_channel_depth` | Current depth of each internal event channel, labeled `channel` |
+| `podtrace_bpf_map_utilization_ratio` | Fill ratio per BPF map, labeled `map` |
+| `podtrace_errors_total` | Errors seen while processing events, labeled `event_type` and `error_code` |
+| `podtrace_process_cache_hits_total` | Process-metadata cache hits |
+| `podtrace_process_cache_misses_total` | Process-metadata cache misses |
+| `podtrace_pid_cache_hits_total` | PID-lookup cache hits |
+| `podtrace_pid_cache_misses_total` | PID-lookup cache misses |
+
+### TLS handshake metrics
+
+| Metric | Description |
+|---|---|
+| `podtrace_tls_handshakes_total` | TLS handshakes observed, labeled `type` |
+| `podtrace_tls_handshake_latency_seconds` | Distribution of TLS handshake durations |
+| `podtrace_tls_handshake_latency_latest_seconds` | Most recent TLS handshake duration |
+
+### Profiling metrics
+
+Emitted only when profiling is enabled; see [profiling.md](profiling.md).
+
+| Metric | Description |
+|---|---|
+| `podtrace_profiling_goroutines` | Goroutine count from the last pprof fetch, labeled `pod_ip` and `state` |
+| `podtrace_profiling_auto_triggers_total` | Profile fetches started by an automatic trigger |
+| `podtrace_profiling_fetch_errors_total` | Failed pprof fetches, labeled `pod_ip` and `profile_type` |
 
 ## Enabling Metrics
 
@@ -71,12 +161,12 @@ All metrics are labeled with:
 **`podtrace_rtt_seconds`** (Histogram)
 - Description: Distribution of TCP RTT (Round-Trip Time) measurements
 - Buckets: Exponential (0.0001s to ~52s)
-- Labels: `type`, `process_name`
+- Labels: `namespace`, `process_name`, `target_pod`, `target_service`, `type`
 - Source: TCP send/receive operations
 
 **`podtrace_rtt_latest_seconds`** (Gauge)
 - Description: Most recent TCP RTT measurement
-- Labels: `type`, `process_name`
+- Labels: `namespace`, `process_name`, `target_pod`, `target_service`, `type`
 - Updated: On each TCP send/receive event
 
 ### Latency Metrics
@@ -84,110 +174,102 @@ All metrics are labeled with:
 **`podtrace_latency_seconds`** (Histogram)
 - Description: Distribution of TCP connection and operation latencies
 - Buckets: Exponential (0.0001s to ~52s)
-- Labels: `type`, `process_name`
+- Labels: `namespace`, `process_name`, `target_pod`, `target_service`, `type`
 - Source: TCP connections
 
 **`podtrace_latency_latest_seconds`** (Gauge)
 - Description: Most recent TCP latency measurement
-- Labels: `type`, `process_name`
+- Labels: `namespace`, `process_name`, `target_pod`, `target_service`, `type`
 - Updated: On each connection event
 
 ### DNS Metrics
 
 **`podtrace_dns_latency_seconds_gauge`** (Gauge)
 - Description: Latest DNS query latency per process
-- Labels: `type`, `process_name`
+- Labels: `namespace`, `process_name`, `type`
 - Updated: On each DNS lookup
 
 **`podtrace_dns_latency_seconds_histogram`** (Histogram)
 - Description: Distribution of DNS query latencies
 - Buckets: Exponential (0.0001s to ~52s)
-- Labels: `type`, `process_name`
+- Labels: `namespace`, `process_name`, `type`
 - Source: DNS lookups
 
 ### File System Metrics
 
 **`podtrace_fs_latency_seconds_gauge`** (Gauge)
 - Description: Latest file system operation latency
-- Labels: `type` (write/fsync), `process_name`
+- Labels: `namespace`, `process_name`, `type`
 - Updated: On each file system operation
 
 **`podtrace_fs_latency_seconds_histogram`** (Histogram)
 - Description: Distribution of file system operation latencies
 - Buckets: Exponential (0.0001s to ~52s)
-- Labels: `type`, `process_name`
+- Labels: `namespace`, `process_name`, `type`
 - Source: File read/write/fsync operations
 
 ### CPU Metrics
 
 **`podtrace_cpu_block_seconds_gauge`** (Gauge)
 - Description: Latest CPU block time (thread blocking duration)
-- Labels: `type`, `process_name`
+- Labels: `namespace`, `process_name`, `type`
 - Updated: On each scheduling event
 
 **`podtrace_cpu_block_seconds_histogram`** (Histogram)
 - Description: Distribution of CPU block times
 - Buckets: Exponential (0.0001s to ~52s)
-- Labels: `type`, `process_name`
+- Labels: `namespace`, `process_name`, `type`
 - Source: CPU scheduling events (sched_switch)
 
 ### Connection Pool Metrics
 
 **`podtrace_pool_acquires_total`** (Counter)
 - Description: Total number of connection pool acquire attempts
-- Labels: `type`, `process_name`
+- Labels: `namespace`, `pool_id`, `process_name`
 
 **`podtrace_pool_releases_total`** (Counter)
 - Description: Total number of connections returned to the pool
-- Labels: `type`, `process_name`
+- Labels: `namespace`, `pool_id`, `process_name`
 
 **`podtrace_pool_exhausted_total`** (Counter)
 - Description: Total pool exhaustion events (acquire failed — pool full)
-- Labels: `type`, `process_name`
+- Labels: `namespace`, `pool_id`, `process_name`
 
-**`podtrace_pool_wait_time_seconds`** (Histogram)
+**`podtrace_pool_wait_seconds`** (Histogram)
 - Description: Time spent waiting to acquire a connection from the pool
 - Buckets: Exponential (0.0001s to ~52s)
-- Labels: `type`, `process_name`
-
-**`podtrace_pool_connections`** (Gauge)
-- Description: Current number of active connections in the pool
-- Labels: `type`, `process_name`
-
-**`podtrace_pool_utilization`** (Gauge)
-- Description: Connection pool utilization as a percentage
-- Labels: `type`, `process_name`
+- Labels: `namespace`, `pool_id`, `process_name`
 
 ### Language-Runtime Adapter Metrics
 
 **`podtrace_redis_latency_seconds`** (Histogram)
 - Description: Distribution of Redis command latencies (hiredis uprobes)
-- Labels: `type`, `process_name`
+- Labels: `command`, `namespace`, `process_name`
 - Source: `redisCommand` / `redisCommandArgv` uprobes
 
 **`podtrace_memcached_latency_seconds`** (Histogram)
 - Description: Distribution of Memcached operation latencies (libmemcached uprobes)
-- Labels: `type`, `process_name`
+- Labels: `namespace`, `operation`, `process_name`
 - Source: `memcached_get`, `memcached_set`, `memcached_delete` uprobes
 
 **`podtrace_fastcgi_latency_seconds`** (Histogram)
 - Description: Distribution of FastCGI request latencies (unix-socket kprobes, BTF-only)
-- Labels: `type`, `process_name`
+- Labels: `method`, `namespace`, `process_name`
 - Source: FastCGI request/response kprobes
 
 **`podtrace_grpc_latency_seconds`** (Histogram)
 - Description: Distribution of gRPC method call latencies
-- Labels: `type`, `process_name`
+- Labels: `method`, `namespace`, `process_name`
 - Source: `tcp_sendmsg` kprobe filtered by `PODTRACE_GRPC_PORT` (default 50051)
 
 **`podtrace_kafka_latency_seconds`** (Histogram)
 - Description: Distribution of Kafka produce and consume latencies (librdkafka uprobes)
-- Labels: `type`, `process_name`, `operation` (produce or fetch)
+- Labels: `namespace`, `operation`, `process_name`, `topic`
 - Source: `rd_kafka_produce`, `rd_kafka_consumer_poll` uprobes
 
 **`podtrace_kafka_bytes_total`** (Counter)
 - Description: Total bytes in Kafka produce/consume operations
-- Labels: `type`, `process_name`, `operation` (produce or fetch)
+- Labels: `namespace`, `operation`, `process_name`, `topic`
 - Use with `rate()` to get bytes/second throughput
 
 ## Prometheus Configuration
@@ -296,12 +378,12 @@ histogram_quantile(0.99,
 
 **`podtrace_network_bytes_total`** (Counter)
 - Description: Total bytes transferred over network (TCP/UDP send/receive)
-- Labels: `type`, `process_name`, `direction` (send or recv)
+- Labels: `direction`, `namespace`, `process_name`, `target_pod`, `target_service`, `type`
 - Use with `rate()` to get bytes/second
 
 **`podtrace_filesystem_bytes_total`** (Counter)
 - Description: Total bytes transferred via filesystem operations (read/write)
-- Labels: `type`, `process_name`, `operation` (read or write)
+- Labels: `namespace`, `operation`, `process_name`, `type`
 - Use with `rate()` to get bytes/second
 
 ### I/O Bandwidth Query Examples
@@ -371,23 +453,23 @@ The metrics endpoint includes:
 
 **`podtrace_resource_limit_bytes`** (Gauge)
 - Description: Resource limit in bytes (or CPU quota in microseconds)
-- Labels: `resource_type` (cpu, memory, io), `namespace`
+- Labels: `namespace`, `resource_type`
 - Updated: When resource limits are read from cgroup files
 
 **`podtrace_resource_usage_bytes`** (Gauge)
 - Description: Current resource usage in bytes (or CPU time in microseconds)
-- Labels: `resource_type` (cpu, memory, io), `namespace`
+- Labels: `namespace`, `resource_type`
 - Updated: Periodically (every 5 seconds by default)
 
 **`podtrace_resource_utilization_percent`** (Gauge)
 - Description: Resource utilization percentage (usage/limit * 100)
-- Labels: `resource_type` (cpu, memory, io), `namespace`
+- Labels: `namespace`, `resource_type`
 - Range: 0-100 (values >100 indicate limit exceeded)
 - Updated: Periodically (every 5 seconds by default)
 
 **`podtrace_resource_alert_level`** (Gauge)
 - Description: Resource alert level: 0=none, 1=warning (80%), 2=critical (90%), 3=emergency (95%)
-- Labels: `resource_type` (cpu, memory, io), `namespace`
+- Labels: `namespace`, `resource_type`
 - Updated: When utilization crosses thresholds
 
 ### Resource Limit Query Examples
