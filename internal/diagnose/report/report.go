@@ -487,15 +487,8 @@ func buildStatusMap(httpRespEvents []*events.Event) map[string]int {
 // responseStatus extracts the 3-digit status code from a response event. The
 // code is carried on the first line of Details.
 func responseStatus(e *events.Event) string {
-	first := e.Details
-	if i := strings.IndexByte(first, '\n'); i >= 0 {
-		first = first[:i]
-	}
-	if n, err := strconv.Atoi(strings.TrimSpace(first)); err == nil && n >= 100 && n <= 599 {
-		return strconv.Itoa(n)
-	}
-	if e.Error >= 100 && e.Error <= 599 {
-		return strconv.Itoa(int(e.Error))
+	if code, ok := e.ResponseStatus(); ok {
+		return strconv.Itoa(code)
 	}
 	return ""
 }

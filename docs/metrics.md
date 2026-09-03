@@ -13,9 +13,9 @@ labels are shaped for reading a single investigation, `process_name` and
 
 The **continuous** surface, exposed by the always-on agent and intended for a
 permanent Prometheus scrape, is a separate surface with a different label
-model. It is not yet implemented; when it lands it will be documented
-separately rather than by extending the tables below. Nothing on this page
-changes as part of that work.
+model. It is documented in [continuous-metrics.md](continuous-metrics.md)
+rather than by extending the tables below, and nothing on this page changes
+as it grows.
 
 ## Surface stability
 

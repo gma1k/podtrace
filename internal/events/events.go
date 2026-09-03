@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -181,6 +183,22 @@ func (e *Event) HTTPScheme() string {
 		return "https"
 	}
 	return "http"
+}
+
+// ResponseStatus returns the HTTP status code carried by an L7 response
+// event, and whether one was found.
+func (e *Event) ResponseStatus() (int, bool) {
+	first := e.Details
+	if i := strings.IndexByte(first, '\n'); i >= 0 {
+		first = first[:i]
+	}
+	if n, err := strconv.Atoi(strings.TrimSpace(first)); err == nil && n >= 100 && n <= 599 {
+		return n, true
+	}
+	if e.Error >= 100 && e.Error <= 599 {
+		return int(e.Error), true
+	}
+	return 0, false
 }
 
 // HTTPProtoLabel is the protocol label for an HTTP event, reflecting its

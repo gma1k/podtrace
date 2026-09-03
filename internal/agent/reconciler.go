@@ -53,6 +53,8 @@ type AgentReconciler struct {
 
 	CategoryGate func(categories []string) error
 
+	MetricsPlane MetricsPlaneConfig
+
 	exporterCacheMu sync.Mutex
 	exporterCache   map[CRKey]cachedExporter
 	pendingClose    []tracer.Exporter
@@ -232,7 +234,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	r.closeDisplacedExporters()
 
 	if r.CategoryGate != nil {
-		categories := unionCategoriesFromRules(rules)
+		categories := unionCategories(unionCategoriesFromRules(rules), r.MetricsPlane)
 		if err := r.CategoryGate(categories); err != nil {
 			logger.V(1).Info("category gate apply failed",
 				"error", err, "categories", categories)
@@ -240,6 +242,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	targets := buildTargetSet(rules, localPods, podEntries)
+	targets = expandTargetsForMetricsPlane(targets, podEntries, r.MetricsPlane)
 	select {
 	case r.TargetsCh <- targets:
 	default:
@@ -266,12 +269,15 @@ func (r *AgentReconciler) enqueueAllPodTraces(ctx context.Context, _ client.Obje
 	if err := r.List(ctx, &list); err != nil {
 		return nil
 	}
-	out := make([]reconcile.Request, 0, len(list.Items))
+	out := make([]reconcile.Request, 0, len(list.Items)+1)
 	for _, pt := range list.Items {
 		out = append(out, reconcile.Request{NamespacedName: types.NamespacedName{
 			Namespace: pt.Namespace,
 			Name:      pt.Name,
 		}})
+	}
+	if r.MetricsPlane.Enabled {
+		out = append(out, metricsPlaneRequest)
 	}
 	return out
 }

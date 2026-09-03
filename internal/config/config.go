@@ -145,6 +145,37 @@ var (
 	ReportGenerationTimeout = getDurationEnvOrDefault("PODTRACE_REPORT_GENERATION_TIMEOUT", DefaultReportGenerationTimeout)
 )
 
+const DefaultWorkloadMetricsBudget = 40000
+
+var (
+	WorkloadMetricsEnabled          = getBoolEnvOrDefault("PODTRACE_WORKLOAD_METRICS", false)
+	WorkloadMetricsNativeHistograms = getBoolEnvOrDefault("PODTRACE_WORKLOAD_METRICS_NATIVE_HISTOGRAMS", true)
+	WorkloadMetricsBudget           = getIntEnvOrDefault("PODTRACE_WORKLOAD_METRICS_SERIES_BUDGET", DefaultWorkloadMetricsBudget)
+	WorkloadMetricsPodLabel         = getBoolEnvOrDefault("PODTRACE_WORKLOAD_METRICS_POD_LABEL", false)
+	WorkloadMetricsProcessLabel     = getBoolEnvOrDefault("PODTRACE_WORKLOAD_METRICS_PROCESS_LABEL", false)
+
+	WorkloadMetricsSeriesTTL = getDurationEnvOrDefault("PODTRACE_WORKLOAD_METRICS_SERIES_TTL", 15*time.Minute)
+
+	WorkloadMetricsReapInterval = getDurationEnvOrDefault("PODTRACE_WORKLOAD_METRICS_REAP_INTERVAL", time.Minute)
+)
+
+var WorkloadMetricsExcludedNamespaces = splitCommaEnv("PODTRACE_WORKLOAD_METRICS_EXCLUDE_NAMESPACES")
+
+func splitCommaEnv(key string) []string {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 const (
 	DefaultPodResolveTimeout       = 30 * time.Second
 	DefaultMetricsReadTimeout      = 5 * time.Second

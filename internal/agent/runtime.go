@@ -30,6 +30,7 @@ import (
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/ebpf/probes"
 	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/workloadmetrics"
 	"github.com/gma1k/podtrace/pkg/tracer"
 )
 
@@ -144,7 +145,10 @@ func Run(ctx context.Context, opts Options) error {
 		metrics.BackendDegraded.WithLabelValues(reason).Set(1)
 	}
 
-	exporters := []tracer.Exporter{router}
+	exporters, metricsSink, expErr := buildExporters(router, metrics, enricher, logger)
+	if expErr != nil {
+		return expErr
+	}
 	engine, err := tracer.NewEngine(backend, exporters, tracer.Config{
 		Observer: metrics.EngineObserver(),
 	})
@@ -163,6 +167,10 @@ func Run(ctx context.Context, opts Options) error {
 		Metrics:         metrics,
 		Enricher:        enricher,
 		CategoryGate:    makeCategoryGate(backend),
+		MetricsPlane: MetricsPlaneConfig{
+			Enabled:           config.WorkloadMetricsEnabled,
+			ExcludeNamespaces: config.WorkloadMetricsExcludedNamespaces,
+		},
 	}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("setup reconciler: %w", err)
@@ -186,6 +194,7 @@ func Run(ctx context.Context, opts Options) error {
 	g.Go(func() error { return writer.Run(gctx) })
 	g.Go(func() error { return probeSrv.Run(gctx) })
 	g.Go(func() error { return serveMetrics(gctx, opts.MetricsAddr, metrics, logger) })
+	g.Go(func() error { return reapWorkloadMetrics(gctx, metricsSink, logger) })
 
 	g.Go(func() error {
 		if !mgr.GetCache().WaitForCacheSync(gctx) {
@@ -273,6 +282,66 @@ func serveMetrics(ctx context.Context, addr string, metrics *Metrics, logger log
 		return err
 	}
 	return nil
+}
+
+// buildExporters assembles the engine's fan-out list.
+func buildExporters(router *Router, metrics *Metrics, enricher *PodEnricher, logger logr.Logger) ([]tracer.Exporter, *workloadmetrics.Sink, error) {
+	exporters := []tracer.Exporter{router}
+
+	if !config.WorkloadMetricsEnabled {
+		return exporters, nil, nil
+	}
+
+	sink, err := workloadmetrics.New(metrics.Registerer(), workloadmetrics.Options{
+		SeriesBudget:        config.WorkloadMetricsBudget,
+		NativeHistograms:    config.WorkloadMetricsNativeHistograms,
+		IncludePodLabel:     config.WorkloadMetricsPodLabel,
+		IncludeProcessLabel: config.WorkloadMetricsProcessLabel,
+		Lookup:              enricherLookup(enricher),
+		OnBudgetExhausted: func(budget int) {
+			logger.Error(nil, "continuous metrics series budget exhausted; new series are being refused",
+				"seriesBudget", budget,
+				"remedy", "raise TracerConfig.spec.agent.metrics.seriesBudget or add excludeNamespaces",
+				"metric", "podtrace_workload_metrics_series_dropped_total")
+		},
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("build workload metrics plane: %w", err)
+	}
+
+	logger.Info("continuous workload metrics enabled",
+		"seriesBudget", config.WorkloadMetricsBudget,
+		"nativeHistograms", config.WorkloadMetricsNativeHistograms)
+	return append(exporters, sink), sink, nil
+}
+
+// reapWorkloadMetrics periodically drops series whose workload stopped
+// being observed, so the per-node budget is spent on what is running
+// rather than on what used to run.
+func reapWorkloadMetrics(ctx context.Context, sink *workloadmetrics.Sink, logger logr.Logger) error {
+	if sink == nil {
+		return nil
+	}
+	ticker := time.NewTicker(config.WorkloadMetricsReapInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if n := sink.Reap(config.WorkloadMetricsSeriesTTL); n > 0 {
+				logger.V(1).Info("reaped idle workload metric series",
+					"removed", n, "idleFor", config.WorkloadMetricsSeriesTTL)
+			}
+		}
+	}
+}
+
+func enricherLookup(e *PodEnricher) func(uint64) (events.K8sMetadata, bool) {
+	if e == nil {
+		return nil
+	}
+	return e.Lookup
 }
 
 // makeCategoryGate returns a closure suitable for

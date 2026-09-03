@@ -123,6 +123,23 @@ data:
           {{- end }}
           allowInsecureWebhook: {{ .Values.agent.alerting.allowInsecureWebhook }}
         {{- end }}
+        {{- if .Values.agent.metrics.enabled }}
+        metrics:
+          enabled: true
+          {{- with .Values.agent.metrics.excludeNamespaces }}
+          excludeNamespaces:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.agent.metrics.seriesBudget }}
+          seriesBudget: {{ .Values.agent.metrics.seriesBudget }}
+          {{- end }}
+          nativeHistograms: {{ .Values.agent.metrics.nativeHistograms }}
+          {{- if or .Values.agent.metrics.labels.pod .Values.agent.metrics.labels.process }}
+          labels:
+            pod: {{ .Values.agent.metrics.labels.pod }}
+            process: {{ .Values.agent.metrics.labels.process }}
+          {{- end }}
+        {{- end }}
       session:
         {{- with .Values.session.resources }}
         resources:

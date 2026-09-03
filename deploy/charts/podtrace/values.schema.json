@@ -49,6 +49,43 @@
                 "usdt": {
                     "type": "boolean"
                 },
+                "metrics": {
+                    "type": "object",
+                    "description": "Continuous metrics plane. See docs/continuous-metrics.md.",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "excludeNamespaces": {
+                            "type": "array",
+                            "maxItems": 64,
+                            "items": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+                            }
+                        },
+                        "seriesBudget": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 2000000,
+                            "description": "0 uses the built-in default."
+                        },
+                        "nativeHistograms": {
+                            "type": "boolean"
+                        },
+                        "labels": {
+                            "type": "object",
+                            "properties": {
+                                "pod": {
+                                    "type": "boolean"
+                                },
+                                "process": {
+                                    "type": "boolean"
+                                }
+                            }
+                        }
+                    }
+                },
                 "resources": {
                     "type": "object",
                     "properties": {

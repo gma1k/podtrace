@@ -1,0 +1,301 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: metrics-plane
+spec:
+  description: |
+    Property tested: the continuous metrics plane serves workload metrics
+    for every pod on the node, with no PodTrace authored, purely because
+    TracerConfig.spec.agent.metrics.enabled is true.
+
+    This is the coverage-by-default claim, and the only layer that can
+    check it. Unit tests cannot: they cannot show that the reconciler
+    actually fires without a PodTrace CR (its controller is built
+    For(&PodTrace{}), so a pod event maps through the PodTrace list and
+    yields nothing when that list is empty), nor that the agent attaches
+    to pods no CR selected, nor that identity survives the trip from
+    cgroup through the enricher into a label.
+
+    Steps:
+      1. Enable the plane on the TracerConfig, excluding one namespace.
+      2. Run a workload that generates traffic in both namespaces.
+      3. Scrape an agent's /metrics and assert:
+         - workload series exist for the app namespace
+         - they carry namespace/workload/workload_kind/container
+         - workload= is the Deployment name, not the pod name
+         - no pod or process label appears (both are opt-in)
+         - nothing carries the excluded namespace
+         - events are being attributed, not counted as unattributed
+      4. Turn the plane off and confirm the surface goes away.
+  timeouts:
+    apply: 60s
+    assert: 120s
+    exec: 600s
+    cleanup: 180s
+    delete: 180s
+  steps:
+    - name: enable-the-plane
+      description: |
+        Patch the chart-rendered TracerConfig rather than applying a new
+        one, so this exercises the same path a `helm upgrade --set
+        agent.metrics.enabled=true` takes.
+      try:
+        - script:
+            content: |
+              set -eu
+
+              for _ in $(seq 1 24); do
+                if kubectl -n podtrace-system get endpoints podtrace-webhook \
+                     -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null | grep -q .; then
+                  if kubectl patch tracerconfig default --type=merge --dry-run=server \
+                       -p '{"metadata":{"annotations":{}}}' >/dev/null 2>&1; then
+                    echo "validating webhook is answering"
+                    break
+                  fi
+                fi
+                sleep 5
+              done
+
+              kubectl patch tracerconfig default --type=merge -p '{
+                "spec": {
+                  "agent": {
+                    "metrics": {
+                      "enabled": true,
+                      "excludeNamespaces": ["metrics-plane-excluded"],
+                      "seriesBudget": 20000
+                    }
+                  }
+                }
+              }'
+              for _ in $(seq 1 60); do
+                desired=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.desiredNumberScheduled}')
+                updated=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.updatedNumberScheduled}')
+                ready=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.numberReady}')
+                if [ -n "${desired}" ] && [ "${updated}" = "${desired}" ] && [ "${ready}" = "${desired}" ]; then
+                  echo "all ${desired} agents updated and ready"
+                  break
+                fi
+                sleep 5
+              done
+              if [ "${updated:-0}" != "${desired:-1}" ] || [ "${ready:-0}" != "${desired:-1}" ]; then
+                echo "FAIL: agents did not converge (updated=${updated:-?} ready=${ready:-?} desired=${desired:-?})"
+                exit 1
+              fi
+
+    - name: agent-carries-the-env
+      description: |
+        The operator must translate the CRD field into agent environment.
+        Asserted separately from the metrics themselves so that a failure
+        here points at the operator rather than at the plane.
+      try:
+        - script:
+            content: |
+              set -eu
+              env=$(kubectl -n podtrace-system get ds podtrace-agent \
+                -o jsonpath='{range .spec.template.spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}')
+
+              fail=0
+              for want in \
+                'PODTRACE_WORKLOAD_METRICS=true' \
+                'PODTRACE_WORKLOAD_METRICS_EXCLUDE_NAMESPACES=metrics-plane-excluded' \
+                'PODTRACE_WORKLOAD_METRICS_SERIES_BUDGET=20000'
+              do
+                if ! printf '%s' "${env}" | grep -qx "${want}"; then
+                  echo "FAIL: agent env missing ${want}"
+                  fail=1
+                fi
+              done
+
+              for unwanted in \
+                'PODTRACE_WORKLOAD_METRICS_POD_LABEL' \
+                'PODTRACE_WORKLOAD_METRICS_PROCESS_LABEL'
+              do
+                if printf '%s' "${env}" | grep -q "^${unwanted}="; then
+                  echo "FAIL: ${unwanted} rendered without being requested"
+                  fail=1
+                fi
+              done
+
+              if [ "${fail}" -ne 0 ]; then
+                echo "--- rendered PODTRACE_WORKLOAD_METRICS* env ---"
+                printf '%s' "${env}" | grep '^PODTRACE_WORKLOAD_METRICS' || echo "(none)"
+                exit 1
+              fi
+              echo "operator rendered the metrics env correctly"
+
+    - name: run-workload
+      try:
+        - apply:
+            file: ./workload.yaml
+        - assert:
+            file: ./assert-workload-ready.yaml
+
+    - name: plane-serves-workload-series
+      description: |
+        Scrapes the agent from a sibling pod, because the agent image is
+        distroless and has no shell to curl itself with. No PodTrace
+        exists at this point — that absence is the point of the test.
+      try:
+        - script:
+            timeout: 300s
+            content: |
+              set -eu
+
+              if [ -n "$(kubectl get podtraces.podtrace.io -A -o name 2>/dev/null)" ]; then
+                echo "FAIL: a PodTrace exists; this test must prove coverage without one"
+                kubectl get podtraces.podtrace.io -A
+                exit 1
+              fi
+
+              scraper=$(kubectl -n metrics-plane-app get pod \
+                -l app=metrics-scraper \
+                -o jsonpath='{.items[0].metadata.name}')
+
+              scrape() {
+                for ip in $(kubectl -n podtrace-system get pod \
+                              -l podtrace.io/component=agent \
+                              -o jsonpath='{range .items[*]}{.status.podIP} {end}'); do
+                  kubectl -n metrics-plane-app exec "${scraper}" -c curl -- \
+                    curl -sS --max-time 10 "http://${ip}:9090/metrics" 2>/dev/null || true
+                done
+              }
+              echo "scraping $(kubectl -n podtrace-system get pod -l podtrace.io/component=agent \
+                --no-headers 2>/dev/null | wc -l) agents via ${scraper}"
+
+              found=""
+              for attempt in $(seq 1 30); do
+                out=$(scrape || true)
+                if printf '%s' "${out}" | grep -q 'workload="shop-checkout"'; then
+                  found="${out}"
+                  echo "shop-checkout series present on attempt ${attempt}"
+                  break
+                fi
+                sleep 5
+              done
+
+              if [ -z "${found}" ]; then
+                echo "FAIL: no workload=shop-checkout series after 150s"
+                echo "--- podtrace_workload_ lines seen ---"
+                scrape | grep 'podtrace_workload_' | head -40 || true
+                echo "--- agent log tails ---"
+                for a in $(kubectl -n podtrace-system get pod -l podtrace.io/component=agent \
+                             -o jsonpath='{range .items[*]}{.metadata.name} {end}'); do
+                  echo "  ---- ${a} ----"
+                  kubectl -n podtrace-system logs "${a}" -c agent --tail=30 || true
+                done
+                exit 1
+              fi
+
+              printf '%s' "${found}" > /tmp/scrape.txt
+
+              fail=0
+
+              if ! grep -q 'workload="shop-checkout"' /tmp/scrape.txt; then
+                echo 'FAIL: no series with workload="shop-checkout"'
+                grep -o 'workload="[^"]*"' /tmp/scrape.txt | sort -u | head
+                fail=1
+              fi
+              if ! grep -q 'workload_kind="Deployment"' /tmp/scrape.txt; then
+                echo 'FAIL: workload_kind is not Deployment; a ReplicaSet owner must resolve through'
+                grep -o 'workload_kind="[^"]*"' /tmp/scrape.txt | sort -u | head
+                fail=1
+              fi
+              if grep -q 'workload="shop-checkout-[a-z0-9]*-[a-z0-9]*"' /tmp/scrape.txt; then
+                echo 'FAIL: workload label carries a pod name; it will churn on every rollout'
+                fail=1
+              fi
+              if ! grep -q 'container="web"' /tmp/scrape.txt; then
+                echo 'FAIL: no container label'
+                fail=1
+              fi
+
+              for banned in 'pod=' 'process=' 'target_pod=' 'process_name='; do
+                if grep 'podtrace_workload_' /tmp/scrape.txt | grep -q "${banned}"; then
+                  echo "FAIL: label ${banned} present without being opted in"
+                  grep 'podtrace_workload_' /tmp/scrape.txt | grep "${banned}" | head -3
+                  fail=1
+                fi
+              done
+
+              if grep 'podtrace_workload_' /tmp/scrape.txt | grep -q 'namespace="metrics-plane-excluded"'; then
+                echo 'FAIL: excluded namespace produced series'
+                grep 'podtrace_workload_' /tmp/scrape.txt | grep 'namespace="metrics-plane-excluded"' | head -3
+                fail=1
+              fi
+
+              if grep -q 'podtrace_workload_.*_latest_seconds' /tmp/scrape.txt; then
+                echo 'FAIL: a latest-value gauge is exposed continuously'
+                fail=1
+              fi
+
+              agg=$(grep '^podtrace_workload_metrics_events_total{outcome="aggregated"}' /tmp/scrape.txt \
+                    | awk '{print $2}' | cut -d. -f1)
+              if [ -z "${agg:-}" ] || [ "${agg}" -le 0 ]; then
+                echo "FAIL: aggregated event count is ${agg:-unset}; the identity join is not working"
+                grep 'podtrace_workload_metrics_events_total' /tmp/scrape.txt || true
+                fail=1
+              fi
+
+              if grep -q '^podtrace_workload_metrics_series_dropped_total' /tmp/scrape.txt; then
+                echo 'FAIL: series were dropped on a workload this small; the budget default is wrong'
+                grep 'podtrace_workload_metrics_series_dropped_total' /tmp/scrape.txt
+                fail=1
+              fi
+
+              echo "--- surface summary ---"
+              grep -o '^podtrace_workload_[a-z0-9_]*' /tmp/scrape.txt | sort -u
+
+              exit "${fail}"
+
+    - name: disabling-removes-the-surface
+      description: |
+        Turning the plane off must stop the surface, so that a cluster
+        which opts out is not left paying for series.
+      try:
+        - script:
+            timeout: 480s
+            content: |
+              set -eu
+              kubectl patch tracerconfig default --type=merge \
+                -p '{"spec":{"agent":{"metrics":{"enabled":false}}}}'
+              for _ in $(seq 1 60); do
+                desired=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.desiredNumberScheduled}')
+                updated=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.updatedNumberScheduled}')
+                ready=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.numberReady}')
+                if [ -n "${desired}" ] && [ "${updated}" = "${desired}" ] && [ "${ready}" = "${desired}" ]; then
+                  echo "all ${desired} agents updated and ready"
+                  break
+                fi
+                sleep 5
+              done
+              if [ "${updated:-0}" != "${desired:-1}" ] || [ "${ready:-0}" != "${desired:-1}" ]; then
+                echo "FAIL: agents did not converge (updated=${updated:-?} ready=${ready:-?} desired=${desired:-?})"
+                exit 1
+              fi
+
+              scraper=$(kubectl -n metrics-plane-app get pod \
+                -l app=metrics-scraper \
+                -o jsonpath='{.items[0].metadata.name}')
+
+              for attempt in $(seq 1 12); do
+                out=""
+                for ip in $(kubectl -n podtrace-system get pod \
+                              -l podtrace.io/component=agent \
+                              -o jsonpath='{range .items[*]}{.status.podIP} {end}'); do
+                  out="${out}$(kubectl -n metrics-plane-app exec "${scraper}" -c curl -- \
+                        curl -sS --max-time 10 "http://${ip}:9090/metrics" 2>/dev/null || true)"
+                done
+                if ! printf '%s' "${out}" | grep -q 'podtrace_workload_'; then
+                  echo "surface gone on attempt ${attempt}"
+                  exit 0
+                fi
+                sleep 5
+              done
+
+              echo "FAIL: podtrace_workload_ series still served after disabling"
+              exit 1
+      finally:
+        - script:
+            content: |
+              kubectl patch tracerconfig default --type=merge \
+                -p '{"spec":{"agent":{"metrics":null}}}' || true
