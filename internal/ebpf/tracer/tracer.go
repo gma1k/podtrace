@@ -593,7 +593,12 @@ func pruneL7ProbesIfNoBPFLoop(spec *ebpf.CollectionSpec) {
 	}
 }
 
-func NewTracer() (*Tracer, error) {
+func NewTracer(tracerOpts ...Option) (*Tracer, error) {
+	var startup tracerOptions
+	for _, apply := range tracerOpts {
+		apply(&startup)
+	}
+
 	if err := setDumpable(); err != nil {
 		logger.Warn("Failed to set dumpable flag", zap.Error(err))
 	}
@@ -686,6 +691,11 @@ func NewTracer() (*Tracer, error) {
 		coll.Close()
 		return nil, err
 	}
+	initiallyDisabled := map[probes.ProbeGroup]struct{}{}
+	if startup.gateAtStartup {
+		initiallyDisabled = gateInitialProbeGroups(probeGroups, startup.initialCategories)
+	}
+
 	var links []link.Link
 	for _, ls := range probeGroups {
 		links = append(links, ls...)
@@ -779,7 +789,7 @@ func NewTracer() (*Tracer, error) {
 		collection:                    coll,
 		links:                         links,
 		probeGroups:                   probeGroups,
-		intentionallyDisabled:         map[probes.ProbeGroup]struct{}{},
+		intentionallyDisabled:         initiallyDisabled,
 		reader:                        rd,
 		h2Reader:                      h2rd,
 		h2Decoder:                     h2dec,
@@ -2646,6 +2656,61 @@ func (t *Tracer) EnableProbeGroup(g probes.ProbeGroup) error {
 
 // probeGroupNeededBy reports whether a group should stay attached
 // given the set of categories currently desired by some active CR.
+// Option configures NewTracer.
+type Option func(*tracerOptions)
+
+type tracerOptions struct {
+	initialCategories []string
+	gateAtStartup     bool
+}
+
+// WithInitialCategories restricts which probe groups stay attached once the
+// mandatory attach has been verified.
+func WithInitialCategories(categories []string) Option {
+	return func(o *tracerOptions) {
+		if categories == nil {
+			categories = []string{}
+		}
+		o.initialCategories = categories
+		o.gateAtStartup = true
+	}
+}
+
+// gateInitialProbeGroups closes the links of every gateable group the
+// initial category set does not want, and reports which groups it closed so
+// the caller can seed intentionallyDisabled.
+func gateInitialProbeGroups(
+	probeGroups map[probes.ProbeGroup][]link.Link,
+	categories []string,
+) map[probes.ProbeGroup]struct{} {
+	wanted := make(map[string]struct{}, len(categories))
+	for _, c := range categories {
+		wanted[c] = struct{}{}
+	}
+
+	disabled := map[probes.ProbeGroup]struct{}{}
+	for g := range groupCategoryNeeds {
+		if probeGroupNeededBy(g, wanted) {
+			continue
+		}
+		closeLinks(probeGroups[g])
+		delete(probeGroups, g)
+		disabled[g] = struct{}{}
+	}
+
+	if len(disabled) > 0 {
+		names := make([]string, 0, len(disabled))
+		for g := range disabled {
+			names = append(names, string(g))
+		}
+		sort.Strings(names)
+		logger.Info("Probe groups gated at startup",
+			zap.Strings("disabled", names),
+			zap.Strings("categories", categories))
+	}
+	return disabled
+}
+
 func probeGroupNeededBy(g probes.ProbeGroup, wanted map[string]struct{}) bool {
 	needs, gated := groupCategoryNeeds[g]
 	if !gated {

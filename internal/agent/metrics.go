@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
@@ -68,6 +69,11 @@ type Metrics struct {
 // against a fresh Registry.
 func NewMetrics() *Metrics {
 	reg := prometheus.NewRegistry()
+
+	reg.MustRegister(
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+	)
 	m := &Metrics{
 		registry: reg,
 		AgentInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -394,6 +400,10 @@ func (m *Metrics) RefreshFromEnricher(e *PodEnricher) {
 	m.lastOwnerOrphaned = stats.OwnerOrphaned
 
 	m.EnrichmentCacheSize.Set(float64(stats.CacheSize))
+}
+
+func (m *Metrics) Registerer() prometheus.Registerer {
+	return m.registry
 }
 
 // Handler returns a promhttp.Handler bound to this Metrics' registry.

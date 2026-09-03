@@ -10,6 +10,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/gma1k/podtrace/internal/agent"
+	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/ebpf"
 	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/pkg/tracer"
@@ -111,7 +112,9 @@ func selectBackendFactory(mode string) (func() (tracer.TracerBackend, error), er
 }
 
 func agentBackendFactory() (tracer.TracerBackend, error) {
-	tr, err := ebpf.NewTracer()
+	tr, err := ebpf.NewTracer(ebpf.WithInitialCategories(
+		agent.StartupCategories(config.WorkloadMetricsEnabled),
+	))
 	if err != nil {
 		return nil, err
 	}

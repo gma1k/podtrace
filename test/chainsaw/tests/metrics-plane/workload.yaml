@@ -1,0 +1,179 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: metrics-plane-app
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: metrics-plane-excluded
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shop-checkout
+  namespace: metrics-plane-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shop-checkout
+  template:
+    metadata:
+      labels:
+        app: shop-checkout
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/nginx/conf.d
+            - name: cache
+              mountPath: /var/cache/nginx
+            - name: run
+              mountPath: /var/run
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 101
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+      volumes:
+        - name: conf
+          configMap:
+            name: shop-checkout-conf
+        - name: cache
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shop-checkout-conf
+  namespace: metrics-plane-app
+data:
+  default.conf: |
+    server {
+      listen 8080;
+      location / { return 200 "ok\n"; }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shop-checkout
+  namespace: metrics-plane-app
+spec:
+  selector:
+    app: shop-checkout
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shop-loadgen
+  namespace: metrics-plane-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shop-loadgen
+  template:
+    metadata:
+      labels:
+        app: shop-loadgen
+    spec:
+      containers:
+        - name: curl
+          image: curlimages/curl:8.9.1
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              while true; do
+                curl -sS -o /dev/null http://shop-checkout.metrics-plane-app:8080/ || true
+                sleep 0.2
+              done
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quiet-loadgen
+  namespace: metrics-plane-excluded
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: quiet-loadgen
+  template:
+    metadata:
+      labels:
+        app: quiet-loadgen
+    spec:
+      containers:
+        - name: curl
+          image: curlimages/curl:8.9.1
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              while true; do
+                curl -sS -o /dev/null http://shop-checkout.metrics-plane-app:8080/ || true
+                sleep 0.2
+              done
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metrics-scraper
+  namespace: metrics-plane-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: metrics-scraper
+  template:
+    metadata:
+      labels:
+        app: metrics-scraper
+    spec:
+      containers:
+        - name: curl
+          image: curlimages/curl:8.9.1
+          command: ["/bin/sh", "-c", "sleep infinity"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault

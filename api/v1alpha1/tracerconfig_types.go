@@ -45,6 +45,42 @@ type AgentSpec struct {
 
 	// +optional
 	Alerting *AgentAlertingSpec `json:"alerting,omitempty"`
+
+	// +optional
+	Metrics *AgentMetricsSpec `json:"metrics,omitempty"`
+}
+
+// AgentMetricsSpec configures the continuous metrics plane.
+type AgentMetricsSpec struct {
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// +optional
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MaxLength=63
+	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	ExcludeNamespaces []string `json:"excludeNamespaces,omitempty"`
+
+	// +optional
+	Labels *AgentMetricsLabelsSpec `json:"labels,omitempty"`
+
+	// +optional
+	// +kubebuilder:validation:Minimum=100
+	// +kubebuilder:validation:Maximum=2000000
+	SeriesBudget *int32 `json:"seriesBudget,omitempty"`
+
+	// +optional
+	NativeHistograms *bool `json:"nativeHistograms,omitempty"`
+}
+
+// AgentMetricsLabelsSpec opts into labels that are deliberately absent by
+// default because each one multiplies series count.
+type AgentMetricsLabelsSpec struct {
+	// +optional
+	Pod bool `json:"pod,omitempty"`
+
+	// +optional
+	Process bool `json:"process,omitempty"`
 }
 
 // AgentAlertingSpec configures agent-side resource-limit alert delivery.

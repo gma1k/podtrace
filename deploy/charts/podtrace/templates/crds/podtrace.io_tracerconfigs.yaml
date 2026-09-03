@@ -1010,6 +1010,37 @@ spec:
                     - warn
                     - error
                     type: string
+                  metrics:
+                    description: AgentMetricsSpec configures the continuous metrics
+                      plane.
+                    properties:
+                      enabled:
+                        type: boolean
+                      excludeNamespaces:
+                        items:
+                          maxLength: 63
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                          type: string
+                        maxItems: 64
+                        type: array
+                      labels:
+                        description: |-
+                          AgentMetricsLabelsSpec opts into labels that are deliberately absent by
+                          default because each one multiplies series count.
+                        properties:
+                          pod:
+                            type: boolean
+                          process:
+                            type: boolean
+                        type: object
+                      nativeHistograms:
+                        type: boolean
+                      seriesBudget:
+                        format: int32
+                        maximum: 2000000
+                        minimum: 100
+                        type: integer
+                    type: object
                   priorityClassName:
                     type: string
                   resources:
