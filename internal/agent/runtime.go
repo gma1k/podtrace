@@ -171,6 +171,7 @@ func Run(ctx context.Context, opts Options) error {
 			Enabled:           config.WorkloadMetricsEnabled,
 			ExcludeNamespaces: config.WorkloadMetricsExcludedNamespaces,
 		},
+		WorkloadMetrics: workloadMetricProducer(metricsSink),
 	}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("setup reconciler: %w", err)
@@ -284,6 +285,20 @@ func serveMetrics(ctx context.Context, addr string, metrics *Metrics, logger log
 	return nil
 }
 
+// workloadMetricProducer wraps the plane in the Prometheus-to-OTLP
+// producer the metric pusher reads.
+//
+// A nil Sink must collapse to a nil interface, not to an interface
+// holding a nil pointer, or the pool's "no producer, no pusher" check
+// stops working and a disabled plane would still start a push loop with
+// nothing to send.
+func workloadMetricProducer(sink *workloadmetrics.Sink) metricProducer {
+	if sink == nil {
+		return nil
+	}
+	return workloadmetrics.NewProducer(sink)
+}
+
 // buildExporters assembles the engine's fan-out list.
 func buildExporters(router *Router, metrics *Metrics, enricher *PodEnricher, logger logr.Logger) ([]tracer.Exporter, *workloadmetrics.Sink, error) {
 	exporters := []tracer.Exporter{router}
@@ -293,11 +308,13 @@ func buildExporters(router *Router, metrics *Metrics, enricher *PodEnricher, log
 	}
 
 	sink, err := workloadmetrics.New(metrics.Registerer(), workloadmetrics.Options{
-		SeriesBudget:        config.WorkloadMetricsBudget,
-		NativeHistograms:    config.WorkloadMetricsNativeHistograms,
-		IncludePodLabel:     config.WorkloadMetricsPodLabel,
-		IncludeProcessLabel: config.WorkloadMetricsProcessLabel,
-		Lookup:              enricherLookup(enricher),
+		SeriesBudget:         config.WorkloadMetricsBudget,
+		NativeHistograms:     config.WorkloadMetricsNativeHistograms,
+		IncludePodLabel:      config.WorkloadMetricsPodLabel,
+		IncludeProcessLabel:  config.WorkloadMetricsProcessLabel,
+		Lookup:               enricherLookup(enricher),
+		SemanticConventions:  config.WorkloadMetricsSemanticConv,
+		AttributeCardinality: config.WorkloadMetricsAttributeLimit,
 		OnBudgetExhausted: func(budget int) {
 			logger.Error(nil, "continuous metrics series budget exhausted; new series are being refused",
 				"seriesBudget", budget,

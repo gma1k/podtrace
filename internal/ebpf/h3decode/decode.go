@@ -164,6 +164,7 @@ func decodePeer(family uint8, port uint16, addr []byte) (string, uint16) {
 // through the same enrichment + reporting path as other L7 events.
 func (t *Txn) Events() []*events.Event {
 	target := "HTTP/3"
+	observed := events.NormalizeHTTPMethod(t.Method)
 	if t.Path != "" {
 		method := t.Method
 		if method == "" {
@@ -196,6 +197,7 @@ func (t *Txn) Events() []*events.Event {
 			TCPState:      events.HTTPTransportH3,
 			Target:        target,
 			CorrelationID: t.Timestamp,
+			HTTPMethod:    observed,
 		}
 		var lines []string
 		if t.Traceparent != "" {
@@ -214,6 +216,7 @@ func (t *Txn) Events() []*events.Event {
 			Type:          events.EventHTTPResp,
 			TCPState:      events.HTTPTransportH3,
 			Target:        target,
+			HTTPMethod:    observed,
 			Details:       joinNonEmpty(append([]string{status}, extra...)),
 			LatencyNS:     t.LatencyNS,
 			CorrelationID: t.Timestamp,

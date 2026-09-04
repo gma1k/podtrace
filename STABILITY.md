@@ -118,6 +118,15 @@ metric, plus OpenTelemetry semantic-convention names where a convention
 exists. Both are contractual once emitted. The reasoning, and the cardinality
 cost it carries, are in [docs/metrics.md](docs/metrics.md#naming).
 
+The same names are contractual over OTLP, in the rendering that transport
+requires: the convention families cross as their dotted names
+(`http.server.request.duration`) with dotted attribute keys, and podtrace's
+own names cross verbatim. That mapping is a table in
+`internal/workloadmetrics/semconv.go` with a test that fails when a
+convention label gains no entry, so a rename cannot reach a release through
+the OTLP path alone. The difference between the two paths is documented in
+[docs/continuous-metrics.md](docs/continuous-metrics.md).
+
 ### How releases get versioned (pre-1.0)
 
 While Podtrace at `v0.x`, release-please bumps **patch** for both

@@ -135,3 +135,29 @@ func TestMetricsEnvIsDeterministic(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+func TestMetricsEnvRendersSemanticConventions(t *testing.T) {
+	got := envMap(metricsEnv(&podtracev1alpha1.AgentMetricsSpec{
+		Enabled:              true,
+		SemanticConventions:  true,
+		AttributeCardinality: ptr(int32(25)),
+	}))
+
+	if got[envMetricsSemanticConv] != "true" {
+		t.Errorf("%s = %q, want true", envMetricsSemanticConv, got[envMetricsSemanticConv])
+	}
+	if got[envMetricsAttributeLimit] != "25" {
+		t.Errorf("%s = %q, want 25", envMetricsAttributeLimit, got[envMetricsAttributeLimit])
+	}
+}
+
+func TestSemanticConventionsAbsentWhenNotRequested(t *testing.T) {
+	got := envMap(metricsEnv(&podtracev1alpha1.AgentMetricsSpec{Enabled: true}))
+
+	for _, key := range []string{envMetricsSemanticConv, envMetricsAttributeLimit} {
+		if _, present := got[key]; present {
+			t.Errorf("%s rendered without being requested; dual emission doubles the "+
+				"L7 series and must stay opt-in", key)
+		}
+	}
+}

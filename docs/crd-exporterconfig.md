@@ -42,6 +42,33 @@ Secret-valued headers are loaded into the companion Secret under the
 fixed `credential` key. Today only ONE Secret-valued header is
 supported per OTLP exporter.
 
+#### Metrics as a second signal
+
+An OTLP exporter can also carry the continuous metrics plane, to the same
+endpoint and with the same headers:
+
+```yaml
+spec:
+  type: otlp
+  otlp:
+    endpoint: otel-collector.observability:4318
+    metrics:
+      enabled: true
+      interval: 60s             # default 60s, clamped to 10s-10m
+```
+
+OTLP only — no other exporter type in this set speaks OTLP metrics, and
+a bundle that asks for metrics on another type is rejected rather than
+silently ignored.
+
+The plane must also be enabled on the TracerConfig
+(`spec.agent.metrics.enabled`), because the push republishes that surface
+rather than producing a second one. Several PodTraces pointing at the same
+collector share one metric stream, since the series are node-wide rather
+than per-CR. See [continuous-metrics.md](continuous-metrics.md) for the
+wire details, including how convention metric names differ between the
+scrape and the push.
+
 ### Jaeger
 
 ```yaml
@@ -123,6 +150,8 @@ spec:
 | `otlp.insecure` | bool | Disables TLS. |
 | `otlp.headers[]` | list | Either literal `value` or `valueFrom: SecretKeySelector`. |
 | `otlp.headersFromSecret` | object | `{name}` reference to a Secret in the same namespace; every key in that Secret becomes an OTLP header. Use for bulk or additional secret-backed headers beyond the single `headers[].valueFrom` credential. |
+| `otlp.metrics.enabled` | bool | Pushes the continuous metrics plane to this endpoint beside the spans. Requires the plane to be on in the TracerConfig. |
+| `otlp.metrics.interval` | duration | Push period. Defaults to `60s`; clamped to `10s`-`10m`. Must not be negative. |
 | `jaeger.endpoint` | string | Required when `type=jaeger`. |
 | `zipkin.endpoint` | string | Required when `type=zipkin`. |
 | `splunk.endpoint` | string | Splunk HEC URL. |
@@ -140,7 +169,8 @@ operator creates two objects in `podtrace-system`:
    `pts-bundle-<sessionUID>` (session). Carries
    `type`, `endpoint`, `protocol`, `insecure`, `site`,
    `headers.<name>` for literals, `header_secret_name` when applicable,
-   `sample_percent`, and a `bundle.yaml` blob the CLI consumes.
+   `sample_percent`, `metrics` and `metrics_interval_seconds` when metric
+   export is on, and a `bundle.yaml` blob the CLI consumes.
 2. **Secret** with the same name (created only when the exporter
    references credential material). Carries the resolved value under
    the fixed `credential` key, plus one `header.<name>` key for each

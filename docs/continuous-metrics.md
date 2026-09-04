@@ -203,6 +203,76 @@ over classes. A `4xx` is a client error and counts as `ok` — it is a failure
 of the request, not of the workload being observed, and remains visible
 through `status_class`.
 
+### OpenTelemetry semantic conventions
+
+Enabled with `agent.metrics.semanticConventions=true`, the plane also emits
+the convention's own names for the L7 signals, **in addition to** the native
+families above. That doubling is the point: a stock Grafana, Datadog or
+Honeycomb dashboard queries these names, so podtrace becomes a drop-in
+inside a stack you already run rather than a second dialect to learn.
+
+| Metric | Attributes |
+|---|---|
+| `http_server_request_duration_seconds` | `http_request_method`, `http_response_status_code`, `network_protocol_name` |
+| `rpc_server_duration_seconds` | `rpc_system`, `rpc_method` |
+| `db_client_operation_duration_seconds` | `db_system_name`, `db_operation_name` |
+
+These carry **no `podtrace_` prefix** — the names belong to the convention,
+and prefixing them would make them invisible to the dashboards they exist to
+serve.
+
+Identity arrives as `service_name`, `k8s_namespace_name` and
+`k8s_container_name`. `service_name` is the workload, because that is the
+label conventional dashboards group by. Semconv's workload keys are
+kind-specific (`k8s.deployment.name`, `k8s.statefulset.name`, …) and a
+Prometheus family has one fixed label set, so there is no single key that
+could carry the workload for every kind.
+
+Three deliberate differences from the native families:
+
+- **`http_response_status_code` is the real code**, not the class. The
+  convention expects a code, and a dashboard filtering `status >= 500`
+  cannot work on `"5xx"`. This costs roughly ten times the cardinality on
+  that one family.
+- **`rpc_method` and `db_operation_name` are bounded.** Both come from
+  observed traffic, so their value space is open; past
+  `PODTRACE_WORKLOAD_METRICS_ATTRIBUTE_CARDINALITY` (default 50) the tail
+  folds into `_other` rather than minting series without end.
+- **Kafka and FastCGI are absent.** Neither has a server-duration
+  convention, and forcing them into one would misdescribe them. They remain
+  on the native `podtrace_workload_l7_*` families.
+
+`http.route` is not emitted. podtrace observes the wire, so it sees the
+request target rather than the server's route template, and the convention
+explicitly warns against substituting the raw path.
+
+#### When the method is `_OTHER`
+
+`http_request_method` carries the real method on every transport podtrace
+decodes: HTTP/1.x reads it off the request line in BPF, and HTTP/2 and
+HTTP/3 read the `:method` pseudo-header out of HPACK and QPACK
+respectively. The method travels request-to-response, because the duration
+is only known once the response arrives.
+
+It falls back to `_OTHER` — the convention's own placeholder — in two
+cases, both of them honest:
+
+- **The method was outside the convention's set.** `:method` is an
+  arbitrary token chosen by the peer, so it is folded to
+  GET/HEAD/POST/PUT/PATCH/DELETE/OPTIONS/CONNECT/TRACE and anything else
+  becomes `_OTHER`. Passing the raw token through would hand Prometheus an
+  unbounded, peer-chosen label dimension, which is precisely what the
+  series budget cannot defend against.
+- **No method was recovered at all.** On a late-joined HTTP/2 connection
+  the `:method` may have been indexed into the dynamic table before
+  capture attached, and some C-library HTTP/3 adapters measure timing
+  without decoding the peer's headers.
+
+`http_response_status_code` is `0` on the same principle, for a response
+whose status could not be recovered — a gRPC-over-h2 stream, most often.
+The convention would have the attribute omitted; a Prometheus family has
+one fixed label set and cannot omit a label, so `0` is the sentinel.
+
 ### Network, DNS, filesystem, CPU, TLS
 
 | Metric | Type | Extra labels |
@@ -238,6 +308,88 @@ internals in [metrics.md](metrics.md).
 metadata, which means the identity join failed and those observations were
 discarded rather than filed under a wrong or placeholder workload. A steadily
 rising `unattributed` means the plane is running but measuring nothing.
+
+## Pushing the plane over OTLP
+
+The plane is a scrape target by default. It can also be pushed, as a second
+signal on an `ExporterConfig` that already carries spans:
+
+```yaml
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+metadata:
+  name: collector
+spec:
+  type: otlp
+  otlp:
+    endpoint: otel-collector.observability:4318
+    metrics:
+      enabled: true
+      interval: 60s
+```
+
+Same object, same endpoint, same headers: metrics authenticate exactly as
+the spans do. That reaches every OTLP-compatible backend without a
+per-vendor metrics SDK, and it is deliberately **not** Prometheus
+remote-write — a Collector does remote-write better, and forwarding rather
+than storing keeps podtrace out of the storage business.
+
+Two conditions have to hold for anything to be sent. The plane must be on
+(`TracerConfig.spec.agent.metrics.enabled`), because the push republishes
+the surface rather than producing a second one; and a PodTrace must
+reference the `ExporterConfig`, because that is what tells the agent to
+build the exporter at all.
+
+`interval` defaults to 60s, matching a conventional scrape period, and is
+clamped to 10s–10m: below the floor the cost outruns what a cumulative
+counter can reveal, and above the ceiling a dashboard reads the gap as an
+outage.
+
+### What the push looks like on the wire
+
+The Prometheus registry stays the single source of truth. The push reads
+the surface that already exists rather than recording a second copy of it,
+so the series budget, the cardinality bound and the reaper apply to both
+paths identically and cannot drift apart.
+
+Names differ between the two paths, in one direction only:
+
+| Surface | Scrape | OTLP |
+|---|---|---|
+| Convention families | `http_server_request_duration_seconds` | `http.server.request.duration` |
+| Convention attributes | `http_request_method` | `http.request.method` |
+| podtrace's own families | `podtrace_workload_l7_requests_total` | unchanged |
+
+The convention families get their dotted names back because that is what an
+OTLP-native backend recognises, and dropping to the Prometheus rendering
+there would undo the point of emitting them. podtrace's own names have no
+convention to honour, so they travel verbatim — the same thing a
+Collector's `prometheus` receiver does with a scrape. Rename them in the
+Collector if you want something else.
+
+Workload identity arrives as data-point attributes, not as the OTLP
+Resource. A Resource belongs to the exporting provider and one provider
+serves every workload on the node, so `service.name` on the Resource is
+`podtrace` (with `k8s.node.name` beside it) while the observed workload
+travels as the `service.name` **attribute**. That is again what the
+Collector's Prometheus receiver produces, so both paths agree.
+
+All instruments are cumulative, because the underlying Prometheus counters
+are. Native histograms cross as OTLP exponential histograms; classic
+buckets cross as explicit-bucket histograms.
+
+### One stream per collector, not per CR
+
+Spans are per-CR: a span belongs to the trace some CR asked for. A counter
+does not. So several PodTraces pointing at one collector share a single
+metric stream — pushing one per CR would send the same node-wide counters
+two or three times and make every sum across them wrong. Two CRs pointing
+at *different* collectors get one stream each, which is fan-out and
+correct.
+
+A metrics receiver that cannot be reached does not take tracing down with
+it: spans keep flowing and the failure is reported through the exporter's
+own init-failure metric.
 
 ## Histograms
 

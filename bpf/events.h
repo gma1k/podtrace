@@ -78,6 +78,8 @@ struct event {
 	u8  peer_saddr6[16];
 	u8  peer_daddr6[16];
 	u64 correlation_id;
+	u8  http_method;
+	u8  _pad5[7];
 };
 
 #define H2_HDR_FRAG_MAX 1024

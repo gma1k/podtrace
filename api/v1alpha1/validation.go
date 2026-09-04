@@ -80,6 +80,9 @@ func ValidateExporterConfigVariant(spec ExporterConfigSpec) error {
 		if secretHeaders > 1 {
 			return fmt.Errorf("at most one headers[].valueFrom is supported (the bundle carries a single credential); move additional secret-backed headers into spec.otlp.headersFromSecret")
 		}
+		if m := spec.OTLP.Metrics; m != nil && m.Interval != nil && m.Interval.Duration < 0 {
+			return fmt.Errorf("spec.otlp.metrics.interval %v must not be negative", m.Interval.Duration)
+		}
 	}
 	if err := validateExporterEndpoint(spec); err != nil {
 		return err

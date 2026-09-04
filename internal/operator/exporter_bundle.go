@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -27,6 +28,12 @@ import (
 //	endpoint                      = full URL or host:port (exporter-specific)
 //	protocol                      = http | grpc (OTLP only)
 //	insecure                      = "true" | "false" (OTLP only)
+//	metrics                       = "true" when the continuous workload
+//	                                metrics should be pushed to the same
+//	                                endpoint as the spans (OTLP only)
+//	metrics_interval_seconds      = push period in whole seconds
+//	                                (optional; absent means the agent
+//	                                 default)
 //	site                          = datadoghq.com | datadoghq.eu (DataDog only)
 //	sample_percent                = effective decimal string in [0, 100]
 //	                                (operator-computed min of CR + EC; absent
@@ -82,6 +89,12 @@ func renderBundlePayload(policy *bundlePolicyInputs, ec *podtracev1alpha1.Export
 			data["protocol"] = string(podtracev1alpha1.OTLPProtocolHTTP)
 		}
 		data["insecure"] = boolString(ec.Spec.OTLP.Insecure)
+		if m := ec.Spec.OTLP.Metrics; m != nil && m.Enabled {
+			data["metrics"] = "true"
+			if m.Interval != nil && m.Interval.Duration > 0 {
+				data["metrics_interval_seconds"] = itoa(int(m.Interval.Duration / time.Second))
+			}
+		}
 		var credRef *podtracev1alpha1.SecretKeySelector
 		for _, h := range ec.Spec.OTLP.Headers {
 			if h.ValueFrom != nil {

@@ -531,6 +531,7 @@ struct {
 struct http_req {
 	u64 start_ns;
 	char endpoint[MAX_STRING_LEN];
+	u8 method;
 };
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);

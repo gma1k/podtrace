@@ -71,6 +71,14 @@ type AgentMetricsSpec struct {
 
 	// +optional
 	NativeHistograms *bool `json:"nativeHistograms,omitempty"`
+
+	// +optional
+	SemanticConventions bool `json:"semanticConventions,omitempty"`
+
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=10000
+	AttributeCardinality *int32 `json:"attributeCardinality,omitempty"`
 }
 
 // AgentMetricsLabelsSpec opts into labels that are deliberately absent by

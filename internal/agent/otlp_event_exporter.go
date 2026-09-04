@@ -23,7 +23,40 @@ func newOTLPEventExporter(cr CRKey, b *BundlePayload, opts ...sdkOption) (tracer
 	if err != nil {
 		return nil, err
 	}
-	return newSDKEventExporter("otlp", cr, b, spanExporter, opts...)
+	exporter, err := newSDKEventExporter("otlp", cr, b, spanExporter, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return attachMetricPusher(exporter, b, opts...)
+}
+
+// attachMetricPusher turns on the second signal when the bundle asks for
+// it, binding the pusher's lifetime to the exporter's.
+//
+// A failure to start the metric push does not fail the exporter: spans
+// are the primary signal and an unreachable metrics receiver must not
+// take tracing down with it. The error is returned so the caller can
+// classify and report it.
+func attachMetricPusher(exporter tracer.Exporter, b *BundlePayload, opts ...sdkOption) (tracer.Exporter, error) {
+	dest, wanted := destinationFromBundle(b)
+	if !wanted {
+		return exporter, nil
+	}
+	var cfg sdkOptions
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	sdkExporter, ok := exporter.(*sdkEventExporter)
+	if !ok || cfg.pushers == nil {
+		return exporter, nil
+	}
+
+	release, err := cfg.pushers.acquire(dest)
+	sdkExporter.releaseMetrics = release
+	if err != nil {
+		return exporter, fmt.Errorf("start OTLP metric export: %w", err)
+	}
+	return exporter, nil
 }
 
 // newOTLPSpanExporter wires an otlptrace HTTP client from a bundle.

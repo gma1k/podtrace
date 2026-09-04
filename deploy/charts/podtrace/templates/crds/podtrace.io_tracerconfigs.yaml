@@ -1014,6 +1014,11 @@ spec:
                     description: AgentMetricsSpec configures the continuous metrics
                       plane.
                     properties:
+                      attributeCardinality:
+                        format: int32
+                        maximum: 10000
+                        minimum: 1
+                        type: integer
                       enabled:
                         type: boolean
                       excludeNamespaces:
@@ -1034,6 +1039,8 @@ spec:
                             type: boolean
                         type: object
                       nativeHistograms:
+                        type: boolean
+                      semanticConventions:
                         type: boolean
                       seriesBudget:
                         format: int32

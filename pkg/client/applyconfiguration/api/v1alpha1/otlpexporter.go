@@ -39,6 +39,9 @@ type OTLPExporterApplyConfiguration struct {
 	// HeadersFromSecret pulls additional headers from a Secret in the same
 	// namespace. Each key in the secret becomes a header; values are used verbatim.
 	HeadersFromSecret *v1.LocalObjectReference `json:"headersFromSecret,omitempty"`
+	// Metrics pushes the continuous metrics plane to this same endpoint,
+	// beside the spans. Requires the plane to be enabled on the TracerConfig.
+	Metrics *OTLPMetricsApplyConfiguration `json:"metrics,omitempty"`
 }
 
 // OTLPExporterApplyConfiguration constructs a declarative configuration of the OTLPExporter type for use with
@@ -89,5 +92,13 @@ func (b *OTLPExporterApplyConfiguration) WithHeaders(values ...*OTLPHeaderApplyC
 // If called multiple times, the HeadersFromSecret field is set to the value of the last call.
 func (b *OTLPExporterApplyConfiguration) WithHeadersFromSecret(value v1.LocalObjectReference) *OTLPExporterApplyConfiguration {
 	b.HeadersFromSecret = &value
+	return b
+}
+
+// WithMetrics sets the Metrics field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Metrics field is set to the value of the last call.
+func (b *OTLPExporterApplyConfiguration) WithMetrics(value *OTLPMetricsApplyConfiguration) *OTLPExporterApplyConfiguration {
+	b.Metrics = value
 	return b
 }

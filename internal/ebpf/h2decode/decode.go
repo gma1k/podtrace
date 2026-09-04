@@ -378,12 +378,14 @@ func otherDirection(dir uint8) uint8 {
 
 func (d *Decoder) buildRequestLocked(rec *RawRecord, method, path, traceparent string,
 	extra []string) *events.Event {
+	observed := events.NormalizeHTTPMethod(method)
 	if method == "" {
 		method = "GET"
 	}
 	d.rememberStreamLocked(rec, method, path)
 
 	ev := &events.Event{}
+	ev.HTTPMethod = observed
 	ev.Timestamp = rec.Timestamp
 	ev.PID = rec.PID
 	ev.CgroupID = rec.CgroupID
@@ -425,6 +427,7 @@ func (d *Decoder) buildResponseLocked(rec *RawRecord, status, traceparent string
 	sk := streamKey{conn: rec.ConnID, stream: rec.StreamID}
 	if req, ok := d.streams[sk]; ok {
 		ev.Target = req.method + " " + req.path
+		ev.HTTPMethod = events.NormalizeHTTPMethod(req.method)
 		ev.CorrelationID = req.startTS
 		if rec.Timestamp > req.startTS {
 			ev.LatencyNS = rec.Timestamp - req.startTS
@@ -461,6 +464,7 @@ func (d *Decoder) buildGrpcTrailerLocked(rec *RawRecord, grpcStatus string) *eve
 	sk := streamKey{conn: rec.ConnID, stream: rec.StreamID}
 	if req, ok := d.streams[sk]; ok {
 		ev.Target = req.method + " " + req.path
+		ev.HTTPMethod = events.NormalizeHTTPMethod(req.method)
 		ev.CorrelationID = req.startTS
 		if rec.Timestamp > req.startTS {
 			ev.LatencyNS = rec.Timestamp - req.startTS

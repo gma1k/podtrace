@@ -55,6 +55,11 @@ type AgentReconciler struct {
 
 	MetricsPlane MetricsPlaneConfig
 
+	// WorkloadMetrics is the continuous metrics plane, and is what an
+	// OTLP exporter pushes when its ExporterConfig asks for metrics.
+	// Nil when the plane is disabled, in which case no exporter pushes.
+	WorkloadMetrics metricProducer
+
 	exporterCacheMu sync.Mutex
 	exporterCache   map[CRKey]cachedExporter
 	pendingClose    []tracer.Exporter
@@ -74,8 +79,12 @@ type cachedExporter struct {
 func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.ExporterBuilder == nil {
 		metrics := r.Metrics
+		// One pool for the agent, so CRs pointing at the same collector
+		// share a single metric stream rather than each pushing the same
+		// node-wide counters.
+		pushers := newMetricPusherPool(r.WorkloadMetrics, r.NodeName)
 		r.ExporterBuilder = func(b *BundlePayload, key CRKey) (tracer.Exporter, error) {
-			return BuildExporter(b, key, withMetrics(metrics))
+			return BuildExporter(b, key, withMetrics(metrics), withMetricPushers(pushers))
 		}
 	}
 	if r.CgroupResolver == nil {
