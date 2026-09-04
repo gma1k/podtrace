@@ -99,6 +99,10 @@ agent:
 
     nativeHistograms: true
 
+    semanticConventions: false
+
+    attributeCardinality: 0
+
     labels:
       pod: false
       process: false

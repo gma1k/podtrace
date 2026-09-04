@@ -1,0 +1,334 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: otlp-metrics-push
+spec:
+  concurrent: false
+  description: |
+    Property tested: the continuous metrics plane leaves the node as OTLP
+    metrics when an ExporterConfig of type otlp asks for it, and arrives at
+    the receiver in the shape a backend needs.
+
+    This is the only layer that can check it. Unit tests prove the
+    conversion and the wire encoding against a local receiver, but not that
+    the CRD field survives the operator's bundle, reaches the agent as
+    env-independent config, and that a real agent with a real BPF backend
+    actually pushes what its own /metrics endpoint serves.
+
+    Three things are asserted on the receiver's own logs:
+      - the push lands on /v1/metrics, not the trace path
+      - podtrace's own family names cross verbatim
+      - the OpenTelemetry convention family crosses as its dotted name,
+        which is what makes a stock OTLP backend recognise it
+
+    Then the ExporterConfig is switched off and the push must stop, so a
+    cluster that opts out is not left paying for the traffic.
+  timeouts:
+    apply: 60s
+    assert: 180s
+    exec: 600s
+    cleanup: 180s
+    delete: 180s
+  steps:
+    - name: enable-the-plane
+      description: |
+        The push republishes the plane's surface rather than producing a
+        second one, so the plane has to be on for there to be anything to
+        send.
+      try:
+        - script:
+            timeout: 420s
+            content: |
+              set -eu
+
+              for _ in $(seq 1 24); do
+                if kubectl -n podtrace-system get endpoints podtrace-webhook \
+                     -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null | grep -q .; then
+                  if kubectl patch tracerconfig default --type=merge --dry-run=server \
+                       -p '{"metadata":{"annotations":{}}}' >/dev/null 2>&1; then
+                    echo "validating webhook is answering"
+                    break
+                  fi
+                fi
+                sleep 5
+              done
+
+              kubectl patch tracerconfig default --type=merge -p '{
+                "spec": {
+                  "agent": {
+                    "metrics": {
+                      "enabled": true,
+                      "semanticConventions": true
+                    }
+                  }
+                }
+              }'
+
+              for _ in $(seq 1 48); do
+                desired=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.desiredNumberScheduled}')
+                updated=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.updatedNumberScheduled}')
+                ready=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.numberReady}')
+                if [ -n "${desired}" ] && [ "${updated}" = "${desired}" ] && [ "${ready}" = "${desired}" ]; then
+                  echo "all ${desired} agents updated and ready"
+                  break
+                fi
+                sleep 5
+              done
+              if [ "${updated:-0}" != "${desired:-1}" ] || [ "${ready:-0}" != "${desired:-1}" ]; then
+                echo "FAIL: agents did not converge (updated=${updated:-?} ready=${ready:-?} desired=${desired:-?})"
+                exit 1
+              fi
+
+    - name: run-sink-and-workload
+      try:
+        - apply:
+            file: ./resources.yaml
+        - assert:
+            file: ./assert-ready.yaml
+
+    - name: point-an-exporter-at-the-sink
+      description: |
+        Applied after the sink is ready so the first push has somewhere to
+        land, and with the shortest interval the agent accepts so the test
+        does not wait out a scrape period.
+      try:
+        - script:
+            content: |
+              set -eu
+              kubectl -n "${NAMESPACE}" apply -f - <<EOF
+              apiVersion: podtrace.io/v1alpha1
+              kind: ExporterConfig
+              metadata:
+                name: sink-ec
+              spec:
+                type: otlp
+                otlp:
+                  endpoint: http://otlp-sink.${NAMESPACE}:4318
+                  insecure: true
+                  metrics:
+                    enabled: true
+                    interval: 10s
+              ---
+              apiVersion: podtrace.io/v1alpha1
+              kind: PodTrace
+              metadata:
+                name: pt-push
+              spec:
+                selector:
+                  matchLabels:
+                    app: push-target
+                filters: [net]
+                exporterRef:
+                  name: sink-ec
+              EOF
+
+    - name: the-bundle-carries-the-request
+      description: |
+        Asserted separately from the push itself so a failure here points at
+        the operator rather than at the agent.
+
+        The bundle ConfigMap is found by its source annotation rather than
+        by name: the name is "pt-bundle-" plus the *PodTrace* UID truncated
+        to 12 characters, which is easy to reconstruct wrongly and gives a
+        confusing "not found" when you do.
+      try:
+        - script:
+            timeout: 300s
+            content: |
+              set -eu
+
+              name=""
+              for _ in $(seq 1 36); do
+                name=$(kubectl -n podtrace-system get configmap \
+                  -o jsonpath='{range .items[?(@.metadata.annotations.podtrace\.io/exporterconfig-ref=="'"${NAMESPACE}"'/sink-ec")]}{.metadata.name}{"\n"}{end}' \
+                  2>/dev/null | head -1)
+                if [ -n "${name}" ]; then
+                  break
+                fi
+                sleep 5
+              done
+              if [ -z "${name}" ]; then
+                echo "FAIL: no bundle ConfigMap annotated for ${NAMESPACE}/sink-ec after 180s"
+                kubectl -n podtrace-system get configmaps \
+                  -o custom-columns='NAME:.metadata.name,SRC:.metadata.annotations.podtrace\.io/exporterconfig-ref' \
+                  | head -20
+                exit 1
+              fi
+              echo "bundle: ${name}"
+
+              metrics=$(kubectl -n podtrace-system get configmap "${name}" -o jsonpath='{.data.metrics}')
+              interval=$(kubectl -n podtrace-system get configmap "${name}" \
+                -o jsonpath='{.data.metrics_interval_seconds}')
+
+              fail=0
+              if [ "${metrics}" != "true" ]; then
+                echo "FAIL: bundle metrics key = '${metrics}', want true"
+                fail=1
+              fi
+              if [ "${interval}" != "10" ]; then
+                echo "FAIL: bundle metrics_interval_seconds = '${interval}', want 10"
+                fail=1
+              fi
+              if [ "${fail}" -ne 0 ]; then
+                kubectl -n podtrace-system get configmap "${name}" -o yaml
+                exit 1
+              fi
+              echo "operator rendered the metric-export request into the bundle"
+
+    - name: metrics-arrive-at-the-sink
+      description: |
+        Read from the sink's /stats endpoint rather than its log. The
+        PodTrace's span stream produces tens of thousands of log lines,
+        which rotates the far rarer metric lines out of the window
+        `kubectl logs` can read — a log-grep assertion then fails for a
+        reason that has nothing to do with the code under test.
+      try:
+        - script:
+            timeout: 420s
+            content: |
+              set -eu
+
+              probe=$(kubectl -n "${NAMESPACE}" get pod -l app=push-probe \
+                -o jsonpath='{.items[0].metadata.name}')
+              sink=$(kubectl -n "${NAMESPACE}" get pod -l app=otlp-sink \
+                -o jsonpath='{.items[0].status.podIP}')
+
+              stats() {
+                kubectl -n "${NAMESPACE}" exec "${probe}" -c curl -- \
+                  curl -sS --max-time 10 "http://${sink}:4318/stats" 2>/dev/null || true
+              }
+
+              seen=""
+              for attempt in $(seq 1 36); do
+                out=$(stats)
+                if printf '%s' "${out}" | grep -q '"metrics"'; then
+                  seen="${out}"
+                  echo "metric push observed on attempt ${attempt}"
+                  break
+                fi
+                sleep 10
+              done
+
+              if [ -z "${seen}" ]; then
+                echo "FAIL: no OTLP metric push reached the sink after 360s"
+                echo "--- sink /stats ---"
+                stats || true
+                echo "--- sink log tail ---"
+                kubectl -n "${NAMESPACE}" logs -l app=otlp-sink --tail=20 || true
+                echo "--- agent log tails ---"
+                for a in $(kubectl -n podtrace-system get pod -l podtrace.io/component=agent \
+                             -o jsonpath='{range .items[*]}{.metadata.name} {end}'); do
+                  echo "  ---- ${a} ----"
+                  kubectl -n podtrace-system logs "${a}" -c agent --tail=40 || true
+                done
+                echo "--- podtrace status ---"
+                kubectl -n "${NAMESPACE}" get podtrace pt-push -o yaml || true
+                exit 1
+              fi
+
+              printf '%s' "${seen}" > /tmp/stats.json
+              echo "${seen}" | head -c 2000
+              echo
+
+              fail=0
+
+              if ! grep -q '"errors":0' /tmp/stats.json; then
+                echo "FAIL: the sink could not decode a body it received. The OTLP exporters"
+                echo "      gzip by default, so a decode failure means the push is malformed"
+                fail=1
+              fi
+
+              if ! grep -q 'podtrace_workload_metrics_events_total' /tmp/stats.json; then
+                echo "FAIL: no podtrace_workload_ family in the push; podtrace's own names must"
+                echo "      cross verbatim, the same thing a Collector prometheus receiver does"
+                fail=1
+              fi
+
+              if ! grep -q 'http\.server\.request\.duration' /tmp/stats.json; then
+                echo "FAIL: the convention family did not arrive with its dotted name. Over OTLP"
+                echo "      the Prometheus rendering is not what a stock backend recognises, so"
+                echo "      the dotted name is the whole point of emitting these"
+                fail=1
+              fi
+
+              if ! grep -q 'http\.request\.method' /tmp/stats.json; then
+                echo "FAIL: http.request.method absent. The method is captured by bpf/http.c and"
+                echo "      carried request->response; without it the convention attribute would"
+                echo "      always be the _OTHER placeholder"
+                fail=1
+              fi
+
+              if grep -q 'http_server_request_duration_seconds' /tmp/stats.json; then
+                echo "FAIL: a convention family crossed in its Prometheus rendering"
+                fail=1
+              fi
+
+              if ! grep -q 'k8s\.node\.name' /tmp/stats.json; then
+                echo "FAIL: the resource does not name the node that produced these metrics"
+                fail=1
+              fi
+
+              if ! grep -q 'service\.name' /tmp/stats.json; then
+                echo "FAIL: service.name absent; workload identity travels as a data-point"
+                echo "      attribute because one provider serves every workload on the node"
+                fail=1
+              fi
+
+              exit "${fail}"
+
+    - name: turning-the-export-off-stops-the-push
+      description: |
+        A cluster that opts out must not keep paying for the traffic — and
+        the spans must survive, because the two signals share an endpoint
+        but not a lifetime.
+      try:
+        - script:
+            timeout: 300s
+            content: |
+              set -eu
+
+              probe=$(kubectl -n "${NAMESPACE}" get pod -l app=push-probe \
+                -o jsonpath='{.items[0].metadata.name}')
+              sink=$(kubectl -n "${NAMESPACE}" get pod -l app=otlp-sink \
+                -o jsonpath='{.items[0].status.podIP}')
+
+              count() {
+                kubectl -n "${NAMESPACE}" exec "${probe}" -c curl -- \
+                  curl -sS --max-time 10 "http://${sink}:4318/stats" 2>/dev/null \
+                  | tr ',{}' '\n' | grep "\"$1\"" | tr -dc '0-9' || echo 0
+              }
+
+              kubectl -n "${NAMESPACE}" patch exporterconfig sink-ec --type=merge \
+                -p '{"spec":{"otlp":{"metrics":{"enabled":false}}}}'
+
+              # One push interval plus reconcile and bundle-propagation slack.
+              sleep 45
+
+              before=$(count metrics)
+              traces_before=$(count traces)
+              sleep 45
+              after=$(count metrics)
+              traces_after=$(count traces)
+
+              fail=0
+              if [ "${after}" -gt "${before}" ]; then
+                echo "FAIL: pushes continued after the export was disabled (${before} -> ${after})"
+                fail=1
+              else
+                echo "push stopped (${before} -> ${after})"
+              fi
+
+              if [ "${traces_after}" -le "${traces_before}" ]; then
+                echo "FAIL: spans stopped too (${traces_before} -> ${traces_after}). Disabling the"
+                echo "      metrics signal must not tear down the span exporter they share"
+                fail=1
+              else
+                echo "spans still flowing (${traces_before} -> ${traces_after})"
+              fi
+
+              exit "${fail}"
+      finally:
+        - script:
+            content: |
+              kubectl patch tracerconfig default --type=merge \
+                -p '{"spec":{"agent":{"metrics":null}}}' || true

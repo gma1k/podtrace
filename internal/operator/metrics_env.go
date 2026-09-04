@@ -19,6 +19,8 @@ const (
 	envMetricsNativeHistograms  = "PODTRACE_WORKLOAD_METRICS_NATIVE_HISTOGRAMS"
 	envMetricsPodLabel          = "PODTRACE_WORKLOAD_METRICS_POD_LABEL"
 	envMetricsProcessLabel      = "PODTRACE_WORKLOAD_METRICS_PROCESS_LABEL"
+	envMetricsSemanticConv      = "PODTRACE_WORKLOAD_METRICS_SEMANTIC_CONVENTIONS"
+	envMetricsAttributeLimit    = "PODTRACE_WORKLOAD_METRICS_ATTRIBUTE_CARDINALITY"
 )
 
 // metricsEnv renders AgentMetricsSpec onto the agent container's
@@ -46,6 +48,15 @@ func metricsEnv(spec *podtracev1alpha1.AgentMetricsSpec) []corev1.EnvVar {
 		env = append(env, corev1.EnvVar{
 			Name:  envMetricsNativeHistograms,
 			Value: strconv.FormatBool(*spec.NativeHistograms),
+		})
+	}
+	if spec.SemanticConventions {
+		env = append(env, corev1.EnvVar{Name: envMetricsSemanticConv, Value: "true"})
+	}
+	if spec.AttributeCardinality != nil {
+		env = append(env, corev1.EnvVar{
+			Name:  envMetricsAttributeLimit,
+			Value: strconv.FormatInt(int64(*spec.AttributeCardinality), 10),
 		})
 	}
 	if labels := spec.Labels; labels != nil {

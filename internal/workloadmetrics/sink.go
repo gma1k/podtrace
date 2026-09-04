@@ -2,11 +2,13 @@ package workloadmetrics
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 
 	"github.com/gma1k/podtrace/internal/events"
 )
@@ -26,6 +28,10 @@ type Options struct {
 	OnBudgetExhausted func(budget int)
 
 	Now func() time.Time
+
+	SemanticConventions bool
+
+	AttributeCardinality int
 }
 
 // seriesEntry records enough about an admitted series to delete it later.
@@ -40,7 +46,10 @@ type seriesEntry struct {
 // and the engine fans out to both.
 type Sink struct {
 	c      *collectors
+	sc     *semconvCollectors
 	lookup func(uint64) (events.K8sMetadata, bool)
+
+	own *prometheus.Registry
 
 	includePod     bool
 	includeProcess bool
@@ -61,12 +70,32 @@ func New(reg prometheus.Registerer, opts Options) (*Sink, error) {
 	if err := c.register(reg); err != nil {
 		return nil, err
 	}
+
+	var sc *semconvCollectors
+	if opts.SemanticConventions {
+		limit := opts.AttributeCardinality
+		if limit == 0 {
+			limit = defaultAttributeCardinality
+		}
+		sc = newSemconvCollectors(opts.NativeHistograms, limit)
+		if err := sc.register(reg); err != nil {
+			return nil, fmt.Errorf("register semantic-convention metrics: %w", err)
+		}
+	}
+	own := prometheus.NewRegistry()
+	own.MustRegister(c.all()...)
+	if sc != nil {
+		own.MustRegister(sc.all()...)
+	}
+
 	clock := opts.Now
 	if clock == nil {
 		clock = time.Now
 	}
 	return &Sink{
 		c:              c,
+		sc:             sc,
+		own:            own,
 		lookup:         opts.Lookup,
 		includePod:     opts.IncludePodLabel,
 		includeProcess: opts.IncludeProcessLabel,
@@ -78,6 +107,15 @@ func New(reg prometheus.Registerer, opts Options) (*Sink, error) {
 }
 
 func (s *Sink) Name() string { return "workload-metrics" }
+
+// Gather returns the workload surface in Prometheus exposition form,
+// making the Sink a prometheus.Gatherer over its own families only.
+func (s *Sink) Gather() ([]*dto.MetricFamily, error) {
+	if s == nil || s.own == nil {
+		return nil, nil
+	}
+	return s.own.Gather()
+}
 
 // Close releases nothing; the collectors live as long as the registry.
 func (s *Sink) Close(context.Context) error { return nil }
@@ -270,6 +308,7 @@ func (s *Sink) record(e *events.Event, base []string) bool {
 			appendLabels(base, protocol, statusClass(e), outcome(e)), 1)
 		s.observe(s.c.l7Duration, "l7_request_duration_seconds",
 			appendLabels(base, protocol), seconds)
+		s.recordSemconv(e, seconds)
 		return true
 
 	case events.EventTCPSend, events.EventTCPRecv, events.EventUDPSend, events.EventUDPRecv:
@@ -307,5 +346,32 @@ func (s *Sink) record(e *events.Event, base []string) bool {
 
 	default:
 		return false
+	}
+}
+
+func (s *Sink) recordSemconv(e *events.Event, seconds float64) {
+	if s.sc == nil {
+		return
+	}
+	meta, ok := s.metadataFor(e)
+	if !ok {
+		return
+	}
+	id := semconvIdentity(meta)
+
+	switch e.Type {
+	case events.EventHTTPResp, events.EventHTTP3:
+		s.observe(s.sc.httpDuration, semconvHTTPDuration,
+			appendLabels(id, httpRequestMethod(e), statusCodeLabel(e), networkProtocolName(e)), seconds)
+
+	case events.EventGRPCMethod:
+		method := s.sc.methodValues.bound(firstLine(e.Target))
+		s.observe(s.sc.rpcDuration, semconvRPCDuration,
+			appendLabels(id, rpcSystem(e.Type), method), seconds)
+
+	case events.EventRedisCmd, events.EventMemcachedCmd, events.EventDBQuery:
+		op := s.sc.operationValues.bound(firstLine(e.Details))
+		s.observe(s.sc.dbDuration, semconvDBDuration,
+			appendLabels(id, dbSystem(e.Type), op), seconds)
 	}
 }

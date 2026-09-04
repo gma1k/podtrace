@@ -15,6 +15,7 @@ spec:
   timeouts:
     apply: 30s
     assert: 120s
+    exec: 300s
   steps:
     - name: setup
       try:
@@ -24,12 +25,20 @@ spec:
             file: ./assert-initial-ready.yaml
 
     - name: rollout-restart-agent
+      description: |
+        The step budget has to outlast the rollout it waits on. A
+        three-node DaemonSet rolling one pod at a time takes over a
+        minute on a loaded cluster, and without an explicit budget the
+        script was killed at about 70s with `signal: killed` — after
+        `rollout status` had already reported success, which made it look
+        like a product flake rather than arithmetic.
       try:
         - script:
+            timeout: 240s
             content: |
               set -eu
               kubectl -n podtrace-system rollout restart ds/podtrace-agent
-              kubectl -n podtrace-system rollout status ds/podtrace-agent --timeout=120s
+              kubectl -n podtrace-system rollout status ds/podtrace-agent --timeout=180s
 
     - name: cr-still-reconciled
       try:

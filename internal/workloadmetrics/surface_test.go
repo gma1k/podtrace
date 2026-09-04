@@ -28,6 +28,9 @@ func renderSurface(t *testing.T) string {
 		for _, c := range newCollectors(Options{NativeHistograms: true}).all() {
 			c.Describe(ch)
 		}
+		for _, c := range newSemconvCollectors(true, defaultAttributeCardinality).all() {
+			c.Describe(ch)
+		}
 	}()
 
 	lines := make([]string, 0, 32)
@@ -141,7 +144,7 @@ func TestDocumentedSurfaceMatchesSnapshot(t *testing.T) {
 	}
 
 	documented := map[string]struct{}{}
-	for _, m := range regexp.MustCompile("`(podtrace_workload_[a-z0-9_]+)`").FindAllStringSubmatch(string(doc), -1) {
+	for _, m := range regexp.MustCompile("`(podtrace_workload_[a-z0-9_]+|(?:http|rpc|db)_[a-z0-9_]+_seconds)`").FindAllStringSubmatch(string(doc), -1) {
 		documented[m[1]] = struct{}{}
 	}
 

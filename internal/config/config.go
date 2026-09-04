@@ -153,6 +153,8 @@ var (
 	WorkloadMetricsBudget           = getIntEnvOrDefault("PODTRACE_WORKLOAD_METRICS_SERIES_BUDGET", DefaultWorkloadMetricsBudget)
 	WorkloadMetricsPodLabel         = getBoolEnvOrDefault("PODTRACE_WORKLOAD_METRICS_POD_LABEL", false)
 	WorkloadMetricsProcessLabel     = getBoolEnvOrDefault("PODTRACE_WORKLOAD_METRICS_PROCESS_LABEL", false)
+	WorkloadMetricsSemanticConv     = getBoolEnvOrDefault("PODTRACE_WORKLOAD_METRICS_SEMANTIC_CONVENTIONS", false)
+	WorkloadMetricsAttributeLimit   = getIntEnvOrDefault("PODTRACE_WORKLOAD_METRICS_ATTRIBUTE_CARDINALITY", 50)
 
 	WorkloadMetricsSeriesTTL = getDurationEnvOrDefault("PODTRACE_WORKLOAD_METRICS_SERIES_TTL", 15*time.Minute)
 

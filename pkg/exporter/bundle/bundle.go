@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -85,6 +86,10 @@ type Payload struct {
 
 	SynthesizeSpans bool `yaml:"synthesizeSpans,omitempty"`
 
+	Metrics bool `yaml:"metrics,omitempty"`
+
+	MetricsInterval time.Duration `yaml:"metricsInterval,omitempty"`
+
 	Headers map[string]string `yaml:"headers,omitempty"`
 
 	HeaderName string `yaml:"headerName,omitempty"`
@@ -137,6 +142,19 @@ func FromConfigMapData(data map[string]string) (*Payload, error) {
 	}
 	if v := data["synthesize_spans"]; v != "" {
 		p.SynthesizeSpans = v == "true"
+	}
+	if v := data["metrics"]; v != "" {
+		p.Metrics = v == "true"
+	}
+	if v := data["metrics_interval_seconds"]; v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return nil, fmt.Errorf("bundle: metrics_interval_seconds %q not an integer: %w", v, err)
+		}
+		if n < 0 {
+			return nil, fmt.Errorf("bundle: metrics_interval_seconds %d must be non-negative", n)
+		}
+		p.MetricsInterval = time.Duration(n) * time.Second
 	}
 	if v, ok := data["sample_percent"]; ok && v != "" {
 		n, err := strconv.Atoi(v)
@@ -290,6 +308,12 @@ func ToConfigMapData(p *Payload) map[string]string {
 	if p.SynthesizeSpans {
 		out["synthesize_spans"] = "true"
 	}
+	if p.Metrics {
+		out["metrics"] = "true"
+	}
+	if p.MetricsInterval > 0 {
+		out["metrics_interval_seconds"] = strconv.Itoa(int(p.MetricsInterval / time.Second))
+	}
 	keys := make([]string, 0, len(p.Headers))
 	for k := range p.Headers {
 		keys = append(keys, k)
@@ -384,6 +408,12 @@ func validatePayload(p *Payload) error {
 	}
 	if p.Sample != nil && (*p.Sample < 0 || *p.Sample > 1) {
 		return fmt.Errorf("bundle: sample %v out of range 0-1", *p.Sample)
+	}
+	if p.Metrics && p.Type != TypeOTLP {
+		return fmt.Errorf("bundle: metrics export requires type %q, got %q", TypeOTLP, p.Type)
+	}
+	if p.MetricsInterval < 0 {
+		return fmt.Errorf("bundle: metricsInterval %v must be non-negative", p.MetricsInterval)
 	}
 	if p.Thresholds != nil {
 		for _, spec := range thresholdFields() {

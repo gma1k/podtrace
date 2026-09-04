@@ -87,6 +87,13 @@ jobs:
             test/chainsaw/tests/h2-capture/workload
           kind load docker-image podtrace-h2demo:ci --name podtrace-chainsaw
 
+      - name: Build OTLP sink image
+        run: |
+          docker build --provenance=false \
+            -t podtrace-otlp-sink:ci \
+            test/chainsaw/tests/otlp-sink/workload
+          kind load docker-image podtrace-otlp-sink:ci --name podtrace-chainsaw
+
       - name: Build HTTP/3 workload images
         run: |
           docker build --provenance=false \

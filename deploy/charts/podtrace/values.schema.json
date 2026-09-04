@@ -73,6 +73,14 @@
                         "nativeHistograms": {
                             "type": "boolean"
                         },
+                        "semanticConventions": {
+                            "type": "boolean"
+                        },
+                        "attributeCardinality": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000
+                        },
                         "labels": {
                             "type": "object",
                             "properties": {

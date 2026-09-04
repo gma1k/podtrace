@@ -10,6 +10,8 @@ import (
 
 const metricPrefix = "podtrace_workload_"
 
+const defaultAttributeCardinality = 50
+
 // latencyBuckets spans 500us to 30s in twelve buckets.
 var latencyBuckets = []float64{
 	0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 5, 30,

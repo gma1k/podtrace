@@ -134,6 +134,10 @@ data:
           seriesBudget: {{ .Values.agent.metrics.seriesBudget }}
           {{- end }}
           nativeHistograms: {{ .Values.agent.metrics.nativeHistograms }}
+          semanticConventions: {{ .Values.agent.metrics.semanticConventions }}
+          {{- if .Values.agent.metrics.attributeCardinality }}
+          attributeCardinality: {{ .Values.agent.metrics.attributeCardinality }}
+          {{- end }}
           {{- if or .Values.agent.metrics.labels.pod .Values.agent.metrics.labels.process }}
           labels:
             pod: {{ .Values.agent.metrics.labels.pod }}

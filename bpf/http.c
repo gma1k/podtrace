@@ -7,27 +7,47 @@
 #include "protocols.h"
 #ifdef PODTRACE_VMLINUX_FROM_BTF
 
-static __always_inline int http_method_len(const u8 *b)
+#define HTTP_METHOD_UNKNOWN 0
+#define HTTP_METHOD_GET     1
+#define HTTP_METHOD_PUT     2
+#define HTTP_METHOD_POST    3
+#define HTTP_METHOD_HEAD    4
+#define HTTP_METHOD_PATCH   5
+#define HTTP_METHOD_DELETE  6
+#define HTTP_METHOD_OPTIONS 7
+
+static __always_inline int http_method_probe(const u8 *b)
 {
 	if (b[0] == 'G' && b[1] == 'E' && b[2] == 'T' && b[3] == ' ')
-		return 3;
+		return (HTTP_METHOD_GET << 8) | 3;
 	if (b[0] == 'P' && b[1] == 'U' && b[2] == 'T' && b[3] == ' ')
-		return 3;
+		return (HTTP_METHOD_PUT << 8) | 3;
 	if (b[0] == 'P' && b[1] == 'O' && b[2] == 'S' && b[3] == 'T' && b[4] == ' ')
-		return 4;
+		return (HTTP_METHOD_POST << 8) | 4;
 	if (b[0] == 'H' && b[1] == 'E' && b[2] == 'A' && b[3] == 'D' && b[4] == ' ')
-		return 4;
+		return (HTTP_METHOD_HEAD << 8) | 4;
 	if (b[0] == 'P' && b[1] == 'A' && b[2] == 'T' && b[3] == 'C' && b[4] == 'H' &&
 	    b[5] == ' ')
-		return 5;
+		return (HTTP_METHOD_PATCH << 8) | 5;
 	if (b[0] == 'D' && b[1] == 'E' && b[2] == 'L' && b[3] == 'E' && b[4] == 'T' &&
 	    b[5] == 'E' && b[6] == ' ')
-		return 6;
+		return (HTTP_METHOD_DELETE << 8) | 6;
 	if (b[0] == 'O' && b[1] == 'P' && b[2] == 'T' && b[3] == 'I' && b[4] == 'O' &&
 	    b[5] == 'N' && b[6] == 'S' && b[7] == ' ')
-		return 7;
+		return (HTTP_METHOD_OPTIONS << 8) | 7;
 	return 0;
 }
+
+static __always_inline int http_method_code(const u8 *b)
+{
+	return http_method_probe(b) >> 8;
+}
+
+static __always_inline int http_method_len(const u8 *b)
+{
+	return http_method_probe(b) & 0xff;
+}
+
 
 static __always_inline int http_should_trace(void)
 {
@@ -122,6 +142,7 @@ static __noinline void http_emit_request(void *ctx, void *base, u64 avail,
 
 	struct http_req req = {};
 	req.start_ns = bpf_ktime_get_ns();
+	req.method = (u8)http_method_code((const u8 *)buf);
 	u32 p = 0;
 	int spaces = 0;
 	u32 i;
@@ -156,6 +177,7 @@ static __noinline void http_emit_request(void *ctx, void *base, u64 avail,
 		e->bytes = 0;
 		e->tcp_state = transport;
 		e->correlation_id = now;
+		e->http_method = req.method;
 		bpf_probe_read_kernel_str(e->target, sizeof(e->target), req.endpoint);
 		http_capture_traceparent(base, avail, e->details);
 		fill_event_peer(e);
@@ -224,6 +246,7 @@ static __noinline void http_emit_response(void *ctx, void *base, u64 len,
 		e->bytes = len;
 		e->tcp_state = transport;
 		e->correlation_id = req->start_ns;
+		e->http_method = req->method;
 		bpf_probe_read_kernel_str(e->target, sizeof(e->target), req->endpoint);
 		bpf_probe_read_kernel_str(e->details, sizeof(e->details), status);
 		fill_event_peer(e);

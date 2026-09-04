@@ -263,3 +263,23 @@ All tracing configuration can be set via:
 - **Metadata**: Latency, error counts, request counts per edge
 
 Graphs can be exported in DOT format for visualization with Graphviz.
+
+## Span identity
+
+Spans arrive under the **observed workload's** name, not podtrace's.
+`service.name` is the workload, `service.namespace` its namespace, and
+podtrace identifies itself as the instrumentation through
+`telemetry.sdk.name`. That is what makes a workload appear as itself in
+Jaeger's service list rather than every traced pod collapsing into a single
+`podtrace` entry.
+
+Mechanically, `service.name` is a Resource attribute and a Resource is bound
+to a TracerProvider, so podtrace keeps one lightweight provider per observed
+workload. They all share a single span processor, queue and exporter, so the
+cost is a map entry per workload rather than a full export pipeline. Idle
+providers are dropped after ten minutes; past 256 workloads on one node,
+further events fall back to a shared provider rather than evicting live ones.
+
+Events with no resolvable workload — no namespace or no owner — keep the
+agent's own identity, because an empty `service.name` is worse than an
+honest one.

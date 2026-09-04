@@ -1,0 +1,175 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otlp-sink
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otlp-sink
+  template:
+    metadata:
+      labels:
+        app: otlp-sink
+    spec:
+      containers:
+        - name: sink
+          image: podtrace-otlp-sink:ci
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 4318
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 4318
+            initialDelaySeconds: 1
+            periodSeconds: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otlp-sink
+spec:
+  selector:
+    app: otlp-sink
+  ports:
+    - port: 4318
+      targetPort: 4318
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: push-target
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: push-target
+  template:
+    metadata:
+      labels:
+        app: push-target
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/nginx/conf.d
+            - name: cache
+              mountPath: /var/cache/nginx
+            - name: run
+              mountPath: /var/run
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 101
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+      volumes:
+        - name: conf
+          configMap:
+            name: push-target-conf
+        - name: cache
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: push-target-conf
+data:
+  default.conf: |
+    server {
+      listen 8080;
+      location / { return 200 "ok\n"; }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: push-target
+spec:
+  selector:
+    app: push-target
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: push-loadgen
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: push-loadgen
+  template:
+    metadata:
+      labels:
+        app: push-loadgen
+    spec:
+      containers:
+        - name: curl
+          image: curlimages/curl:8.9.1
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              while true; do
+                curl -sS -o /dev/null "http://push-target.${POD_NAMESPACE}:8080/" || true
+                sleep 0.2
+              done
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: push-probe
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: push-probe
+  template:
+    metadata:
+      labels:
+        app: push-probe
+    spec:
+      containers:
+        - name: curl
+          image: curlimages/curl:8.9.1
+          command: ["/bin/sh", "-c", "sleep infinity"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault

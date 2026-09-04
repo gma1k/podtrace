@@ -209,6 +209,13 @@ func ParseEvent(data []byte) *events.Event {
 		CorrelationID uint64
 	}
 
+	type rawEventV9 struct {
+		rawEventV8
+		HTTPMethod uint8
+		_          [7]uint8
+	}
+
+	expectedV9 := int(unsafe.Sizeof(rawEventV9{}))
 	expectedV8 := int(unsafe.Sizeof(rawEventV8{}))
 	expectedV7 := int(unsafe.Sizeof(rawEventV7{}))
 	expectedV6 := int(unsafe.Sizeof(rawEventV6{}))
@@ -230,10 +237,41 @@ func ParseEvent(data []byte) *events.Event {
 	event.DNSTransport = 0
 	event.DNSServerIP6 = [16]byte{}
 	event.PeerSrcIP = ""
+	event.HTTPMethod = ""
 	event.PeerDstIP = ""
 	event.PeerSrcPort = 0
 	event.PeerDstPort = 0
 	event.CorrelationID = 0
+
+	if len(data) >= expectedV9 {
+		var e rawEventV9
+		if err := binaryRead(bytes.NewReader(data[:expectedV9]), binary.LittleEndian, &e); err != nil {
+			return nil
+		}
+		event.Timestamp = e.Timestamp
+		event.PID = e.PID
+		event.Type = events.EventType(e.Type)
+		event.LatencyNS = e.LatencyNS
+		event.Error = e.Error
+		event.Bytes = e.Bytes
+		event.TCPState = e.TCPState
+		event.StackKey = e.StackKey
+		event.CgroupID = e.CgroupID
+		event.ProcessName = string(bytes.TrimRight(e.Comm[:], "\x00"))
+		event.Target = decodeTarget(e.Type, e.Target[:])
+		event.Details = string(bytes.TrimRight(e.Details[:], "\x00"))
+		event.NetNsID = e.NetNsID
+		event.DNSServerIP = e.DNSServerIP
+		event.DNSTransport = e.DNSTransport
+		event.DNSServerIP6 = e.DNSServerIP6
+		event.PeerSrcIP = events.PeerIP(e.PeerFamily, e.PeerSaddr, e.PeerSaddr6)
+		event.PeerDstIP = events.PeerIP(e.PeerFamily, e.PeerDaddr, e.PeerDaddr6)
+		event.PeerSrcPort = e.PeerSport
+		event.PeerDstPort = e.PeerDport
+		event.CorrelationID = e.CorrelationID
+		event.HTTPMethod = events.HTTPMethodFromCode(e.HTTPMethod)
+		return event
+	}
 
 	if len(data) >= expectedV8 {
 		var e rawEventV8

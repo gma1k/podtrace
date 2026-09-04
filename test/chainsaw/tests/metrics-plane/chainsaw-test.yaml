@@ -3,6 +3,7 @@ kind: Test
 metadata:
   name: metrics-plane
 spec:
+  concurrent: false
   description: |
     Property tested: the continuous metrics plane serves workload metrics
     for every pod on the node, with no PodTrace authored, purely because
