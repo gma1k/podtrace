@@ -87,6 +87,20 @@
       ]
     },
     {
+      "description": "A Go major bump in the k8s ecosystem changes the module import path (.../v6 becomes .../v7), so it is a coordinated rename across every module that imports it, not a version bump. api, apimachinery, client-go, apiextensions-apiserver and controller-runtime all pin the same major, and the generated applyconfiguration parser must match the one apimachinery compiles managedfields against. Hold these on the dashboard and take them with the k8s release train. Does not affect the normal v0.x train, which Renovate reports as minor.",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchPackageNames": [
+        "/^k8s\\.io//",
+        "/^sigs\\.k8s\\.io//"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "dependencyDashboardApproval": true
+    },
+    {
       "description": "Group GitHub Actions updates",
       "matchManagers": [
         "github-actions"
