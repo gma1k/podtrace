@@ -101,9 +101,13 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 	}
 
 	sessionArgs := append([]string{}, args...)
+	if s.Spec.ExporterRef.Name != "" {
+		sessionArgs = append(sessionArgs,
+			"--tracing",
+			"--exporter-from-file", "/etc/podtrace/exporter/bundle.yaml",
+		)
+	}
 	sessionArgs = append(sessionArgs,
-		"--tracing",
-		"--exporter-from-file", "/etc/podtrace/exporter/bundle.yaml",
 		"--summary-file", "/var/run/podtrace/summary.json",
 		"--termination-message-path", "/dev/termination-log",
 	)

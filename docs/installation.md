@@ -41,7 +41,7 @@ kubectl get podtracesession demo-trace -n podtrace-demo \
 
 # Read the full human-readable report
 kubectl get cm nginx-trace-report -n podtrace-demo \
-  -o jsonpath='{.data.report\.txt}'
+  -o go-template='{{range $k,$v := .data}}{{$v}}{{end}}'
 ```
 
 The demo session has `ttlSecondsAfterFinished: 600`, so it auto-deletes itself 10 minutes after completing. To tear down everything immediately:
@@ -671,3 +671,44 @@ helm install podtrace deploy/charts/podtrace \
 See [operator.md](operator.md) for the architectural picture and
 [crd-podtracesession.md](crd-podtracesession.md) for an end-to-end
 trace example after install.
+
+### Uninstall
+
+```bash
+helm uninstall podtrace --namespace podtrace-system
+```
+
+The chart applies the `TracerConfig` from a hook Job rather than as a
+tracked release resource, so Helm does not remove it on its own — and
+that object owns the agent DaemonSet. Left in place it would keep a
+privileged, `CAP_SYS_ADMIN` pod running on every node with no operator
+left to reconcile or stop it, so a `pre-delete` hook deletes it. The
+DaemonSet, its ServiceAccount and its ClusterRole go with it through
+their owner references.
+
+To keep the agents running across an uninstall — reinstalling the chart
+without interrupting capture, or managing the `TracerConfig` outside the
+release — opt out:
+
+```bash
+helm uninstall podtrace --namespace podtrace-system \
+  --set tracerConfig.retainOnUninstall=true
+```
+
+Then remove them by hand when you are done:
+
+```bash
+kubectl delete tracerconfig default
+```
+
+Two things Helm never removes, by design:
+
+- **CRDs**, and with them every `PodTrace`, `PodTraceSession`,
+  `ExporterConfig` and report object in the cluster. Delete them with
+  `kubectl delete crd -l app.kubernetes.io/name=podtrace` only when you
+  intend to lose that data.
+- **The namespace**, if the chart created it.
+
+OLM and raw-`kubectl` installs do not run Helm hooks. On those paths the
+operator self-bootstraps a `TracerConfig`, so delete it yourself when
+removing podtrace.

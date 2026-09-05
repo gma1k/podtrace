@@ -176,7 +176,7 @@ EOF
 # Session runs a Job on the target's node, finishes within ~15s
 kubectl wait --for=jsonpath='{.status.state}'=Completed \
   podtracesession smoke --timeout=60s
-kubectl get cm smoke-report -o jsonpath='{.data.report\.txt}'
+kubectl get cm smoke-report -o go-template='{{range $k,$v := .data}}{{$v}}{{end}}'
 ```
 
 ## BTF on Talos

@@ -38,6 +38,13 @@ func SessionBundleName(sessionUID types.UID) string {
 
 // ensureSessionExporterBundle creates-or-updates the ConfigMap + optional
 // companion Secret the session Job mounts at /etc/podtrace/exporter/.
+func ensureSessionExporterBundleIfReferenced(ctx context.Context, c client.Client, reader client.Reader, s *podtracev1alpha1.PodTraceSession, ec *podtracev1alpha1.ExporterConfig, systemNS string, referenced bool) error {
+	if !referenced {
+		return nil
+	}
+	return ensureSessionExporterBundle(ctx, c, reader, s, ec, systemNS)
+}
+
 func ensureSessionExporterBundle(ctx context.Context, c client.Client, reader client.Reader, s *podtracev1alpha1.PodTraceSession, ec *podtracev1alpha1.ExporterConfig, systemNS string) error {
 	name := SessionBundleName(s.UID)
 

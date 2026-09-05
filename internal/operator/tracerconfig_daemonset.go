@@ -22,6 +22,8 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 		},
 	}
 
+	podLabels := agentPodTemplateLabels(selector.MatchLabels)
+
 	hostPathType := corev1.HostPathDirectory
 	priv := false
 	runAsRoot := int64(0)
@@ -109,7 +111,7 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 		},
 		Template: corev1.PodTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{
-				Labels: selector.MatchLabels,
+				Labels: podLabels,
 			},
 			Spec: corev1.PodSpec{
 				ServiceAccountName:            AgentServiceAccountName(tc.Name),
@@ -196,4 +198,19 @@ func itoa(n int) string    { return strconv.Itoa(n) }
 // name.
 func intstrFromString(name string) intstr.IntOrString {
 	return intstr.FromString(name)
+}
+
+// agentPodTemplateLabels returns the selector labels plus the
+// app.kubernetes.io/* convention, as a new map so the caller's selector is
+// left untouched.
+func agentPodTemplateLabels(selector map[string]string) map[string]string {
+	labels := make(map[string]string, len(selector)+4)
+	for k, v := range selector {
+		labels[k] = v
+	}
+	labels["app.kubernetes.io/name"] = "podtrace"
+	labels["app.kubernetes.io/component"] = ComponentAgent
+	labels["app.kubernetes.io/part-of"] = "podtrace"
+	labels["app.kubernetes.io/managed-by"] = ManagedByValue
+	return labels
 }

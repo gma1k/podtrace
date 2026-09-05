@@ -188,6 +188,13 @@ func resolveTracerConfigRef(ctx context.Context, c client.Client, ref *corev1.Lo
 
 // resolveExporterRef verifies that spec.exporterRef.name refers to an
 // ExporterConfig that exists in the caller's namespace.
+func resolveSessionExporterRef(ctx context.Context, c client.Client, namespace, name string) error {
+	if name == "" {
+		return nil
+	}
+	return resolveExporterRef(ctx, c, namespace, name)
+}
+
 func resolveExporterRef(ctx context.Context, c client.Client, namespace, name string) error {
 	if name == "" {
 		return fmt.Errorf("spec.exporterRef.name is required")

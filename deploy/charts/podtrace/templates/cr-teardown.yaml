@@ -1,0 +1,130 @@
+{{/*
+  Uninstall cleanup for the bootstrapped TracerConfig.
+
+  The TracerConfig is applied by the post-install hook Job in
+  cr-bootstrap.yaml, not as a tracked release resource, so `helm uninstall`
+  leaves it behind. That is harmless for a config object, but this one owns
+  the agent DaemonSet: leaving it means a privileged, CAP_SYS_ADMIN pod
+  keeps running on every node with no operator left to reconcile, update or
+  stop it.
+
+  So the default is to remove it. Deleting the TracerConfig cascades to the
+  DaemonSet through its ownerReference, and TracerConfig carries no
+  finalizer, so the delete completes without the operator's help. This hook
+  runs before the release's own resources are torn down, while the operator
+  is still up.
+
+  Set tracerConfig.retainOnUninstall=true to keep the agents running across
+  an uninstall — for a chart reinstall that should not interrupt capture,
+  or when the TracerConfig is managed outside this release.
+
+  Helm-only: OLM and raw-kubectl install paths do not run hooks, and the
+  operator self-bootstraps a TracerConfig on those paths, so they are
+  unaffected either way.
+*/}}
+{{- if and .Values.operator.enabled .Values.tracerConfig.create (not .Values.tracerConfig.retainOnUninstall) }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "podtrace.fullname" . }}-cr-teardown
+  namespace: {{ include "podtrace.systemNamespace" . }}
+  labels:
+    {{- include "podtrace.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cr-teardown
+  annotations:
+    helm.sh/hook: pre-delete
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "podtrace.fullname" . }}-cr-teardown
+  labels:
+    {{- include "podtrace.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cr-teardown
+  annotations:
+    helm.sh/hook: pre-delete
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: ["podtrace.io"]
+    resources: ["tracerconfigs"]
+    verbs: ["get", "list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "podtrace.fullname" . }}-cr-teardown
+  labels:
+    {{- include "podtrace.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cr-teardown
+  annotations:
+    helm.sh/hook: pre-delete
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "podtrace.fullname" . }}-cr-teardown
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "podtrace.fullname" . }}-cr-teardown
+    namespace: {{ include "podtrace.systemNamespace" . }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "podtrace.fullname" . }}-cr-teardown
+  namespace: {{ include "podtrace.systemNamespace" . }}
+  labels:
+    {{- include "podtrace.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cr-teardown
+  annotations:
+    helm.sh/hook: pre-delete
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 60
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: podtrace
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: cr-teardown
+    spec:
+      serviceAccountName: {{ include "podtrace.fullname" . }}-cr-teardown
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kubectl
+          image: {{ .Values.crds.labelerImage | default "alpine/k8s:1.37.0@sha256:b421c2e9419edb98db39b6ab641669f4db7bb2acf354f22450c6b7e7176d1ff4" }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              echo "Deleting TracerConfig {{ .Values.tracerConfig.name }} so the agent DaemonSet stops with the chart."
+              kubectl delete tracerconfig {{ .Values.tracerConfig.name | quote }} \
+                --ignore-not-found --wait=true --timeout=90s
+              echo "Done. Set tracerConfig.retainOnUninstall=true to keep agents running across an uninstall."
+{{- end }}

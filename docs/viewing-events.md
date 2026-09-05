@@ -13,7 +13,7 @@ path is. Pick the one that matches what you're doing.
 | You want… | Use | Read it with |
 |---|---|---|
 | Live events streaming in your terminal | `kubectl podtrace` CLI mode | the CLI itself prints them |
-| One bounded snapshot you can `kubectl get` | `PodTraceSession` with `spec.reportRef.configMap` | `kubectl get cm <name> -o jsonpath='{.data.report\.txt}'` |
+| One bounded snapshot you can `kubectl get` | `PodTraceSession` with `spec.reportRef.configMap` | `kubectl get cm <name> -o go-template='{{range $k,$v := .data}}{{$v}}{{end}}'` |
 | Archived per-run snapshots over time | `PodTraceSchedule` with `reportRef.objectStore` | `aws s3 cp s3://…/<key> -` |
 | Real-time spans in a UI (production) | any CR with an `ExporterConfig` pointed at OTLP | Jaeger / Tempo / Datadog / Splunk |
 
@@ -107,7 +107,7 @@ EOF
 until [ "$(kubectl -n my-app get podtracesession my-trace -o jsonpath='{.status.state}')" = "Completed" ]; do sleep 5; done
 
 # Read the full human-readable report
-kubectl -n my-app get cm my-trace-report -o jsonpath='{.data.report\.txt}' | less
+kubectl -n my-app get cm my-trace-report -o go-template='{{range $k,$v := .data}}{{$v}}{{end}}' | less
 ```
 
 What the report contains (sample from a curl workload):
@@ -149,7 +149,7 @@ related failures into causal chains and offers fixes.
 
 Use `reportRef.secret` instead of `configMap` when the report may
 contain sensitive hostnames/paths/payloads. Same read pattern,
-`-o jsonpath='{.data.report\.txt}' | base64 -d`.
+`-o go-template='{{range $k,$v := .data}}{{$v}}{{end}}' | base64 -d`.
 
 **Size limit**: ConfigMaps and Secrets are capped at 1 MiB by etcd.
 For longer runs or noisier workloads, prefer Surface 3.

@@ -95,11 +95,12 @@ static __attribute__((noinline)) u32 append_dec(char *buf, u32 idx, u32 max_idx,
 	int started = 0;
 	for (int i = 0; i < 5; i++) {
 		u32 digit = (val / divisor) % 10;
-		if (digit != 0 || started || divisor == 1) {
+		if (digit != 0 || started || i == 4) {
 			if (idx < max_idx) buf[idx++] = '0' + digit;
 			started = 1;
 		}
-		divisor /= 10;
+		if (divisor > 1)
+			divisor /= 10;
 	}
 	return idx;
 }
