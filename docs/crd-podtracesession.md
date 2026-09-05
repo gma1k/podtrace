@@ -133,7 +133,7 @@ kubectl get podtracesession diag-api -n my-app -o jsonpath='{.status.summary}{"\
 kubectl get podtracesession diag-api -n my-app -o jsonpath='{range .status.jobs[*]}{.node}: {.totalEvents} events{"\n"}{end}'
 
 # Read the full report
-kubectl get cm api-diag-report -n my-app -o jsonpath='{.data.report\.txt}' | less
+kubectl get cm api-diag-report -n my-app -o go-template='{{range $k,$v := .data}}{{$v}}{{end}}' | less
 
 # Inspect raw kubelet termination message
 kubectl -n podtrace-system get pods -l podtrace.io/session=diag-api \

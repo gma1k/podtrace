@@ -230,7 +230,7 @@ sessionTemplate:
     #   credentialsSecretRef: { name: s3-creds }
 ```
 
-Then `kubectl get cm nightly-report -o jsonpath='{.data.report\.txt}'`
+Then `kubectl get cm nightly-report -o go-template='{{range $k,$v := .data}}{{$v}}{{end}}'`
 for the latest run, or `aws s3 ls s3://my-bucket/podtrace/` for the
 archived history.
 

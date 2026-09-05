@@ -48,27 +48,64 @@ spec:
               cpu: 200m
               memory: 128Mi
 ---
-# OTLP exporter pointing at a localhost collector — replace the endpoint
-# with your own OTLP receiver to ship traces externally. The session
-# still produces a ConfigMap report regardless of whether traces reach
-# this endpoint.
-apiVersion: podtrace.io/v1alpha1
-kind: ExporterConfig
+# Gives nginx a stable name for the loadgen to call, and a ClusterIP for
+# the session to observe DNS and connect activity against.
+apiVersion: v1
+kind: Service
 metadata:
-  name: demo-otlp
+  name: nginx
   namespace: podtrace-demo
 spec:
-  type: otlp
-  otlp:
-    endpoint: localhost:4318
-    protocol: http
-    insecure: true
+  selector:
+    app: nginx
+  ports:
+    - port: 80
+      targetPort: 80
+---
+# Drives the traffic the session reports on: one 200 and one 404 per
+# second, so the report shows request paths, status codes and latency
+# rather than an empty collection period.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen
+  namespace: podtrace-demo
+  labels:
+    app: loadgen
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loadgen
+  template:
+    metadata:
+      labels:
+        app: loadgen
+    spec:
+      containers:
+        - name: curl
+          image: curlimages/curl:8.9.1
+          command: ["sh", "-c"]
+          args:
+            - |
+              while true; do
+                curl -s -o /dev/null http://nginx.podtrace-demo.svc.cluster.local/ || true
+                curl -s -o /dev/null http://nginx.podtrace-demo.svc.cluster.local/missing || true
+                sleep 1
+              done
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
 ---
 # 30-second diagnose session against the nginx pod. Inspect the result:
 #
 #   kubectl get podtracesession demo-trace -n podtrace-demo
 #   kubectl get cm nginx-trace-report -n podtrace-demo \
-#     -o jsonpath='{.data.report\.txt}'
+#     -o go-template='{{range $k,$v := .data}}{{$v}}{{end}}'
 apiVersion: podtrace.io/v1alpha1
 kind: PodTraceSession
 metadata:
@@ -80,8 +117,8 @@ spec:
       app: nginx
   duration: 30s
   filters: [dns, net, fs]
-  exporterRef:
-    name: demo-otlp
+  # No exporterRef: this session only wants a local report. To ship spans
+  # as well, add an ExporterConfig and reference it here.
   reportRef:
     configMap:
       name: nginx-trace-report

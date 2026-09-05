@@ -181,7 +181,7 @@ spec:
 ```bash
 kubectl apply -f session.yaml
 kubectl get podtracesession diag-api -n my-app -w   # wait for Completed
-kubectl get cm api-diag-report -n my-app -o jsonpath='{.data.report\.txt}' | less
+kubectl get cm api-diag-report -n my-app -o go-template='{{range $k,$v := .data}}{{$v}}{{end}}' | less
 ```
 
 This path runs the same eBPF stack the CLI uses, but as a per-node
@@ -238,7 +238,7 @@ kubectl get podtracesession demo-trace -n podtrace-demo -w
 
 # Read the report
 kubectl get cm nginx-trace-report -n podtrace-demo \
-  -o jsonpath='{.data.report\.txt}'
+  -o go-template='{{range $k,$v := .data}}{{$v}}{{end}}'
 
 # Tear down the demo (operator + sample workload + CRDs)
 kubectl delete ns podtrace-system podtrace-demo

@@ -73,9 +73,8 @@ spec:
               duration:
                 type: string
               exporterRef:
-                description: |-
-                  LocalObjectReference contains enough information to let you locate the
-                  referenced object inside the same namespace.
+                description: ExporterRef names the ExporterConfig this session ships
+                  spans to.
                 properties:
                   name:
                     default: ""
@@ -321,14 +320,6 @@ spec:
                 description: |-
                   TracerConfigRef pins every Job this session spawns to one
                   TracerConfig, overriding the per-node fleet lookup.
-
-                  Left unset, each per-node Job takes the config of the fleet that
-                  targets its node, so a session spanning two node pools picks up each
-                  pool's own image and redaction policy. Set this when a session must
-                  run under one known configuration regardless of placement.
-
-                  TracerConfig is cluster-scoped, so this is a bare name with no
-                  namespace.
                 properties:
                   name:
                     default: ""
@@ -347,12 +338,14 @@ spec:
                 type: integer
             required:
             - duration
-            - exporterRef
             type: object
             x-kubernetes-validations:
             - message: exactly one of spec.selector or spec.podRefs must be set
               rule: '[has(self.selector), has(self.podRefs)].filter(x, x).size() ==
                 1'
+            - message: at least one of spec.exporterRef or spec.reportRef must be
+                set, otherwise the session has nowhere to put its output
+              rule: has(self.reportRef) || (has(self.exporterRef) && has(self.exporterRef.name))
           status:
             description: PodTraceSessionStatus reflects the observed state of a PodTraceSession.
             properties:

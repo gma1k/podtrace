@@ -169,8 +169,6 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if err != nil {
 		var missing *errNoTracerConfig
 		if errors.As(err, &missing) {
-			// Terminal: no amount of requeueing conjures a TracerConfig, and
-			// proceeding would build a Job with an empty image.
 			return ctrl.Result{}, r.failSessionTerminally(ctx, &session, "TracerConfigUnresolved", err.Error())
 		}
 		return ctrl.Result{}, err
@@ -179,8 +177,9 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	systemNS := systemNamespaceForSession(tc, r.SystemNamespace)
 
 	var ec podtracev1alpha1.ExporterConfig
+	hasExporter := session.Spec.ExporterRef.Name != ""
 	ecKey := types.NamespacedName{Namespace: session.Namespace, Name: session.Spec.ExporterRef.Name}
-	if err := r.Get(ctx, ecKey, &ec); err != nil {
+	if err := r.Get(ctx, ecKey, &ec); hasExporter && err != nil {
 		if apierrors.IsNotFound(err) {
 			r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "ExporterNotFound",
 				fmt.Sprintf("ExporterConfig %s not found", ecKey))
@@ -192,12 +191,8 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if err := validateManagedCRName("ExporterConfig", ec.Name); err != nil {
 		return ctrl.Result{}, r.failSessionTerminally(ctx, &session, "ExporterConfigNameTooLong", err.Error())
 	}
-	// A session whose nodes span fleets with different spec.systemNamespace
-	// puts Jobs in more than one namespace, and a Job cannot mount a bundle,
-	// assume a ServiceAccount, or exercise RBAC that lives somewhere else.
-	// Provision the full set in every namespace the resolution touches.
 	for _, ns := range resolved.namespaces {
-		if err := ensureSessionExporterBundle(ctx, r.Client, r.reader(), &session, &ec, ns); err != nil {
+		if err := ensureSessionExporterBundleIfReferenced(ctx, r.Client, r.reader(), &session, &ec, ns, hasExporter); err != nil {
 			r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "BundleSync", err.Error())
 			_ = r.Status().Update(ctx, &session)
 			return ctrl.Result{RequeueAfter: 60 * time.Second}, nil

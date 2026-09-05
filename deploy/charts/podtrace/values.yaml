@@ -155,6 +155,8 @@ tracerConfig:
   name: default
   sidecarUploader: false
 
+  retainOnUninstall: false
+
   redaction:
     enabled: false
     redactDNSNames: false

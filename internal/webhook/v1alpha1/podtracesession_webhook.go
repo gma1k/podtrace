@@ -62,7 +62,7 @@ func (v *PodTraceSessionCustomValidator) validate(ctx context.Context, s *podtra
 	if s.Spec.Duration.Duration <= 0 {
 		return nil, fmt.Errorf("spec.duration must be greater than zero")
 	}
-	if err := resolveExporterRef(ctx, v.Client, s.Namespace, s.Spec.ExporterRef.Name); err != nil {
+	if err := resolveSessionExporterRef(ctx, v.Client, s.Namespace, s.Spec.ExporterRef.Name); err != nil {
 		return nil, err
 	}
 	if err := resolveTracerConfigRef(ctx, v.Client, s.Spec.TracerConfigRef, s.Namespace, v.SystemNamespace); err != nil {

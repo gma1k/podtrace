@@ -82,7 +82,7 @@ spec:
 Then:
 
 ```bash
-kubectl get cm my-pod-diag-report -n my-app -o jsonpath='{.data.report\.txt}' > report.txt
+kubectl get cm my-pod-diag-report -n my-app -o go-template='{{range $k,$v := .data}}{{$v}}{{end}}' > report.txt
 ```
 
 ### Selector-driven multi-pod trace

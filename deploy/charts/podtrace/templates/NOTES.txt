@@ -48,7 +48,7 @@ Quick start
   # Run an end-to-end trace against any pod
   kubectl apply -f examples/diagnose-demo.yaml
   kubectl -n podtrace-demo get podtracesession diag-demo -w
-  kubectl -n podtrace-demo get cm diag-demo-report -o jsonpath='{.data.report\.txt}'
+  kubectl -n podtrace-demo get cm diag-demo-report -o go-template='{{ "{{range $k,$v := .data}}{{$v}}{{end}}" }}'
 {{- else if .Values.operator.enabled }}
   # Operator is running but no TracerConfig is rendered. Apply one to
   # bring up the agent DaemonSet:

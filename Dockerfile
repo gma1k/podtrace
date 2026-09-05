@@ -61,7 +61,7 @@ RUN set -eu; \
         echo "Run 'make bpf-btf-header' on a host with bpftool before building." >&2; \
         exit 1; \
     else \
-        echo "WARNING: building from the stub bpf/vmlinux.h, gRPC and FastCGI probes will be no-ops in this image" >&2; \
+        echo "BPF build: stub bpf/vmlinux.h. It declares the fields podtrace reads under preserve_access_index, so CO-RE resolves them against the running kernel and every probe is built. The running kernel still needs BTF." >&2; \
     fi
 
 RUN --mount=type=cache,target=/root/.cache/go-build \

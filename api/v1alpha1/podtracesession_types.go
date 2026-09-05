@@ -36,6 +36,7 @@ const (
 // PodTraceSessionSpec defines a bounded diagnose-mode trace. The operator
 // reconciles this into one privileged Job per node hosting matched pods.
 // +kubebuilder:validation:XValidation:rule="[has(self.selector), has(self.podRefs)].filter(x, x).size() == 1",message="exactly one of spec.selector or spec.podRefs must be set"
+// +kubebuilder:validation:XValidation:rule="has(self.reportRef) || (has(self.exporterRef) && has(self.exporterRef.name))",message="at least one of spec.exporterRef or spec.reportRef must be set, otherwise the session has nowhere to put its output"
 type PodTraceSessionSpec struct {
 	// +optional
 	Selector *metav1.LabelSelector `json:"selector,omitempty"`
@@ -55,19 +56,12 @@ type PodTraceSessionSpec struct {
 	// +optional
 	Filters []EventFilter `json:"filters,omitempty"`
 
-	// +kubebuilder:validation:Required
-	ExporterRef corev1.LocalObjectReference `json:"exporterRef"`
+	// ExporterRef names the ExporterConfig this session ships spans to.
+	// +optional
+	ExporterRef corev1.LocalObjectReference `json:"exporterRef,omitempty"`
 
 	// TracerConfigRef pins every Job this session spawns to one
 	// TracerConfig, overriding the per-node fleet lookup.
-	//
-	// Left unset, each per-node Job takes the config of the fleet that
-	// targets its node, so a session spanning two node pools picks up each
-	// pool's own image and redaction policy. Set this when a session must
-	// run under one known configuration regardless of placement.
-	//
-	// TracerConfig is cluster-scoped, so this is a bare name with no
-	// namespace.
 	// +optional
 	TracerConfigRef *corev1.LocalObjectReference `json:"tracerConfigRef,omitempty"`
 

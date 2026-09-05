@@ -168,7 +168,7 @@ kubectl -n e2e wait deploy/web --for=condition=Available --timeout=60s
 
 until [ "$(kubectl -n e2e get podtracesession nonotlp-jaeger -o jsonpath='{.status.state}')" = "Completed" ]; do sleep 3; done
 kubectl -n e2e get podtracesession nonotlp-jaeger
-kubectl -n e2e get cm nonotlp-report -o jsonpath='{.data.report\.txt}' | head -20
+kubectl -n e2e get cm nonotlp-report -o go-template='{{range $k,$v := .data}}{{$v}}{{end}}' | head -20
 
 kubectl -n e2e delete podtracesession nonotlp-jaeger
 ```
