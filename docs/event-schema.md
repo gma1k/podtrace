@@ -94,7 +94,8 @@ The current production schema. Adds the network namespace inode number at the en
 **Total V4 size: 344 bytes**
 
 > **Note:** `NetNsID` is only populated when the BPF object is compiled with
-> `PODTRACE_VMLINUX_FROM_BTF` (full kernel BTF). Otherwise it remains 0.
+> the running kernel exposing BTF, which CO-RE needs to walk
+> `task_struct -> nsproxy -> net_ns`. Otherwise it remains 0.
 
 ---
 
@@ -227,7 +228,7 @@ resolved from (correlation, IPv4 and IPv6), rendered as `ip:port (name)`. See
 | V1      | Base schema | — |
 | V2      | `CgroupID`  | `bpf_get_current_cgroup_id()` always available |
 | V3      | `Comm[16]`  | `bpf_get_current_comm()` always available |
-| V4      | `NetNsID`   | Requires `PODTRACE_VMLINUX_FROM_BTF` for BTF CO-RE |
+| V4      | `NetNsID`   | Requires the running kernel to expose BTF, for CO-RE |
 | V5      | `DNSServerIP`, `DNSTransport` | Packet DNS: upstream IPv4 resolver + UDP/TCP |
 | V6      | `DNSServerIP6` | Packet DNS: upstream IPv6 resolver (IPv4/IPv6 parity) |
 

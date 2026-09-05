@@ -14,10 +14,12 @@ import (
 	"github.com/go-logr/logr"
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -62,6 +64,8 @@ type Options struct {
 	StatusReportInterval time.Duration
 
 	BackendFactory func() (tracer.TracerBackend, error)
+
+	RestConfig *rest.Config
 }
 
 // DefaultOptions returns production defaults.
@@ -99,7 +103,12 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	restConfig := opts.RestConfig
+	if restConfig == nil {
+		restConfig = ctrl.GetConfigOrDie()
+	}
+
+	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme:         scheme,
 		LeaderElection: false,
 		Cache: cache.Options{
@@ -112,6 +121,12 @@ func Run(ctx context.Context, opts Options) error {
 				},
 				&corev1.Secret{}: {
 					Namespaces: map[string]cache.Config{opts.SystemNamespace: {}},
+				},
+				&discoveryv1.EndpointSlice{}: {
+					Transform: trimEndpointSlice,
+				},
+				&corev1.Service{}: {
+					Transform: trimService,
 				},
 			},
 		},
@@ -143,9 +158,19 @@ func Run(ctx context.Context, opts Options) error {
 		logger.Error(backendErr, "tracer backend unavailable — running in degraded noop mode",
 			"reason", reason)
 		metrics.BackendDegraded.WithLabelValues(reason).Set(1)
+		probeSrv.MarkDegraded(reason)
 	}
 
-	exporters, metricsSink, expErr := buildExporters(router, metrics, enricher, logger)
+	var peers *PeerResolver
+	if config.WorkloadMetricsEnabled {
+		if err := RegisterPeerIndex(ctx, mgr); err != nil {
+			logger.Error(err, "service-map peer index unavailable; edges will not be recorded")
+		} else {
+			peers = NewPeerResolver(clusterPeerLookup(mgr.GetCache()))
+		}
+	}
+
+	exporters, metricsSink, expErr := buildExporters(router, metrics, enricher, peers, logger)
 	if expErr != nil {
 		return expErr
 	}
@@ -198,8 +223,8 @@ func Run(ctx context.Context, opts Options) error {
 	g.Go(func() error { return reapWorkloadMetrics(gctx, metricsSink, logger) })
 
 	g.Go(func() error {
-		if !mgr.GetCache().WaitForCacheSync(gctx) {
-			return errors.New("informer cache sync failed")
+		if err := cacheSyncError(mgr.GetCache().WaitForCacheSync(gctx), gctx.Err()); err != nil {
+			return err
 		}
 		probeSrv.MarkReady()
 		logger.Info("agent ready")
@@ -211,6 +236,15 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	return nil
+}
+
+// cacheSyncError decides whether a cache that stopped syncing is a
+// failure.
+func cacheSyncError(synced bool, ctxErr error) error {
+	if synced || ctxErr != nil {
+		return nil
+	}
+	return errors.New("informer cache sync failed")
 }
 
 func (o *Options) validate() error {
@@ -287,11 +321,6 @@ func serveMetrics(ctx context.Context, addr string, metrics *Metrics, logger log
 
 // workloadMetricProducer wraps the plane in the Prometheus-to-OTLP
 // producer the metric pusher reads.
-//
-// A nil Sink must collapse to a nil interface, not to an interface
-// holding a nil pointer, or the pool's "no producer, no pusher" check
-// stops working and a disabled plane would still start a push loop with
-// nothing to send.
 func workloadMetricProducer(sink *workloadmetrics.Sink) metricProducer {
 	if sink == nil {
 		return nil
@@ -299,8 +328,15 @@ func workloadMetricProducer(sink *workloadmetrics.Sink) metricProducer {
 	return workloadmetrics.NewProducer(sink)
 }
 
+func peerLookup(r *PeerResolver) func(string, uint16) (workloadmetrics.PeerIdentity, bool) {
+	if r == nil {
+		return nil
+	}
+	return r.Resolve
+}
+
 // buildExporters assembles the engine's fan-out list.
-func buildExporters(router *Router, metrics *Metrics, enricher *PodEnricher, logger logr.Logger) ([]tracer.Exporter, *workloadmetrics.Sink, error) {
+func buildExporters(router *Router, metrics *Metrics, enricher *PodEnricher, peers *PeerResolver, logger logr.Logger) ([]tracer.Exporter, *workloadmetrics.Sink, error) {
 	exporters := []tracer.Exporter{router}
 
 	if !config.WorkloadMetricsEnabled {
@@ -313,6 +349,7 @@ func buildExporters(router *Router, metrics *Metrics, enricher *PodEnricher, log
 		IncludePodLabel:      config.WorkloadMetricsPodLabel,
 		IncludeProcessLabel:  config.WorkloadMetricsProcessLabel,
 		Lookup:               enricherLookup(enricher),
+		ResolvePeer:          peerLookup(peers),
 		SemanticConventions:  config.WorkloadMetricsSemanticConv,
 		AttributeCardinality: config.WorkloadMetricsAttributeLimit,
 		OnBudgetExhausted: func(budget int) {

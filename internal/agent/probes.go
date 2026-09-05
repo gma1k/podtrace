@@ -28,13 +28,12 @@ type ProbeServer struct {
 
 	lastHeartbeat atomic.Int64 // UnixNano; updated by Heartbeat()
 	readyFlag     atomic.Bool  // set by MarkReady()
+	degraded      atomic.Pointer[string]
 	stall         time.Duration
 }
 
 // NewProbeServer returns a ProbeServer ready to serve /healthz and
-// /readyz at addr. The stall value controls how long between
-// Heartbeat() calls before /healthz flips to 503 (the reconcile loop
-// should call Heartbeat on every tick — a stall indicates a hang).
+// /readyz at addr.
 func NewProbeServer(addr string, stallWindow time.Duration) *ProbeServer {
 	if stallWindow <= 0 {
 		stallWindow = 90 * time.Second
@@ -44,25 +43,39 @@ func NewProbeServer(addr string, stallWindow time.Duration) *ProbeServer {
 	return s
 }
 
-// Heartbeat records a liveness tick. Called by the status writer
-// (which already runs periodically) so we do not need an extra
-// goroutine just for probe freshness.
+// Heartbeat records a liveness tick.
 func (s *ProbeServer) Heartbeat() {
 	s.lastHeartbeat.Store(time.Now().UnixNano())
 }
 
-// MarkReady toggles /readyz to 200. Called once informers have synced
-// and the tracer is attached.
+// MarkReady toggles /readyz to 200.
 func (s *ProbeServer) MarkReady() { s.readyFlag.Store(true) }
 
+// MarkDegraded records that the agent cannot capture, and why.
+func (s *ProbeServer) MarkDegraded(reason string) {
+	if reason == "" {
+		reason = "unknown"
+	}
+	s.degraded.Store(&reason)
+}
+
+// DegradedReason reports why the agent cannot capture, or "" when it can.
+func (s *ProbeServer) DegradedReason() string {
+	if r := s.degraded.Load(); r != nil {
+		return *r
+	}
+	return ""
+}
+
 // MarkUnready is used during shutdown to drain traffic before the pod
-// terminates. Kubernetes's pre-stop hook can call this via an HTTP
-// endpoint if we choose to expose one later.
+// terminates.
 func (s *ProbeServer) MarkUnready() { s.readyFlag.Store(false) }
 
 // IsReady is exported so other goroutines (e.g. the status writer
 // Ready callback) share the same truth.
-func (s *ProbeServer) IsReady() bool { return s.readyFlag.Load() }
+func (s *ProbeServer) IsReady() bool {
+	return s.readyFlag.Load() && s.degraded.Load() == nil
+}
 
 // Run serves the probe endpoints until ctx is done. Returns nil on
 // graceful shutdown, otherwise the terminal error from http.ListenAndServe.
@@ -83,11 +96,6 @@ func (s *ProbeServer) Run(ctx context.Context) error {
 	go func() {
 		defer close(shutdownDone)
 		<-ctx.Done()
-		// WithoutCancel gives us a fresh context that inherits values
-		// (deadlines, tracing keys) from the original ctx without
-		// carrying its "Done" signal. We need the freshness because
-		// ctx just fired Done — graceful shutdown needs a positive
-		// timeout, not an already-cancelled context.
 		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(sctx)
@@ -113,6 +121,11 @@ func (s *ProbeServer) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *ProbeServer) handleReadyz(w http.ResponseWriter, _ *http.Request) {
+	if reason := s.DegradedReason(); reason != "" {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("degraded: " + reason))
+		return
+	}
 	if !s.readyFlag.Load() {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte("not ready"))

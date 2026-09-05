@@ -6,7 +6,6 @@
 #include "helpers.h"
 #include "protocols.h"
 
-#ifdef PODTRACE_VMLINUX_FROM_BTF
 
 SEC("kprobe/unix_stream_recvmsg")
 int kprobe_unix_stream_recvmsg(struct pt_regs *ctx)
@@ -277,15 +276,3 @@ int kprobe_unix_stream_sendmsg(struct pt_regs *ctx)
 	return 0;
 }
 
-#else
-
-SEC("kprobe/unix_stream_recvmsg")
-int kprobe_unix_stream_recvmsg(struct pt_regs *ctx) { return 0; }
-
-SEC("kretprobe/unix_stream_recvmsg")
-int kretprobe_unix_stream_recvmsg(struct pt_regs *ctx) { return 0; }
-
-SEC("kprobe/unix_stream_sendmsg")
-int kprobe_unix_stream_sendmsg(struct pt_regs *ctx) { return 0; }
-
-#endif

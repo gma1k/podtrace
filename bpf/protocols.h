@@ -64,13 +64,12 @@
 
 #define FCGI_PARAMS_SCAN_LEN 128
 
-#ifdef PODTRACE_VMLINUX_FROM_BTF
 static __always_inline void *msghdr_user_base(struct msghdr *msg, u64 *avail)
 {
 	if (!msg)
 		return NULL;
 	u8 it = BPF_CORE_READ(msg, msg_iter.iter_type);
-	if (it == ITER_UBUF) {
+	if (it == (u8)bpf_core_enum_value(enum iter_type, ITER_UBUF)) {
 		void *ubuf = (void *)BPF_CORE_READ(msg, msg_iter.ubuf);
 		size_t count = BPF_CORE_READ(msg, msg_iter.count);
 		size_t off = BPF_CORE_READ(msg, msg_iter.iov_offset);
@@ -80,7 +79,7 @@ static __always_inline void *msghdr_user_base(struct msghdr *msg, u64 *avail)
 			return NULL;
 		return (u8 *)ubuf + off;
 	}
-	if (it == ITER_IOVEC) {
+	if (it == (u8)bpf_core_enum_value(enum iter_type, ITER_IOVEC)) {
 		const struct iovec *iov = BPF_CORE_READ(msg, msg_iter.__iov);
 		if (!iov)
 			return NULL;
@@ -104,6 +103,5 @@ static __always_inline int read_msghdr_data(struct msghdr *msg, void *buf, u32 b
 		return -1;
 	return bpf_probe_read_user(buf, buf_size, base);
 }
-#endif
 
 #endif

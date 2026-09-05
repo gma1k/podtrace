@@ -753,6 +753,76 @@
       ],
       "title": "CPU Block Distribution",
       "type": "timeseries"
+    },
+    {
+      "id": 11,
+      "type": "nodeGraph",
+      "title": "Service map",
+      "datasource": "prometheus-2",
+      "description": "Edges come from podtrace_workload_edge_* , which carry both ends of every call. Structure comes from the byte counter because it covers flows carrying no L7 payload podtrace can decode \u2014 a database, a cache, anything over TLS \u2014 while the request rate and error ratio come from the L7 counter and are empty for those. The map is a query, not a datastore: there is no relay and no aggregation tier behind this panel.",
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "options": {
+        "nodes": {
+          "mainStatUnit": "reqps",
+          "secondaryStatUnit": "percentunit"
+        },
+        "edges": {
+          "mainStatUnit": "reqps",
+          "secondaryStatUnit": "percentunit"
+        }
+      },
+      "targets": [
+        {
+          "refId": "edges",
+          "datasource": "prometheus-2",
+          "editorMode": "code",
+          "expr": "sum by (namespace, workload, target_namespace, target_service) (rate(podtrace_workload_edge_bytes_total[$__rate_interval]))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "__auto"
+        },
+        {
+          "refId": "requests",
+          "datasource": "prometheus-2",
+          "editorMode": "code",
+          "expr": "sum by (namespace, workload, target_namespace, target_service) (rate(podtrace_workload_edge_requests_total[$__rate_interval]))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "__auto"
+        },
+        {
+          "refId": "errors",
+          "datasource": "prometheus-2",
+          "editorMode": "code",
+          "expr": "sum by (namespace, workload, target_namespace, target_service) (rate(podtrace_workload_edge_requests_total{outcome=\"error\"}[$__rate_interval])) / clamp_min(sum by (namespace, workload, target_namespace, target_service) (rate(podtrace_workload_edge_requests_total[$__rate_interval])), 1e-9)",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "__auto"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "target_service",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "Value #requests": "mainstat",
+              "Value #errors": "secondarystat"
+            }
+          }
+        }
+      ]
     }
   ],
   "preload": false,

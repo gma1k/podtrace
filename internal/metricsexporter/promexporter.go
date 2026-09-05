@@ -884,13 +884,26 @@ func ResetLatestGauges() {
 	tlsGauge.Reset()
 }
 
+// gaugeResetLoop clears the "latest" gauges on a fixed interval so a
+// series whose source has gone away stops reporting its last value
+// forever. Split out of StartServer so the interval is a parameter.
+func gaugeResetLoop(stop <-chan struct{}, interval time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			ResetLatestGauges()
+		}
+	}
+}
+
 func StartServer() *Server {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", securityHeadersMiddleware(rateLimitMiddleware(promhttp.Handler())))
 	if config.MetricsEnablePprof() {
-		// pprof goes through the same security/rate-limit middleware as
-		// /metrics: a 30-second CPU profile request is a cheap DoS against
-		// a privileged pod when the handlers are exposed raw.
 		wrap := func(h http.HandlerFunc) http.Handler {
 			return securityHeadersMiddleware(rateLimitMiddleware(h))
 		}
@@ -919,18 +932,7 @@ func StartServer() *Server {
 
 	srv := &Server{server: server, stop: make(chan struct{})}
 
-	go func() {
-		t := time.NewTicker(resetLatestGaugeInterval)
-		defer t.Stop()
-		for {
-			select {
-			case <-srv.stop:
-				return
-			case <-t.C:
-				ResetLatestGauges()
-			}
-		}
-	}()
+	go gaugeResetLoop(srv.stop, resetLatestGaugeInterval)
 
 	go func() {
 		defer func() {
@@ -986,7 +988,6 @@ func ExportResourceLimitMetricWithContext(e *events.Event, namespace string) {
 		return
 	}
 
-	// Resource type is stored in TCPState field
 	resourceType := e.TCPState
 	var resourceTypeLabel string
 	switch resourceType {
@@ -1000,14 +1001,10 @@ func ExportResourceLimitMetricWithContext(e *events.Event, namespace string) {
 		resourceTypeLabel = "unknown"
 	}
 
-	// Utilization percentage is stored in Error field
 	utilization := float64(e.Error)
 
-	// Current usage is stored in Bytes field
 	usageBytes := float64(e.Bytes)
 
-	// Calculate limit from usage and utilization
-	// limit = (usage * 100) / utilization
 	var limitBytes float64
 	if utilization > 0 {
 		limitBytes = (usageBytes * 100.0) / utilization

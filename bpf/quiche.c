@@ -5,7 +5,6 @@
 #include "events.h"
 #include "helpers.h"
 
-#ifdef PODTRACE_VMLINUX_FROM_BTF
 
 #define QUICHE_HDR_STRIDE 32
 #define QUICHE_HDR_MAX    32
@@ -233,25 +232,3 @@ int uretprobe_quiche_h3_conn_poll(struct pt_regs *ctx)
 	h3_adapter_first_inbound(conn, (u64)stream_id);
 	return 0;
 }
-
-#else
-
-SEC("uprobe/quiche_h3_send_request")
-int uprobe_quiche_h3_send_request(struct pt_regs *ctx) { return 0; }
-
-SEC("uretprobe/quiche_h3_send_request")
-int uretprobe_quiche_h3_send_request(struct pt_regs *ctx) { return 0; }
-
-SEC("uprobe/quiche_h3_send_response")
-int uprobe_quiche_h3_send_response(struct pt_regs *ctx) { return 0; }
-
-SEC("uprobe/quiche_rs_send_request")
-int uprobe_quiche_rs_send_request(struct pt_regs *ctx) { return 0; }
-
-SEC("uprobe/quiche_h3_conn_poll")
-int uprobe_quiche_h3_conn_poll(struct pt_regs *ctx) { return 0; }
-
-SEC("uretprobe/quiche_h3_conn_poll")
-int uretprobe_quiche_h3_conn_poll(struct pt_regs *ctx) { return 0; }
-
-#endif

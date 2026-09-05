@@ -119,6 +119,15 @@ Operator and agent both expose Prometheus metrics:
   `kernel_too_old`, `tracefs_unmounted`, `collection_failed`,
   `ringbuf_failed`, `map_lookup_failed`, `invalid_event`, `unknown`).
 
+  A degraded agent also fails its **readiness probe**, so the pod reports
+  `0/1` and a DaemonSet rollout stalls rather than completing. That is
+  deliberate: the agent still starts, still serves its endpoints and still
+  reconciles, so if readiness ignored the backend the pod would report `1/1`
+  and every rollout gate, `kubectl rollout status`, `helm --wait`, CI,
+  would pass while nothing was being captured. `/readyz` returns `503` with
+  the reason in the body; `/healthz` keeps passing, so the pod is not
+  restarted and its logs and metrics stay available for diagnosis.
+
   Diagnostics granularity (per-program + per-CR failure surfaces):
 
   - `podtrace_agent_program_attach_failures_total{program,reason}` —

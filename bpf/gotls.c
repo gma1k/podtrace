@@ -6,7 +6,6 @@
 #include "helpers.h"
 #include "protocols.h"
 
-#ifdef PODTRACE_VMLINUX_FROM_BTF
 
 #if defined(__TARGET_ARCH_x86) || defined(__x86_64__)
 #define GO_ARG_PTR(ctx)   ((void *)(ctx)->bx)
@@ -22,7 +21,6 @@
 #define GO_TLS_SUPPORTED 1
 #endif
 
-#endif
 
 #ifdef GO_TLS_SUPPORTED
 

@@ -12,7 +12,7 @@ For per-cloud specifics, jump to the [distro-specific notes](#distro-specific-no
 | Requirement      | Minimum                | Recommended       |
 |------------------|------------------------|-------------------|
 | Linux kernel     | 5.8 (BPF ring buffer)  | 6.1+              |
-| BTF              | Required for some probes (see below) | `/sys/kernel/btf/vmlinux` present |
+| BTF              | Required on the running kernel | `/sys/kernel/btf/vmlinux` present |
 | Architecture     | amd64, arm64           | Same              |
 | Kubernetes       | 1.28                   | 1.32–1.36         |
 | Cgroup driver    | systemd or cgroupfs    | systemd, v2       |
@@ -34,39 +34,44 @@ uname -r                       # 5.8 or higher
 ls /sys/kernel/btf/vmlinux     # exists → BTF available
 ```
 
-### Probes that work without BTF
+### Building without bpftool
 
-These attach successfully on any 5.8+ kernel, even if BTF is unavailable:
+When `bpftool` is unavailable at build time there is no kernel BTF to
+generate a header from, and the build falls back to the stub
+[bpf/vmlinux.h](../bpf/vmlinux.h).
 
-- TCP / UDP / DNS tracing (kprobes on `tcp_v4_connect`, `tcp_sendmsg`,
-  `tcp_recvmsg`, `udp_sendmsg`, `getaddrinfo`)
-- Basic file ops (`vfs_read`, `vfs_write`, `vfs_fsync`)
-- CPU scheduling (`sched_switch`, `sched_process_fork` tracepoints)
-- Lock contention via futex
-- Memory events (page fault, OOM)
-- Process lifecycle (`execve`, `fork`, `open`, `close`, `unlink`, `rename`)
-- HTTP request/response tracing via uprobes
+**Every probe still works.** The stub declares the kernel types the probes
+walk — `task_struct`, `pid`, `upid`, `nsproxy`, `net`, `ns_common`,
+`css_set`, `cgroup`, `kernfs_node`, `dentry`, `qstr`, `path`, `file`,
+`renamedata`, `sock`, `sock_common`, `in6_addr`, `msghdr`, `iov_iter`,
+`iovec` — under `preserve_access_index`. The layouts written there are
+deliberately not the kernel's: clang emits a CO-RE relocation per field
+access and libbpf rewrites every offset from the running kernel's own BTF
+when the program loads, so only the field *names* have to match.
 
-### Probes that require BTF
+Two consequences worth knowing:
 
-These are gated behind `#ifdef PODTRACE_VMLINUX_FROM_BTF` in the BPF
-sources. Without BTF they are silently no-ops; the rest of podtrace still
-works.
+- **The running kernel still needs BTF.** The stub removes the need for
+  BTF on the *build host*, not on the target. A kernel without
+  `/sys/kernel/btf/vmlinux` cannot relocate, and the collection will not
+  load.
+- **Enum values are relocated too, not baked in.** `enum iter_type`, which
+  selects how a socket payload is addressed, has been reordered across
+  releases. It is read with `bpf_core_enum_value()` rather than taken from
+  a header, so a binary built against one kernel does not misread payloads
+  on another.
 
-| Feature                                    | BPF source           | Why BTF |
-|--------------------------------------------|----------------------|---------|
-| FastCGI / PHP-FPM tracing                  | `bpf/fastcgi.c`      | `iov_iter` field name unstable across kernels |
-| gRPC method extraction (HTTP/2 inspection) | `bpf/grpc.c`         | Same |
-| Full filesystem path resolution            | `bpf/filesystem.c`   | Walks `dentry`/`path` chains via CO-RE |
-| Memory fault error code enrichment         | `bpf/memory.c`       | Tracepoint argument types not stable |
-| `vfs_rename` cross-kernel layout           | `bpf/syscalls.c`     | Signature changed at 6.3 (see below) |
-| Network namespace ID on every event        | `bpf/events.h`       | Walks `task_struct → nsproxy → net_ns` chain |
+### Kernel features that are genuinely conditional
 
-When BTF is missing, the build falls back to a 79-line stub
-[bpf/vmlinux.h](../bpf/vmlinux.h) that defines the always-required types
-(`task_struct`, `dentry`, `path`, `qstr`, `file`, `nsproxy`, `net`,
-`ns_common`) under `preserve_access_index` so CO-RE still resolves at
-load time.
+These are not build-time choices; they depend on the kernel the agent runs
+on, and each is detected at load or probe time rather than compiled out:
+
+| Feature | Requires |
+|---|---|
+| `vfs_rename` argument layout | Detected with `bpf_core_type_exists(struct renamedata)`; the signature changed at 6.3 |
+| OOM victim `comm` | Detected with `bpf_core_field_exists(tp->__data_loc_comm)` |
+| OOM victim cgroup | `bpf_task_from_pid` / `bpf_task_release` kfuncs |
+| `bpf_loop` (traceparent scanning) | 5.17+ |
 
 ## Architecture support
 

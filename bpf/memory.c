@@ -43,10 +43,8 @@ struct oom_mark_victim_hdr {
 };
 _Static_assert(__builtin_offsetof(struct oom_mark_victim_hdr, pid) == 8, "mark_victim: pid must be at offset 8");
 
-#ifdef PODTRACE_VMLINUX_FROM_BTF
 extern struct task_struct *bpf_task_from_pid(s32 pid) __ksym;
 extern void bpf_task_release(struct task_struct *p) __ksym;
-#endif
 
 SEC("tp/oom/mark_victim")
 int tracepoint_oom_mark_victim(void *ctx) {
@@ -64,7 +62,6 @@ int tracepoint_oom_mark_victim(void *ctx) {
 
 	__builtin_memset(e->comm, 0, sizeof(e->comm));
 
-#ifdef PODTRACE_VMLINUX_FROM_BTF
 	struct trace_event_raw_mark_victim *tp = ctx;
 	e->pid = BPF_CORE_READ(tp, pid);
 	struct task_struct *victim = bpf_task_from_pid((s32)e->pid);
@@ -82,12 +79,6 @@ int tracepoint_oom_mark_victim(void *ctx) {
 			__builtin_memcpy(e->comm, e->target, COMM_LEN);
 		}
 	}
-#else
-	struct oom_mark_victim_hdr hdr = {};
-	if (bpf_probe_read_kernel(&hdr, sizeof(hdr), ctx) == 0) {
-		e->pid = hdr.pid;
-	}
-#endif
 
 	capture_user_stack(ctx, e->pid, 0, e);
 	bpf_ringbuf_output(&events, e, sizeof(*e), 0);

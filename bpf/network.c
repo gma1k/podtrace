@@ -5,7 +5,6 @@
 #include "events.h"
 #include "helpers.h"
 
-#ifdef PODTRACE_VMLINUX_FROM_BTF
 static __noinline void stash_tcp_peer(struct pt_regs *ctx, u32 pair)
 {
 	struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
@@ -39,13 +38,6 @@ static __noinline void stash_tcp_peer(struct pt_regs *ctx, u32 pair)
 	bpf_map_update_elem(&tcp_target, &key, buf, BPF_ANY);
 	bpf_map_update_elem(&tcp_peer_stash, &key, &peer, BPF_ANY);
 }
-#else
-static __always_inline void stash_tcp_peer(struct pt_regs *ctx, u32 pair)
-{
-	(void)ctx;
-	(void)pair;
-}
-#endif
 
 static __always_inline void stash_sk_owner(struct pt_regs *ctx)
 {
@@ -80,6 +72,120 @@ static __always_inline void drop_pair_sidemaps(struct pair_key *key)
 	bpf_map_delete_elem(&connect_addrs, key);
 	bpf_map_delete_elem(&dns_targets, key);
 	bpf_map_delete_elem(&db_queries, key);
+}
+
+static __noinline int peer_from_msghdr(struct msghdr *msg, struct tcp_peer *peer);
+
+static __noinline int peer_from_connected_sock(struct sock *sk, struct tcp_peer *peer)
+{
+	if (!sk || !peer)
+		return 0;
+	u16 dport_be = BPF_CORE_READ(sk, __sk_common.skc_dport);
+	if (dport_be == 0)
+		return 0;
+	u16 family = BPF_CORE_READ(sk, __sk_common.skc_family);
+	if (family == AF_INET) {
+		u32 daddr_be = BPF_CORE_READ(sk, __sk_common.skc_daddr);
+		if (daddr_be == 0)
+			return 0;
+		peer->family = family;
+		peer->dport = __builtin_bswap16(dport_be);
+		peer->sport = BPF_CORE_READ(sk, __sk_common.skc_num);
+		peer->daddr = __builtin_bswap32(daddr_be);
+		peer->saddr = __builtin_bswap32(BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr));
+		return 1;
+	}
+	if (family == AF_INET6) {
+		peer->family = family;
+		peer->dport = __builtin_bswap16(dport_be);
+		peer->sport = BPF_CORE_READ(sk, __sk_common.skc_num);
+		BPF_CORE_READ_INTO(&peer->daddr6, sk, __sk_common.skc_v6_daddr.in6_u.u6_addr8);
+		BPF_CORE_READ_INTO(&peer->saddr6, sk, __sk_common.skc_v6_rcv_saddr.in6_u.u6_addr8);
+		return 1;
+	}
+	return 0;
+}
+
+static __noinline void stash_udp_peer(struct pt_regs *ctx)
+{
+	struct pair_key key = make_pair_key(PAIR_UDP_SENDMSG);
+	struct tcp_peer peer = {};
+
+	struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
+	if (peer_from_connected_sock(sk, &peer)) {
+		peer.stash_ns = bpf_ktime_get_ns();
+		bpf_map_update_elem(&tcp_peer_stash, &key, &peer, BPF_ANY);
+		return;
+	}
+
+	/* Unconnected: the address is in the msghdr. */
+	struct msghdr *msg = (struct msghdr *)PT_REGS_PARM2(ctx);
+	if (!peer_from_msghdr(msg, &peer))
+		return;
+	peer.sport = sk ? BPF_CORE_READ(sk, __sk_common.skc_num) : 0;
+	peer.stash_ns = bpf_ktime_get_ns();
+	bpf_map_update_elem(&tcp_peer_stash, &key, &peer, BPF_ANY);
+}
+
+static __noinline int peer_from_msghdr(struct msghdr *msg, struct tcp_peer *peer)
+{
+	if (!msg || !peer)
+		return 0;
+	void *name = BPF_CORE_READ(msg, msg_name);
+	if (!name)
+		return 0;
+
+	u16 family = 0;
+	if (bpf_probe_read_kernel(&family, sizeof(family), name) != 0)
+		return 0;
+
+	if (family == AF_INET) {
+		struct {
+			u16 sin_family;
+			u16 sin_port;
+			u32 sin_addr;
+		} sa4;
+		if (bpf_probe_read_kernel(&sa4, sizeof(sa4), name) != 0)
+			return 0;
+		if (sa4.sin_addr == 0 || sa4.sin_port == 0)
+			return 0;
+		peer->family = AF_INET;
+		peer->dport = __builtin_bswap16(sa4.sin_port);
+		peer->daddr = __builtin_bswap32(sa4.sin_addr);
+	} else if (family == AF_INET6) {
+		struct {
+			u16 sin6_family;
+			u16 sin6_port;
+			u32 sin6_flowinfo;
+			u8  sin6_addr[16];
+		} sa6;
+		if (bpf_probe_read_kernel(&sa6, sizeof(sa6), name) != 0)
+			return 0;
+		if (sa6.sin6_port == 0)
+			return 0;
+		peer->family = AF_INET6;
+		peer->dport = __builtin_bswap16(sa6.sin6_port);
+		__builtin_memcpy(peer->daddr6, sa6.sin6_addr, 16);
+	} else {
+		return 0;
+	}
+	return 1;
+}
+
+static __noinline void stash_udp_recv_peer(void)
+{
+	struct pair_key key = make_pair_key(PAIR_UDP_RECVMSG);
+	u64 *saved = bpf_map_lookup_elem(&udp_recv_msghdr, &key);
+	if (!saved)
+		return;
+	struct msghdr *msg = (struct msghdr *)*saved;
+	bpf_map_delete_elem(&udp_recv_msghdr, &key);
+
+	struct tcp_peer peer = {};
+	if (!peer_from_msghdr(msg, &peer))
+		return;
+	peer.stash_ns = bpf_ktime_get_ns();
+	bpf_map_update_elem(&tcp_peer_stash, &key, &peer, BPF_ANY);
 }
 
 SEC("kprobe/tcp_v4_connect")
@@ -279,6 +385,7 @@ int kretprobe_tcp_sendmsg(struct pt_regs *ctx) {
 		}
 	}
 	bpf_map_delete_elem(&tcp_target, &key);
+	fill_event_peer_pref(e, PAIR_TCP_SENDMSG);
 	capture_user_stack(ctx, pid, tid, e);
 	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
@@ -360,6 +467,7 @@ int kretprobe_tcp_recvmsg(struct pt_regs *ctx) {
 		}
 	}
 	bpf_map_delete_elem(&tcp_target, &key);
+	fill_event_peer_pref(e, PAIR_TCP_RECVMSG);
 	capture_user_stack(ctx, pid, tid, e);
 	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
@@ -608,6 +716,7 @@ int kprobe_udp_sendmsg(struct pt_regs *ctx) {
 	struct pair_key key = make_pair_key(PAIR_UDP_SENDMSG);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
+	stash_udp_peer(ctx);
 	return 0;
 }
 
@@ -644,6 +753,7 @@ int kretprobe_udp_sendmsg(struct pt_regs *ctx) {
 	e->target[0] = '\0';
 	
 	capture_user_stack(ctx, pid, tid, e);
+	fill_event_peer_pref(e, PAIR_UDP_SENDMSG);
 	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
@@ -654,6 +764,16 @@ int kprobe_udp_recvmsg(struct pt_regs *ctx) {
 	struct pair_key key = make_pair_key(PAIR_UDP_RECVMSG);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
+
+	struct tcp_peer peer = {};
+	if (peer_from_connected_sock((struct sock *)PT_REGS_PARM1(ctx), &peer)) {
+		peer.stash_ns = bpf_ktime_get_ns();
+		bpf_map_update_elem(&tcp_peer_stash, &key, &peer, BPF_ANY);
+	}
+
+	u64 msg = (u64)PT_REGS_PARM2(ctx);
+	if (msg)
+		bpf_map_update_elem(&udp_recv_msghdr, &key, &msg, BPF_ANY);
 	return 0;
 }
 
@@ -690,6 +810,8 @@ int kretprobe_udp_recvmsg(struct pt_regs *ctx) {
 	e->target[0] = '\0';
 	
 	capture_user_stack(ctx, pid, tid, e);
+	stash_udp_recv_peer();
+	fill_event_peer_pref(e, PAIR_UDP_RECVMSG);
 	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;

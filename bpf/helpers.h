@@ -17,10 +17,6 @@ static inline struct pair_key make_pair_key(u32 pair) {
 	return k;
 }
 
-// The stash is keyed by thread+direction only, so a thread that multiplexes
-// connections (Go/event-loop servers) can leave an entry from an unrelated
-// connection. It is also never deleted. Dropping entries older than this bounds
-// how stale a served peer can be; the definitive fix is socket-scoped keying.
 #define TCP_PEER_MAX_AGE_NS (5ULL * 1000ULL * 1000ULL * 1000ULL)
 
 static inline struct tcp_peer *fresh_tcp_peer(struct pair_key *k, u64 now) {
@@ -38,8 +34,23 @@ static inline struct tcp_peer *lookup_tcp_peer(u32 prefer_pair) {
 	struct tcp_peer *p = fresh_tcp_peer(&k, now);
 	if (p)
 		return p;
+	if (prefer_pair == PAIR_UDP_SENDMSG || prefer_pair == PAIR_UDP_RECVMSG)
+		return NULL;
 	k.pair = (prefer_pair == PAIR_TCP_SENDMSG) ? PAIR_TCP_RECVMSG : PAIR_TCP_SENDMSG;
 	return fresh_tcp_peer(&k, now);
+}
+
+static inline void fill_event_peer_pref(struct event *e, u32 prefer_pair) {
+	struct tcp_peer *p = lookup_tcp_peer(prefer_pair);
+	if (!p)
+		return;
+	e->peer_family = (u8)p->family;
+	e->peer_sport = p->sport;
+	e->peer_dport = p->dport;
+	e->peer_saddr = p->saddr;
+	e->peer_daddr = p->daddr;
+	__builtin_memcpy(e->peer_saddr6, p->saddr6, 16);
+	__builtin_memcpy(e->peer_daddr6, p->daddr6, 16);
 }
 
 static inline void fill_event_peer(struct event *e) {
@@ -83,8 +94,6 @@ static __attribute__((noinline)) u32 append_dec(char *buf, u32 idx, u32 max_idx,
 	u32 divisor = 10000;
 	int started = 0;
 	for (int i = 0; i < 5; i++) {
-		/* divisor cycles 10000,1000,100,10,1 over these 5 iterations, never 0 */
-		// cppcheck-suppress zerodivcond
 		u32 digit = (val / divisor) % 10;
 		if (digit != 0 || started || divisor == 1) {
 			if (idx < max_idx) buf[idx++] = '0' + digit;
@@ -165,12 +174,10 @@ static inline struct event *get_event_buf_unfiltered(void) {
 		e->cgroup_id = bpf_get_current_cgroup_id();
 		bpf_get_current_comm(&e->comm, sizeof(e->comm));
 
-#ifdef PODTRACE_VMLINUX_FROM_BTF
 		struct task_struct *__task = (struct task_struct *)bpf_get_current_task();
 		if (__task) {
 			e->net_ns_id = BPF_CORE_READ(__task, nsproxy, net_ns, ns.inum);
 		}
-#endif
 	}
 	return e;
 }

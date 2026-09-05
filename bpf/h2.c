@@ -6,7 +6,6 @@
 #include "helpers.h"
 #include "protocols.h"
 
-#ifdef PODTRACE_VMLINUX_FROM_BTF
 
 static __always_inline struct h2_hdr_scratch *h2_hdr_scratch_lookup(void)
 {
@@ -401,22 +400,3 @@ int kprobe_h2_tcp_close(struct pt_regs *ctx)
 	bpf_ringbuf_output(&h2_hdr_events, &s->rec, sizeof(s->rec), 0);
 	return 0;
 }
-
-#else
-
-SEC("kprobe/tcp_sendmsg")
-int kprobe_h2_tcp_sendmsg(struct pt_regs *ctx) { return 0; }
-
-SEC("kretprobe/tcp_sendmsg")
-int kretprobe_h2_tcp_sendmsg(struct pt_regs *ctx) { return 0; }
-
-SEC("kprobe/tcp_recvmsg")
-int kprobe_h2_tcp_recvmsg(struct pt_regs *ctx) { return 0; }
-
-SEC("kretprobe/tcp_recvmsg")
-int kretprobe_h2_tcp_recvmsg(struct pt_regs *ctx) { return 0; }
-
-SEC("kprobe/tcp_close")
-int kprobe_h2_tcp_close(struct pt_regs *ctx) { return 0; }
-
-#endif

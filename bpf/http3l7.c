@@ -6,7 +6,6 @@
 #include "helpers.h"
 #include "protocols.h"
 
-#ifdef PODTRACE_VMLINUX_FROM_BTF
 
 #if defined(__TARGET_ARCH_x86) || defined(__x86_64__)
 #define GO_REG0(ctx)      ((u64)(ctx)->ax)
@@ -26,7 +25,6 @@
 #define GO_H3_SUPPORTED 1
 #endif
 
-#endif
 
 #ifdef GO_H3_SUPPORTED
 

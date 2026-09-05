@@ -9,7 +9,6 @@
 #define GRPC_INSPECT_LEN 50
 #define HTTP2_FRAME_HDR  9
 
-#ifdef PODTRACE_VMLINUX_FROM_BTF
 
 SEC("kprobe/tcp_sendmsg")
 int kprobe_grpc_tcp_sendmsg(struct pt_regs *ctx)
@@ -73,9 +72,3 @@ int kprobe_grpc_tcp_sendmsg(struct pt_regs *ctx)
 	return 0;
 }
 
-#else
-
-SEC("kprobe/tcp_sendmsg")
-int kprobe_grpc_tcp_sendmsg(struct pt_regs *ctx) { return 0; }
-
-#endif
