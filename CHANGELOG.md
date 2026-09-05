@@ -9,6 +9,55 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.14.8](https://github.com/gma1k/podtrace/compare/v0.14.7...v0.14.8) (2026-09-05)
+
+
+### Features
+
+* add always-on workload metrics plane ([#486](https://github.com/gma1k/podtrace/issues/486)) ([7377cf2](https://github.com/gma1k/podtrace/commit/7377cf2d9a99b9603b518bda6fdabe36df3111b0))
+* add graduation machinery for CRD version cutover ([#475](https://github.com/gma1k/podtrace/issues/475)) ([1b5a68d](https://github.com/gma1k/podtrace/commit/1b5a68de35b53305b0d7a498a286552b1ce9d0ab))
+* add OTel semantic conventions and OTLP metric export ([#489](https://github.com/gma1k/podtrace/issues/489)) ([d8f87e3](https://github.com/gma1k/podtrace/commit/d8f87e31d8973393e79994d98957a746c1594ae1))
+* add workload service map and un-gate all BPF probes ([#494](https://github.com/gma1k/podtrace/issues/494)) ([79f1419](https://github.com/gma1k/podtrace/commit/79f1419cb05a59f7acbf22fb7b4face723841eab))
+
+
+### Bug Fixes
+
+* repair the first-run experience and uninstall cleanup ([#495](https://github.com/gma1k/podtrace/issues/495)) ([6187dd4](https://github.com/gma1k/podtrace/commit/6187dd49fe6ee9ef0e081001211820500b1e3562))
+
+
+### Documentation
+
+* define the exported metrics surface as a contract ([#482](https://github.com/gma1k/podtrace/issues/482)) ([ec99a77](https://github.com/gma1k/podtrace/commit/ec99a774352c92be19b157d64ad8eeecc3dc05ef))
+
+
+### Maintenance
+
+* **deps:** update alpine/k8s docker tag to v1.37.0 ([#479](https://github.com/gma1k/podtrace/issues/479)) ([842da51](https://github.com/gma1k/podtrace/commit/842da51b485b4616d1e9824c4110d1b2263d74f3))
+* **deps:** update dependency golangci/golangci-lint to v2.13.2 ([#471](https://github.com/gma1k/podtrace/issues/471)) ([8803a08](https://github.com/gma1k/podtrace/commit/8803a08433ab6b9275f4ad2653bf5effb4afc87a))
+* **deps:** update docker/dockerfile docker tag to v1.27 ([#484](https://github.com/gma1k/podtrace/issues/484)) ([cf21570](https://github.com/gma1k/podtrace/commit/cf21570d0d69121a2b627c41b8f70d6c9535b3a7))
+* **deps:** update docker/setup-qemu-action action to v4.3.0 ([#478](https://github.com/gma1k/podtrace/issues/478)) ([64eca53](https://github.com/gma1k/podtrace/commit/64eca5323d6c2cbc7c2348e22fc15cff41a213f3))
+* **deps:** update github/codeql-action action to v4.37.9 ([#466](https://github.com/gma1k/podtrace/issues/466)) ([fcea1f2](https://github.com/gma1k/podtrace/commit/fcea1f23de15ab576f38933516eccecb1b090d82))
+* **deps:** update go modules (non-major) ([#463](https://github.com/gma1k/podtrace/issues/463)) ([7c8d542](https://github.com/gma1k/podtrace/commit/7c8d542081197cc1244e83d8de80b5609298f6fa))
+* **deps:** update go modules (non-major) ([#467](https://github.com/gma1k/podtrace/issues/467)) ([23de623](https://github.com/gma1k/podtrace/commit/23de6230b0ce27346d57d846e1dec776eaa9f75c))
+* **deps:** update go modules (non-major) ([#468](https://github.com/gma1k/podtrace/issues/468)) ([2677f62](https://github.com/gma1k/podtrace/commit/2677f62af75759cfa1ca0668030524196754a295))
+* **deps:** update go modules (non-major) ([#470](https://github.com/gma1k/podtrace/issues/470)) ([5569173](https://github.com/gma1k/podtrace/commit/5569173263d8133b293923c28ac1a12b30e94cf4))
+* **deps:** update go modules (non-major) ([#477](https://github.com/gma1k/podtrace/issues/477)) ([f24780f](https://github.com/gma1k/podtrace/commit/f24780f5c444857f5ead238413ebf04efe0cd451))
+* **deps:** update go modules (non-major) ([#481](https://github.com/gma1k/podtrace/issues/481)) ([58bf08d](https://github.com/gma1k/podtrace/commit/58bf08d245bb78a5272ba0592c84574133bd873f))
+* **deps:** update go modules (non-major) ([#492](https://github.com/gma1k/podtrace/issues/492)) ([27d1dcc](https://github.com/gma1k/podtrace/commit/27d1dcca82711cb97131ec0eb6f52f28b3a83942))
+* **deps:** update golang:1.27.0-trixie docker digest to df98008 ([#474](https://github.com/gma1k/podtrace/issues/474)) ([d836621](https://github.com/gma1k/podtrace/commit/d836621c8537643bbb1a43281785423796b23c0e))
+* **deps:** update golang:1.27.1-trixie docker digest to 9baa6b4 ([#483](https://github.com/gma1k/podtrace/issues/483)) ([4c9da18](https://github.com/gma1k/podtrace/commit/4c9da18dd111a7ae119f82b942446956f3dfdee1))
+* **deps:** update helm/kind-action action to v1.15.0 ([#485](https://github.com/gma1k/podtrace/issues/485)) ([bf83ee3](https://github.com/gma1k/podtrace/commit/bf83ee3ab74a794c4305baa32fdeb1f1f8d60b6c))
+* **deps:** update kubernetes ecosystem to v0.37.0 ([#469](https://github.com/gma1k/podtrace/issues/469)) ([dd910b4](https://github.com/gma1k/podtrace/commit/dd910b40d8a6077a5b83472f6d2f1046f89a59b3))
+* **deps:** update module cloud.google.com/go/storage to v1.67.0 ([#487](https://github.com/gma1k/podtrace/issues/487)) ([8500a5c](https://github.com/gma1k/podtrace/commit/8500a5c0694a349e98294355d10b104f669fba92))
+* **deps:** update module github.com/aws/aws-sdk-go-v2/config to v1.32.39 ([#465](https://github.com/gma1k/podtrace/issues/465)) ([f24d80c](https://github.com/gma1k/podtrace/commit/f24d80c2ebe97f66cf62f3d4b38461200e4e60cc))
+* **deps:** update module github.com/aws/aws-sdk-go-v2/service/s3 to v1.110.0 ([#480](https://github.com/gma1k/podtrace/issues/480)) ([975b485](https://github.com/gma1k/podtrace/commit/975b485c5615ce4b91cbd040d266fec4260115ee))
+* **deps:** update module github.com/prometheus/client_model to v0.6.3 ([#476](https://github.com/gma1k/podtrace/issues/476)) ([1c241e8](https://github.com/gma1k/podtrace/commit/1c241e8aaef2bcc95fda10898a34c3e59890cc22))
+* **deps:** update module google.golang.org/api to v0.295.0 ([#472](https://github.com/gma1k/podtrace/issues/472)) ([bf0cf97](https://github.com/gma1k/podtrace/commit/bf0cf97d257009148a051122f37f3aa5a819a177))
+* **deps:** update module sigs.k8s.io/controller-runtime to v0.25.0 ([#488](https://github.com/gma1k/podtrace/issues/488)) ([b5abe9c](https://github.com/gma1k/podtrace/commit/b5abe9c51e11740df6241ca48c989afabf89328e))
+* **deps:** update softprops/action-gh-release action to v3.0.3 ([#473](https://github.com/gma1k/podtrace/issues/473)) ([4d9c3e9](https://github.com/gma1k/podtrace/commit/4d9c3e982f6ce8818ff7202a54c42e1b1be7cb67))
+* **renovate:** replace k8s major approval gate with a structured-merge-diff version hold ([#493](https://github.com/gma1k/podtrace/issues/493)) ([e275f0f](https://github.com/gma1k/podtrace/commit/e275f0f567585f9a296890b509f44a7a15566174))
+* **renovate:** require dashboard approval for k8s ecosystem Go major bumps ([#491](https://github.com/gma1k/podtrace/issues/491)) ([a94ef9e](https://github.com/gma1k/podtrace/commit/a94ef9e60ecb91949383e11888d60fb0e022d680))
+
 ## [0.14.7](https://github.com/gma1k/podtrace/compare/v0.14.6...v0.14.7) (2026-08-25)
 
 
