@@ -273,6 +273,118 @@ whose status could not be recovered — a gRPC-over-h2 stream, most often.
 The convention would have the attribute omitted; a Prometheus family has
 one fixed label set and cannot omit a label, so `0` is the sentinel.
 
+### The service map
+
+Every L7 call and every TCP and UDP transfer records **both ends** of the
+edge, so the topology is a PromQL expression rather than a datastore:
+
+```promql
+sum by (workload, target_service) (
+    rate(podtrace_workload_edge_requests_total[5m])
+)
+```
+
+| Metric | Type | Extra labels |
+|---|---|---|
+| `podtrace_workload_edge_requests_total` | Counter | `outcome` |
+| `podtrace_workload_edge_request_duration_seconds` | Histogram | — |
+| `podtrace_workload_edge_bytes_total` | Counter | `direction` |
+
+All three carry `namespace` and `workload` for the near end, and
+`target_namespace` and `target_service` for the far end. The first two are
+RED per edge: rate and errors from the counter, duration from the histogram.
+The byte counter puts flows carrying no L7 payload podtrace can decode, a
+database, a cache, DNS, anything over TLS — on the map too, since the TCP
+and UDP probes stamp the socket tuple onto the event even when nothing
+decoded the payload. The shipped Grafana dashboard draws all of it as a node graph.
+
+The far end is a **Service**, not a pod. A Service name survives a rollout;
+a pod name and a pod IP do not, and a label carrying one would mint a new
+series on every rollout and never stop.
+
+#### The map is directed
+
+A peer is resolved by **address and port together**, and that is what keeps
+each call counted once. A client reaches a service on the service's own
+port, so its peer resolves to that Service. The server replying to that
+client sees the client's *ephemeral* port, which matches no endpoint, so the
+server side draws nothing.
+
+Resolving on address alone would record every call twice — once from each
+end — and where both workloads have a Service the map would show a reversed
+duplicate edge for every arrow. The query above would report double the real
+rate.
+
+Two consequences follow, both deliberate:
+
+- **A cluster-local address matching no Service endpoint draws no edge.**
+  It is either the client half of a call already recorded from the other
+  end, or a peer podtrace cannot name; collapsing every such peer into one
+  graph node would merge unrelated systems into a single node that means
+  nothing.
+- **`target_service="external"`** is the one placeholder that is drawn.
+  Traffic leaving the cluster is a real destination, and it reports
+  `target_namespace="unknown"` — as does a target folded into `_other` by
+  the cardinality bound, because carrying a real namespace next to an
+  approximate service would imply a precision the label no longer has.
+
+#### How the far end is resolved
+
+A peer is looked up by address and port against two indexes:
+
+1. **EndpointSlices**, keyed on backend `address:port`. Most TCP lands here:
+   conntrack rewrites a connection's destination before the socket is
+   established, so the socket carries a backend pod address.
+2. **Service ClusterIPs**, keyed the same way. An unconnected UDP datagram
+   is addressed to the ClusterIP and nothing rewrites what the probe reads,
+   so without this most UDP flows would have no far end at all.
+
+Endpoints are tried first, because a backend address is the more specific
+answer and names the same Service.
+
+Peers come from three probe families:
+
+- **L7**, whose record is fused with its L4 socket.
+- **TCP send and receive**, read straight off the socket.
+- **UDP send and receive**. A connected socket names its peer the way TCP
+  does; an unconnected one names it in the datagram, which the kernel writes
+  into `msg_name` on receive and the caller supplies on send. Resolvers
+  differ on which form they use, so both are handled.
+
+All of it works on a build made without `bpftool`: the socket fields are
+read through CO-RE, so libbpf relocates the offsets from the running
+kernel's own BTF when the program loads. The iterator kind that locates a
+socket payload is relocated the same way rather than baked in at compile
+time — `enum iter_type` has been reordered across releases, so a constant
+taken from the build host's headers silently misreads payloads on a kernel
+that numbers them differently.
+
+#### Why this is a separate family
+
+Metric names and their label keys are contractual
+([STABILITY.md](../STABILITY.md)), so adding `target_service` to the
+existing L7 families would change the identity of every series already being
+queried. Those families are also per-container and per-status-class, so
+multiplying them by peer count would multiply the whole surface.
+
+Costed instead as its own family: roughly workloads × peers × outcomes.
+Twenty workloads talking to ten services each is about 400 series per node,
+against the 40,000 budget. Edges are admitted through the same chokepoint as
+every other family, so they cannot bypass the budget, and the reaper evicts
+an edge whose workload goes away exactly as it does elsewhere.
+
+#### Resolution cost
+
+The agent watches EndpointSlices and Services cluster-wide, because an edge
+points anywhere and a node-scoped cache cannot resolve it. Both are trimmed
+on the way into the cache to the addresses, the ports and the identity. Resolutions are cached with a TTL so the hot path pays a map
+lookup rather than an index query per event, and the cache is bounded so a
+workload talking to many addresses cannot grow it without limit.
+
+If the agent cannot read EndpointSlices and Services, the families are
+**not registered at all** rather than exposed and left empty, so an absent
+capability does not read as a broken one.
+
 ### Network, DNS, filesystem, CPU, TLS
 
 | Metric | Type | Extra labels |

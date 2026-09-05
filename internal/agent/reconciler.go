@@ -41,6 +41,8 @@ type AgentReconciler struct {
 	Router          *Router
 	Metrics         *Metrics
 
+	ControllerName string
+
 	TargetsCh chan tracer.TargetSet
 
 	ExporterBuilder func(payload *BundlePayload, crKey CRKey) (tracer.Exporter, error)
@@ -55,9 +57,6 @@ type AgentReconciler struct {
 
 	MetricsPlane MetricsPlaneConfig
 
-	// WorkloadMetrics is the continuous metrics plane, and is what an
-	// OTLP exporter pushes when its ExporterConfig asks for metrics.
-	// Nil when the plane is disabled, in which case no exporter pushes.
 	WorkloadMetrics metricProducer
 
 	exporterCacheMu sync.Mutex
@@ -79,9 +78,6 @@ type cachedExporter struct {
 func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.ExporterBuilder == nil {
 		metrics := r.Metrics
-		// One pool for the agent, so CRs pointing at the same collector
-		// share a single metric stream rather than each pushing the same
-		// node-wide counters.
 		pushers := newMetricPusherPool(r.WorkloadMetrics, r.NodeName)
 		r.ExporterBuilder = func(b *BundlePayload, key CRKey) (tracer.Exporter, error) {
 			return BuildExporter(b, key, withMetrics(metrics), withMetricPushers(pushers))
@@ -95,8 +91,13 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	r.exporterCache = map[CRKey]cachedExporter{}
 
+	name := r.ControllerName
+	if name == "" {
+		name = "agent"
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
-		Named("agent").
+		Named(name).
 		For(&podtracev1alpha1.PodTrace{}).
 		Watches(&corev1.Pod{},
 			handler.EnqueueRequestsFromMapFunc(r.enqueueAllPodTraces),

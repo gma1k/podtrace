@@ -31,6 +31,9 @@ func renderSurface(t *testing.T) string {
 		for _, c := range newSemconvCollectors(true, defaultAttributeCardinality).all() {
 			c.Describe(ch)
 		}
+		for _, c := range newEdgeCollectors(true, defaultAttributeCardinality).all() {
+			c.Describe(ch)
+		}
 	}()
 
 	lines := make([]string, 0, 32)

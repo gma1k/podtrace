@@ -6,7 +6,6 @@
 #include "helpers.h"
 #include "protocols.h"
 
-#ifdef PODTRACE_VMLINUX_FROM_BTF
 
 #if defined(__TARGET_ARCH_x86) || defined(__x86_64__)
 #define GRPC_GO_HF_PTR(ctx)       ((u64)(ctx)->di)
@@ -24,7 +23,6 @@
 #define GRPC_GO_SUPPORTED 1
 #endif
 
-#endif
 
 #ifdef GRPC_GO_SUPPORTED
 

@@ -5,7 +5,6 @@
 #include "events.h"
 #include "helpers.h"
 #include "protocols.h"
-#ifdef PODTRACE_VMLINUX_FROM_BTF
 
 #define HTTP_METHOD_UNKNOWN 0
 #define HTTP_METHOD_GET     1
@@ -441,34 +440,3 @@ int uretprobe_gnutls_record_recv(struct pt_regs *ctx)
 	http_emit_request(ctx, base, (u64)ret, HTTP_TRANSPORT_TLS, conn);
 	return 0;
 }
-
-#else
-
-SEC("kprobe/tcp_sendmsg")
-int kprobe_http_tcp_sendmsg(struct pt_regs *ctx) { return 0; }
-
-SEC("kprobe/tcp_recvmsg")
-int kprobe_http_tcp_recvmsg(struct pt_regs *ctx) { return 0; }
-
-SEC("kretprobe/tcp_recvmsg")
-int kretprobe_http_tcp_recvmsg(struct pt_regs *ctx) { return 0; }
-
-SEC("uprobe/SSL_write")
-int uprobe_SSL_write(struct pt_regs *ctx) { return 0; }
-
-SEC("uprobe/SSL_read")
-int uprobe_SSL_read(struct pt_regs *ctx) { return 0; }
-
-SEC("uretprobe/SSL_read")
-int uretprobe_SSL_read(struct pt_regs *ctx) { return 0; }
-
-SEC("uprobe/gnutls_record_send")
-int uprobe_gnutls_record_send(struct pt_regs *ctx) { return 0; }
-
-SEC("uprobe/gnutls_record_recv")
-int uprobe_gnutls_record_recv(struct pt_regs *ctx) { return 0; }
-
-SEC("uretprobe/gnutls_record_recv")
-int uretprobe_gnutls_record_recv(struct pt_regs *ctx) { return 0; }
-
-#endif

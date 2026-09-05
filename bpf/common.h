@@ -190,6 +190,12 @@ struct podtrace_sockaddr_alg {
 #ifndef BPF_MAP_TYPE_LRU_HASH
 #define BPF_MAP_TYPE_LRU_HASH 9
 #endif
+#ifndef BPF_NOEXIST
+#define BPF_NOEXIST 1
+#endif
+#ifndef BPF_EXIST
+#define BPF_EXIST 2
+#endif
 #ifndef BPF_ANY
 #define BPF_ANY 0
 #endif

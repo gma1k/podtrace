@@ -5,7 +5,6 @@
 #include "events.h"
 #include "helpers.h"
 
-#ifdef PODTRACE_VMLINUX_FROM_BTF
 
 #define NGHTTP3_NV_STRIDE 40
 #define NGHTTP3_NV_MAX    32
@@ -294,16 +293,3 @@ int uprobe_nghttp3_read_stream(struct pt_regs *ctx)
 				(u64)PT_REGS_PARM3(ctx), (u64)PT_REGS_PARM4(ctx));
 	return 0;
 }
-
-#else
-
-SEC("uprobe/nghttp3_submit_request")
-int uprobe_nghttp3_submit_request(struct pt_regs *ctx) { return 0; }
-
-SEC("uprobe/nghttp3_submit_response")
-int uprobe_nghttp3_submit_response(struct pt_regs *ctx) { return 0; }
-
-SEC("uprobe/nghttp3_read_stream")
-int uprobe_nghttp3_read_stream(struct pt_regs *ctx) { return 0; }
-
-#endif

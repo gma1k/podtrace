@@ -148,7 +148,6 @@ int kprobe_vfs_unlink(struct pt_regs *ctx) {
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 
-#ifdef PODTRACE_VMLINUX_FROM_BTF
 	struct dentry *de_parm2 = (struct dentry *)PT_REGS_PARM2(ctx);
 	barrier_var(de_parm2);
 	struct dentry *de_parm3 = (struct dentry *)PT_REGS_PARM3(ctx);
@@ -162,7 +161,6 @@ int kprobe_vfs_unlink(struct pt_regs *ctx) {
 			bpf_map_update_elem(&syscall_paths, &key, buf, BPF_ANY);
 		}
 	}
-#endif
 	return 0;
 }
 
@@ -212,7 +210,6 @@ int kprobe_vfs_rename(struct pt_regs *ctx) {
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 
-#ifdef PODTRACE_VMLINUX_FROM_BTF
 	struct renamedata *rd = (struct renamedata *)PT_REGS_PARM1(ctx);
 	barrier_var(rd);
 	struct dentry *old_parm2 = (struct dentry *)PT_REGS_PARM2(ctx);
@@ -239,7 +236,6 @@ int kprobe_vfs_rename(struct pt_regs *ctx) {
 			bpf_probe_read_kernel_str(buf + MAX_STRING_LEN / 2, MAX_STRING_LEN / 2, new_name);
 		bpf_map_update_elem(&syscall_paths, &key, buf, BPF_ANY);
 	}
-#endif
 	return 0;
 }
 

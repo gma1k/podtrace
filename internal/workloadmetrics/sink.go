@@ -25,6 +25,8 @@ type Options struct {
 
 	Lookup func(cgroupID uint64) (events.K8sMetadata, bool)
 
+	ResolvePeer func(peerIP string, peerPort uint16) (PeerIdentity, bool)
+
 	OnBudgetExhausted func(budget int)
 
 	Now func() time.Time
@@ -47,7 +49,10 @@ type seriesEntry struct {
 type Sink struct {
 	c      *collectors
 	sc     *semconvCollectors
+	edges  *edgeCollectors
 	lookup func(uint64) (events.K8sMetadata, bool)
+
+	resolvePeer func(string, uint16) (PeerIdentity, bool)
 
 	own *prometheus.Registry
 
@@ -82,10 +87,25 @@ func New(reg prometheus.Registerer, opts Options) (*Sink, error) {
 			return nil, fmt.Errorf("register semantic-convention metrics: %w", err)
 		}
 	}
+	var edges *edgeCollectors
+	if opts.ResolvePeer != nil {
+		limit := opts.AttributeCardinality
+		if limit == 0 {
+			limit = defaultAttributeCardinality
+		}
+		edges = newEdgeCollectors(opts.NativeHistograms, limit)
+		if err := edges.register(reg); err != nil {
+			return nil, fmt.Errorf("register service-map metrics: %w", err)
+		}
+	}
+
 	own := prometheus.NewRegistry()
 	own.MustRegister(c.all()...)
 	if sc != nil {
 		own.MustRegister(sc.all()...)
+	}
+	if edges != nil {
+		own.MustRegister(edges.all()...)
 	}
 
 	clock := opts.Now
@@ -95,6 +115,8 @@ func New(reg prometheus.Registerer, opts Options) (*Sink, error) {
 	return &Sink{
 		c:              c,
 		sc:             sc,
+		edges:          edges,
+		resolvePeer:    opts.ResolvePeer,
 		own:            own,
 		lookup:         opts.Lookup,
 		includePod:     opts.IncludePodLabel,
@@ -309,6 +331,7 @@ func (s *Sink) record(e *events.Event, base []string) bool {
 		s.observe(s.c.l7Duration, "l7_request_duration_seconds",
 			appendLabels(base, protocol), seconds)
 		s.recordSemconv(e, seconds)
+		s.recordEdgeL7(e, outcome(e), seconds)
 		return true
 
 	case events.EventTCPSend, events.EventTCPRecv, events.EventUDPSend, events.EventUDPRecv:
@@ -319,6 +342,7 @@ func (s *Sink) record(e *events.Event, base []string) bool {
 			s.add(s.c.networkBytes, "network_bytes_total",
 				appendLabels(base, direction, transport), float64(e.Bytes))
 		}
+		s.recordEdgeNetwork(e, direction)
 		return true
 
 	case events.EventDNS, events.EventDNSQuery:

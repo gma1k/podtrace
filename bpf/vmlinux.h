@@ -15,7 +15,133 @@
 #pragma clang attribute push (__attribute__((preserve_access_index)), apply_to = record)
 #endif
 
-struct file;
+typedef unsigned long size_t;
+
+struct qstr {
+	const unsigned char *name;
+};
+
+struct dentry {
+	struct qstr d_name;
+};
+
+struct path {
+	struct dentry *dentry;
+};
+
+struct file {
+	struct path f_path;
+};
+
+struct renamedata {
+	struct dentry *old_dentry;
+	struct dentry *new_dentry;
+};
+
+struct ns_common {
+	unsigned int inum;
+};
+
+struct pid_namespace {
+	struct ns_common ns;
+};
+
+struct net {
+	struct ns_common ns;
+};
+
+struct nsproxy {
+	struct net *net_ns;
+};
+
+struct upid {
+	int nr;
+	struct pid_namespace *ns;
+};
+
+struct pid {
+	unsigned int level;
+	struct upid numbers[1];
+};
+
+struct kernfs_node {
+	unsigned long long id;
+};
+
+struct cgroup {
+	struct kernfs_node *kn;
+};
+
+struct css_set {
+	struct cgroup *dfl_cgrp;
+};
+
+struct task_struct {
+	int pid;
+	struct task_struct *group_leader;
+	struct pid *thread_pid;
+	struct nsproxy *nsproxy;
+	struct css_set *cgroups;
+};
+
+struct trace_event_raw_mark_victim {
+	int pid;
+	unsigned int __data_loc_comm;
+};
+
+struct in6_addr {
+	union {
+		unsigned char u6_addr8[16];
+	} in6_u;
+};
+
+struct sock_common {
+	unsigned int skc_daddr;
+	unsigned int skc_rcv_saddr;
+	unsigned short skc_num;
+	unsigned short skc_dport;
+	unsigned short skc_family;
+	struct in6_addr skc_v6_daddr;
+	struct in6_addr skc_v6_rcv_saddr;
+};
+
+struct sock {
+	struct sock_common __sk_common;
+};
+
+struct iovec {
+	void *iov_base;
+	unsigned long iov_len;
+};
+
+enum iter_type {
+	ITER_UBUF,
+	ITER_IOVEC,
+	ITER_BVEC,
+	ITER_KVEC,
+	ITER_FOLIOQ,
+	ITER_XARRAY,
+	ITER_DISCARD,
+};
+
+struct iov_iter {
+	unsigned char iter_type;
+	unsigned long iov_offset;
+	union {
+		struct {
+			union {
+				const struct iovec *__iov;
+				void *ubuf;
+			};
+			unsigned long count;
+		};
+	};
+};
+
+struct msghdr {
+	void *msg_name;
+	struct iov_iter msg_iter;
+};
 
 #ifndef BPF_NO_PRESERVE_ACCESS_INDEX
 #pragma clang attribute pop

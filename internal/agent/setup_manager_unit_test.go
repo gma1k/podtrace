@@ -11,10 +11,6 @@ import (
 	"github.com/gma1k/podtrace/pkg/tracer"
 )
 
-// TestAgentSetup_SetupWithManager builds a non-connecting manager (the
-// rest.Config points at an unroutable host) and verifies the agent
-// reconciler wires its watches without error. Manager construction does
-// not dial the apiserver, so this stays a unit test.
 func TestAgentSetup_SetupWithManager(t *testing.T) {
 	scheme, err := newAgentScheme()
 	if err != nil {
@@ -35,6 +31,7 @@ func TestAgentSetup_SetupWithManager(t *testing.T) {
 		Client:          mgr.GetClient(),
 		NodeName:        "node-1",
 		SystemNamespace: "podtrace-system",
+		ControllerName:  "agent-setup-unit-test",
 	}
 	if err := r.SetupWithManager(mgr); err != nil {
 		t.Fatalf("SetupWithManager: %v", err)
@@ -51,12 +48,6 @@ func TestAgentSetup_SetupWithManager(t *testing.T) {
 	}
 }
 
-// TestAgentSetup_FallbackLegacyTarget drives the reachable, no-match
-// branch: with no pods the loop body never runs, and with a pod whose
-// cgroup path cannot be discovered the loop hits its continue arm. On a
-// host without a kubepods cgroup root, discoverKubepodsRoot returns ""
-// so cgroupPathForPod returns "" deterministically — neither branch
-// touches a live cgroup or appends a target.
 func TestAgentSetup_FallbackLegacyTarget(t *testing.T) {
 	var out tracer.TargetSet
 	fallbackLegacyTarget(&out, nil, 12345)

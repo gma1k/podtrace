@@ -59,7 +59,9 @@ func ClassifyBackendError(err error) string {
 	case strings.Contains(msg, "invalid event"):
 		return BackendErrInvalidEvent
 	case strings.Contains(msg, "ebpf collection"),
-		strings.Contains(msg, "create collection"):
+		strings.Contains(msg, "create collection"),
+		strings.Contains(msg, "load ebpf program"),
+		strings.Contains(msg, "load bpf object"):
 		return BackendErrCollection
 	}
 	return BackendErrUnknown

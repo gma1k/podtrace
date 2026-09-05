@@ -17,7 +17,7 @@ func exporterNames(t *testing.T) []string {
 	t.Helper()
 
 	metrics := NewMetrics()
-	exporters, _, err := buildExporters(NewRouter(nil), metrics, nil, logr.Discard())
+	exporters, _, err := buildExporters(NewRouter(nil), metrics, nil, nil, logr.Discard())
 	if err != nil {
 		t.Fatalf("buildExporters: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestWorkloadMetricsRegistersOnTheAgentEndpoint(t *testing.T) {
 	t.Cleanup(func() { config.WorkloadMetricsEnabled = originalEnabled })
 
 	metrics := NewMetrics()
-	if _, _, err := buildExporters(NewRouter(nil), metrics, nil, logr.Discard()); err != nil {
+	if _, _, err := buildExporters(NewRouter(nil), metrics, nil, nil, logr.Discard()); err != nil {
 		t.Fatalf("buildExporters: %v", err)
 	}
 
@@ -97,10 +97,10 @@ func TestBuildExportersRejectsDoubleRegistration(t *testing.T) {
 	t.Cleanup(func() { config.WorkloadMetricsEnabled = originalEnabled })
 
 	metrics := NewMetrics()
-	if _, _, err := buildExporters(NewRouter(nil), metrics, nil, logr.Discard()); err != nil {
+	if _, _, err := buildExporters(NewRouter(nil), metrics, nil, nil, logr.Discard()); err != nil {
 		t.Fatalf("first call: %v", err)
 	}
-	if _, _, err := buildExporters(NewRouter(nil), metrics, nil, logr.Discard()); err == nil {
+	if _, _, err := buildExporters(NewRouter(nil), metrics, nil, nil, logr.Discard()); err == nil {
 		t.Error("registering the plane twice on one registry must fail rather than " +
 			"silently serving one of two copies")
 	}
@@ -144,7 +144,7 @@ func TestBudgetExhaustionLogCallbackIsInstalled(t *testing.T) {
 		config.WorkloadMetricsBudget = originalBudget
 	})
 
-	exporters, _, err := buildExporters(NewRouter(nil), NewMetrics(), nil, logr.Discard())
+	exporters, _, err := buildExporters(NewRouter(nil), NewMetrics(), nil, nil, logr.Discard())
 	if err != nil {
 		t.Fatalf("buildExporters: %v", err)
 	}

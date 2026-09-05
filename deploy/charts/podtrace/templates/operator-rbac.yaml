@@ -9,9 +9,6 @@ metadata:
     {{- include "podtrace.labels" . | nindent 4 }}
     app.kubernetes.io/component: operator
 ---
-# ClusterRole for the operator. These permissions must match what the
-# reconcilers actually need — kept manually in sync with the kubebuilder
-# rbac markers in internal/operator/*_controller.go.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -20,9 +17,6 @@ metadata:
     {{- include "podtrace.labels" . | nindent 4 }}
     app.kubernetes.io/component: operator
 rules:
-  # podtrace.io CRDs. delete is required for TTL-driven cleanup of
-  # expired PodTraceSession resources (sessionTTL on terminal phase)
-  # and for agent-driven removal of stale PodTrace entries.
   - apiGroups: ["podtrace.io"]
     resources: ["tracerconfigs", "podtraces", "podtracesessions", "exporterconfigs", "podtraceschedules", "applicationtraces"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -39,20 +33,20 @@ rules:
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # Pod lookup (selector → node resolution in PodTraceSessionReconciler)
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch"]
-  # Namespace lookup for spec.namespaceSelector resolution. The operator
-  # lists namespaces, filters by the user-supplied LabelSelector, and
-  # writes the result into the agent bundle's target_namespaces field.
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "list", "watch"]
-  # Node labels and taints decide which TracerConfig's agent fleet lands on
-  # which node.
   - apiGroups: [""]
     resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["services"]
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["serviceaccounts", "configmaps"]
@@ -60,18 +54,15 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "list", "watch", "create", "delete"]
-  # Agent RBAC managed by TracerConfigReconciler
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles", "clusterrolebindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["roles", "rolebindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # Events surface on operator errors.
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["get", "list", "watch", "create", "patch"]
-  # Leader election lease
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

@@ -508,6 +508,16 @@ func agentClusterRoleRules(systemNS string) []rbacv1.PolicyRule {
 			Resources: []string{"events"},
 			Verbs:     []string{"create", "patch"},
 		},
+		{
+			APIGroups: []string{"discovery.k8s.io"},
+			Resources: []string{"endpointslices"},
+			Verbs:     []string{"get", "list", "watch"},
+		},
+		{
+			APIGroups: []string{""},
+			Resources: []string{"services"},
+			Verbs:     []string{"get", "list", "watch"},
+		},
 	}
 }
 

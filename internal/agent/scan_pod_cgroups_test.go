@@ -69,3 +69,39 @@ func TestScanPodCgroups_SkipsWhenPodPathIsNotADirectory(t *testing.T) {
 		}
 	}
 }
+
+func TestScanPodCgroupsSkipsAContainerCgroupItCannotStat(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses the directory permission this test relies on")
+	}
+
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "kubepods.slice")
+	uidUnder := strings.ReplaceAll(testPodUID, "-", "_")
+	podDir := filepath.Join(root,
+		"kubepods-besteffort.slice",
+		"kubepods-besteffort-pod"+uidUnder+".slice",
+	)
+	containerDir := filepath.Join(podDir, "cri-containerd-abc.scope")
+	if err := os.MkdirAll(containerDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Chmod(podDir, 0o400); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(podDir, 0o755) })
+	withKubepodsRoot(t, root)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "ns", UID: types.UID(testPodUID)},
+		Status:     corev1.PodStatus{QOSClass: corev1.PodQOSBestEffort},
+	}
+
+	for _, e := range scanPodCgroups([]*corev1.Pod{pod}) {
+		if e.ContainerID != "" || e.ContainerName != "" {
+			t.Errorf("emitted container entry %+v for a cgroup whose inode could not be read. "+
+				"Without an inode there is no cgroup ID to attach to, so the entry would "+
+				"filter every event to zero and read as a silently idle container", e)
+		}
+	}
+}
