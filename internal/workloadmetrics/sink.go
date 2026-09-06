@@ -34,6 +34,8 @@ type Options struct {
 	SemanticConventions bool
 
 	AttributeCardinality int
+
+	KernelAggregation bool
 }
 
 // seriesEntry records enough about an admitted series to delete it later.
@@ -43,14 +45,13 @@ type seriesEntry struct {
 	lastSeen time.Time
 }
 
-// Sink aggregates events into the continuous surface. It satisfies
-// tracer.Exporter, so the agent registers it alongside the per-CR router
-// and the engine fans out to both.
+// Sink aggregates events into the continuous surface.
 type Sink struct {
-	c      *collectors
-	sc     *semconvCollectors
-	edges  *edgeCollectors
-	lookup func(uint64) (events.K8sMetadata, bool)
+	c          *collectors
+	sc         *semconvCollectors
+	edges      *edgeCollectors
+	kernelHist *kernelHistograms
+	lookup     func(uint64) (events.K8sMetadata, bool)
 
 	resolvePeer func(string, uint16) (PeerIdentity, bool)
 
@@ -93,14 +94,25 @@ func New(reg prometheus.Registerer, opts Options) (*Sink, error) {
 		if limit == 0 {
 			limit = defaultAttributeCardinality
 		}
-		edges = newEdgeCollectors(opts.NativeHistograms, limit)
+		edges = newEdgeCollectors(opts.NativeHistograms, limit, opts.KernelAggregation)
 		if err := edges.register(reg); err != nil {
 			return nil, fmt.Errorf("register service-map metrics: %w", err)
 		}
 	}
 
+	var kernelHist *kernelHistograms
+	if opts.KernelAggregation {
+		kernelHist = newKernelHistograms(baseLabelNames(opts), opts.ResolvePeer != nil)
+		if err := reg.Register(kernelHist); err != nil {
+			return nil, fmt.Errorf("register kernel-aggregated metrics: %w", err)
+		}
+	}
+
 	own := prometheus.NewRegistry()
 	own.MustRegister(c.all()...)
+	if kernelHist != nil {
+		own.MustRegister(kernelHist)
+	}
 	if sc != nil {
 		own.MustRegister(sc.all()...)
 	}
@@ -116,6 +128,7 @@ func New(reg prometheus.Registerer, opts Options) (*Sink, error) {
 		c:              c,
 		sc:             sc,
 		edges:          edges,
+		kernelHist:     kernelHist,
 		resolvePeer:    opts.ResolvePeer,
 		own:            own,
 		lookup:         opts.Lookup,
@@ -221,6 +234,9 @@ func (s *Sink) deleteSeries(entry *seriesEntry) bool {
 }
 
 func (s *Sink) observe(h *prometheus.HistogramVec, family string, labelValues []string, seconds float64) {
+	if s.kernelHist.owns(family) {
+		return
+	}
 	if !s.admit(family, labelValues) {
 		return
 	}

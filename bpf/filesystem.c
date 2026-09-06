@@ -86,7 +86,8 @@ int kretprobe_vfs_read(struct pt_regs *ctx) {
 		e->target[0] = '\0';
 	}
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
@@ -137,7 +138,8 @@ int kretprobe_vfs_write(struct pt_regs *ctx) {
 		e->target[0] = '\0';
 	}
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
@@ -199,7 +201,8 @@ int kretprobe_vfs_fsync(struct pt_regs *ctx) {
 		e->target[0] = '\0';
 	}
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }

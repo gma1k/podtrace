@@ -274,7 +274,8 @@ int kretprobe_tcp_v6_connect(struct pt_regs *ctx) {
 		}
 	}
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&connect_addrs, &key);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
@@ -320,7 +321,8 @@ int kretprobe_tcp_connect(struct pt_regs *ctx) {
 		}
 	}
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&connect_addrs, &key);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
@@ -387,7 +389,8 @@ int kretprobe_tcp_sendmsg(struct pt_regs *ctx) {
 	bpf_map_delete_elem(&tcp_target, &key);
 	fill_event_peer_pref(e, PAIR_TCP_SENDMSG);
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 
 	char *grpc_method_ptr = bpf_map_lookup_elem(&grpc_methods, &conn_key);
@@ -469,7 +472,8 @@ int kretprobe_tcp_recvmsg(struct pt_regs *ctx) {
 	bpf_map_delete_elem(&tcp_target, &key);
 	fill_event_peer_pref(e, PAIR_TCP_RECVMSG);
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
@@ -531,7 +535,8 @@ int uretprobe_getaddrinfo(struct pt_regs *ctx) {
 		e->target[0] = '\0';
 	}
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
@@ -602,7 +607,8 @@ int tracepoint_inet_sock_set_state(void *ctx) {
 		}
 	}
 	capture_user_stack(ctx, pid, 0, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	return 0;
 }
 
@@ -665,7 +671,8 @@ int tracepoint_tcp_retransmit_skb(void *ctx) {
 		}
 	}
 	capture_user_stack(ctx, pid, 0, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	return 0;
 }
 
@@ -707,7 +714,8 @@ int tracepoint_net_dev_xmit(void *ctx) {
 	unsigned short name_off = (unsigned short)(args_local.name_loc & 0xffff);
 	bpf_probe_read_kernel_str(e->target, sizeof(e->target), (char *)ctx + name_off);
 	capture_user_stack(ctx, pid, 0, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	return 0;
 }
 
@@ -754,7 +762,8 @@ int kretprobe_udp_sendmsg(struct pt_regs *ctx) {
 	
 	capture_user_stack(ctx, pid, tid, e);
 	fill_event_peer_pref(e, PAIR_UDP_SENDMSG);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
@@ -812,7 +821,8 @@ int kretprobe_udp_recvmsg(struct pt_regs *ctx) {
 	capture_user_stack(ctx, pid, tid, e);
 	stash_udp_recv_peer();
 	fill_event_peer_pref(e, PAIR_UDP_RECVMSG);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
@@ -871,7 +881,8 @@ int uretprobe_http_request(struct pt_regs *ctx) {
 		e->target[0] = '\0';
 	}
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
@@ -917,7 +928,8 @@ int uretprobe_http_response(struct pt_regs *ctx) {
 	e->target[0] = '\0';
 	
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
@@ -975,7 +987,8 @@ int uretprobe_PQexec(struct pt_regs *ctx) {
 		e->target[0] = '\0';
 	}
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
@@ -1033,7 +1046,8 @@ int uretprobe_mysql_real_query(struct pt_regs *ctx) {
 		e->target[0] = '\0';
 	}
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
@@ -1070,7 +1084,8 @@ int uretprobe_SSL_connect(struct pt_regs *ctx) {
 	e->tcp_state = 0;
 	e->target[0] = '\0';
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
@@ -1108,7 +1123,8 @@ int uretprobe_SSL_accept(struct pt_regs *ctx) {
 	e->tcp_state = 0;
 	e->target[0] = '\0';
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
@@ -1146,7 +1162,8 @@ int uretprobe_SSL_do_handshake(struct pt_regs *ctx) {
 	e->tcp_state = 0;
 	e->target[0] = '\0';
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
@@ -1184,7 +1201,8 @@ int uretprobe_gnutls_handshake(struct pt_regs *ctx) {
 	e->tcp_state = 0;
 	e->target[0] = '\0';
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
@@ -1222,7 +1240,8 @@ int uretprobe_mbedtls_ssl_handshake(struct pt_regs *ctx) {
 	e->tcp_state = 0;
 	e->target[0] = '\0';
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }

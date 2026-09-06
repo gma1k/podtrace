@@ -22,6 +22,7 @@ type Metrics struct {
 	EventsExported      *prometheus.CounterVec
 	EventsDropped       *prometheus.CounterVec
 	KernelEventsDropped *prometheus.CounterVec
+	KernelAggRows       *prometheus.CounterVec
 	ActiveCgroups       *prometheus.GaugeVec
 	ActiveCRs           prometheus.Gauge
 	ReconcileTotal      prometheus.Counter
@@ -98,6 +99,11 @@ func NewMetrics() *Metrics {
 			Name:      "kernel_events_dropped_total",
 			Help:      "Events discarded before the dispatch loop (kernel ring buffer overrun or full event channel), labeled by reason. Node-level; predates CR routing so it is not attributable to a CR.",
 		}, []string{"reason"}),
+		KernelAggRows: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "podtrace_agent",
+			Name:      "kernel_agg_rows_total",
+			Help:      "Rows drained from the kernel metric aggregation map, by outcome. Collector internal, not part of the contractual surface.",
+		}, []string{"outcome"}),
 		ActiveCgroups: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: "podtrace_agent",
 			Name:      "active_cgroups",
@@ -200,7 +206,8 @@ func NewMetrics() *Metrics {
 	}
 	reg.MustRegister(
 		m.AgentInfo,
-		m.EventsExported, m.EventsDropped, m.KernelEventsDropped, m.ActiveCgroups, m.ActiveCRs,
+		m.EventsExported, m.EventsDropped, m.KernelEventsDropped, m.KernelAggRows,
+		m.ActiveCgroups, m.ActiveCRs,
 		m.ReconcileTotal, m.BackendDegraded, m.CgroupsAttached, m.CgroupsDetached,
 		m.EnrichmentLookups, m.EnrichmentCacheSize, m.EnrichmentSnapshots,
 		m.EnrichmentOwnerResolved,
@@ -527,4 +534,28 @@ func (m *Metrics) RefreshFromRouter(router *Router) {
 			}).Set(float64(rule.Policy.Generation))
 		}
 	}
+}
+
+// RecordKernelDrain records the outcome of one drain of the kernel
+// aggregation map: how many rows came back, and how many carried a cgroup
+// still resident enough to attribute.
+func (m *Metrics) RecordKernelDrain(rows, applied int) {
+	if m == nil || m.KernelAggRows == nil {
+		return
+	}
+	if applied > 0 {
+		m.KernelAggRows.WithLabelValues("applied").Add(float64(applied))
+	}
+	if dropped := rows - applied; dropped > 0 {
+		m.KernelAggRows.WithLabelValues("unattributed").Add(float64(dropped))
+	}
+}
+
+// RecordKernelDrainFailure counts a drain that could not read the map, which
+// loses that interval's observations rather than corrupting them.
+func (m *Metrics) RecordKernelDrainFailure() {
+	if m == nil || m.KernelAggRows == nil {
+		return
+	}
+	m.KernelAggRows.WithLabelValues("drain_failed").Inc()
 }

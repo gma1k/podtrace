@@ -31,7 +31,7 @@ func renderSurface(t *testing.T) string {
 		for _, c := range newSemconvCollectors(true, defaultAttributeCardinality).all() {
 			c.Describe(ch)
 		}
-		for _, c := range newEdgeCollectors(true, defaultAttributeCardinality).all() {
+		for _, c := range newEdgeCollectors(true, defaultAttributeCardinality, false).all() {
 			c.Describe(ch)
 		}
 	}()

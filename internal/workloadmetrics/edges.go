@@ -50,10 +50,13 @@ type edgeCollectors struct {
 	bytes    *prometheus.CounterVec
 
 	targets *boundedValues
+
+	kernelAggregation bool
 }
 
-func newEdgeCollectors(native bool, limit int) *edgeCollectors {
+func newEdgeCollectors(native bool, limit int, kernelAgg bool) *edgeCollectors {
 	return &edgeCollectors{
+		kernelAggregation: kernelAgg,
 		requests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: metricPrefix + edgeRequestsTotal,
 			Help: "L7 requests between a workload and the service it called, for the service map.",
@@ -72,6 +75,9 @@ func newEdgeCollectors(native bool, limit int) *edgeCollectors {
 }
 
 func (c *edgeCollectors) all() []prometheus.Collector {
+	if c.kernelAggregation {
+		return []prometheus.Collector{c.requests, c.bytes}
+	}
 	return []prometheus.Collector{c.requests, c.duration, c.bytes}
 }
 

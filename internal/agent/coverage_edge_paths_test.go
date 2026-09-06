@@ -132,3 +132,30 @@ func TestAGenuineCacheSyncFailureIsReported(t *testing.T) {
 		t.Errorf("cacheSyncError(true, nil) = %v, want nil", err)
 	}
 }
+
+func TestPublishingRulesLiftsTheKernelBypassImmediately(t *testing.T) {
+	router := NewRouter(nil)
+
+	var modes []bool
+	router.OnRulesChanged(func(hasRules bool) { modes = append(modes, hasRules) })
+
+	router.Publish([]CRRule{{Key: CRKey{Namespace: "ns", Name: "cr"}}}).Wait()
+	router.Publish(nil).Wait()
+
+	if len(modes) != 2 || !modes[0] || modes[1] {
+		t.Fatalf("hook saw %v, want [true false]. The bypass must lift the moment a CR starts "+
+			"routing and re-arm when it stops; waiting for a drain tick would lose the opening "+
+			"seconds of a diagnose session", modes)
+	}
+}
+
+func TestHasRulesReflectsTheActiveRuleSet(t *testing.T) {
+	router := NewRouter(nil)
+	if router.HasRules() {
+		t.Error("a fresh router reports active rules")
+	}
+	router.Publish([]CRRule{{Key: CRKey{Name: "cr"}}}).Wait()
+	if !router.HasRules() {
+		t.Error("a published rule is not reflected, so the bypass would stay on while a session runs")
+	}
+}

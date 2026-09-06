@@ -156,9 +156,13 @@ var (
 	WorkloadMetricsSemanticConv     = getBoolEnvOrDefault("PODTRACE_WORKLOAD_METRICS_SEMANTIC_CONVENTIONS", false)
 	WorkloadMetricsAttributeLimit   = getIntEnvOrDefault("PODTRACE_WORKLOAD_METRICS_ATTRIBUTE_CARDINALITY", 50)
 
+	WorkloadMetricsKernelAggregation = getBoolEnvOrDefault("PODTRACE_WORKLOAD_METRICS_KERNEL_AGGREGATION", false)
+
 	WorkloadMetricsSeriesTTL = getDurationEnvOrDefault("PODTRACE_WORKLOAD_METRICS_SERIES_TTL", 15*time.Minute)
 
 	WorkloadMetricsReapInterval = getDurationEnvOrDefault("PODTRACE_WORKLOAD_METRICS_REAP_INTERVAL", time.Minute)
+
+	WorkloadMetricsDrainInterval = getDurationEnvOrDefault("PODTRACE_WORKLOAD_METRICS_DRAIN_INTERVAL", 10*time.Second)
 )
 
 var WorkloadMetricsExcludedNamespaces = splitCommaEnv("PODTRACE_WORKLOAD_METRICS_EXCLUDE_NAMESPACES")

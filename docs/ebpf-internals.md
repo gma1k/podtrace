@@ -319,6 +319,56 @@ Flags:
 - `-D__TARGET_ARCH_x86`: Define target architecture
 - `-mcpu=v3`: Use BPF v3 instruction set
 
+## Kernel-side metric aggregation
+
+`bpf/agg.h` folds metric observations into a BPF map instead of shipping one
+ring-buffer record per observation, so the continuous metrics plane costs
+O(series) rather than O(events). The probes call `agg_from_event()` beside
+each `bpf_ringbuf_output()`, and the agent drains the map on an interval.
+
+### Bucket indices are map keys, not offsets
+
+The obvious way to build a histogram in BPF is an array of counters indexed by
+bucket, which forces every index to be a compile-time-constant-masked offset
+into a map value, the constraint this codebase has hit before. This design
+sidesteps it: the bucket is part of the map **key**, so there is no
+variable-offset write to mask, and the accumulators live in the map value
+rather than on the stack.
+
+### The index is Prometheus schema 3
+
+`agg_bucket()` computes `floor(log2(v) * 8)`: the Prometheus native-histogram
+schema a bucket factor of 1.1 resolves to. It is a branchless MSB search
+(no loop, so the verifier sees straight-line code) plus seven comparisons
+against the normalized sub-boundaries.
+
+Those boundaries are `2^(k/8) * 2^32` for k=1..7 and must be exact. Hand-written
+constants were wrong on the first attempt; they are now generated and verified
+against Prometheus's own formula — `SearchFloat64s(bounds, frac) + (exp-1)*8`
+from `client_golang`, across every value from 1 to 100000 plus every
+power-of-two boundary. `kernelagg.BucketIndex()` is the Go mirror.
+
+### Struct layout must be spelled out
+
+`struct agg_key` ends with explicit `u8 pad[6]`. The struct would be padded to
+its `u64` alignment anyway, but Go's `encoding/binary` adds no implicit
+trailing padding, so an implicitly-padded struct decodes short. That failure
+mode is quiet in the worst way, a misread key attributes metrics to the wrong
+workload — so a test asserts `binary.Size(Key{}) == 24`.
+
+### Reserved records must be released
+
+The ring-buffer bypass skips `bpf_ringbuf_output()` for anything the map
+absorbed. Where a probe uses the reserve/submit form instead, `bpf/dns.c` —
+the reservation must be **discarded**, not simply skipped, or it leaks and the
+ring wedges.
+
+### Arch coverage
+
+Both the BTF and stub builds produce the full program set on amd64 and
+arm64. The kernel verifier has been exercised on amd64; arm64 is
+compile-verified only, since it needs an arm64 kernel to load against.
+
 ## Verification
 
 The kernel verifies eBPF programs before loading:

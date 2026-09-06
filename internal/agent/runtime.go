@@ -30,6 +30,7 @@ import (
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 	"github.com/gma1k/podtrace/internal/alerting"
 	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/ebpf/kernelagg"
 	"github.com/gma1k/podtrace/internal/ebpf/probes"
 	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/internal/workloadmetrics"
@@ -221,6 +222,7 @@ func Run(ctx context.Context, opts Options) error {
 	g.Go(func() error { return probeSrv.Run(gctx) })
 	g.Go(func() error { return serveMetrics(gctx, opts.MetricsAddr, metrics, logger) })
 	g.Go(func() error { return reapWorkloadMetrics(gctx, metricsSink, logger) })
+	g.Go(func() error { return drainKernelMetrics(gctx, backend, metricsSink, router, metrics, logger) })
 
 	g.Go(func() error {
 		if err := cacheSyncError(mgr.GetCache().WaitForCacheSync(gctx), gctx.Err()); err != nil {
@@ -352,6 +354,7 @@ func buildExporters(router *Router, metrics *Metrics, enricher *PodEnricher, pee
 		ResolvePeer:          peerLookup(peers),
 		SemanticConventions:  config.WorkloadMetricsSemanticConv,
 		AttributeCardinality: config.WorkloadMetricsAttributeLimit,
+		KernelAggregation:    config.WorkloadMetricsKernelAggregation,
 		OnBudgetExhausted: func(budget int) {
 			logger.Error(nil, "continuous metrics series budget exhausted; new series are being refused",
 				"seriesBudget", budget,
@@ -365,8 +368,77 @@ func buildExporters(router *Router, metrics *Metrics, enricher *PodEnricher, pee
 
 	logger.Info("continuous workload metrics enabled",
 		"seriesBudget", config.WorkloadMetricsBudget,
-		"nativeHistograms", config.WorkloadMetricsNativeHistograms)
+		"nativeHistograms", config.WorkloadMetricsNativeHistograms,
+		"kernelAggregation", config.WorkloadMetricsKernelAggregation)
 	return append(exporters, sink), sink, nil
+}
+
+// drainKernelMetrics folds the kernel's aggregation map into the sink on an
+// interval, which is what makes the plane cost O(series) instead of O(events).
+func drainKernelMetrics(ctx context.Context, backend tracer.TracerBackend, sink *workloadmetrics.Sink, router *Router, metrics *Metrics, logger logr.Logger) error {
+	if sink == nil || !config.WorkloadMetricsKernelAggregation {
+		return nil
+	}
+	aggregator, ok := backend.(tracer.KernelAggregator)
+	if !ok {
+		logger.Info("kernel aggregation requested but the backend does not support it; " +
+			"metrics continue on the event path")
+		return nil
+	}
+	if err := aggregator.SetKernelAggregationMode(kernelagg.ModeOn); err != nil {
+		logger.Info("kernel aggregation unavailable on this backend; metrics continue on the event path",
+			"reason", err.Error())
+		return nil
+	}
+
+	modeFor := func(hasRules bool) kernelagg.Mode {
+		if hasRules {
+			return kernelagg.ModeOn
+		}
+		return kernelagg.ModeBypass
+	}
+	applyMode := func(hasRules bool) {
+		mode := modeFor(hasRules)
+		if err := aggregator.SetKernelAggregationMode(mode); err != nil {
+			logger.Error(err, "could not set kernel aggregation mode", "mode", mode.String())
+			return
+		}
+		logger.V(1).Info("kernel aggregation mode set", "mode", mode.String())
+	}
+	if router != nil {
+		router.OnRulesChanged(applyMode)
+		applyMode(router.HasRules())
+	} else {
+		applyMode(false)
+	}
+	logger.Info("kernel metric aggregation enabled",
+		"drainInterval", config.WorkloadMetricsDrainInterval)
+
+	ticker := time.NewTicker(config.WorkloadMetricsDrainInterval)
+	defer ticker.Stop()
+	drain := func() {
+		rows, err := aggregator.DrainKernelMetrics()
+		if err != nil {
+			logger.Error(err, "draining the kernel aggregation map failed")
+			metrics.RecordKernelDrainFailure()
+			return
+		}
+		applied := sink.IngestKernel(rows)
+		metrics.RecordKernelDrain(len(rows), applied)
+		if len(rows) > 0 {
+			logger.V(1).Info("drained kernel metric rows", "rows", len(rows), "applied", applied)
+		}
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			drain()
+			_ = aggregator.SetKernelAggregationMode(kernelagg.ModeOff)
+			return nil
+		case <-ticker.C:
+			drain()
+		}
+	}
 }
 
 // reapWorkloadMetrics periodically drops series whose workload stopped

@@ -12,6 +12,7 @@ import (
 	"github.com/gma1k/podtrace/internal/agent"
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/ebpf"
+	"github.com/gma1k/podtrace/internal/ebpf/kernelagg"
 	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/pkg/tracer"
 )
@@ -189,4 +190,31 @@ func (a *ebpfBackendAdapter) SetEnabledCategories(categories []string) error {
 
 func noopBackendFactory() (tracer.TracerBackend, error) {
 	return agent.NewNoopBackend(), nil
+}
+
+// kernelAggCapable is the slice of the eBPF tracer the metrics plane needs.
+// Declared here rather than imported so the adapter stays a narrowing layer.
+type kernelAggCapable interface {
+	SetKernelAggregationMode(mode kernelagg.Mode) error
+	DrainKernelMetrics() ([]kernelagg.Row, error)
+}
+
+// ErrNoKernelAggregation reports a backend that cannot fold metrics in the
+// kernel, a noop backend, or one built without the aggregation maps.
+var ErrNoKernelAggregation = errors.New("backend does not support kernel aggregation")
+
+func (a *ebpfBackendAdapter) SetKernelAggregationMode(mode kernelagg.Mode) error {
+	agg, ok := a.tr.(kernelAggCapable)
+	if !ok {
+		return ErrNoKernelAggregation
+	}
+	return agg.SetKernelAggregationMode(mode)
+}
+
+func (a *ebpfBackendAdapter) DrainKernelMetrics() ([]kernelagg.Row, error) {
+	agg, ok := a.tr.(kernelAggCapable)
+	if !ok {
+		return nil, ErrNoKernelAggregation
+	}
+	return agg.DrainKernelMetrics()
 }

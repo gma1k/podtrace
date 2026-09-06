@@ -25,6 +25,22 @@ type Router struct {
 	stats    *perCRStats
 	enricher *PodEnricher
 	inflight *sync.WaitGroup
+
+	onRulesChanged func(hasRules bool)
+}
+
+// OnRulesChanged registers a hook invoked when the rule set is published.
+func (r *Router) OnRulesChanged(fn func(hasRules bool)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onRulesChanged = fn
+}
+
+// HasRules reports whether any CR is currently routing events.
+func (r *Router) HasRules() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.rules) > 0
 }
 
 // NewRouter constructs an empty Router.
@@ -66,6 +82,12 @@ func (r *Router) Publish(rules []CRRule) *sync.WaitGroup {
 	}
 
 	r.rules = cp
+	// The kernel bypass must lift the moment a diagnostic CR appears, not on
+	// the next drain tick: waiting would lose the opening seconds of a
+	// session, which is exactly the window an operator started it for.
+	if r.onRulesChanged != nil {
+		r.onRulesChanged(len(cp) > 0)
+	}
 	prev := r.inflight
 	r.inflight = &sync.WaitGroup{}
 	return prev

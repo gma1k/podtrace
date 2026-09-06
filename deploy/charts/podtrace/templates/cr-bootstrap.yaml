@@ -135,6 +135,7 @@ data:
           {{- end }}
           nativeHistograms: {{ .Values.agent.metrics.nativeHistograms }}
           semanticConventions: {{ .Values.agent.metrics.semanticConventions }}
+          kernelAggregation: {{ .Values.agent.metrics.kernelAggregation }}
           {{- if .Values.agent.metrics.attributeCardinality }}
           attributeCardinality: {{ .Values.agent.metrics.attributeCardinality }}
           {{- end }}

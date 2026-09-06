@@ -236,7 +236,10 @@ static __always_inline void emit_encrypted_dns(struct __sk_buff *skb, u8 is_v6, 
 	}
 	__builtin_memcpy(e->details, is_doh ? "encrypted (DoH)" : "encrypted (DoT)",
 			 sizeof("encrypted (DoH)"));
-	bpf_ringbuf_submit(e, 0);
+	if (agg_absorbed(e, 0))
+		bpf_ringbuf_discard(e, 0);
+	else
+		bpf_ringbuf_submit(e, 0);
 }
 
 static __noinline int skip_name(struct __sk_buff *skb, int off) {
@@ -343,7 +346,13 @@ int dns_egress(struct __sk_buff *skb) {
 	__builtin_memcpy(e->dns_server_ip6, q.server_ip6, 16);
 	__builtin_memcpy(e->comm, q.comm, COMM_LEN);
 	__builtin_memcpy(e->target, q.name, MAX_STRING_LEN);
-	bpf_ringbuf_submit(e, 0);
+	/* A reserved record must be released either way: discard rather than
+	 * submit when the map already absorbed it, or the reservation leaks
+	 * and the ring wedges. */
+	if (agg_absorbed(e, 0))
+		bpf_ringbuf_discard(e, 0);
+	else
+		bpf_ringbuf_submit(e, 0);
 	return 1;
 }
 
@@ -450,6 +459,12 @@ int dns_ingress(struct __sk_buff *skb) {
 	u32 *payload_on = bpf_map_lookup_elem(&dns_payload_enabled, &pz);
 	if (payload_on && *payload_on) {
 		u64 latency = e->latency_ns;
+		/* This is the only DNS record carrying a real latency, and with
+		 * dnsFullAnswers on it leaves through the payload ring instead of
+		 * the event ring. Fold it in before discarding, or the metrics
+		 * plane sees nothing but the zero-latency query and packet events
+		 * and dns_latency_seconds sums to zero. */
+		agg_from_event(e, 0);
 		bpf_ringbuf_discard(e, 0);
 		struct dns_payload_meta meta = {
 			.cgroup_id = key.cgroup_id,
@@ -512,7 +527,13 @@ int dns_ingress(struct __sk_buff *skb) {
 		aoff = (rdata + (rdlen & DNS_OFF_MASK)) & DNS_OFF_MASK;
 	}
 
-	bpf_ringbuf_submit(e, 0);
+	/* A reserved record must be released either way: discard rather than
+	 * submit when the map already absorbed it, or the reservation leaks
+	 * and the ring wedges. */
+	if (agg_absorbed(e, 0))
+		bpf_ringbuf_discard(e, 0);
+	else
+		bpf_ringbuf_submit(e, 0);
 	bpf_map_delete_elem(&dns_inflight, &key);
 	return 1;
 }

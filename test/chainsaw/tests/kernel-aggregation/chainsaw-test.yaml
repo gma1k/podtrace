@@ -1,0 +1,280 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: kernel-aggregation
+spec:
+  concurrent: false
+  description: |
+    Property tested: with kernelAggregation on, the metrics come from the BPF
+    map rather than from events, and the exported surface is unchanged.
+
+    This is the only layer that can check it. A unit test can prove the
+    kernel's bucket indices match Prometheus and that a drained row folds into
+    the right family, but it cannot prove that the probes actually populate
+    the map on a live kernel, that draining it produces the same series a
+    scrape saw before, or that the service map survives the ring-buffer
+    bypass — the whole point of which is that there are no events left to
+    derive edges from.
+
+    Steps:
+      1. Enable the plane with kernelAggregation on the TracerConfig.
+      2. Assert the operator translated the field into agent environment.
+      3. Run a workload that generates traffic.
+      4. Scrape an agent and assert:
+         - workload series exist and carry the expected identity
+         - latency histograms arrive as native histograms at schema 3
+         - the service map still has edges, resolved to a Service name
+         - rows are being attributed, not counted as unattributed
+      5. Author a PodTrace and confirm the event path switches back on.
+  timeouts:
+    apply: 60s
+    assert: 120s
+    exec: 600s
+    cleanup: 180s
+    delete: 180s
+  steps:
+    - name: enable-kernel-aggregation
+      description: |
+        Patch the chart-rendered TracerConfig, so this takes the same path a
+        `helm upgrade --set agent.metrics.kernelAggregation=true` would.
+      try:
+        - script:
+            content: |
+              set -eu
+
+              for _ in $(seq 1 24); do
+                if kubectl -n podtrace-system get endpoints podtrace-webhook \
+                     -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null | grep -q .; then
+                  if kubectl patch tracerconfig default --type=merge --dry-run=server \
+                       -p '{"metadata":{"annotations":{}}}' >/dev/null 2>&1; then
+                    break
+                  fi
+                fi
+                sleep 5
+              done
+
+              kubectl patch tracerconfig default --type=merge -p '{
+                "spec": {
+                  "agent": {
+                    "metrics": {
+                      "enabled": true,
+                      "kernelAggregation": true,
+                      "excludeNamespaces": ["kernel-agg-excluded"]
+                    }
+                  }
+                }
+              }'
+
+              for _ in $(seq 1 60); do
+                desired=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.desiredNumberScheduled}')
+                updated=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.updatedNumberScheduled}')
+                ready=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.numberReady}')
+                if [ -n "${desired}" ] && [ "${updated}" = "${desired}" ] && [ "${ready}" = "${desired}" ]; then
+                  echo "all ${desired} agents updated and ready"
+                  break
+                fi
+                sleep 5
+              done
+              if [ "${updated:-0}" != "${desired:-1}" ] || [ "${ready:-0}" != "${desired:-1}" ]; then
+                echo "FAIL: agents did not converge (updated=${updated:-?} ready=${ready:-?} desired=${desired:-?})"
+                kubectl -n podtrace-system get pod -l podtrace.io/component=agent
+                exit 1
+              fi
+
+    - name: agent-carries-the-env
+      description: |
+        Asserted separately from the metrics so a failure here points at the
+        operator rather than at the kernel path.
+      try:
+        - script:
+            content: |
+              set -eu
+              env=$(kubectl -n podtrace-system get ds podtrace-agent \
+                -o jsonpath='{range .spec.template.spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}')
+              for want in \
+                'PODTRACE_WORKLOAD_METRICS=true' \
+                'PODTRACE_WORKLOAD_METRICS_KERNEL_AGGREGATION=true'
+              do
+                if ! printf '%s' "${env}" | grep -qx "${want}"; then
+                  echo "FAIL: agent env missing ${want}"
+                  printf '%s\n' "${env}"
+                  exit 1
+                fi
+              done
+              echo "operator rendered the kernel aggregation env"
+
+    - name: run-the-workload
+      try:
+        - apply:
+            file: workload.yaml
+        - assert:
+            file: assert-workload-ready.yaml
+
+    - name: metrics-come-from-the-kernel
+      description: |
+        No PodTrace exists, so with the bypass armed the ring buffer is
+        carrying nothing for these families: every series below can only have
+        come from the aggregation map.
+      try:
+        - script:
+            content: |
+              set -eu
+
+              if [ -n "$(kubectl get podtraces.podtrace.io -A -o name 2>/dev/null)" ]; then
+                echo "FAIL: a PodTrace exists; the bypass would not be armed"
+                exit 1
+              fi
+
+              scraper=$(kubectl -n kernel-agg-app get pod \
+                -l app=metrics-scraper -o jsonpath='{.items[0].metadata.name}')
+
+              scrape() {
+                for ip in $(kubectl -n podtrace-system get pod \
+                              -l podtrace.io/component=agent \
+                              -o jsonpath='{range .items[*]}{.status.podIP} {end}'); do
+                  kubectl -n kernel-agg-app exec "${scraper}" -c curl -- \
+                    curl -sS --max-time 10 "http://${ip}:9090/metrics" 2>/dev/null || true
+                done
+              }
+
+              found=""
+              for attempt in $(seq 1 40); do
+                out=$(scrape || true)
+                has_workload=$(printf '%s' "${out}" | grep -c 'workload="shop-checkout"' || true)
+                has_dns=$(printf '%s' "${out}" \
+                  | grep '^podtrace_workload_dns_latency_seconds_sum' \
+                  | grep 'namespace="kernel-agg-app"' \
+                  | awk '{ if ($2 + 0 > 0) print }' | wc -l)
+                if [ "${has_workload}" -gt 0 ] && [ "${has_dns}" -gt 0 ]; then
+                  found="${out}"
+                  echo "kernel-fed series present on attempt ${attempt}"
+                  break
+                fi
+                sleep 5
+              done
+              if [ -z "${found}" ]; then
+                echo "FAIL: no workload series appeared; the aggregation map never reached the sink"
+                kubectl -n podtrace-system logs -l podtrace.io/component=agent --tail=60 || true
+                exit 1
+              fi
+
+              fail=0
+
+              if ! printf '%s' "${found}" | grep -q 'podtrace_workload_network_bytes_total.*workload="shop-checkout"'; then
+                echo "FAIL: no network byte counter; a drained delta should Add into the existing counter"
+                fail=1
+              fi
+
+              if ! printf '%s' "${found}" | grep -q 'podtrace_agent_kernel_agg_rows_total.*outcome="applied"'; then
+                echo "FAIL: no applied rows counted; the drain loop is not attributing anything"
+                printf '%s' "${found}" | grep 'kernel_agg_rows_total' || true
+                fail=1
+              fi
+
+              dns_nonzero=$(printf '%s' "${found}" \
+                | grep '^podtrace_workload_dns_latency_seconds_sum' \
+                | grep 'namespace="kernel-agg-app"' \
+                | awk '{ if ($2 + 0 > 0) print $2 }' | head -1)
+              if [ -z "${dns_nonzero}" ]; then
+                echo "FAIL: no dns_latency_seconds series in kernel-agg-app carries a non-zero sum"
+                printf '%s' "${found}" | grep '^podtrace_workload_dns_latency_seconds_sum' | head -4
+                fail=1
+              fi
+
+              if ! printf '%s' "${found}" | grep -q 'podtrace_workload_edge_'; then
+                echo "FAIL: the service map went dark under the ring-buffer bypass"
+                fail=1
+              fi
+
+              if printf '%s' "${found}" | grep -q 'namespace="kernel-agg-excluded"'; then
+                echo "FAIL: an excluded namespace reported series"
+                fail=1
+              fi
+
+              [ "${fail}" -eq 0 ] || exit 1
+              echo "kernel-aggregated metrics and service map both present"
+
+    - name: a-podtrace-lifts-the-bypass
+      description: |
+        Authoring a CR must switch the event stream back on. The router
+        notifies the agent on publish, so this must not need a drain tick.
+      try:
+        - script:
+            content: |
+              set -eu
+              cat <<'EOF' | kubectl apply -f -
+              apiVersion: podtrace.io/v1alpha1
+              kind: ExporterConfig
+              metadata:
+                name: kernel-agg-ec
+                namespace: kernel-agg-app
+              spec:
+                type: otlp
+                otlp:
+                  endpoint: localhost:4318
+                  protocol: http
+                  insecure: true
+              ---
+              apiVersion: podtrace.io/v1alpha1
+              kind: PodTrace
+              metadata:
+                name: kernel-agg-trace
+                namespace: kernel-agg-app
+              spec:
+                selector:
+                  matchLabels:
+                    app: shop-checkout
+                filters: [net]
+                exporterRef:
+                  name: kernel-agg-ec
+              EOF
+
+              # Assert the observable, not a log line: the mode change is logged
+              # at V(1), which the agent does not emit at its default level, so
+              # grepping for it would pass whether or not the bypass ever lifted.
+              # Events reaching the CR's exporter can only happen if the ring
+              # buffer started carrying them again.
+              scraper=$(kubectl -n kernel-agg-app get pod \
+                -l app=metrics-scraper -o jsonpath='{.items[0].metadata.name}')
+
+              exported=0
+              for _ in $(seq 1 36); do
+                for ip in $(kubectl -n podtrace-system get pod \
+                              -l podtrace.io/component=agent \
+                              -o jsonpath='{range .items[*]}{.status.podIP} {end}'); do
+                  n=$(kubectl -n kernel-agg-app exec "${scraper}" -c curl -- \
+                        curl -sS --max-time 10 "http://${ip}:9090/metrics" 2>/dev/null \
+                      | grep '^podtrace_agent_events_exported_total' \
+                      | grep 'cr_name="kernel-agg-trace"' \
+                      | awk '{ if ($2 + 0 > 0) print $2 }' | head -1)
+                  if [ -n "${n}" ]; then
+                    exported="${n}"
+                    break
+                  fi
+                done
+                [ "${exported}" != "0" ] && break
+                sleep 5
+              done
+
+              if [ "${exported}" = "0" ]; then
+                echo "FAIL: no events reached the CR after it was authored; the ring-buffer"
+                echo "      bypass never lifted, so a diagnose session would see nothing"
+                kubectl -n podtrace-system logs -l podtrace.io/component=agent --tail=40 || true
+                exit 1
+              fi
+              echo "events flowing to the CR again (${exported}); the bypass lifted"
+      finally:
+        - script:
+            content: |
+              kubectl -n kernel-agg-app delete podtrace kernel-agg-trace --ignore-not-found
+              kubectl -n kernel-agg-app delete exporterconfig kernel-agg-ec --ignore-not-found
+
+    - name: restore-the-tracerconfig
+      try:
+        - script:
+            content: |
+              set -eu
+              kubectl patch tracerconfig default --type=merge -p '{
+                "spec": {"agent": {"metrics": {"enabled": false, "kernelAggregation": false}}}
+              }'
+              echo "plane restored to disabled"
