@@ -55,6 +55,8 @@ type collectors struct {
 	seriesDropped *prometheus.CounterVec
 	seriesActive  prometheus.Gauge
 	seriesReaped  prometheus.Counter
+
+	kernelAggregation bool
 }
 
 // familyLookup resolves the short family name recorded against an admitted
@@ -109,6 +111,7 @@ func histogramOpts(name, help string, native bool) prometheus.HistogramOpts {
 
 func newCollectors(opts Options) *collectors {
 	native := opts.NativeHistograms
+	kernelAgg := opts.KernelAggregation
 	base := baseLabelNames(opts)
 	withBase := func(extra ...string) []string {
 		out := make([]string, 0, len(base)+len(extra))
@@ -117,6 +120,7 @@ func newCollectors(opts Options) *collectors {
 		return out
 	}
 	return &collectors{
+		kernelAggregation: kernelAgg,
 		l7Requests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: metricPrefix + "l7_requests_total",
 			Help: "Application-layer requests observed, by protocol and outcome. Use rate() for throughput and the status_class label for error ratio.",
@@ -196,6 +200,18 @@ func newCollectors(opts Options) *collectors {
 }
 
 func (c *collectors) all() []prometheus.Collector {
+	if c.kernelAggregation {
+		return []prometheus.Collector{
+			c.l7Requests,
+			c.networkBytes,
+			c.filesystemBytes,
+			c.errors,
+			c.eventsTotal,
+			c.seriesDropped,
+			c.seriesActive,
+			c.seriesReaped,
+		}
+	}
 	return []prometheus.Collector{
 		c.l7Requests,
 		c.l7Duration,

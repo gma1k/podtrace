@@ -41,6 +41,7 @@ import (
 	"github.com/gma1k/podtrace/internal/ebpf/h2decode"
 	"github.com/gma1k/podtrace/internal/ebpf/h3decode"
 	"github.com/gma1k/podtrace/internal/ebpf/h3stream"
+	"github.com/gma1k/podtrace/internal/ebpf/kernelagg"
 	"github.com/gma1k/podtrace/internal/ebpf/loader"
 	"github.com/gma1k/podtrace/internal/ebpf/parser"
 	"github.com/gma1k/podtrace/internal/ebpf/probes"
@@ -2855,4 +2856,30 @@ func WaitForInterrupt() {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	<-sig
+}
+
+// SetKernelAggregationMode selects what the probes do with an observation:
+// nothing, fold-and-ship, or fold-and-skip-the-ringbuf.
+func (t *Tracer) SetKernelAggregationMode(mode kernelagg.Mode) error {
+	if t == nil || t.collection == nil {
+		return nil
+	}
+	m := t.collection.Maps[kernelagg.EnabledMapName]
+	if m == nil {
+		return nil
+	}
+	return kernelagg.SetMode(m, mode)
+}
+
+// DrainKernelMetrics reads and clears the aggregation map, returning the
+// deltas accumulated since the previous drain.
+func (t *Tracer) DrainKernelMetrics() ([]kernelagg.Row, error) {
+	if t == nil || t.collection == nil {
+		return nil, nil
+	}
+	m := t.collection.Maps[kernelagg.MapName]
+	if m == nil {
+		return nil, nil
+	}
+	return kernelagg.Drain(m)
 }

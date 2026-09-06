@@ -5,6 +5,7 @@
 
 #include "common.h"
 #include "events.h"
+#include "agg.h"
 
 struct stack_trace_t {
 	u64 ips[MAX_STACK_DEPTH];

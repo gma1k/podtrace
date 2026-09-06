@@ -1028,6 +1028,12 @@ spec:
                           type: string
                         maxItems: 64
                         type: array
+                      kernelAggregation:
+                        description: |-
+                          KernelAggregation folds observations in a BPF map instead of shipping
+                          one event per observation, so the plane costs O(series) rather than
+                          O(events).
+                        type: boolean
                       labels:
                         description: |-
                           AgentMetricsLabelsSpec opts into labels that are deliberately absent by

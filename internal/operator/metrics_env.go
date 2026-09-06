@@ -20,6 +20,7 @@ const (
 	envMetricsPodLabel          = "PODTRACE_WORKLOAD_METRICS_POD_LABEL"
 	envMetricsProcessLabel      = "PODTRACE_WORKLOAD_METRICS_PROCESS_LABEL"
 	envMetricsSemanticConv      = "PODTRACE_WORKLOAD_METRICS_SEMANTIC_CONVENTIONS"
+	envMetricsKernelAggregation = "PODTRACE_WORKLOAD_METRICS_KERNEL_AGGREGATION"
 	envMetricsAttributeLimit    = "PODTRACE_WORKLOAD_METRICS_ATTRIBUTE_CARDINALITY"
 )
 
@@ -52,6 +53,9 @@ func metricsEnv(spec *podtracev1alpha1.AgentMetricsSpec) []corev1.EnvVar {
 	}
 	if spec.SemanticConventions {
 		env = append(env, corev1.EnvVar{Name: envMetricsSemanticConv, Value: "true"})
+	}
+	if spec.KernelAggregation {
+		env = append(env, corev1.EnvVar{Name: envMetricsKernelAggregation, Value: "true"})
 	}
 	if spec.AttributeCardinality != nil {
 		env = append(env, corev1.EnvVar{

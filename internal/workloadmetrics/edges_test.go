@@ -276,7 +276,7 @@ func TestEdgeSeriesCountTheBudgetTheSameWayEveryOtherFamilyDoes(t *testing.T) {
 }
 
 func TestTheEdgeSurfaceIsDeliberatelyCoarse(t *testing.T) {
-	for _, collector := range newEdgeCollectors(false, 10).all() {
+	for _, collector := range newEdgeCollectors(false, 10, false).all() {
 		for _, label := range collectorLabelNames(t, collector) {
 			switch label {
 			case "container", "protocol", "status_class", "pod", "process":
@@ -304,10 +304,10 @@ func TestAnUnattributedEventProducesNoEdge(t *testing.T) {
 
 func TestDuplicateEdgeFamilyRegistrationIsReported(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	if err := newEdgeCollectors(false, 10).register(reg); err != nil {
+	if err := newEdgeCollectors(false, 10, false).register(reg); err != nil {
 		t.Fatalf("first registration: %v", err)
 	}
-	if err := newEdgeCollectors(false, 10).register(reg); err == nil {
+	if err := newEdgeCollectors(false, 10, false).register(reg); err == nil {
 		t.Error("registering the topology families twice was accepted; a silent collision " +
 			"would leave one set of collectors receiving observations nobody scrapes")
 	}
@@ -315,7 +315,7 @@ func TestDuplicateEdgeFamilyRegistrationIsReported(t *testing.T) {
 
 func TestSinkReportsAnEdgeRegistrationCollision(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	if err := newEdgeCollectors(false, 10).register(reg); err != nil {
+	if err := newEdgeCollectors(false, 10, false).register(reg); err != nil {
 		t.Fatalf("seed registration: %v", err)
 	}
 	if _, err := New(reg, Options{ResolvePeer: staticPeer("payments", "shop")}); err == nil {

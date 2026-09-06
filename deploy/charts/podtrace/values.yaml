@@ -101,6 +101,8 @@ agent:
 
     semanticConventions: false
 
+    kernelAggregation: false
+
     attributeCardinality: 0
 
     labels:

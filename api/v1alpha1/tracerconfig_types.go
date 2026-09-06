@@ -75,6 +75,12 @@ type AgentMetricsSpec struct {
 	// +optional
 	SemanticConventions bool `json:"semanticConventions,omitempty"`
 
+	// KernelAggregation folds observations in a BPF map instead of shipping
+	// one event per observation, so the plane costs O(series) rather than
+	// O(events).
+	// +optional
+	KernelAggregation bool `json:"kernelAggregation,omitempty"`
+
 	// +optional
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=10000

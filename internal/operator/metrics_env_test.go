@@ -161,3 +161,34 @@ func TestSemanticConventionsAbsentWhenNotRequested(t *testing.T) {
 		}
 	}
 }
+
+func TestMetricsEnvRendersKernelAggregation(t *testing.T) {
+	env := metricsEnv(&podtracev1alpha1.AgentMetricsSpec{
+		Enabled:           true,
+		KernelAggregation: true,
+	})
+
+	var found bool
+	for _, e := range env {
+		if e.Name == envMetricsKernelAggregation {
+			found = true
+			if e.Value != "true" {
+				t.Errorf("%s = %q, want true", e.Name, e.Value)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("%s absent; the CRD field would be accepted and silently ignored, leaving the "+
+			"agent on the event path while the spec says otherwise", envMetricsKernelAggregation)
+	}
+}
+
+func TestMetricsEnvOmitsKernelAggregationWhenOff(t *testing.T) {
+	env := metricsEnv(&podtracev1alpha1.AgentMetricsSpec{Enabled: true})
+	for _, e := range env {
+		if e.Name == envMetricsKernelAggregation {
+			t.Errorf("%s was rendered while off; a cluster not using it would take a pod "+
+				"template change and an agent rollout for nothing", e.Name)
+		}
+	}
+}

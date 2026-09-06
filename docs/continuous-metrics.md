@@ -517,6 +517,79 @@ that layout alone would exceed the per-node budget. Query quantiles with
 `histogram_quantile` rather than depending on specific `le` values — bucket
 boundaries are explicitly outside the compatibility promise.
 
+## Kernel-side aggregation
+
+By default the plane costs one ring-buffer crossing per observation, so a busy
+node pays O(events) to produce metrics whose cost should be O(series). At 100
+pods per node serving 10k requests per second that is roughly a million
+kernel-to-userspace crossings a second, sampled or not — `samplePercent` is
+applied after the crossing, so sampling reduces export cost while leaving the
+expensive part intact.
+
+Turn on kernel aggregation and the probes fold each observation into a BPF map
+instead:
+
+```yaml
+apiVersion: podtrace.io/v1alpha1
+kind: TracerConfig
+metadata:
+  name: default
+spec:
+  agent:
+    metrics:
+      enabled: true
+      kernelAggregation: true
+```
+
+or `--set agent.metrics.kernelAggregation=true` at install.
+
+### What changes, and what does not
+
+Nothing about the exported surface. The same metric names carry the same label
+keys, and a dashboard cannot tell which path served it, a test asserts both
+paths produce identical series identities.
+
+Latency distributions are recorded as **Prometheus native-histogram schema-3
+bucket indices**, computed in the kernel with integer arithmetic. Schema 3 is
+the schema a bucket factor of 1.1 resolves to, so the buckets are exactly the
+ones the event path would have produced. That indexing is verified against
+Prometheus's own formula across every power-of-two boundary rather than
+assumed.
+
+Counters are simpler: a drained delta is an `Add` into the counter the event
+path already owns.
+
+### Draining
+
+The map holds **deltas, not totals**. It is an LRU, so a node that meets more
+peers than it holds evicts the coldest rows; if it carried running totals an
+eviction would look like a counter reset and corrupt every `rate()` spanning
+it. Draining means an eviction costs at most one partial interval.
+
+`PODTRACE_WORKLOAD_METRICS_DRAIN_INTERVAL` (default `10s`) bounds how long an
+observation waits before it is scrapeable. `podtrace_agent_kernel_agg_rows_total`
+reports rows drained by outcome, `applied`, `unattributed`, `drain_failed`.
+
+### The ring-buffer bypass
+
+While no `PodTrace` CR is routing events, the probes skip the ring buffer
+entirely for anything the map absorbed, so a metrics-only node generates no
+per-event kernel-to-userspace traffic at all.
+
+Two properties make that safe. Only an event the map actually recorded may be
+skipped, so families the aggregation does not cover keep flowing to userspace
+and turning the bypass on cannot silently lose an event type. And the bypass
+lifts the instant a CR starts routing, the router notifies the agent on
+publish rather than the agent waiting for a drain tick, so a diagnose session
+never loses its opening seconds.
+
+### The service map still works
+
+Edges are fed from the kernel too. The peer address travels in the map key and
+is resolved to a Service name at scrape time, the same join the event path
+performs, so bypassing the ring buffer does not darken the topology on
+exactly the nodes the bypass is meant to help.
+
 ## The series budget
 
 The budget is a hard cap on distinct label combinations per node, enforced at
