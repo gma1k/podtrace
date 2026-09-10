@@ -25,6 +25,8 @@ type Options struct {
 
 	Lookup func(cgroupID uint64) (events.K8sMetadata, bool)
 
+	TraceContext func(*events.Event) bool
+
 	ResolvePeer func(peerIP string, peerPort uint16) (PeerIdentity, bool)
 
 	OnBudgetExhausted func(budget int)
@@ -60,8 +62,11 @@ type Sink struct {
 	includePod     bool
 	includeProcess bool
 
+	traceContext func(*events.Event) bool
+
 	mu        sync.Mutex
 	seen      map[string]*seriesEntry
+	peaks     map[string]utilizationPeak
 	budget    int
 	exhausted bool
 
@@ -132,6 +137,7 @@ func New(reg prometheus.Registerer, opts Options) (*Sink, error) {
 		resolvePeer:    opts.ResolvePeer,
 		own:            own,
 		lookup:         opts.Lookup,
+		traceContext:   opts.TraceContext,
 		includePod:     opts.IncludePodLabel,
 		includeProcess: opts.IncludeProcessLabel,
 		seen:           make(map[string]*seriesEntry),
@@ -211,6 +217,7 @@ func (s *Sink) Reap(maxIdle time.Duration) int {
 			removed++
 		}
 		delete(s.seen, key)
+		delete(s.peaks, peakKey(entry.family, entry.labels))
 	}
 	if removed > 0 {
 		s.c.seriesReaped.Add(float64(removed))
@@ -224,30 +231,40 @@ func (s *Sink) Reap(maxIdle time.Duration) int {
 
 // deleteSeries removes one series from whichever collector owns its family.
 func (s *Sink) deleteSeries(entry *seriesEntry) bool {
-	if h, ok := s.c.histogramFor(entry.family); ok {
-		return h.DeleteLabelValues(entry.labels...)
+	remove, ok := s.c.deleterFor(entry.family)
+	if !ok {
+		return false
 	}
-	if c, ok := s.c.counterFor(entry.family); ok {
-		return c.DeleteLabelValues(entry.labels...)
-	}
-	return false
+	return remove(entry.labels)
 }
 
 func (s *Sink) observe(h *prometheus.HistogramVec, family string, labelValues []string, seconds float64) {
+	s.observeExemplar(h, family, labelValues, seconds, nil)
+}
+
+// observeExemplar records an observation and, when the event carried a trace
+// id, the exemplar that links this bucket back to that trace.
+func (s *Sink) observeExemplar(h *prometheus.HistogramVec, family string, labelValues []string, seconds float64, ex prometheus.Labels) {
 	if s.kernelHist.owns(family) {
 		return
 	}
 	if !s.admit(family, labelValues) {
 		return
 	}
-	h.WithLabelValues(labelValues...).Observe(seconds)
+	observeExemplar(h.WithLabelValues(labelValues...), seconds, ex)
 }
 
 func (s *Sink) add(c *prometheus.CounterVec, family string, labelValues []string, delta float64) {
+	s.addExemplar(c, family, labelValues, delta, nil)
+}
+
+// addExemplar increments a counter and, when the event carried a trace id,
+// the exemplar that links this increment back to that trace.
+func (s *Sink) addExemplar(c *prometheus.CounterVec, family string, labelValues []string, delta float64, ex prometheus.Labels) {
 	if !s.admit(family, labelValues) {
 		return
 	}
-	c.WithLabelValues(labelValues...).Add(delta)
+	addExemplar(c.WithLabelValues(labelValues...), delta, ex)
 }
 
 // Export aggregates a batch. It never returns an error: a metrics plane
@@ -258,6 +275,9 @@ func (s *Sink) Export(_ context.Context, batch []*events.Event) error {
 	for _, e := range batch {
 		if e == nil {
 			continue
+		}
+		if s.traceContext != nil {
+			s.traceContext(e)
 		}
 		base, ok := s.baseLabelValues(e)
 		if !ok {
@@ -330,6 +350,8 @@ func appendLabels(base []string, extra ...string) []string {
 func (s *Sink) record(e *events.Event, base []string) bool {
 	seconds := e.Latency().Seconds()
 
+	ex, _ := exemplarFor(e)
+
 	if e.IsError() {
 		s.add(s.c.errors, "errors_total", appendLabels(base, errorKind(e.Type)), 1)
 	}
@@ -342,18 +364,18 @@ func (s *Sink) record(e *events.Event, base []string) bool {
 		events.EventFastCGIResp, events.EventRedisCmd, events.EventMemcachedCmd,
 		events.EventKafkaProduce, events.EventKafkaFetch, events.EventDBQuery:
 		protocol := protocolLabel(e)
-		s.add(s.c.l7Requests, "l7_requests_total",
-			appendLabels(base, protocol, statusClass(e), outcome(e)), 1)
-		s.observe(s.c.l7Duration, "l7_request_duration_seconds",
-			appendLabels(base, protocol), seconds)
+		s.addExemplar(s.c.l7Requests, "l7_requests_total",
+			appendLabels(base, protocol, statusClass(e), outcome(e)), 1, ex)
+		s.observeExemplar(s.c.l7Duration, "l7_request_duration_seconds",
+			appendLabels(base, protocol), seconds, ex)
 		s.recordSemconv(e, seconds)
 		s.recordEdgeL7(e, outcome(e), seconds)
 		return true
 
 	case events.EventTCPSend, events.EventTCPRecv, events.EventUDPSend, events.EventUDPRecv:
 		direction, transport := networkDimensions(e.Type)
-		s.observe(s.c.networkLatency, "network_latency_seconds",
-			appendLabels(base, direction, transport), seconds)
+		s.observeExemplar(s.c.networkLatency, "network_latency_seconds",
+			appendLabels(base, direction, transport), seconds, ex)
 		if e.Bytes > 0 {
 			s.add(s.c.networkBytes, "network_bytes_total",
 				appendLabels(base, direction, transport), float64(e.Bytes))
@@ -362,7 +384,7 @@ func (s *Sink) record(e *events.Event, base []string) bool {
 		return true
 
 	case events.EventDNS, events.EventDNSQuery:
-		s.observe(s.c.dnsLatency, "dns_latency_seconds", base, seconds)
+		s.observeExemplar(s.c.dnsLatency, "dns_latency_seconds", base, seconds, ex)
 		return true
 
 	case events.EventRead, events.EventWrite, events.EventFsync,
@@ -383,6 +405,10 @@ func (s *Sink) record(e *events.Event, base []string) bool {
 	case events.EventTLSHandshake:
 		s.observe(s.c.tlsHandshakeDuration, "tls_handshake_duration_seconds", base, seconds)
 		return true
+
+	case events.EventResourceLimit, events.EventPoolAcquire,
+		events.EventPoolRelease, events.EventPoolExhausted:
+		return s.recordSaturation(e, base)
 
 	default:
 		return false

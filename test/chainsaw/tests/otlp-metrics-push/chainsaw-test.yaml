@@ -41,7 +41,7 @@ spec:
             content: |
               set -eu
 
-              for _ in $(seq 1 24); do
+              for _ in $(seq 1 60); do
                 if kubectl -n podtrace-system get endpoints podtrace-webhook \
                      -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null | grep -q .; then
                   if kubectl patch tracerconfig default --type=merge --dry-run=server \
@@ -50,7 +50,7 @@ spec:
                     break
                   fi
                 fi
-                sleep 5
+                sleep 2
               done
 
               kubectl patch tracerconfig default --type=merge -p '{
@@ -64,7 +64,7 @@ spec:
                 }
               }'
 
-              for _ in $(seq 1 48); do
+              for _ in $(seq 1 120); do
                 desired=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.desiredNumberScheduled}')
                 updated=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.updatedNumberScheduled}')
                 ready=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.numberReady}')
@@ -72,7 +72,7 @@ spec:
                   echo "all ${desired} agents updated and ready"
                   break
                 fi
-                sleep 5
+                sleep 2
               done
               if [ "${updated:-0}" != "${desired:-1}" ] || [ "${ready:-0}" != "${desired:-1}" ]; then
                 echo "FAIL: agents did not converge (updated=${updated:-?} ready=${ready:-?} desired=${desired:-?})"
@@ -138,14 +138,14 @@ spec:
               set -eu
 
               name=""
-              for _ in $(seq 1 36); do
+              for _ in $(seq 1 90); do
                 name=$(kubectl -n podtrace-system get configmap \
                   -o jsonpath='{range .items[?(@.metadata.annotations.podtrace\.io/exporterconfig-ref=="'"${NAMESPACE}"'/sink-ec")]}{.metadata.name}{"\n"}{end}' \
                   2>/dev/null | head -1)
                 if [ -n "${name}" ]; then
                   break
                 fi
-                sleep 5
+                sleep 2
               done
               if [ -z "${name}" ]; then
                 echo "FAIL: no bundle ConfigMap annotated for ${NAMESPACE}/sink-ec after 180s"
@@ -301,12 +301,27 @@ spec:
               kubectl -n "${NAMESPACE}" patch exporterconfig sink-ec --type=merge \
                 -p '{"spec":{"otlp":{"metrics":{"enabled":false}}}}'
 
-              # One push interval plus reconcile and bundle-propagation slack.
-              sleep 45
+              # Poll until pushes actually stop rather than sleeping through the
+              # reconcile and bundle-propagation window: on a healthy cluster
+              # this settles in a fraction of the old fixed 45s wait.
+              stable=0
+              last=$(count metrics)
+              for _ in $(seq 1 30); do
+                sleep 3
+                now=$(count metrics)
+                if [ "${now}" = "${last}" ]; then
+                  stable=$((stable + 1))
+                  [ "${stable}" -ge 3 ] && break
+                else
+                  stable=0
+                fi
+                last="${now}"
+              done
 
               before=$(count metrics)
               traces_before=$(count traces)
-              sleep 45
+
+              sleep 25
               after=$(count metrics)
               traces_after=$(count traces)
 

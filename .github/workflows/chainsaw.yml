@@ -31,8 +31,15 @@ concurrency:
 jobs:
   chainsaw:
     if: ${{ !startsWith(github.head_ref, 'release-please--') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
+    runs-on: ${{ vars.CHAINSAW_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+
+    name: chainsaw (shard ${{ matrix.shard }}/4)
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -62,54 +69,55 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5.0.1
         with:
-          version: v4.2.4
+          version: v4.3.0
 
       - name: Install chainsaw
         run: |
-          # v0.2.14 predates Go 1.26's testing.testDeps gaining the
-          # ModulePath() method; pin >= v0.2.15 to compile under Go 1.26.
-          go install github.com/kyverno/chainsaw@v0.2.15
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          set -euo pipefail
+
+          ver="v0.2.15"
+          arch="$(dpkg --print-architecture)"
+          case "${arch}" in
+            amd64) want="295d226c89f126c0a97775d364be149f47a810c8a3f9829ee410583d0c1abe3c" ;;
+            arm64) want="fecf5f3ea74d11da2cd5d95a4c016d5d2543cbc4844ce21adf5e727e7ffd9e44" ;;
+            *) echo "::error::no pinned chainsaw for arch ${arch}"; exit 1 ;;
+          esac
+
+          url="https://github.com/kyverno/chainsaw/releases/download/${ver}/chainsaw_linux_${arch}.tar.gz"
+          tmp="$(mktemp)"
+          curl -fsSL --retry 3 --retry-delay 5 "${url}" -o "${tmp}"
+          if ! echo "${want}  ${tmp}" | sha256sum -c - >/dev/null 2>&1; then
+            echo "::error::chainsaw ${ver} ${arch} checksum mismatch; refusing to install"
+            rm -f "${tmp}"
+            exit 1
+          fi
+          sudo tar -C /usr/local/bin -xzf "${tmp}" chainsaw
+          sudo chmod 0755 /usr/local/bin/chainsaw
+          rm -f "${tmp}"
+          chainsaw version
 
       - name: Install BPF toolchain
         uses: ./.github/actions/setup-bpf-toolchain
 
       - name: Build podtrace image
-        run: |
-          make docker-build IMAGE_TAG=ci
-          kind load docker-image ghcr.io/gma1k/podtrace:ci \
-            --name podtrace-chainsaw
+        run: make docker-build IMAGE_TAG=ci
 
-      - name: Build HTTP/2 + Go-TLS workload image
+      - name: Build workload fixture images
         run: |
+          set -euo pipefail
           docker build --provenance=false \
             -t podtrace-h2demo:ci \
             test/chainsaw/tests/h2-capture/workload
-          kind load docker-image podtrace-h2demo:ci --name podtrace-chainsaw
-
-      - name: Build OTLP sink image
-        run: |
           docker build --provenance=false \
             -t podtrace-otlp-sink:ci \
             test/chainsaw/tests/otlp-sink/workload
-          kind load docker-image podtrace-otlp-sink:ci --name podtrace-chainsaw
-
-      - name: Build HTTP/3 workload images
-        run: |
           docker build --provenance=false \
             -t podtrace-h3curl:ci \
             test/chainsaw/tests/h3-adapter-capture/workload-curl
-          for i in 1 2 3; do
-            docker pull nginx:1.29 && break
-            echo "pull attempt $i failed; retrying in 15s" >&2
-            sleep 15
-          done
-          kind load docker-image podtrace-h3curl:ci --name podtrace-chainsaw
-          kind load docker-image nginx:1.29 --name podtrace-chainsaw
 
-      - name: Preload hook-job and workload images into kind
+      - name: Pull upstream workload images
         run: |
-          for image in alpine/k8s:1.30.4 polinux/stress:1.0.4; do
+          for image in nginx:1.29 alpine/k8s:1.30.4 polinux/stress:1.0.4; do
             pulled=0
             for i in 1 2 3; do
               if docker pull "$image"; then
@@ -123,8 +131,18 @@ jobs:
               echo "::error::could not pull $image after 3 attempts"
               exit 1
             fi
-            kind load docker-image "$image" --name podtrace-chainsaw
           done
+
+      - name: Load images into kind
+        run: |
+          kind load docker-image --name podtrace-chainsaw \
+            ghcr.io/gma1k/podtrace:ci \
+            podtrace-h2demo:ci \
+            podtrace-otlp-sink:ci \
+            podtrace-h3curl:ci \
+            nginx:1.29 \
+            alpine/k8s:1.30.4 \
+            polinux/stress:1.0.4
 
       - name: Install operator via Helm
         run: |
@@ -142,6 +160,7 @@ jobs:
             --set image.repository=ghcr.io/gma1k/podtrace \
             --set image.tag=ci \
             --set image.pullPolicy=Never \
+            --set agent.rolloutMaxUnavailable=100% \
             --wait --timeout 180s
 
           for i in $(seq 1 60); do
@@ -153,7 +172,13 @@ jobs:
           kubectl -n podtrace-system rollout status ds/podtrace-agent --timeout=180s
 
       - name: Run chainsaw suite
-        run: make chainsaw
+        env:
+          CHAINSAW_PARALLEL: ${{ vars.CHAINSAW_PARALLEL || '2' }}
+          CHAINSAW_SHARD: ${{ matrix.shard }}
+        run: |
+          make chainsaw \
+            CHAINSAW_SHARD="${CHAINSAW_SHARD}" \
+            CHAINSAW_PARALLEL="${CHAINSAW_PARALLEL}"
 
       - name: Dump cluster state on failure
         if: failure()
@@ -191,7 +216,7 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5.0.1
         with:
-          version: v4.2.4
+          version: v4.3.0
 
       - name: Install BPF toolchain
         uses: ./.github/actions/setup-bpf-toolchain

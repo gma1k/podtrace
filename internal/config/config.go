@@ -165,6 +165,22 @@ var (
 	WorkloadMetricsDrainInterval = getDurationEnvOrDefault("PODTRACE_WORKLOAD_METRICS_DRAIN_INTERVAL", 10*time.Second)
 )
 
+var (
+	InspectionsEnabled = getBoolEnvOrDefault("PODTRACE_INSPECTIONS", false)
+
+	InspectionsInterval = getDurationEnvOrDefault("PODTRACE_INSPECTIONS_INTERVAL", 30*time.Second)
+
+	InspectionsBudget = getIntEnvOrDefault("PODTRACE_INSPECTIONS_BUDGET", 512)
+
+	InspectionsAlerts = getBoolEnvOrDefault("PODTRACE_INSPECTIONS_ALERTS", true)
+
+	InspectionErrorRatePercent     = getFloatEnvOrDefault("PODTRACE_INSPECTIONS_ERROR_RATE_PCT", 5)
+	InspectionMinRequestsPerSecond = getFloatEnvOrDefault("PODTRACE_INSPECTIONS_MIN_REQUEST_RATE", 0.1)
+	InspectionMeanLatency          = getDurationEnvOrDefault("PODTRACE_INSPECTIONS_MEAN_LATENCY", time.Second)
+
+	InspectionsHoldTime = getDurationEnvOrDefault("PODTRACE_INSPECTIONS_HOLD_TIME", 0)
+)
+
 var WorkloadMetricsExcludedNamespaces = splitCommaEnv("PODTRACE_WORKLOAD_METRICS_EXCLUDE_NAMESPACES")
 
 func splitCommaEnv(key string) []string {
@@ -471,6 +487,33 @@ func getIntEnvOrDefault(key string, defaultValue int) int {
 			return i
 		}
 		warnIgnoredEnv(key, value, "must be a positive integer")
+	}
+	return defaultValue
+}
+
+// ParseNonNegativeFloat is the accepted form of a float-valued environment
+// variable. It is exported because the operator writes these values and the
+// agent parses them: a value the operator renders but this rejects falls back
+// to a default with only a warning, so the user's setting would be silently
+// ignored. Having one named function lets a test assert the two halves agree.
+//
+// Zero is accepted. For a rate threshold it means "any occurrence at all
+// fires", which is a real setting rather than an unset one.
+func ParseNonNegativeFloat(value string) (float64, bool) {
+	f, err := strconv.ParseFloat(value, 64)
+	if err != nil || f < 0 {
+		return 0, false
+	}
+	return f, true
+}
+
+// getFloatEnvOrDefault reads a non-negative float.
+func getFloatEnvOrDefault(key string, defaultValue float64) float64 {
+	if value := os.Getenv(key); value != "" {
+		if f, ok := ParseNonNegativeFloat(value); ok {
+			return f
+		}
+		warnIgnoredEnv(key, value, "must be a non-negative number")
 	}
 	return defaultValue
 }

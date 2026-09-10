@@ -22,6 +22,15 @@ const (
 	envMetricsSemanticConv      = "PODTRACE_WORKLOAD_METRICS_SEMANTIC_CONVENTIONS"
 	envMetricsKernelAggregation = "PODTRACE_WORKLOAD_METRICS_KERNEL_AGGREGATION"
 	envMetricsAttributeLimit    = "PODTRACE_WORKLOAD_METRICS_ATTRIBUTE_CARDINALITY"
+
+	envInspectionsEnabled    = "PODTRACE_INSPECTIONS"
+	envInspectionsInterval   = "PODTRACE_INSPECTIONS_INTERVAL"
+	envInspectionsAlerts     = "PODTRACE_INSPECTIONS_ALERTS"
+	envInspectionsBudget     = "PODTRACE_INSPECTIONS_BUDGET"
+	envInspectionErrorRate   = "PODTRACE_INSPECTIONS_ERROR_RATE_PCT"
+	envInspectionMinRequests = "PODTRACE_INSPECTIONS_MIN_REQUEST_RATE"
+	envInspectionMeanLatency = "PODTRACE_INSPECTIONS_MEAN_LATENCY"
+	envInspectionsHoldTime   = "PODTRACE_INSPECTIONS_HOLD_TIME"
 )
 
 // metricsEnv renders AgentMetricsSpec onto the agent container's
@@ -71,7 +80,72 @@ func metricsEnv(spec *podtracev1alpha1.AgentMetricsSpec) []corev1.EnvVar {
 			env = append(env, corev1.EnvVar{Name: envMetricsProcessLabel, Value: "true"})
 		}
 	}
+	return append(env, inspectionsEnv(spec.Inspections)...)
+}
+
+// inspectionsEnv renders AgentInspectionsSpec onto the agent container's
+// environment.
+func inspectionsEnv(spec *podtracev1alpha1.AgentInspectionsSpec) []corev1.EnvVar {
+	if spec == nil || !spec.Enabled {
+		return nil
+	}
+
+	env := []corev1.EnvVar{{Name: envInspectionsEnabled, Value: "true"}}
+
+	if spec.Interval != nil && spec.Interval.Duration > 0 {
+		env = append(env, corev1.EnvVar{
+			Name:  envInspectionsInterval,
+			Value: spec.Interval.Duration.String(),
+		})
+	}
+	if spec.Alerts != nil {
+		env = append(env, corev1.EnvVar{
+			Name:  envInspectionsAlerts,
+			Value: strconv.FormatBool(*spec.Alerts),
+		})
+	}
+	if spec.Budget != nil {
+		env = append(env, corev1.EnvVar{
+			Name:  envInspectionsBudget,
+			Value: strconv.FormatInt(int64(*spec.Budget), 10),
+		})
+	}
+
+	if spec.HoldTime != nil && spec.HoldTime.Duration > 0 {
+		env = append(env, corev1.EnvVar{
+			Name:  envInspectionsHoldTime,
+			Value: spec.HoldTime.Duration.String(),
+		})
+	}
+
+	t := spec.Thresholds
+	if t == nil {
+		return env
+	}
+	if t.ErrorRatePercent != nil {
+		env = append(env, corev1.EnvVar{
+			Name:  envInspectionErrorRate,
+			Value: strconv.FormatInt(int64(*t.ErrorRatePercent), 10),
+		})
+	}
+	if t.MinRequestsPerMinute != nil {
+		env = append(env, corev1.EnvVar{
+			Name:  envInspectionMinRequests,
+			Value: perMinuteAsPerSecond(*t.MinRequestsPerMinute),
+		})
+	}
+	if t.MeanLatency != nil && t.MeanLatency.Duration > 0 {
+		env = append(env, corev1.EnvVar{
+			Name:  envInspectionMeanLatency,
+			Value: t.MeanLatency.Duration.String(),
+		})
+	}
 	return env
+}
+
+// perMinuteAsPerSecond renders a per-minute count as a per-second rate.
+func perMinuteAsPerSecond(perMinute int32) string {
+	return strconv.FormatFloat(float64(perMinute)/60, 'g', -1, 64)
 }
 
 // sanitizeExcludedNamespaces drops blanks and duplicates and returns the

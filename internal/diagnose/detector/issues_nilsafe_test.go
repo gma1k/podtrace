@@ -1,7 +1,6 @@
 package detector
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/gma1k/podtrace/internal/events"
@@ -18,7 +17,7 @@ func TestDetectIssues_SkipsNilEvents(t *testing.T) {
 	issues := DetectIssues(evs, 10, 100)
 	found := false
 	for _, s := range issues {
-		if strings.Contains(s, "High connection failure rate") {
+		if s.ID == IDConnectionFailureRate {
 			found = true
 		}
 	}

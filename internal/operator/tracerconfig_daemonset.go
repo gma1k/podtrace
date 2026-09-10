@@ -105,10 +105,8 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 	}
 
 	return appsv1.DaemonSetSpec{
-		Selector: selector,
-		UpdateStrategy: appsv1.DaemonSetUpdateStrategy{
-			Type: appsv1.RollingUpdateDaemonSetStrategyType,
-		},
+		Selector:       selector,
+		UpdateStrategy: agentUpdateStrategy(tc),
 		Template: corev1.PodTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: podLabels,
@@ -213,4 +211,19 @@ func agentPodTemplateLabels(selector map[string]string) map[string]string {
 	labels["app.kubernetes.io/part-of"] = "podtrace"
 	labels["app.kubernetes.io/managed-by"] = ManagedByValue
 	return labels
+}
+
+// agentUpdateStrategy decides how many agents may be down at once during a
+// rollout.
+func agentUpdateStrategy(tc *podtracev1alpha1.TracerConfig) appsv1.DaemonSetUpdateStrategy {
+	strategy := appsv1.DaemonSetUpdateStrategy{
+		Type: appsv1.RollingUpdateDaemonSetStrategyType,
+	}
+	if tc == nil || tc.Spec.Agent.RolloutMaxUnavailable == nil {
+		return strategy
+	}
+	strategy.RollingUpdate = &appsv1.RollingUpdateDaemonSet{
+		MaxUnavailable: tc.Spec.Agent.RolloutMaxUnavailable,
+	}
+	return strategy
 }

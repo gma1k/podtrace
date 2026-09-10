@@ -42,7 +42,7 @@ spec:
             content: |
               set -eu
 
-              for _ in $(seq 1 24); do
+              for _ in $(seq 1 60); do
                 if kubectl -n podtrace-system get endpoints podtrace-webhook \
                      -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null | grep -q .; then
                   if kubectl patch tracerconfig default --type=merge --dry-run=server \
@@ -50,7 +50,7 @@ spec:
                     break
                   fi
                 fi
-                sleep 5
+                sleep 2
               done
 
               kubectl patch tracerconfig default --type=merge -p '{
@@ -65,7 +65,7 @@ spec:
                 }
               }'
 
-              for _ in $(seq 1 60); do
+              for _ in $(seq 1 150); do
                 desired=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.desiredNumberScheduled}')
                 updated=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.updatedNumberScheduled}')
                 ready=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.numberReady}')
@@ -73,7 +73,7 @@ spec:
                   echo "all ${desired} agents updated and ready"
                   break
                 fi
-                sleep 5
+                sleep 2
               done
               if [ "${updated:-0}" != "${desired:-1}" ] || [ "${ready:-0}" != "${desired:-1}" ]; then
                 echo "FAIL: agents did not converge (updated=${updated:-?} ready=${ready:-?} desired=${desired:-?})"

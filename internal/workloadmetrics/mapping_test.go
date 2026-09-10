@@ -69,12 +69,9 @@ var ignoredEventTypes = map[events.EventType]string{
 	events.EventExec:           "process lifecycle, not a workload signal",
 	events.EventFork:           "process lifecycle, not a workload signal",
 	events.EventTLSError:       "counted through errors_total when Error is set",
-	events.EventResourceLimit:  "limits and usage belong to the resource families",
-	events.EventPoolAcquire:    "pool metrics are diagnostic-surface only for now",
-	events.EventPoolRelease:    "pool metrics are diagnostic-surface only for now",
-	events.EventPoolExhausted:  "pool metrics are diagnostic-surface only for now",
 	events.EventAFALG:          "crypto detection is a security signal, not a golden one",
 	events.EventUSDT:           "user-defined probes have no fixed shape to aggregate",
+	events.EventPoolExhausted:  "fires on any query >10ms after connect and reports connection age, not pool wait",
 }
 
 func recordOne(t *testing.T, e *events.Event) (map[string][]*dto.Metric, bool) {
@@ -361,9 +358,7 @@ func TestEveryAdmittedFamilyIsEvictable(t *testing.T) {
 	}
 
 	for family := range seen {
-		_, isHistogram := sink.c.histogramFor(family)
-		_, isCounter := sink.c.counterFor(family)
-		if !isHistogram && !isCounter {
+		if _, ok := sink.c.deleterFor(family); !ok {
 			t.Errorf("family %q is admitted but resolves to no collector, so Reap "+
 				"cannot delete it: it will hold budget forever", family)
 		}

@@ -1028,6 +1028,67 @@ spec:
                           type: string
                         maxItems: 64
                         type: array
+                      inspections:
+                        description: |-
+                          Inspections evaluate rules over this plane's own metrics and raise a
+                          typed issue when one holds.
+                        properties:
+                          alerts:
+                            description: |-
+                              Alerts controls whether an activated issue is raised as an alert,
+                              which is what lets a PodTraceSchedule with an Issue trigger start a
+                              session from it. With this off, inspections only expose
+                              podtrace_issue_active.
+                            type: boolean
+                          budget:
+                            description: Budget bounds how many distinct issue instances
+                              an agent tracks.
+                            format: int32
+                            maximum: 100000
+                            minimum: 1
+                            type: integer
+                          enabled:
+                            type: boolean
+                          holdTime:
+                            description: |-
+                              HoldTime replaces every rule's own hold duration, the time a condition
+                              must hold before its issue activates. Leave unset to keep the built-in
+                              per-rule defaults, which suit their signals; set it shorter for a test
+                              run or longer for a workload whose bursts are expected.
+                            type: string
+                          interval:
+                            description: |-
+                              Interval is how often rules are evaluated. It doubles as the rate
+                              window, so it has to be long enough for a counter delta to mean
+                              something and short enough for an issue to be noticed.
+                            type: string
+                          thresholds:
+                            description: Thresholds tune when the built-in rules fire.
+                            properties:
+                              errorRatePercent:
+                                description: |-
+                                  ErrorRatePercent is the application-layer error ratio above which
+                                  l7.error_rate fires.
+                                format: int32
+                                maximum: 100
+                                minimum: 0
+                                type: integer
+                              meanLatency:
+                                description: |-
+                                  MeanLatency is the mean request duration above which
+                                  l7.latency_degraded fires.
+                                type: string
+                              minRequestsPerMinute:
+                                description: |-
+                                  MinRequestsPerMinute is the traffic floor below which the error-rate
+                                  rule stays quiet, so one failed request in an idle interval does not
+                                  read as a 100% error rate. Expressed per minute rather than per second
+                                  because the useful values are fractions of a request per second.
+                                format: int32
+                                minimum: 0
+                                type: integer
+                            type: object
+                        type: object
                       kernelAggregation:
                         description: |-
                           KernelAggregation folds observations in a BPF map instead of shipping
@@ -1116,6 +1177,14 @@ spec:
                           More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                         type: object
                     type: object
+                  rolloutMaxUnavailable:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: |-
+                      RolloutMaxUnavailable is how many agents may be updated at once when
+                      the DaemonSet's pod template changes, as a count or a percentage.
+                    x-kubernetes-int-or-string: true
                   statusReportInterval:
                     type: string
                   usdt:

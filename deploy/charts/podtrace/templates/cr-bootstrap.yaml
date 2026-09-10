@@ -115,6 +115,9 @@ data:
         dnsPacketCapture: {{ .Values.agent.dnsPacketCapture }}
         dnsFullAnswers: {{ .Values.agent.dnsFullAnswers }}
         usdt: {{ .Values.agent.usdt }}
+        {{- with .Values.agent.rolloutMaxUnavailable }}
+        rolloutMaxUnavailable: {{ . | quote }}
+        {{- end }}
         {{- if .Values.agent.alerting.enabled }}
         alerting:
           enabled: true
@@ -143,6 +146,32 @@ data:
           labels:
             pod: {{ .Values.agent.metrics.labels.pod }}
             process: {{ .Values.agent.metrics.labels.process }}
+          {{- end }}
+          {{- if .Values.agent.metrics.inspections.enabled }}
+          inspections:
+            enabled: true
+            {{- with .Values.agent.metrics.inspections.interval }}
+            interval: {{ . | quote }}
+            {{- end }}
+            alerts: {{ .Values.agent.metrics.inspections.alerts }}
+            {{- if .Values.agent.metrics.inspections.budget }}
+            budget: {{ .Values.agent.metrics.inspections.budget }}
+            {{- end }}
+            {{- with .Values.agent.metrics.inspections.holdTime }}
+            holdTime: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.agent.metrics.inspections.thresholds }}
+            thresholds:
+              {{- if .errorRatePercent }}
+              errorRatePercent: {{ .errorRatePercent }}
+              {{- end }}
+              {{- if .minRequestsPerMinute }}
+              minRequestsPerMinute: {{ .minRequestsPerMinute }}
+              {{- end }}
+              {{- with .meanLatency }}
+              meanLatency: {{ . | quote }}
+              {{- end }}
+            {{- end }}
           {{- end }}
         {{- end }}
       session:

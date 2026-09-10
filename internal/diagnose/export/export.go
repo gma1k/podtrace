@@ -109,7 +109,7 @@ func ExportJSON(d Diagnostician) ExportData {
 	}
 
 	issues := detector.DetectIssues(allEvents, d.ErrorRateThreshold(), d.RTTSpikeThreshold())
-	data.PotentialIssues = issues
+	data.PotentialIssues = detector.Strings(issues)
 
 	return data
 }

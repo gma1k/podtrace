@@ -28,6 +28,8 @@ const (
 	AlertSourceResourceMonitorBPF = "resource_monitor_bpf"
 	AlertSourceOOM                = "oom"
 	AlertSourceErrorRate          = "error_rate"
+
+	AlertSourceIssue = "issue"
 )
 
 // BuildAlertEvent renders a core/v1.Event describing the alert, targeting the

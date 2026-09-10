@@ -662,32 +662,21 @@ func GenerateIssuesSection(d Diagnostician) string {
 	manager := alerting.GetGlobalManager()
 	if manager != nil {
 		for _, issue := range issues {
-			var severity alerting.AlertSeverity
-			if contains(issue, "CRITICAL") || contains(issue, "EMERGENCY") {
-				severity = alerting.SeverityCritical
-			} else if contains(issue, "WARNING") {
-				severity = alerting.SeverityWarning
-			} else {
-				severity = alerting.SeverityWarning
-			}
-			category := issue
-			if idx := strings.IndexByte(issue, ':'); idx > 0 {
-				category = issue[:idx]
+			recommendations := []string{issue.Remediation}
+			context := map[string]interface{}{"issue_id": string(issue.ID)}
+			for _, ev := range issue.Evidence {
+				context[ev.Name] = ev.Value
 			}
 			alert := &alerting.Alert{
-				Severity:  severity,
-				Title:     "Diagnostic Issue: " + category,
-				Message:   issue,
-				Timestamp: time.Now(),
-				Source:    "error_detector",
-				PodName:   "",
-				Namespace: "",
-				Context:   make(map[string]interface{}),
-				Recommendations: []string{
-					"Review diagnostic report for details",
-					"Check application logs",
-					"Verify resource limits",
-				},
+				Severity:        issue.Severity,
+				Title:           "Diagnostic Issue: " + string(issue.ID),
+				Message:         issue.Message,
+				Timestamp:       time.Now(),
+				Source:          alerting.AlertSourceIssue,
+				PodName:         issue.Subject.Workload,
+				Namespace:       issue.Subject.Namespace,
+				Context:         context,
+				Recommendations: recommendations,
 			}
 			manager.SendAlert(alert)
 		}

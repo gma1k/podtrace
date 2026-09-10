@@ -56,6 +56,8 @@ type collectors struct {
 	seriesActive  prometheus.Gauge
 	seriesReaped  prometheus.Counter
 
+	sat saturationCollectors
+
 	kernelAggregation bool
 }
 
@@ -92,8 +94,22 @@ func (c *collectors) counterFor(family string) (*prometheus.CounterVec, bool) {
 	case "errors_total":
 		return c.errors, true
 	default:
-		return nil, false
+		return c.sat.counterFor(family)
 	}
+}
+
+// deleterFor resolves a family to the function that removes one of its series.
+func (c *collectors) deleterFor(family string) (func([]string) bool, bool) {
+	if h, ok := c.histogramFor(family); ok {
+		return func(labels []string) bool { return h.DeleteLabelValues(labels...) }, true
+	}
+	if v, ok := c.counterFor(family); ok {
+		return func(labels []string) bool { return v.DeleteLabelValues(labels...) }, true
+	}
+	if g, ok := c.sat.gaugeFor(family); ok {
+		return func(labels []string) bool { return g.DeleteLabelValues(labels...) }, true
+	}
+	return nil, false
 }
 
 func histogramOpts(name, help string, native bool) prometheus.HistogramOpts {
@@ -121,6 +137,7 @@ func newCollectors(opts Options) *collectors {
 	}
 	return &collectors{
 		kernelAggregation: kernelAgg,
+		sat:               newSaturationCollectors(opts, withBase),
 		l7Requests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: metricPrefix + "l7_requests_total",
 			Help: "Application-layer requests observed, by protocol and outcome. Use rate() for throughput and the status_class label for error ratio.",
@@ -200,34 +217,27 @@ func newCollectors(opts Options) *collectors {
 }
 
 func (c *collectors) all() []prometheus.Collector {
-	if c.kernelAggregation {
-		return []prometheus.Collector{
-			c.l7Requests,
-			c.networkBytes,
-			c.filesystemBytes,
-			c.errors,
-			c.eventsTotal,
-			c.seriesDropped,
-			c.seriesActive,
-			c.seriesReaped,
-		}
-	}
-	return []prometheus.Collector{
+	out := []prometheus.Collector{
 		c.l7Requests,
-		c.l7Duration,
-		c.networkLatency,
 		c.networkBytes,
-		c.dnsLatency,
-		c.filesystemLatency,
 		c.filesystemBytes,
-		c.cpuBlocked,
-		c.tlsHandshakeDuration,
 		c.errors,
 		c.eventsTotal,
 		c.seriesDropped,
 		c.seriesActive,
 		c.seriesReaped,
 	}
+	if !c.kernelAggregation {
+		out = append(out,
+			c.l7Duration,
+			c.networkLatency,
+			c.dnsLatency,
+			c.filesystemLatency,
+			c.cpuBlocked,
+			c.tlsHandshakeDuration,
+		)
+	}
+	return append(out, c.sat.all()...)
 }
 
 func (c *collectors) register(reg prometheus.Registerer) error {

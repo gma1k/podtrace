@@ -30,6 +30,8 @@ Welcome to the `Podtrace` documentation. This directory contains comprehensive g
 
 ### Observability
 - **[Metrics](metrics.md)** - Prometheus metrics, Grafana integration, scrape config, and dashboard import
+- **[Continuous Metrics](continuous-metrics.md)** - The always-on workload surface: golden signals, service map, exemplars, kernel-side aggregation
+- **[Continuous Inspections](continuous-inspections.md)** - Rules over that surface that raise a typed issue and can start a session from it
 - **[Distributed Tracing Guide](distributed-tracing.md)** - Complete distributed tracing user guide
 - **[Tracing Exporters Setup](tracing-exporters.md)** - Detailed exporter configuration (OTLP, Jaeger, Splunk HEC, DataDog, Zipkin)
 - **[Alerting Guide](alerting.md)** - Real-time alerts via webhooks, Slack, and Splunk HEC

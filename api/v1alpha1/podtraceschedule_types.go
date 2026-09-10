@@ -90,7 +90,7 @@ type PodTraceScheduleSpec struct {
 	SessionTemplate PodTraceSessionTemplateSpec `json:"sessionTemplate"`
 }
 
-// +kubebuilder:validation:Enum=ResourceAlert;OOMKill;ErrorRate
+// +kubebuilder:validation:Enum=ResourceAlert;OOMKill;ErrorRate;Issue
 type TriggerSourceKind string
 
 const (
@@ -99,6 +99,10 @@ const (
 	TriggerSourceOOMKill TriggerSourceKind = "OOMKill"
 
 	TriggerSourceErrorRate TriggerSourceKind = "ErrorRate"
+
+	// TriggerSourceIssue fires on any detected issue. Select a specific one
+	// with TriggerSource.IssueID.
+	TriggerSourceIssue TriggerSourceKind = "Issue"
 )
 
 // TriggerSource selects one alert category and the minimum severity that

@@ -15,6 +15,8 @@ import (
 func everyDeepCopyType() map[string]any {
 	return map[string]any{
 		"AgentAlertingSpec":               populated[podtracev1alpha1.AgentAlertingSpec](),
+		"AgentInspectionsSpec":            populated[podtracev1alpha1.AgentInspectionsSpec](),
+		"AgentInspectionThresholdsSpec":   populated[podtracev1alpha1.AgentInspectionThresholdsSpec](),
 		"AgentMetricsLabelsSpec":          populated[podtracev1alpha1.AgentMetricsLabelsSpec](),
 		"AgentMetricsSpec":                populated[podtracev1alpha1.AgentMetricsSpec](),
 		"AgentSpec":                       populated[podtracev1alpha1.AgentSpec](),

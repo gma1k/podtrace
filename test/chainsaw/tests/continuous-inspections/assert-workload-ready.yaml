@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: broken-api
+  namespace: inspect-app
+status:
+  readyReplicas: 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inspect-loadgen
+  namespace: inspect-app
+status:
+  readyReplicas: 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metrics-scraper
+  namespace: inspect-app
+status:
+  readyReplicas: 1

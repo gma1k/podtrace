@@ -47,6 +47,27 @@ func (e *PodEnricher) Lookup(cgroupID uint64) (events.K8sMetadata, bool) {
 	return meta, ok
 }
 
+// PodFor returns the name of a pod of the given workload that this node is
+// tracking, and whether one was found.
+func (e *PodEnricher) PodFor(namespace, workload string) (string, bool) {
+	if e == nil || namespace == "" || workload == "" {
+		return "", false
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	best := ""
+	for _, meta := range e.byCgroup {
+		if meta.Namespace != namespace || meta.WorkloadName != workload || meta.PodName == "" {
+			continue
+		}
+		if best == "" || meta.PodName < best {
+			best = meta.PodName
+		}
+	}
+	return best, best != ""
+}
+
 // Snapshot atomically replaces the cache with metas.
 func (e *PodEnricher) Snapshot(entries []PodCgroupEntry) {
 	if e == nil {
@@ -60,10 +81,6 @@ func (e *PodEnricher) Snapshot(entries []PodCgroupEntry) {
 		}
 		next[entry.CgroupID] = buildK8sMetadata(entry)
 
-		// Owner resolution is tallied once per unique pod (UID), not
-		// once per entry — a pod with N container cgroups must not
-		// inflate the counter N-fold. Pods with no UID (synthetic
-		// test fixtures) are skipped for the counter only.
 		uid := string(entry.Pod.UID)
 		if uid == "" {
 			continue
