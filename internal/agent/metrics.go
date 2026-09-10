@@ -18,17 +18,19 @@ import (
 type Metrics struct {
 	registry *prometheus.Registry
 
-	AgentInfo           *prometheus.GaugeVec
-	EventsExported      *prometheus.CounterVec
-	EventsDropped       *prometheus.CounterVec
-	KernelEventsDropped *prometheus.CounterVec
-	KernelAggRows       *prometheus.CounterVec
-	ActiveCgroups       *prometheus.GaugeVec
-	ActiveCRs           prometheus.Gauge
-	ReconcileTotal      prometheus.Counter
-	BackendDegraded     *prometheus.GaugeVec
-	CgroupsAttached     prometheus.Counter
-	CgroupsDetached     prometheus.Counter
+	AgentInfo             *prometheus.GaugeVec
+	EventsExported        *prometheus.CounterVec
+	EventsDropped         *prometheus.CounterVec
+	KernelEventsDropped   *prometheus.CounterVec
+	KernelAggRows         *prometheus.CounterVec
+	IssuePodUnresolved    prometheus.Counter
+	IssueAlertUndelivered prometheus.Counter
+	ActiveCgroups         *prometheus.GaugeVec
+	ActiveCRs             prometheus.Gauge
+	ReconcileTotal        prometheus.Counter
+	BackendDegraded       *prometheus.GaugeVec
+	CgroupsAttached       prometheus.Counter
+	CgroupsDetached       prometheus.Counter
 
 	ThresholdTripped    *prometheus.CounterVec
 	EffectiveSampleRate *prometheus.GaugeVec
@@ -104,6 +106,16 @@ func NewMetrics() *Metrics {
 			Name:      "kernel_agg_rows_total",
 			Help:      "Rows drained from the kernel metric aggregation map, by outcome. Collector internal, not part of the contractual surface.",
 		}, []string{"outcome"}),
+		IssuePodUnresolved: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "podtrace_agent",
+			Name:      "issue_pod_unresolved_total",
+			Help:      "Activated inspection issues for which no pod could be resolved, so they could not start a session. Non-zero means the metric-to-session loop is open for those workloads.",
+		}),
+		IssueAlertUndelivered: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "podtrace_agent",
+			Name:      "issue_alert_undelivered_total",
+			Help:      "Activated inspection issues whose trigger Event could not be written. Non-zero means those issues are graphed but cannot start a session.",
+		}),
 		ActiveCgroups: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: "podtrace_agent",
 			Name:      "active_cgroups",
@@ -207,6 +219,7 @@ func NewMetrics() *Metrics {
 	reg.MustRegister(
 		m.AgentInfo,
 		m.EventsExported, m.EventsDropped, m.KernelEventsDropped, m.KernelAggRows,
+		m.IssuePodUnresolved, m.IssueAlertUndelivered,
 		m.ActiveCgroups, m.ActiveCRs,
 		m.ReconcileTotal, m.BackendDegraded, m.CgroupsAttached, m.CgroupsDetached,
 		m.EnrichmentLookups, m.EnrichmentCacheSize, m.EnrichmentSnapshots,
@@ -414,8 +427,21 @@ func (m *Metrics) Registerer() prometheus.Registerer {
 }
 
 // Handler returns a promhttp.Handler bound to this Metrics' registry.
+//
+// OpenMetrics negotiation is on because exemplars cannot travel in the plain
+// text format: a scraper that does not ask for OpenMetrics or protobuf gets
+// the same series without them, so this is additive for old scrapers and the
+// metric-to-trace link for new ones.
+// Gatherer exposes the registry for reading. Continuous inspections evaluate
+// over it, so a rule and a scrape of this agent cannot disagree about a value.
+func (m *Metrics) Gatherer() prometheus.Gatherer {
+	return m.registry
+}
+
 func (m *Metrics) Handler() http.Handler {
-	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
+	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{
+		EnableOpenMetrics: true,
+	})
 }
 
 // EngineObserver returns an adapter that bridges the engine's

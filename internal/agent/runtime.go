@@ -33,6 +33,7 @@ import (
 	"github.com/gma1k/podtrace/internal/ebpf/kernelagg"
 	"github.com/gma1k/podtrace/internal/ebpf/probes"
 	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/tracing"
 	"github.com/gma1k/podtrace/internal/workloadmetrics"
 	"github.com/gma1k/podtrace/pkg/tracer"
 )
@@ -224,6 +225,13 @@ func Run(ctx context.Context, opts Options) error {
 	g.Go(func() error { return reapWorkloadMetrics(gctx, metricsSink, logger) })
 	g.Go(func() error { return drainKernelMetrics(gctx, backend, metricsSink, router, metrics, logger) })
 
+	inspections, inspErr := buildInspectionEngine(metrics, metricsSink,
+		enricherPodResolver(enricher), newAlertEventSender(mgr.GetClient()), logger)
+	if inspErr != nil {
+		logger.Error(inspErr, "continuous inspections unavailable")
+	}
+	g.Go(func() error { return runInspections(gctx, inspections, logger) })
+
 	g.Go(func() error {
 		if err := cacheSyncError(mgr.GetCache().WaitForCacheSync(gctx), gctx.Err()); err != nil {
 			return err
@@ -351,6 +359,7 @@ func buildExporters(router *Router, metrics *Metrics, enricher *PodEnricher, pee
 		IncludePodLabel:      config.WorkloadMetricsPodLabel,
 		IncludeProcessLabel:  config.WorkloadMetricsProcessLabel,
 		Lookup:               enricherLookup(enricher),
+		TraceContext:         tracing.NewContextEnricher().Enrich,
 		ResolvePeer:          peerLookup(peers),
 		SemanticConventions:  config.WorkloadMetricsSemanticConv,
 		AttributeCardinality: config.WorkloadMetricsAttributeLimit,

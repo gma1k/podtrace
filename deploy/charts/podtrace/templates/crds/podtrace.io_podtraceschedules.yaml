@@ -567,6 +567,7 @@ spec:
                           - ResourceAlert
                           - OOMKill
                           - ErrorRate
+                          - Issue
                           type: string
                         minSeverity:
                           description: |-

@@ -84,6 +84,8 @@ agent:
 
   usdt: true
 
+  rolloutMaxUnavailable: ""
+
   alerting:
     enabled: false
     webhookURL: ""
@@ -108,6 +110,19 @@ agent:
     labels:
       pod: false
       process: false
+
+    inspections:
+      enabled: false
+
+      interval: 30s
+
+      alerts: true
+
+      budget: 0
+
+      holdTime: ""
+
+      thresholds: {}
 
 session:
   ttlSecondsAfterFinished: 300

@@ -79,6 +79,8 @@ func triggerSourceKindForAlertSource(source string) (podtracev1alpha1.TriggerSou
 		return podtracev1alpha1.TriggerSourceOOMKill, true
 	case alerting.AlertSourceErrorRate:
 		return podtracev1alpha1.TriggerSourceErrorRate, true
+	case alerting.AlertSourceIssue:
+		return podtracev1alpha1.TriggerSourceIssue, true
 	default:
 		return "", false
 	}

@@ -127,6 +127,41 @@ convention label gains no entry, so a rename cannot reach a release through
 the OTLP path alone. The difference between the two paths is documented in
 [docs/continuous-metrics.md](docs/continuous-metrics.md).
 
+### Issue identifiers
+
+Continuous inspections and the diagnostic detector both report **issues**, and
+an issue's `id` is contractual on the same terms as a metric name: adding one
+is a minor, renaming or removing one is a breaking change with a
+`### Breaking` entry in [CHANGELOG.md](CHANGELOG.md).
+
+The reason is that an id is not a description, it is an address. It appears as
+a label value in `podtrace_issue_active{id=...}`, as an alert's error code, and
+in whatever alert routing and `PodTraceSchedule` triggers a user builds on it —
+so a rename silently stops every rule that matched the old name, with nothing
+failing to say so.
+
+Enforcement is mechanical. The vocabulary is a single list in
+`internal/diagnose/detector/issue.go`, and a snapshot test fails when it
+changes, so a rename cannot happen by accident. Two further tests fail if a
+rule emits an unregistered id or if a registered id is missing a severity,
+message, remediation or evidence.
+
+Outside the promise:
+
+- **Issue messages.** The human-readable rendering may change freely; that is
+  what the id is for.
+- **Which rule produces an id.** A rule may move between the two planes, or be
+  reimplemented over a different family, as long as the id keeps meaning the
+  same thing.
+- **Thresholds and `For` durations.** These are tuning, and their defaults may
+  change in a minor release.
+- **Whether a rule exists for a given failure mode.** A rule is removed when
+  the signal it read turns out not to measure what its id claimed —
+  `pool.exhaustion` was withdrawn before release for exactly that reason.
+
+The vocabulary and the rules are documented in
+[docs/continuous-inspections.md](docs/continuous-inspections.md).
+
 ### How releases get versioned (pre-1.0)
 
 While Podtrace at `v0.x`, release-please bumps **patch** for both

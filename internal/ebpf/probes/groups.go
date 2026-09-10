@@ -94,8 +94,19 @@ var probeGroupMap = map[string]ProbeGroup{
 	"uretprobe_PQexec": GroupDatabase,
 
 	// Pool
-	"uprobe_pool_acquire":    GroupPool,
-	"uretprobe_pool_acquire": GroupPool,
+	"uprobe_sqlite3_prepare_v2":    GroupPool,
+	"uprobe_sqlite3_prepare":       GroupPool,
+	"uprobe_sqlite3_prepare16":     GroupPool,
+	"uprobe_sqlite3_prepare16_v2":  GroupPool,
+	"uretprobe_sqlite3_finalize":   GroupPool,
+	"uprobe_sqlite3_step":          GroupPool,
+	"uretprobe_sqlite3_step":       GroupPool,
+	"uprobe_PQconnectStart":        GroupPool,
+	"uretprobe_PQfinish":           GroupPool,
+	"uprobe_PQexec_pool":           GroupPool,
+	"uprobe_mysql_real_connect":    GroupPool,
+	"uretprobe_mysql_close":        GroupPool,
+	"uprobe_mysql_real_query_pool": GroupPool,
 
 	// Cache (Redis / Memcached)
 	"uprobe_redisCommand":        GroupCache,

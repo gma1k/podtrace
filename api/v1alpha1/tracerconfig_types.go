@@ -3,6 +3,7 @@ package v1alpha1
 import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 // BTFMode controls how the agent resolves BTF for CO-RE.
@@ -48,6 +49,11 @@ type AgentSpec struct {
 
 	// +optional
 	Metrics *AgentMetricsSpec `json:"metrics,omitempty"`
+
+	// RolloutMaxUnavailable is how many agents may be updated at once when
+	// the DaemonSet's pod template changes, as a count or a percentage.
+	// +optional
+	RolloutMaxUnavailable *intstr.IntOrString `json:"rolloutMaxUnavailable,omitempty"`
 }
 
 // AgentMetricsSpec configures the continuous metrics plane.
@@ -85,6 +91,73 @@ type AgentMetricsSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=10000
 	AttributeCardinality *int32 `json:"attributeCardinality,omitempty"`
+
+	// Inspections evaluate rules over this plane's own metrics and raise a
+	// typed issue when one holds.
+	// +optional
+	Inspections *AgentInspectionsSpec `json:"inspections,omitempty"`
+}
+
+// AgentInspectionsSpec configures continuous inspections: the half of the
+// plane that decides something is wrong, rather than only recording it.
+type AgentInspectionsSpec struct {
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Interval is how often rules are evaluated. It doubles as the rate
+	// window, so it has to be long enough for a counter delta to mean
+	// something and short enough for an issue to be noticed.
+	// +optional
+	Interval *metav1.Duration `json:"interval,omitempty"`
+
+	// Alerts controls whether an activated issue is raised as an alert,
+	// which is what lets a PodTraceSchedule with an Issue trigger start a
+	// session from it. With this off, inspections only expose
+	// podtrace_issue_active.
+	// +optional
+	Alerts *bool `json:"alerts,omitempty"`
+
+	// Budget bounds how many distinct issue instances an agent tracks.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100000
+	Budget *int32 `json:"budget,omitempty"`
+
+	// HoldTime replaces every rule's own hold duration, the time a condition
+	// must hold before its issue activates. Leave unset to keep the built-in
+	// per-rule defaults, which suit their signals; set it shorter for a test
+	// run or longer for a workload whose bursts are expected.
+	// +optional
+	HoldTime *metav1.Duration `json:"holdTime,omitempty"`
+
+	// Thresholds tune when the built-in rules fire.
+	// +optional
+	Thresholds *AgentInspectionThresholdsSpec `json:"thresholds,omitempty"`
+}
+
+// AgentInspectionThresholdsSpec tunes the built-in rules. Rule shapes are not
+// configurable — that is what keeps the issue vocabulary meaningful — but the
+// numbers they compare against are workload-specific.
+type AgentInspectionThresholdsSpec struct {
+	// ErrorRatePercent is the application-layer error ratio above which
+	// l7.error_rate fires.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
+	ErrorRatePercent *int32 `json:"errorRatePercent,omitempty"`
+
+	// MinRequestsPerMinute is the traffic floor below which the error-rate
+	// rule stays quiet, so one failed request in an idle interval does not
+	// read as a 100% error rate. Expressed per minute rather than per second
+	// because the useful values are fractions of a request per second.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	MinRequestsPerMinute *int32 `json:"minRequestsPerMinute,omitempty"`
+
+	// MeanLatency is the mean request duration above which
+	// l7.latency_degraded fires.
+	// +optional
+	MeanLatency *metav1.Duration `json:"meanLatency,omitempty"`
 }
 
 // AgentMetricsLabelsSpec opts into labels that are deliberately absent by

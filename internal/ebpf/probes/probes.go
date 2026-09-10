@@ -540,6 +540,51 @@ type dbProbeConfig struct {
 	exhaustRetProg string
 }
 
+// databaseProbeConfigs is the connection-lifecycle probe configuration, one
+// entry per client library.
+func databaseProbeConfigs() []dbProbeConfig {
+	return []dbProbeConfig{
+		{
+			name:           "sqlite",
+			libPatterns:    []string{"libsqlite3.so.0", "libsqlite3.so", "sqlite3.so"},
+			acquireSymbols: []string{"sqlite3_prepare_v2", "sqlite3_prepare", "sqlite3_prepare16", "sqlite3_prepare16_v2"},
+			releaseSymbol:  "sqlite3_finalize",
+			exhaustSymbol:  "sqlite3_step",
+			acquireProg:    "uprobe_sqlite3_prepare_v2",
+			releaseProg:    "uretprobe_sqlite3_finalize",
+			exhaustProg:    "uprobe_sqlite3_step",
+			exhaustRetProg: "uretprobe_sqlite3_step",
+		},
+		{
+			name:        "postgresql",
+			libPatterns: []string{"libpq.so.5", "libpq.so"},
+			// The public connection entry points. PQconnectStart alone was
+			// wrong: it is the low-level asynchronous API, and synchronous
+			// clients, which is nearly all of them, psql and pgbench
+			// included, reach libpq through PQconnectdb or
+			// PQconnectdbParams instead and never call it.
+			acquireSymbols: []string{"PQconnectdb", "PQconnectdbParams", "PQconnectStart"},
+			releaseSymbol:  "PQfinish",
+			exhaustSymbol:  "PQexec",
+			acquireProg:    "uprobe_PQconnectStart",
+			releaseProg:    "uretprobe_PQfinish",
+			exhaustProg:    "uprobe_PQexec_pool",
+			exhaustRetProg: "",
+		},
+		{
+			name:           "mysql",
+			libPatterns:    []string{"libmysqlclient.so.21", "libmysqlclient.so"},
+			acquireSymbols: []string{"mysql_real_connect"},
+			releaseSymbol:  "mysql_close",
+			exhaustSymbol:  "mysql_real_query",
+			acquireProg:    "uprobe_mysql_real_connect",
+			releaseProg:    "uretprobe_mysql_close",
+			exhaustProg:    "uprobe_mysql_real_query_pool",
+			exhaustRetProg: "",
+		},
+	}
+}
+
 func AttachPoolProbes(coll *ebpf.Collection, containerID string) []link.Link {
 	return AttachPoolProbesWithPID(coll, containerID, 0, nil)
 }
@@ -572,41 +617,7 @@ func AttachPoolProbesWithPID(coll *ebpf.Collection, containerID string, pid uint
 		logger.Debug("Container process not found", zap.String("containerID", containerID))
 	}
 
-	dbConfigs := []dbProbeConfig{
-		{
-			name:           "sqlite",
-			libPatterns:    []string{"libsqlite3.so.0", "libsqlite3.so", "sqlite3.so"},
-			acquireSymbols: []string{"sqlite3_prepare_v2", "sqlite3_prepare", "sqlite3_prepare16", "sqlite3_prepare16_v2"},
-			releaseSymbol:  "sqlite3_finalize",
-			exhaustSymbol:  "sqlite3_step",
-			acquireProg:    "uprobe_sqlite3_prepare_v2",
-			releaseProg:    "uretprobe_sqlite3_finalize",
-			exhaustProg:    "uprobe_sqlite3_step",
-			exhaustRetProg: "uretprobe_sqlite3_step",
-		},
-		{
-			name:           "postgresql",
-			libPatterns:    []string{"libpq.so.5", "libpq.so"},
-			acquireSymbols: []string{"PQconnectStart"},
-			releaseSymbol:  "PQfinish",
-			exhaustSymbol:  "PQexec",
-			acquireProg:    "uprobe_PQconnectStart",
-			releaseProg:    "uretprobe_PQfinish",
-			exhaustProg:    "uprobe_PQexec_pool",
-			exhaustRetProg: "",
-		},
-		{
-			name:           "mysql",
-			libPatterns:    []string{"libmysqlclient.so.21", "libmysqlclient.so"},
-			acquireSymbols: []string{"mysql_real_connect"},
-			releaseSymbol:  "mysql_close",
-			exhaustSymbol:  "mysql_real_query",
-			acquireProg:    "uprobe_mysql_real_connect",
-			releaseProg:    "uretprobe_mysql_close",
-			exhaustProg:    "uprobe_mysql_real_query_pool",
-			exhaustRetProg: "",
-		},
-	}
+	dbConfigs := databaseProbeConfigs()
 
 	for _, dbConfig := range dbConfigs {
 		var dbPaths []string
@@ -634,15 +645,38 @@ func AttachPoolProbesWithPID(coll *ebpf.Collection, containerID string, pid uint
 				continue
 			}
 
+			// Every acquire symbol is attached, not just the first that
+			// resolves. These are sibling *public* entry points, not a
+			// fallback chain: libpq exports PQconnectdb, PQconnectdbParams
+			// and PQconnectStart, and a client calls exactly one of them per
+			// connection. Stopping at the first meant attaching to whichever
+			// symbol merely *existed* in the library — PQconnectdb always
+			// does — while the client actually called a different one, so
+			// the probe never fired. Verified on kind: pgbench imports
+			// PQconnectdbParams and produced zero events while a probe sat
+			// on PQconnectStart.
+			//
+			// This does not double count, because these entry points do not
+			// call one another; they share a lower-level internal
+			// (PQconnectStartParams) which is deliberately NOT hooked.
+			acquireAttached := 0
 			for _, symbol := range dbConfig.acquireSymbols {
-				if prog := coll.Programs[dbConfig.acquireProg]; prog != nil {
-					l, err := exe.Uprobe(symbol, prog, nil)
-					if err == nil {
-						links = append(links, l)
-						logger.Debug("Attached pool acquire probe", zap.String("database", dbConfig.name), zap.String("symbol", symbol), zap.String("path", path))
-						break
-					}
+				prog := coll.Programs[dbConfig.acquireProg]
+				if prog == nil {
+					break
 				}
+				l, err := exe.Uprobe(symbol, prog, nil)
+				if err != nil {
+					continue
+				}
+				links = append(links, l)
+				acquireAttached++
+				logger.Debug("Attached pool acquire probe", zap.String("database", dbConfig.name), zap.String("symbol", symbol), zap.String("path", path))
+			}
+			if acquireAttached == 0 {
+				logger.Debug("No pool acquire probe attached; release and exhaustion events are suppressed because they key off acquire state",
+					zap.String("database", dbConfig.name), zap.String("path", path),
+					zap.Strings("symbols", dbConfig.acquireSymbols))
 			}
 
 			if dbConfig.releaseProg != "" && dbConfig.releaseSymbol != "" {

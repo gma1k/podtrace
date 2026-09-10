@@ -45,7 +45,7 @@ spec:
             content: |
               set -eu
 
-              for _ in $(seq 1 24); do
+              for _ in $(seq 1 60); do
                 if kubectl -n podtrace-system get endpoints podtrace-webhook \
                      -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null | grep -q .; then
                   if kubectl patch tracerconfig default --type=merge --dry-run=server \
@@ -54,7 +54,7 @@ spec:
                     break
                   fi
                 fi
-                sleep 5
+                sleep 2
               done
 
               kubectl patch tracerconfig default --type=merge -p '{
@@ -68,7 +68,7 @@ spec:
                   }
                 }
               }'
-              for _ in $(seq 1 60); do
+              for _ in $(seq 1 150); do
                 desired=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.desiredNumberScheduled}')
                 updated=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.updatedNumberScheduled}')
                 ready=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.numberReady}')
@@ -76,7 +76,7 @@ spec:
                   echo "all ${desired} agents updated and ready"
                   break
                 fi
-                sleep 5
+                sleep 2
               done
               if [ "${updated:-0}" != "${desired:-1}" ] || [ "${ready:-0}" != "${desired:-1}" ]; then
                 echo "FAIL: agents did not converge (updated=${updated:-?} ready=${ready:-?} desired=${desired:-?})"
@@ -230,7 +230,7 @@ spec:
               fi
 
               agg=$(grep '^podtrace_workload_metrics_events_total{outcome="aggregated"}' /tmp/scrape.txt \
-                    | awk '{print $2}' | cut -d. -f1)
+                    | awk '{ v = $2 + 0; if (v > m) m = v } END { printf "%d", m }')
               if [ -z "${agg:-}" ] || [ "${agg}" -le 0 ]; then
                 echo "FAIL: aggregated event count is ${agg:-unset}; the identity join is not working"
                 grep 'podtrace_workload_metrics_events_total' /tmp/scrape.txt || true
@@ -259,7 +259,7 @@ spec:
               set -eu
               kubectl patch tracerconfig default --type=merge \
                 -p '{"spec":{"agent":{"metrics":{"enabled":false}}}}'
-              for _ in $(seq 1 60); do
+              for _ in $(seq 1 150); do
                 desired=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.desiredNumberScheduled}')
                 updated=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.updatedNumberScheduled}')
                 ready=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.numberReady}')
@@ -267,7 +267,7 @@ spec:
                   echo "all ${desired} agents updated and ready"
                   break
                 fi
-                sleep 5
+                sleep 2
               done
               if [ "${updated:-0}" != "${desired:-1}" ] || [ "${ready:-0}" != "${desired:-1}" ]; then
                 echo "FAIL: agents did not converge (updated=${updated:-?} ready=${ready:-?} desired=${desired:-?})"

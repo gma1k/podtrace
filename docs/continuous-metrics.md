@@ -385,6 +385,44 @@ If the agent cannot read EndpointSlices and Services, the families are
 **not registered at all** rather than exposed and left empty, so an absent
 capability does not read as a broken one.
 
+#### Every edge is a per-node observation
+
+An agent only sees calls made by pods on its own node, so an edge exists on
+the node where the *caller* runs. Prometheus scrapes each agent separately,
+which is exactly right for the metric, but it means the shape of the data is
+per-node, and only some questions survive aggregation.
+
+Safe, because Prometheus sums across nodes:
+
+```
+# Total request rate on an edge, wherever the callers live
+sum by (namespace, workload, target_namespace, target_service) (
+  rate(podtrace_workload_edge_requests_total[5m])
+)
+```
+
+Not safe, because the answer is only ever about one node's callers:
+
+```
+# WRONG: reads as "this workload's dependencies", but it is
+# "this workload's dependencies as seen from one node"
+podtrace_workload_edge_requests_total{workload="checkout"}
+```
+
+The practical consequences:
+
+- **A missing edge does not mean the call does not happen.** It may mean no
+  replica of the caller is scheduled on the node you are looking at.
+- **Fan-out counts must be aggregated first.** Counting distinct
+  `target_service` values on a single agent under-reports a workload's
+  dependencies whenever its replicas are spread across nodes.
+- **Topology reasoning belongs after `sum by`.** Building a graph from one
+  agent's series gives a subgraph, not the graph.
+
+This is a property of where the observation happens, not a limitation to be
+fixed: an agent that resolved edges for pods on other nodes would be
+duplicating what Prometheus already does correctly.
+
 ### Network, DNS, filesystem, CPU, TLS
 
 | Metric | Type | Extra labels |
@@ -402,6 +440,141 @@ capability does not read as a broken one.
 `operation` is `read`, `write`, `fsync`, `open`, `close`, `unlink` or
 `rename`. `kind` groups failures as `l7`, `dns`, `network`, `filesystem`,
 `tls` or `other`.
+
+### Saturation
+
+Latency, traffic and errors tell you a workload is unhealthy. Saturation is
+the signal that tells you *why*, and it is the one that moves first, a
+workload at its CPU limit or out of pool connections shows up as latency and
+errors everywhere else, with nothing in either family saying what ran out.
+
+| Metric | Type | Extra labels |
+|---|---|---|
+| `podtrace_workload_resource_utilization_percent` | Gauge | `resource` |
+| `podtrace_workload_db_connections_opened_total` | Counter | `db_system` |
+| `podtrace_workload_db_connections_closed_total` | Counter | `db_system` |
+
+`resource` is `cpu`, `memory`, `io` or `other`. `db_system` is `postgresql`,
+`mysql`, `sqlite` or `other`, following OpenTelemetry's `db.system` vocabulary.
+
+#### Utilization holds its peak
+
+A gauge collapses. Every other family on this surface is a counter or a
+histogram, which sum correctly when several replicas of a workload land on the
+same node, but a gauge does not sum, it overwrites. Two replicas write the
+same series, because the label set here is workload-scoped like the rest of the
+surface, so a plain last-write-wins would let a healthy replica erase a
+saturated one.
+
+It is worse for [inspections](continuous-inspections.md): two replicas
+alternating 98% and 5% make the series oscillate, and a rule that requires its
+condition to hold continuously would restart its hold timer every other
+evaluation and never fire at all.
+
+So this family reports the **highest reading seen in the last 30 seconds**
+rather than the most recent one. Once that window passes without a higher
+reading, the newer value wins, that decay is what lets a genuinely recovered
+workload stop looking saturated. The window is driven by the clock rather than
+by a scrape, so a Prometheus scrape and the inspection engine's own gather
+cannot steal resets from each other.
+
+The alternative was to add a `pod` label to this family. That was rejected:
+pod labels on this surface are opt-in precisely because each one multiplies
+series count, and quietly forcing one onto a new family would break a
+documented compatibility contract. Set `agent.metrics.labels.pod=true` if you
+want per-replica saturation, and the peak-hold then applies per pod.
+
+#### Database connections
+
+These two counters are named for exactly what the probes observe. The eBPF
+side hooks connection *lifecycle* symbols, so it sees connections being opened
+and closed:
+
+| Library | Opened | Closed |
+|---|---|---|
+| libpq | `PQconnectdb`, `PQconnectdbParams`, `PQconnectStart` | `PQfinish` |
+| libmysqlclient | `mysql_real_connect` | `mysql_close` |
+| libsqlite3 | `sqlite3_prepare*` | `sqlite3_finalize` |
+
+All three libpq entry points are hooked, not just one. `PQconnectStart` is the
+asynchronous API; synchronous clients, which is nearly all of them, `psql` and
+`pgbench` included, reach libpq through `PQconnectdb` or `PQconnectdbParams`
+and never call it. They do not double count, because they do not call one
+another; they share a lower-level internal (`PQconnectStartParams`) which is
+deliberately left unhooked.
+
+```
+# Connections currently open
+podtrace_workload_db_connections_opened_total
+  - podtrace_workload_db_connections_closed_total
+```
+
+A difference that only ever grows is a connection leak. Compare *rates* rather
+than trusting that difference absolutely: a process that exits without calling
+`PQfinish` is never counted as closing, so the close counter undercounts on
+abnormal termination.
+
+**There is no pool-exhaustion metric yet.** Connection *pooling* happens
+inside the application — `database/sql`, HikariCP, pgx — and a caller waiting
+for a free slot is parked on an in-process queue, not on the connect path these
+counters watch. So the honest answer to "is the pool exhausted" is that this
+surface does not yet say, and no family here pretends to.
+
+Earlier versions of this document listed `pool_connections`,
+`pool_utilization` and `pool_wait_time_seconds`. None of them ever existed.
+
+How reachable the real signal is depends entirely on the runtime:
+
+| Runtime | Pool wait is | Reachable? |
+|---|---|---|
+| Go `database/sql` | a blocking call inside `(*DB).conn` | **yes** — see below |
+| Java (HikariCP) | `LockSupport.park` under JIT | no, practically |
+| Node (`pg-pool`) | a JavaScript promise queue | no |
+| Python | `Condition.wait` on a futex | only with interpreter frame walking |
+
+For Go this is tractable with machinery podtrace already ships. Resolving a Go
+symbol by name, finding its return sites, and reading struct fields out of a
+running process are all done today for quic-go's HTTP/3 probes — see
+`goSymbolFileOffset`, `goFuncReturnOffsets` and the `h3_offsets` map. Applied
+to `database/sql` that yields the real thing rather than a proxy:
+
+- **wait time** — `(*DB).conn` entry to return is precisely where a caller
+  blocks for a free slot
+- **utilization** — `numOpen` over `maxOpen`, both plain fields on `*DB`; the
+  capacity a previous version of this document called unobservable is simply a
+  struct read
+- **wait count and total wait** — `database/sql` already keeps both for
+  `DBStats`, so they can be read rather than recomputed
+
+The cost is the same one quic-go support carried: Go struct layouts shift
+between releases, so it needs a per-version offset table and version
+detection. That is why it is a roadmap item rather than something these two
+counters quietly approximate.
+
+Until then, if you need true pool metrics, export them from the application —
+Go's `sql.DBStats`, HikariCP's JMX beans — and correlate them with these
+counters by workload.
+
+Note the BPF side also emits an internal "pool exhausted" event, which this
+surface deliberately drops: it fires on any query more than 10ms after the
+connection opened and never refreshes its timestamp, so it reports the
+connection's *age* rather than any wait. Exporting it under a pool name would
+be a false claim.
+
+#### Saturation is always on the event path
+
+Unlike the latency families, no saturation family is ever served from the
+kernel aggregation map. The map keys on latency buckets and byte counts, which
+is the wrong shape for a utilization gauge, and the resource and connection
+probes submit unconditionally rather than through the ring-buffer bypass.
+Saturation therefore reports identically in both modes.
+
+The two connection families do carry one extra requirement: they come from
+uprobes on the client library, so they populate only for containers whose
+processes have `libpq`, `libmysqlclient` or `libsqlite3` mapped. A process too
+short-lived to be seen by target reconciliation — a per-request CLI invocation,
+for instance — will not be instrumented. `resource_utilization_percent` has no
+such caveat: it comes from a kernel-side probe.
 
 ## Plane internals
 
@@ -517,6 +690,76 @@ that layout alone would exceed the per-node budget. Query quantiles with
 `histogram_quantile` rather than depending on specific `le` values — bucket
 boundaries are explicitly outside the compatibility promise.
 
+## Exemplars: from a metric to the trace behind it
+
+The continuous plane tells you *which* workload is unhealthy. The diagnostic
+plane tells you *why*. Exemplars are the link between them: when a request
+carries a W3C `traceparent`, the agent attaches that trace id to the
+observation, so a p99 spike on a dashboard is clickable straight through to
+the trace that caused it.
+
+Without this the handoff is manual — you see the spike, author a `PodTrace`,
+and hope the problem recurs while you are watching.
+
+Exemplars are attached to:
+
+| Family | Why |
+|---|---|
+| `podtrace_workload_l7_requests_total` | jump from an error-rate spike to a failing request |
+| `podtrace_workload_l7_request_duration_seconds` | jump from a latency bucket to a slow request |
+| `podtrace_workload_network_latency_seconds` | jump from a connect-latency spike to the call |
+| `podtrace_workload_dns_latency_seconds` | jump from a slow resolution to its caller |
+| `podtrace_workload_edge_requests_total` | jump from a slow dependency *on the map* into a trace |
+
+The edge family matters most in practice: the service map is where an
+operator starts, so a slow dependency there has to be clickable into a trace,
+not just into a name.
+
+### Scraping them
+
+Exemplars are only representable in the OpenMetrics exposition format, so the
+scraper has to ask for it:
+
+```yaml
+# Prometheus
+scrape_configs:
+  - job_name: podtrace-agent
+    # Prometheus negotiates OpenMetrics by default; keep exemplar storage on.
+```
+
+```
+--enable-feature=exemplar-storage
+```
+
+A plain `text/plain; version=0.0.4` scrape still works and simply carries no
+exemplars — a strict 0.0.4 parser would reject the exemplar syntax, so it is
+omitted rather than risking the whole response.
+
+In Grafana, point the Prometheus data source's *Exemplars* config at your
+tracing data source with `trace_id` as the label name. That name is
+conventional, not ours, so it is not something podtrace will rename.
+
+### They are sparse by design
+
+Only traffic carrying a `traceparent` produces an exemplar, and Prometheus
+keeps at most one exemplar per bucket per scrape. Both facts point the same
+way: a handful of sampled requests per interval is exactly enough, and
+untraced traffic is still counted in full.
+
+### Interaction with kernel-side aggregation
+
+An exemplar needs a per-request trace id. Under
+`kernelAggregation` (below) with the ring-buffer bypass armed, the counts come
+from a BPF map and no per-request identity reaches userspace — so the L7,
+network and DNS families carry **no exemplars** in that mode.
+
+This is one of the reasons `kernelAggregation` defaults to off. It is also
+less costly than it first appears: the bypass only arms while no `PodTrace`
+exists, so the moment anyone is actually diagnosing, events flow again and
+exemplars come back with them. The gap is real only when your traces come
+from the application's own OpenTelemetry SDK rather than from podtrace, and
+you want the metric-to-trace jump while nobody is running a session.
+
 ## Kernel-side aggregation
 
 By default the plane costs one ring-buffer crossing per observation, so a busy
@@ -548,6 +791,10 @@ or `--set agent.metrics.kernelAggregation=true` at install.
 Nothing about the exported surface. The same metric names carry the same label
 keys, and a dashboard cannot tell which path served it, a test asserts both
 paths produce identical series identities.
+
+The one observable difference is exemplars: they need a per-request trace id,
+which no longer reaches userspace once the bypass is armed. See
+[Interaction with kernel-side aggregation](#interaction-with-kernel-side-aggregation).
 
 Latency distributions are recorded as **Prometheus native-histogram schema-3
 bucket indices**, computed in the kernel with integer arithmetic. Schema 3 is
@@ -679,6 +926,7 @@ sum by (namespace, workload) (
 
 ## Related documents
 
+- [continuous-inspections.md](continuous-inspections.md), the rules that act on this surface
 - [metrics.md](metrics.md), the diagnostic surface and its naming rules
 - [STABILITY.md](../STABILITY.md), what a version promises about metric names
 - [crd-tracerconfig.md](crd-tracerconfig.md), agent fleet configuration

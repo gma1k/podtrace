@@ -1,9 +1,9 @@
 package detector
 
 import (
-	"strings"
 	"testing"
 
+	"github.com/gma1k/podtrace/internal/alerting"
 	"github.com/gma1k/podtrace/internal/events"
 )
 
@@ -30,7 +30,7 @@ func TestDetectIssues_HighConnectionFailureRate(t *testing.T) {
 
 	found := false
 	for _, issue := range issues {
-		if contains(issue, "High connection failure rate") {
+		if issue.ID == IDConnectionFailureRate {
 			found = true
 			break
 		}
@@ -59,7 +59,7 @@ func TestDetectIssues_LowConnectionFailureRate(t *testing.T) {
 
 	found := false
 	for _, issue := range issues {
-		if contains(issue, "High connection failure rate") {
+		if issue.ID == IDConnectionFailureRate {
 			found = true
 			break
 		}
@@ -84,7 +84,7 @@ func TestDetectIssues_HighTCPRTTSpikeRate(t *testing.T) {
 
 	found := false
 	for _, issue := range issues {
-		if contains(issue, "High TCP RTT spike rate") {
+		if issue.ID == IDRTTSpikeRate {
 			found = true
 			break
 		}
@@ -111,7 +111,7 @@ func TestDetectIssues_LowTCPRTTSpikeRate(t *testing.T) {
 	issues := DetectIssues(eventSlice, 10.0, 100.0)
 
 	for _, issue := range issues {
-		if contains(issue, "High TCP RTT spike rate") {
+		if issue.ID == IDRTTSpikeRate {
 			t.Errorf("Should not detect high RTT spike rate for 2%% spike rate, got: %v", issues)
 		}
 	}
@@ -138,10 +138,10 @@ func TestDetectIssues_MixedEvents(t *testing.T) {
 	connectIssues := 0
 	tcpIssues := 0
 	for _, issue := range issues {
-		if contains(issue, "connection") {
+		if issue.ID == IDConnectionFailureRate {
 			connectIssues++
 		}
-		if contains(issue, "TCP RTT") {
+		if issue.ID == IDRTTSpikeRate {
 			tcpIssues++
 		}
 	}
@@ -179,7 +179,7 @@ func TestDetectIssues_ResourceLimitWarning(t *testing.T) {
 
 	found := false
 	for _, issue := range issues {
-		if contains(issue, "CPU") && contains(issue, "WARNING") {
+		if issue.Subject.Resource == "CPU" && issue.Severity == alerting.SeverityWarning {
 			found = true
 			break
 		}
@@ -199,7 +199,7 @@ func TestDetectIssues_ResourceLimitCritical(t *testing.T) {
 
 	found := false
 	for _, issue := range issues {
-		if contains(issue, "Memory") && contains(issue, "CRITICAL") {
+		if issue.Subject.Resource == "Memory" && issue.Severity == alerting.SeverityCritical {
 			found = true
 			break
 		}
@@ -219,7 +219,7 @@ func TestDetectIssues_ResourceLimitEmergency(t *testing.T) {
 
 	found := false
 	for _, issue := range issues {
-		if contains(issue, "I/O") && contains(issue, "EMERGENCY") {
+		if issue.Subject.Resource == "I/O" && issue.Severity == alerting.SeverityFatal {
 			found = true
 			break
 		}
@@ -239,7 +239,7 @@ func TestDetectIssues_ResourceLimitBelowThreshold(t *testing.T) {
 	issues := DetectIssues(events, 10.0, 100.0)
 
 	for _, issue := range issues {
-		if contains(issue, "Resource limit") {
+		if issue.ID == IDResourceSaturation {
 			t.Errorf("Should not detect resource limit issue below 80%%, got: %v", issues)
 		}
 	}
@@ -258,10 +258,10 @@ func TestDetectIssues_MixedResourceLimits(t *testing.T) {
 	cpuIssues := 0
 	memIssues := 0
 	for _, issue := range issues {
-		if contains(issue, "CPU") {
+		if issue.Subject.Resource == "CPU" {
 			cpuIssues++
 		}
-		if contains(issue, "Memory") {
+		if issue.Subject.Resource == "Memory" {
 			memIssues++
 		}
 	}
@@ -289,8 +289,4 @@ func BenchmarkDetectIssues(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = DetectIssues(eventSlice, 10.0, 100.0)
 	}
-}
-
-func contains(s, substr string) bool {
-	return strings.Contains(s, substr)
 }

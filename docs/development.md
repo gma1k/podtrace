@@ -97,6 +97,66 @@ make coverage
 3. **Test**: Run against a test pod
 4. **Iterate**: Repeat as needed
 
+### Iterating on a kind cluster
+
+A rebuilt image does **not** reach a running pod on its own. `make docker-build`
+tags `ghcr.io/gma1k/podtrace:dev`, so after `kind load` the DaemonSet and
+Deployment manifests are byte-identical to what is already applied, Helm and
+the API server both see no change and leave the pods alone. `helm upgrade` and
+`kubectl rollout restart` are equally ineffective, and the operator reconciles
+away any manual `kubectl set env` on the DaemonSet.
+
+The only reliable step is deleting the pods:
+
+```bash
+make docker-build
+kind load docker-image ghcr.io/gma1k/podtrace:dev --name kind
+
+# Delete, do not restart. Both the agents and the operator.
+kubectl -n podtrace-system delete pod -l podtrace.io/component=agent
+kubectl -n podtrace-system delete pod -l app.kubernetes.io/component=operator
+```
+
+Then confirm the pods are actually new, because a rollout that quietly did
+nothing looks exactly like one that succeeded:
+
+```bash
+kubectl -n podtrace-system get pods -o custom-columns=\
+NAME:.metadata.name,START:.status.startTime --no-headers
+```
+
+Forgetting the **operator** is the subtle case: agent-visible behaviour comes
+from environment the operator renders onto the DaemonSet, so a stale operator
+makes a new CRD field look like a broken translation while the code is fine.
+
+This affects the `dev` tag only. A released install pins `image.digest` or a
+real version tag, so a new image is a new pod spec and rolls normally.
+
+### Adding a field to a CRD
+
+Two things must both happen, and skipping the first fails quietly:
+
+```bash
+make manifests generate                    # regenerate the CRD YAML
+helm upgrade podtrace deploy/charts/podtrace --namespace podtrace-system
+```
+
+The CRDs live in `templates/crds/`, so `helm upgrade` does install them — but
+until it runs, the cluster's schema does not know the field. A `kubectl patch`
+setting it gets only a warning:
+
+```
+Warning: unknown field "spec.agent.metrics.inspections.holdTime"
+```
+
+The field is silently dropped, the agent keeps its default, and the symptom is
+indistinguishable from an operator that failed to translate it. If a new
+knob appears to have no effect, check the cluster's CRD before the code:
+
+```bash
+kubectl get crd tracerconfigs.podtrace.io -o yaml | grep -c holdTime
+```
+
 ## Code Organization
 
 ### eBPF Layer (`bpf/`)

@@ -287,6 +287,8 @@ IMAGE_REPO ?= ghcr.io/gma1k/podtrace
 IMAGE_TAG  ?= dev
 IMAGE      ?= $(IMAGE_REPO):$(IMAGE_TAG)
 
+DOCKER_BUILD_FLAGS ?=
+
 GO_VERSION ?= $(shell awk '/^toolchain go/{print substr($$2,3); found=1; exit} /^go /{v=$$2} END{if(!found) print v}' go.mod)
 
 operator-tools:
@@ -336,6 +338,7 @@ docker-build: bpf-btf-header
 	docker build \
 	  --provenance=false \
 	  --sbom=false \
+	  $(DOCKER_BUILD_FLAGS) \
 	  --build-arg GO_VERSION=$(GO_VERSION) \
 	  --build-arg VERSION=$(IMAGE_TAG) \
 	  --build-arg COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown) \
@@ -405,6 +408,9 @@ CHAINSAW ?= $(shell command -v chainsaw 2>/dev/null)
 CHAINSAW_VERSION ?= latest
 
 CHAINSAW_PARALLEL ?= 2
+
+CHAINSAW_SHARD ?=
+CHAINSAW_SHARD_FILE ?= test/chainsaw/shards.conf
 chainsaw-tools:
 	@if [ -z "$(CHAINSAW)" ] && ! command -v chainsaw >/dev/null 2>&1 && [ ! -x "$$($(GO) env GOPATH)/bin/chainsaw" ]; then \
 	  echo "Installing chainsaw@$(CHAINSAW_VERSION)..."; \
@@ -415,7 +421,19 @@ chainsaw: chainsaw-tools
 	@CHAINSAW_BIN="$(CHAINSAW)"; \
 	[ -n "$$CHAINSAW_BIN" ] || CHAINSAW_BIN="$$(command -v chainsaw 2>/dev/null)"; \
 	[ -n "$$CHAINSAW_BIN" ] || CHAINSAW_BIN="$$($(GO) env GOPATH)/bin/chainsaw"; \
-	"$$CHAINSAW_BIN" test --test-dir test/chainsaw/tests --parallel $(CHAINSAW_PARALLEL)
+	if [ -n "$(CHAINSAW_SHARD)" ]; then \
+	  dirs=$$(awk -v s="$(CHAINSAW_SHARD)" \
+	    '$$0 !~ /^[[:space:]]*(#|$$)/ && $$1 == s { printf " --test-dir test/chainsaw/tests/%s", $$2 }' \
+	    $(CHAINSAW_SHARD_FILE)); \
+	  if [ -z "$$dirs" ]; then \
+	    echo "shard $(CHAINSAW_SHARD) selects no tests from $(CHAINSAW_SHARD_FILE)" >&2; \
+	    exit 1; \
+	  fi; \
+	  echo "shard $(CHAINSAW_SHARD):$$(echo "$$dirs" | sed 's| --test-dir test/chainsaw/tests/| |g')"; \
+	  "$$CHAINSAW_BIN" test $$dirs --parallel $(CHAINSAW_PARALLEL); \
+	else \
+	  "$$CHAINSAW_BIN" test --test-dir test/chainsaw/tests --parallel $(CHAINSAW_PARALLEL); \
+	fi
 
 helm-template:
 	helm template podtrace deploy/charts/podtrace

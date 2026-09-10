@@ -1,14 +1,15 @@
 package detector
 
 import (
-	"fmt"
+	"github.com/gma1k/podtrace/internal/alerting"
 
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/events"
 )
 
-func DetectIssues(allEvents []*events.Event, errorRateThreshold, rttSpikeThreshold float64) []string {
-	var issues []string
+// DetectIssues returns the typed issues present in a batch of events.
+func DetectIssues(allEvents []*events.Event, errorRateThreshold, rttSpikeThreshold float64) []Issue {
+	var issues []Issue
 
 	var connectEvents []*events.Event
 	for _, e := range allEvents {
@@ -29,7 +30,19 @@ func DetectIssues(allEvents []*events.Event, errorRateThreshold, rttSpikeThresho
 		}
 		errorRate := float64(errors) / float64(len(connectEvents)) * 100
 		if errorRate > errorRateThreshold {
-			issues = append(issues, fmt.Sprintf("High connection failure rate: %.1f%% (%d/%d) (threshold: %.1f%%)", errorRate, errors, len(connectEvents), errorRateThreshold))
+			issues = append(issues, Issue{
+				ID:       IDConnectionFailureRate,
+				Severity: alerting.SeverityWarning,
+				Evidence: []Evidence{
+					evidence("error_rate", errorRate, errorRateThreshold, "%"),
+					evidence("failed_connections", float64(errors), 0, "count"),
+					evidence("total_connections", float64(len(connectEvents)), 0, "count"),
+				},
+				Remediation: "Check the destination's readiness and any NetworkPolicy or " +
+					"firewall between the two; the service map shows which peer is failing.",
+				Message: fmtRate("High connection failure rate: %.1f%% (%d/%d) (threshold: %.1f%%)",
+					errorRate, errors, len(connectEvents), errorRateThreshold),
+			})
 		}
 	}
 
@@ -52,7 +65,20 @@ func DetectIssues(allEvents []*events.Event, errorRateThreshold, rttSpikeThresho
 		}
 		spikeRate := float64(spikes) / float64(len(tcpEvents)) * 100
 		if spikeRate > config.SpikeRateThreshold {
-			issues = append(issues, fmt.Sprintf("High TCP RTT spike rate: %.1f%% (%d/%d) (threshold: %.1fms)", spikeRate, spikes, len(tcpEvents), rttSpikeThreshold))
+			issues = append(issues, Issue{
+				ID:       IDRTTSpikeRate,
+				Severity: alerting.SeverityWarning,
+				Evidence: []Evidence{
+					evidence("spike_rate", spikeRate, config.SpikeRateThreshold, "%"),
+					evidence("rtt_threshold", rttSpikeThreshold, rttSpikeThreshold, "ms"),
+					evidence("spikes", float64(spikes), 0, "count"),
+					evidence("total_operations", float64(len(tcpEvents)), 0, "count"),
+				},
+				Remediation: "Round trips are slow on the wire rather than in the application; " +
+					"check node saturation and the network path to the peer.",
+				Message: fmtRate("High TCP RTT spike rate: %.1f%% (%d/%d) (threshold: %.1fms)",
+					spikeRate, spikes, len(tcpEvents), rttSpikeThreshold),
+			})
 		}
 	}
 
@@ -89,25 +115,25 @@ func DetectIssues(allEvents []*events.Event, errorRateThreshold, rttSpikeThresho
 		}
 	}
 
-	// Same thresholds the monitor and BPF side honor — a hardcoded copy
-	// here silently dropped alerts the monitor had already raised whenever
-	// PODTRACE_ALERT_*_PCT was tuned below the defaults.
 	for resourceName, maxUtil := range resourceAlerts {
-		var severity string
-		switch {
-		case maxUtil >= config.AlertEmergPct:
-			severity = "EMERGENCY"
-		case maxUtil >= config.AlertCritPct:
-			severity = "CRITICAL"
-		case maxUtil >= config.AlertWarnPct:
-			severity = "WARNING"
+		severity, firing := severityForUtilization(maxUtil,
+			config.AlertWarnPct, config.AlertCritPct, config.AlertEmergPct)
+		if !firing {
+			continue
 		}
-
-		if severity != "" {
-			issues = append(issues, fmt.Sprintf("Resource limit %s: %s - %d%% utilization (threshold: %d%% warning, %d%% critical, %d%% emergency)",
-				severity, resourceName, maxUtil,
-				config.AlertWarnPct, config.AlertCritPct, config.AlertEmergPct))
-		}
+		issues = append(issues, Issue{
+			ID:       IDResourceSaturation,
+			Severity: severity,
+			Subject:  Subject{Resource: resourceName},
+			Evidence: []Evidence{
+				evidence("utilization", float64(maxUtil), float64(config.AlertWarnPct), "%"),
+			},
+			Remediation: "Raise the container's limit for this resource, or reduce what the " +
+				"workload asks of it; saturation here shows up as latency everywhere else.",
+			Message: fmtRate("Resource limit %s: %s - %d%% utilization (threshold: %d%% warning, %d%% critical, %d%% emergency)",
+				severityLabel(severity), resourceName, maxUtil,
+				config.AlertWarnPct, config.AlertCritPct, config.AlertEmergPct),
+		})
 	}
 
 	return issues

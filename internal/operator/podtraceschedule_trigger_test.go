@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -274,5 +275,33 @@ func TestTriggeredSessionName(t *testing.T) {
 	long := triggeredSessionName("this-is-a-very-long-schedule-name-that-exceeds-the-k8s-limit-easily", "prod", "p", at)
 	if len(long) > 63 {
 		t.Errorf("long schedule name not bounded: %d chars", len(long))
+	}
+}
+
+func TestEveryTriggerSourceKindIsAcceptedByTheCRD(t *testing.T) {
+	crd := repoFile(t, "deploy", "charts", "podtrace", "templates", "crds",
+		"podtrace.io_podtraceschedules.yaml")
+
+	for _, kind := range []podtracev1alpha1.TriggerSourceKind{
+		podtracev1alpha1.TriggerSourceResourceAlert,
+		podtracev1alpha1.TriggerSourceOOMKill,
+		podtracev1alpha1.TriggerSourceErrorRate,
+		podtracev1alpha1.TriggerSourceIssue,
+	} {
+		if !strings.Contains(crd, "- "+string(kind)) {
+			t.Errorf("kind %q exists in Go but is not in the CRD enum; the API server would "+
+				"reject a schedule using it even though the operator handles it", kind)
+		}
+	}
+}
+
+func TestAnIssueAlertMapsToTheIssueTriggerKind(t *testing.T) {
+	got, ok := triggerSourceKindForAlertSource(alerting.AlertSourceIssue)
+	if !ok || got != podtracev1alpha1.TriggerSourceIssue {
+		t.Errorf("issue alerts map to %q,%v; want Issue,true. Without this a firing issue "+
+			"cannot trigger the deep-dive session that explains it", got, ok)
+	}
+	if _, ok := triggerSourceKindForAlertSource("not_a_source"); ok {
+		t.Error("an unknown alert source was mapped to a trigger kind")
 	}
 }

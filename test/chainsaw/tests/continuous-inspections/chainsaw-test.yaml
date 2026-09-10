@@ -1,0 +1,377 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: continuous-inspections
+spec:
+  concurrent: false
+  description: |
+    Property tested: a rule evaluated over the agent's own metric surface
+    fires a typed issue, exposes it as podtrace_issue_active, writes the
+    Kubernetes Event the flight-recorder contract needs, and clears when the
+    condition goes away.
+
+    This is the only layer that can check it. Unit tests prove the rule
+    arithmetic, the hold timing and the alert shape against hand-built
+    snapshots — but they cannot prove that the BPF probes actually populate
+    the families the rules read, that the operator's CRD translation reaches
+    the agent, that the agent's own registry is gatherable from inside the
+    inspection loop, or that a real 500-serving workload trips the rule.
+
+    Steps:
+      1. Turn on the metrics plane with inspections, via the TracerConfig.
+      2. Assert the operator translated the fields into agent environment.
+      3. Run a workload that serves nothing but 500s.
+      4. Assert the inspection loop is running at all.
+      5. Assert podtrace_issue_active fires for l7.error_rate on it.
+      6. Assert the Kubernetes Event the trigger contract needs was written.
+      7. Stop the errors and assert the issue clears and its series is gone.
+  timeouts:
+    apply: 60s
+    assert: 120s
+    exec: 900s
+    cleanup: 180s
+    delete: 180s
+  steps:
+    - name: enable-inspections
+      description: |
+        Patch the chart-rendered TracerConfig so this takes the same path a
+        `helm upgrade --set agent.metrics.inspections.enabled=true` would.
+
+        Interval and hold time are tightened from their production defaults so
+        the suite finishes inside CI's budget: a 10s interval and a 20s hold
+        rather than 30s and the rules' own 1-3 minutes. The rule logic is
+        unchanged, only how long it waits before believing a condition.
+      try:
+        - script:
+            content: |
+              set -eu
+
+              for _ in $(seq 1 60); do
+                if kubectl -n podtrace-system get endpoints podtrace-webhook \
+                     -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null | grep -q .; then
+                  if kubectl patch tracerconfig default --type=merge --dry-run=server \
+                       -p '{"metadata":{"annotations":{}}}' >/dev/null 2>&1; then
+                    break
+                  fi
+                fi
+                sleep 2
+              done
+
+              kubectl patch tracerconfig default --type=merge -p '{
+                "spec": {
+                  "agent": {
+                    "metrics": {
+                      "enabled": true,
+                      "inspections": {
+                        "enabled": true,
+                        "interval": "10s",
+                        "alerts": true,
+                        "holdTime": "20s",
+                        "thresholds": {
+                          "errorRatePercent": 20,
+                          "minRequestsPerMinute": 12
+                        }
+                      }
+                    }
+                  }
+                }
+              }'
+
+              for _ in $(seq 1 150); do
+                desired=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.desiredNumberScheduled}')
+                updated=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.updatedNumberScheduled}')
+                ready=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.numberReady}')
+                if [ -n "${desired}" ] && [ "${updated}" = "${desired}" ] && [ "${ready}" = "${desired}" ]; then
+                  echo "all ${desired} agents updated and ready"
+                  break
+                fi
+                sleep 2
+              done
+              if [ "${updated:-0}" != "${desired:-1}" ] || [ "${ready:-0}" != "${desired:-1}" ]; then
+                echo "FAIL: agents did not converge (updated=${updated:-?} ready=${ready:-?} desired=${desired:-?})"
+                kubectl -n podtrace-system get pod -l podtrace.io/component=agent
+                exit 1
+              fi
+
+    - name: agent-carries-the-env
+      description: |
+        Asserted separately from the behaviour so a failure here points at
+        the operator's CRD translation rather than at the rule engine.
+      try:
+        - script:
+            content: |
+              set -eu
+              env=$(kubectl -n podtrace-system get ds podtrace-agent \
+                -o jsonpath='{range .spec.template.spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}')
+              for want in \
+                'PODTRACE_WORKLOAD_METRICS=true' \
+                'PODTRACE_INSPECTIONS=true' \
+                'PODTRACE_INSPECTIONS_INTERVAL=10s' \
+                'PODTRACE_INSPECTIONS_HOLD_TIME=20s' \
+                'PODTRACE_INSPECTIONS_ALERTS=true' \
+                'PODTRACE_INSPECTIONS_ERROR_RATE_PCT=20' \
+                'PODTRACE_INSPECTIONS_MIN_REQUEST_RATE=0.2'
+              do
+                if printf '%s' "${env}" | grep -qx "${want}"; then
+                  continue
+                fi
+                echo "FAIL: agent env missing ${want}"
+
+                field=$(printf '%s' "${want}" | sed 's/=.*//')
+                echo "--- what the TracerConfig actually holds ---"
+                kubectl get tracerconfig default \
+                  -o jsonpath='{.spec.agent.metrics.inspections}{"\n"}' || true
+                echo "--- fields this cluster's CRD accepts ---"
+                kubectl get crd tracerconfigs.podtrace.io -o json 2>/dev/null \
+                  | grep -o '"holdTime"' >/dev/null \
+                  && echo "CRD accepts holdTime" \
+                  || echo "CRD does NOT accept holdTime: it predates this field, so the" \
+                          "patch above was silently stripped. Run helm upgrade to install" \
+                          "the current CRD before blaming the operator (${field})."
+                echo "--- full agent env ---"
+                printf '%s\n' "${env}"
+                exit 1
+              done
+              echo "operator rendered the inspection env"
+
+    - name: run-the-failing-workload
+      try:
+        - apply:
+            file: workload.yaml
+        - assert:
+            file: assert-workload-ready.yaml
+
+    - name: the-loop-is-running
+      description: |
+        Asserted before the issue so a stuck loop is distinguishable from a
+        rule that simply did not fire. The evaluations counter has to move,
+        not merely exist.
+      try:
+        - script:
+            content: |
+              set -eu
+              scraper=$(kubectl -n inspect-app get pod \
+                -l app=metrics-scraper -o jsonpath='{.items[0].metadata.name}')
+
+              agent_ips() {
+                kubectl -n podtrace-system get pod -l podtrace.io/component=agent \
+                  -o jsonpath='{range .items[*]}{.status.podIP} {end}'
+              }
+
+              read_counter() {
+                for ip in $(agent_ips); do
+                  kubectl -n inspect-app exec "${scraper}" -c curl -- \
+                    curl -sS --max-time 10 "http://${ip}:9090/metrics" 2>/dev/null \
+                    | grep "^${1} " | awk '{print $2; exit}'
+                done
+              }
+
+              first=""
+              for _ in $(seq 1 24); do
+                first=$(read_counter podtrace_inspections_evaluations_total | head -1)
+                [ -n "${first}" ] && break
+                sleep 5
+              done
+              if [ -z "${first}" ]; then
+                echo "FAIL: podtrace_inspections_evaluations_total is absent; the engine was"
+                echo "      never constructed, so no rule can ever fire"
+                kubectl -n podtrace-system logs -l podtrace.io/component=agent --tail=60 || true
+                exit 1
+              fi
+
+              second="${first}"
+              for _ in $(seq 1 20); do
+                sleep 3
+                second=$(read_counter podtrace_inspections_evaluations_total | head -1)
+                [ -n "${second}" ] || continue
+                [ "$(printf '%s\n' "${second}" | cut -d. -f1)" -gt "$(printf '%s\n' "${first}" | cut -d. -f1)" ] && break
+              done
+              if [ -z "${second}" ] || [ "$(printf '%s\n' "${second}" | cut -d. -f1)" -le "$(printf '%s\n' "${first}" | cut -d. -f1)" ]; then
+                echo "FAIL: evaluations did not advance (${first} -> ${second:-none}); the loop"
+                echo "      is wedged, which reads exactly like a healthy cluster"
+                kubectl -n podtrace-system logs -l podtrace.io/component=agent --tail=60 || true
+                exit 1
+              fi
+              echo "inspection loop advancing (${first} -> ${second})"
+
+    - name: the-issue-fires
+      description: |
+        The workload serves only 500s at ~10 rps, so l7.error_rate is true
+        continuously and must survive its For and reach the gauge.
+      try:
+        - script:
+            content: |
+              set -eu
+              scraper=$(kubectl -n inspect-app get pod \
+                -l app=metrics-scraper -o jsonpath='{.items[0].metadata.name}')
+
+              scrape() {
+                for ip in $(kubectl -n podtrace-system get pod \
+                              -l podtrace.io/component=agent \
+                              -o jsonpath='{range .items[*]}{.status.podIP} {end}'); do
+                  kubectl -n inspect-app exec "${scraper}" -c curl -- \
+                    curl -sS --max-time 10 "http://${ip}:9090/metrics" 2>/dev/null || true
+                done
+              }
+
+              found=""
+              for attempt in $(seq 1 24); do
+                out=$(scrape || true)
+                if printf '%s' "${out}" \
+                     | grep '^podtrace_issue_active' \
+                     | grep 'id="l7.error_rate"' \
+                     | grep 'workload="broken-api"' \
+                     | awk '{ if ($2 + 0 == 1) print }' | grep -q .; then
+                  found="${out}"
+                  echo "issue active on attempt ${attempt}"
+                  break
+                fi
+                sleep 5
+              done
+
+              if [ -z "${found}" ]; then
+                echo "FAIL: l7.error_rate never fired for broken-api, which serves nothing but"
+                echo "      500s. Either the l7 families are not being populated or the rule"
+                echo "      is not seeing them."
+                echo "--- l7 requests seen ---"
+                scrape | grep '^podtrace_workload_l7_requests_total' | head -10 || true
+                echo "--- issue series seen ---"
+                scrape | grep '^podtrace_issue_active' | head -10 || true
+                echo "--- inspection internals ---"
+                scrape | grep '^podtrace_inspections_' | head -20 || true
+                kubectl -n podtrace-system logs -l podtrace.io/component=agent --tail=80 || true
+                exit 1
+              fi
+
+              fail=0
+
+              if ! printf '%s' "${found}" \
+                   | grep 'podtrace_inspections_transitions_total' \
+                   | grep -q 'transition="activated"'; then
+                echo "FAIL: no activation counted; the gauge moved without the transition path"
+                fail=1
+              fi
+
+              if printf '%s' "${found}" \
+                   | grep '^podtrace_inspections_dropped_total' \
+                   | awk '{ if ($2 + 0 > 0) print }' | grep -q .; then
+                echo "FAIL: issues were dropped against the budget in a two-workload cluster"
+                fail=1
+              fi
+
+              if printf '%s' "${found}" \
+                   | grep '^podtrace_agent_issue_pod_unresolved_total' \
+                   | awk '{ if ($2 + 0 > 0) print }' | grep -q .; then
+                echo "FAIL: an activated issue could not resolve a pod, so it cannot start a"
+                echo "      session — the whole point of raising it"
+                fail=1
+              fi
+
+              [ "${fail}" -eq 0 ] || exit 1
+              echo "issue fired, was counted, and named a pod"
+
+    - name: the-trigger-event-was-written
+      description: |
+        The gauge alone only draws a line. This asserts the Event the
+        operator watches for actually exists, with the annotations a
+        PodTraceSchedule trigger matches on.
+      try:
+        - script:
+            content: |
+              set -eu
+              for _ in $(seq 1 45); do
+                if kubectl -n inspect-app get events \
+                     --field-selector reason=PodtraceAlert -o name 2>/dev/null | grep -q .; then
+                  break
+                fi
+                sleep 2
+              done
+
+              rows=$(kubectl -n inspect-app get events \
+                --field-selector reason=PodtraceAlert \
+                -o jsonpath='{range .items[*]}{.metadata.annotations.podtrace\.io/alert-source}|{.involvedObject.kind}|{.involvedObject.name}|{.metadata.annotations.podtrace\.io/alert-severity}{"\n"}{end}')
+
+              printf '%s\n' "${rows}"
+
+              if ! printf '%s' "${rows}" | grep -q '^issue|'; then
+                echo "FAIL: no Event carries the issue alert source. Without it a"
+                echo "      PodTraceSchedule with an Issue trigger never matches, so the"
+                echo "      metric-to-session loop is broken at the last hop."
+                kubectl -n inspect-app get events --field-selector reason=PodtraceAlert || true
+                exit 1
+              fi
+
+              if ! printf '%s' "${rows}" | grep -q '^issue|Pod|[^|]'; then
+                echo "FAIL: the issue Event does not name a Pod; the operator ignores an"
+                echo "      Event whose involved object is anything else, so it is inert"
+                exit 1
+              fi
+
+              if printf '%s' "${rows}" | grep '^issue|Pod|' | grep -q '|$'; then
+                echo "FAIL: the issue Event carries no severity; a PodTraceSchedule with a"
+                echo "      minSeverity ranks an empty severity as unknown and skips it"
+                exit 1
+              fi
+
+              echo "trigger Event present with a Pod involved object"
+
+    - name: the-issue-clears
+      description: |
+        Recovery has to remove the series, not leave it at zero: a series
+        left behind keeps answering instant queries forever.
+      try:
+        - script:
+            content: |
+              set -eu
+              kubectl -n inspect-app scale deployment inspect-loadgen --replicas=0
+              kubectl -n inspect-app wait --for=delete pod -l app=inspect-loadgen --timeout=120s || true
+
+              scraper=$(kubectl -n inspect-app get pod \
+                -l app=metrics-scraper -o jsonpath='{.items[0].metadata.name}')
+
+              cleared=0
+              for attempt in $(seq 1 24); do
+                still=0
+                for ip in $(kubectl -n podtrace-system get pod \
+                              -l podtrace.io/component=agent \
+                              -o jsonpath='{range .items[*]}{.status.podIP} {end}'); do
+                  if kubectl -n inspect-app exec "${scraper}" -c curl -- \
+                       curl -sS --max-time 10 "http://${ip}:9090/metrics" 2>/dev/null \
+                     | grep '^podtrace_issue_active' \
+                     | grep 'id="l7.error_rate"' \
+                     | grep -q 'workload="broken-api"'; then
+                    still=1
+                  fi
+                done
+                if [ "${still}" -eq 0 ]; then
+                  cleared=1
+                  echo "issue cleared on attempt ${attempt}"
+                  break
+                fi
+                sleep 5
+              done
+
+              if [ "${cleared}" -eq 0 ]; then
+                echo "FAIL: the issue series survived after the traffic stopped. A resolved"
+                echo "      issue left behind means the issue list only ever grows."
+                exit 1
+              fi
+
+              for ip in $(kubectl -n podtrace-system get pod \
+                            -l podtrace.io/component=agent \
+                            -o jsonpath='{range .items[*]}{.status.podIP} {end}'); do
+                kubectl -n inspect-app exec "${scraper}" -c curl -- \
+                  curl -sS --max-time 10 "http://${ip}:9090/metrics" 2>/dev/null \
+                  | grep 'podtrace_inspections_transitions_total' \
+                  | grep 'transition="cleared"' || true
+              done
+
+    - name: restore-the-tracerconfig
+      try:
+        - script:
+            content: |
+              set -eu
+              kubectl patch tracerconfig default --type=merge -p '{
+                "spec": {"agent": {"metrics": {"enabled": false, "inspections": {"enabled": false}}}}
+              }'
+              echo "plane restored to disabled"
