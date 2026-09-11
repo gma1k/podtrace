@@ -142,6 +142,7 @@ func inspectionThresholds() inspect.Thresholds {
 		ErrorRatePercent:     config.InspectionErrorRatePercent,
 		MinRequestsPerSecond: config.InspectionMinRequestsPerSecond,
 		MeanLatency:          config.InspectionMeanLatency,
+		AcquireMean:          config.InspectionAcquireMean,
 		UtilizationWarn:      config.AlertWarnPct,
 		UtilizationCritical:  config.AlertCritPct,
 		UtilizationEmergency: config.AlertEmergPct,

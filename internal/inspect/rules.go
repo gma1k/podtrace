@@ -12,6 +12,7 @@ const (
 	familyL7Requests  = "podtrace_workload_l7_requests_total"
 	familyL7Duration  = "podtrace_workload_l7_request_duration_seconds"
 	familyUtilization = "podtrace_workload_resource_utilization_percent"
+	familyAcquire     = "podtrace_workload_db_connection_acquire_seconds"
 )
 
 // RuleFamilies is every family the built-in rules read, and nothing else.
@@ -20,6 +21,7 @@ func RuleFamilies() []string {
 		familyL7Requests,
 		familyL7Duration,
 		familyUtilization,
+		familyAcquire,
 	}
 }
 
@@ -35,6 +37,8 @@ type Thresholds struct {
 	UtilizationCritical  int
 	UtilizationEmergency int
 
+	AcquireMean time.Duration
+
 	HoldTime time.Duration
 
 	HoldTimes map[detector.ID]time.Duration
@@ -49,6 +53,7 @@ func (t Thresholds) unset() bool {
 		t.UtilizationWarn == 0 &&
 		t.UtilizationCritical == 0 &&
 		t.UtilizationEmergency == 0 &&
+		t.AcquireMean == 0 &&
 		t.HoldTime == 0 &&
 		len(t.HoldTimes) == 0
 }
@@ -85,6 +90,7 @@ func DefaultThresholds() Thresholds {
 		UtilizationWarn:      80,
 		UtilizationCritical:  90,
 		UtilizationEmergency: 95,
+		AcquireMean:          100 * time.Millisecond,
 	}
 }
 
@@ -94,6 +100,7 @@ func Rules() []Rule {
 		errorRateRule(),
 		latencyRule(),
 		saturationRule(),
+		acquireLatencyRule(),
 	}
 }
 
@@ -273,6 +280,69 @@ func saturationRule() Rule {
 					Message: fmt.Sprintf("Resource limit %s: %s/%s %s at %d%% utilization (threshold: %d%% warning, %d%% critical, %d%% emergency)",
 						detector.SeverityLabel(severity), s.Namespace, s.Workload, resource, pct,
 						t.UtilizationWarn, t.UtilizationCritical, t.UtilizationEmergency),
+				})
+			}
+			return issues
+		},
+	}
+}
+
+// acquireLatencyRule fires when callers are spending real time getting a
+// database connection before their query can start.
+func acquireLatencyRule() Rule {
+	return Rule{
+		ID:  detector.IDDBAcquireSlow,
+		For: 2 * time.Minute,
+		Query: `sum by (namespace, workload) (rate(podtrace_workload_db_connection_acquire_seconds_sum[5m]))
+  / sum by (namespace, workload) (rate(podtrace_workload_db_connection_acquire_seconds_count[5m]))`,
+		Eval: func(w Window, t Thresholds) []detector.Issue {
+			if !w.Ready() {
+				return nil
+			}
+
+			type totals struct {
+				sample Sample
+				count  uint64
+				sum    float64
+			}
+			byWorkload := map[string]*totals{}
+			for _, d := range w.Deltas(familyAcquire) {
+				if d.Reset || d.Count == 0 {
+					continue
+				}
+				key := d.Sample.Namespace + "/" + d.Sample.Workload
+				agg, ok := byWorkload[key]
+				if !ok {
+					agg = &totals{sample: d.Sample}
+					byWorkload[key] = agg
+				}
+				agg.count += d.Count
+				agg.sum += d.Sum
+			}
+
+			var issues []detector.Issue
+			for _, agg := range byWorkload {
+				mean := time.Duration(agg.sum / float64(agg.count) * float64(time.Second))
+				if mean < t.AcquireMean {
+					continue
+				}
+				s := agg.sample
+				issues = append(issues, detector.Issue{
+					ID:       detector.IDDBAcquireSlow,
+					Severity: alerting.SeverityWarning,
+					Subject:  subjectOf(s),
+					Evidence: []detector.Evidence{
+						detector.NewEvidence("mean_acquire_time", mean.Seconds(),
+							t.AcquireMean.Seconds(), "s"),
+						detector.NewEvidence("waiting_acquisitions", float64(agg.count), 0, ""),
+					},
+					Remediation: "Check SetMaxOpenConns and SetMaxIdleConns together: a low " +
+						"maximum queues callers, while a low idle count makes them re-establish " +
+						"connections they could have reused. Both show up here. Compare with the " +
+						"application's own sql.DBStats to tell which.",
+					Message: fmt.Sprintf("Slow database connection acquisition: %s/%s spent a mean of %s across %d acquisitions, queueing or reconnecting (threshold: %s)",
+						s.Namespace, s.Workload, mean.Round(time.Millisecond), agg.count,
+						t.AcquireMean.Round(time.Millisecond)),
 				})
 			}
 			return issues

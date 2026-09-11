@@ -64,19 +64,21 @@ func TestEveryMappedProgramExists(t *testing.T) {
 func TestEveryPoolProgramIsMappedToThePoolGroup(t *testing.T) {
 	real := programsInBPFSource(t)
 
+	poolSources := map[string]bool{"database.c": true, "goacquire.c": true}
+
 	for name, file := range real {
-		if file != "database.c" {
+		if !poolSources[file] {
 			continue
 		}
 		group, mapped := probeGroupMap[name]
 		if !mapped {
-			t.Errorf("%s (database.c) is absent from probeGroupMap, so it defaults to %q "+
-				"while its siblings are %q", name, GroupNetwork, GroupPool)
+			t.Errorf("%s (%s) is absent from probeGroupMap, so it defaults to %q "+
+				"while its siblings are %q", name, file, GroupNetwork, GroupPool)
 			continue
 		}
 		if group != GroupPool {
-			t.Errorf("%s (database.c) maps to %q, want %q; a split group means the "+
-				"family half-populates", name, group, GroupPool)
+			t.Errorf("%s (%s) maps to %q, want %q; a split group means the "+
+				"family half-populates", name, file, group, GroupPool)
 		}
 	}
 }

@@ -481,3 +481,68 @@ func TestAKernelFamilyCollisionFailsAtStartup(t *testing.T) {
 			"scrape at runtime instead of failing loudly at startup")
 	}
 }
+
+func TestKernelPathRecordsConnectionAcquireWaits(t *testing.T) {
+	sink, reg := kernelSink(t)
+
+	sink.IngestKernel([]kernelagg.Row{
+		kernelRow(events.EventDBAcquire, 0, 140, 4, 480_000_000, 0),
+	})
+
+	metrics := gather(t, reg, "podtrace_workload_db_connection_acquire_seconds")
+	if len(metrics) != 1 {
+		t.Fatalf("got %d series, want 1; the kernel path must reach the same family as "+
+			"the event path or the metric disappears wherever kernelAggregation is on",
+			len(metrics))
+	}
+	h := metrics[0].GetHistogram()
+	if h.GetSampleCount() != 4 {
+		t.Errorf("count = %d, want 4", h.GetSampleCount())
+	}
+	if got := h.GetSampleSum(); got < 0.47 || got > 0.49 {
+		t.Errorf("sum = %v, want ~0.48s", got)
+	}
+}
+
+func TestEveryEventTypeReachesTheSameFamiliesOnBothPaths(t *testing.T) {
+	familyNames := func(reg *prometheus.Registry) map[string]bool {
+		t.Helper()
+		families, err := reg.Gather()
+		if err != nil {
+			t.Fatalf("Gather: %v", err)
+		}
+		out := map[string]bool{}
+		for _, f := range families {
+			if len(f.GetMetric()) > 0 {
+				out[f.GetName()] = true
+			}
+		}
+		return out
+	}
+
+	for typ, name := range allEventTypes {
+		eSink, eReg := eventSink(t)
+		kSink, kReg := kernelSink(t)
+
+		eSink.record(&events.Event{
+			Type: typ, CgroupID: kernelTestCgroup, LatencyNS: 30_000_000, Bytes: 0,
+		}, []string{"shop", "checkout", "Deployment", "app"})
+
+		row := kernelRow(typ, 0, kernelagg.BucketIndex(30_000_000), 1, 30_000_000, 0)
+		if !kSink.ingestKernelRow(&row) {
+			continue
+		}
+
+		want, got := familyNames(eReg), familyNames(kReg)
+		for family := range want {
+			if !got[family] {
+				t.Errorf("%s reaches %s on the event path but not on the kernel path.\n\n"+
+					"A histogram family reaches kernelObserve only if kernelHistogramLabels "+
+					"declares it; otherwise there is no descriptor, the observation is "+
+					"dropped, and the switch arm still reports it handled the row. The "+
+					"metric then exists in a default deployment and silently vanishes "+
+					"wherever kernelAggregation is on.", name, family)
+			}
+		}
+	}
+}

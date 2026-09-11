@@ -79,7 +79,7 @@ func (c *collectors) histogramFor(family string) (*prometheus.HistogramVec, bool
 	case "tls_handshake_duration_seconds":
 		return c.tlsHandshakeDuration, true
 	default:
-		return nil, false
+		return c.sat.histogramFor(family)
 	}
 }
 
@@ -137,7 +137,7 @@ func newCollectors(opts Options) *collectors {
 	}
 	return &collectors{
 		kernelAggregation: kernelAgg,
-		sat:               newSaturationCollectors(opts, withBase),
+		sat:               newSaturationCollectors(native, withBase),
 		l7Requests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: metricPrefix + "l7_requests_total",
 			Help: "Application-layer requests observed, by protocol and outcome. Use rate() for throughput and the status_class label for error ratio.",
@@ -236,6 +236,7 @@ func (c *collectors) all() []prometheus.Collector {
 			c.cpuBlocked,
 			c.tlsHandshakeDuration,
 		)
+		out = append(out, c.sat.histograms()...)
 	}
 	return append(out, c.sat.all()...)
 }

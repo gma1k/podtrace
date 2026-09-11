@@ -453,6 +453,7 @@ errors everywhere else, with nothing in either family saying what ran out.
 | `podtrace_workload_resource_utilization_percent` | Gauge | `resource` |
 | `podtrace_workload_db_connections_opened_total` | Counter | `db_system` |
 | `podtrace_workload_db_connections_closed_total` | Counter | `db_system` |
+| `podtrace_workload_db_connection_acquire_seconds` | Histogram | — |
 
 `resource` is `cpu`, `memory`, `io` or `other`. `db_system` is `postgresql`,
 `mysql`, `sqlite` or `other`, following OpenTelemetry's `db.system` vocabulary.
@@ -514,46 +515,79 @@ than trusting that difference absolutely: a process that exits without calling
 `PQfinish` is never counted as closing, so the close counter undercounts on
 abnormal termination.
 
-**There is no pool-exhaustion metric yet.** Connection *pooling* happens
-inside the application — `database/sql`, HikariCP, pgx — and a caller waiting
-for a free slot is parked on an in-process queue, not on the connect path these
-counters watch. So the honest answer to "is the pool exhausted" is that this
-surface does not yet say, and no family here pretends to.
+#### Connection acquisition, for Go only
 
-Earlier versions of this document listed `pool_connections`,
-`pool_utilization` and `pool_wait_time_seconds`. None of them ever existed.
+`podtrace_workload_db_connection_acquire_seconds` records the time a caller
+spent obtaining a pooled database connection before its query could start:
 
-How reachable the real signal is depends entirely on the runtime:
+- `_count` — acquisitions that took longer than 1ms
+- `_sum` — the total time callers lost to getting a connection
 
-| Runtime | Pool wait is | Reachable? |
+**It is not `DBStats.WaitCount`.** The probe times
+`database/sql.(*DB).conn` end to end, and that function covers two different
+causes which it cannot separate:
+
+| Cause | When | `DBStats.WaitCount` counts it |
 |---|---|---|
-| Go `database/sql` | a blocking call inside `(*DB).conn` | **yes** — see below |
+| queueing for a free slot | the pool is at `SetMaxOpenConns` | yes |
+| establishing a new connection | the pool is below its maximum | **no** |
+
+Both block the caller for real, which is why they share a metric, but they
+have different fixes, so the metric is named for what it measures rather than
+for one of its causes. Measured on a kind cluster:
+
+```
+workload      DBStats.WaitCount    this metric      cause
+poolstarve    203 waits / 97.6s    200 / 95.5s      real slot contention
+poolopen        0 waits / 0s       119 / 11.9s      connection churn
+```
+
+`poolopen` sets a generous `SetMaxOpenConns` but leaves `SetMaxIdleConns` at
+its default of 2 while eight callers run concurrently, so six connections are
+closed and re-established every round. `DBStats` reports no waits, correctly;
+the callers are still blocked, and this metric reports that. **When the two
+disagree, the gap is connection churn**, raise `SetMaxIdleConns`.
+
+Separating the two would mean reading `numOpen` and `maxOpen` out of the `*DB`
+struct, which needs a table of field offsets per Go release keyed on whatever
+version the target application was built with, and a wrong offset there does
+not fail, it returns a plausible number. The end-to-end duration needs no
+struct layout at all, which is what makes this probe correct on every Go
+version, at the cost of not attributing the cause.
+
+```promql
+# Acquisitions per second slower than 1ms
+rate(podtrace_workload_db_connection_acquire_seconds_count[5m])
+
+# Mean time lost per acquisition
+rate(podtrace_workload_db_connection_acquire_seconds_sum[5m])
+  / rate(podtrace_workload_db_connection_acquire_seconds_count[5m])
+```
+
+**This is Go `database/sql` only.** Pooling happens inside the application, and
+a caller waiting for a slot is parked on an in-process queue no kernel probe
+can see. How reachable that is depends on the runtime:
+
+| Runtime | Acquisition is | Instrumented? |
+|---|---|---|
+| Go `database/sql` | a call into `(*DB).conn` | **yes** |
 | Java (HikariCP) | `LockSupport.park` under JIT | no, practically |
 | Node (`pg-pool`) | a JavaScript promise queue | no |
 | Python | `Condition.wait` on a futex | only with interpreter frame walking |
 
-For Go this is tractable with machinery podtrace already ships. Resolving a Go
-symbol by name, finding its return sites, and reading struct fields out of a
-running process are all done today for quic-go's HTTP/3 probes — see
-`goSymbolFileOffset`, `goFuncReturnOffsets` and the `h3_offsets` map. Applied
-to `database/sql` that yields the real thing rather than a proxy:
+So absence of the series means a fast pool **or** a runtime this cannot see,
+not a healthy pool on its own. For anything but Go, export pool metrics from
+the application (HikariCP's JMX beans, Go's own `sql.DBStats`) and correlate
+by workload.
 
-- **wait time** — `(*DB).conn` entry to return is precisely where a caller
-  blocks for a free slot
-- **utilization** — `numOpen` over `maxOpen`, both plain fields on `*DB`; the
-  capacity a previous version of this document called unobservable is simply a
-  struct read
-- **wait count and total wait** — `database/sql` already keeps both for
-  `DBStats`, so they can be read rather than recomputed
+The probe is an entry-and-return uprobe on `database/sql.(*DB).conn`, resolved
+through `.gopclntab` so it works on stripped binaries. The symbol is absent
+when a program never queries, and absence is treated as "not applicable"
+rather than as a failure.
 
-The cost is the same one quic-go support carried: Go struct layouts shift
-between releases, so it needs a per-version offset table and version
-detection. That is why it is a roadmap item rather than something these two
-counters quietly approximate.
+Earlier versions of this document listed `pool_connections`,
+`pool_utilization` and `pool_wait_time_seconds`. None of them ever existed.
 
-Until then, if you need true pool metrics, export them from the application —
-Go's `sql.DBStats`, HikariCP's JMX beans — and correlate them with these
-counters by workload.
 
 Note the BPF side also emits an internal "pool exhausted" event, which this
 surface deliberately drops: it fires on any query more than 10ms after the

@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -64,6 +65,7 @@ func TestEveryInspectionFieldIsTranslated(t *testing.T) {
 			ErrorRatePercent:     ptr(int32(3)),
 			MinRequestsPerMinute: ptr(int32(30)),
 			MeanLatency:          &metav1.Duration{Duration: 250 * time.Millisecond},
+			AcquireMean:          &metav1.Duration{Duration: 75 * time.Millisecond},
 		},
 	}))
 
@@ -75,6 +77,7 @@ func TestEveryInspectionFieldIsTranslated(t *testing.T) {
 		envInspectionErrorRate:   "3",
 		envInspectionMinRequests: "0.5",
 		envInspectionMeanLatency: "250ms",
+		envInspectionAcquireMean: "75ms",
 	} {
 		if got[name] != want {
 			t.Errorf("%s = %q, want %q", name, got[name], want)
@@ -91,10 +94,11 @@ func TestEveryTranslatedValueIsParsedBackByTheAgent(t *testing.T) {
 			ErrorRatePercent:     ptr(int32(12)),
 			MinRequestsPerMinute: ptr(int32(1)),
 			MeanLatency:          &metav1.Duration{Duration: 1500 * time.Millisecond},
+			AcquireMean:          &metav1.Duration{Duration: 900 * time.Millisecond},
 		},
 	}))
 
-	for _, name := range []string{envInspectionsInterval, envInspectionMeanLatency} {
+	for _, name := range []string{envInspectionsInterval, envInspectionMeanLatency, envInspectionAcquireMean} {
 		if _, err := time.ParseDuration(env[name]); err != nil {
 			t.Errorf("%s = %q, which the agent's duration parser rejects: %v",
 				name, env[name], err)
@@ -116,7 +120,7 @@ func TestAZeroOrNegativeIntervalIsLeftToTheAgentDefault(t *testing.T) {
 			MeanLatency: &metav1.Duration{Duration: 0},
 		},
 	}))
-	for _, name := range []string{envInspectionsInterval, envInspectionMeanLatency} {
+	for _, name := range []string{envInspectionsInterval, envInspectionMeanLatency, envInspectionAcquireMean} {
 		if _, present := got[name]; present {
 			t.Errorf("%s was emitted as %q; a zero interval would spin the loop",
 				name, got[name])
@@ -151,5 +155,36 @@ func TestAZeroHoldTimeIsLeftToTheRuleDefaults(t *testing.T) {
 					"interval's blip", envInspectionsHoldTime, got[envInspectionsHoldTime])
 			}
 		})
+	}
+}
+
+func TestEveryThresholdFieldOnTheCRDReachesTheAgent(t *testing.T) {
+	spec := &podtracev1alpha1.AgentInspectionThresholdsSpec{}
+	v := reflect.ValueOf(spec).Elem()
+	typ := v.Type()
+
+	for i := 0; i < typ.NumField(); i++ {
+		switch v.Field(i).Type().String() {
+		case "*int32":
+			v.Field(i).Set(reflect.ValueOf(ptr(int32(7))))
+		case "*v1.Duration":
+			v.Field(i).Set(reflect.ValueOf(&metav1.Duration{Duration: 7 * time.Second}))
+		default:
+			t.Fatalf("field %s has unhandled type %s; teach this guard about it",
+				typ.Field(i).Name, v.Field(i).Type())
+		}
+	}
+
+	got := envMap(inspectionsEnv(&podtracev1alpha1.AgentInspectionsSpec{
+		Enabled:    true,
+		Thresholds: spec,
+	}))
+
+	if len(got)-1 != typ.NumField() {
+		t.Errorf("%d threshold fields are set but inspectionsEnv emitted %d variables "+
+			"besides the enabled flag: %v\n\nA field added to the CRD without a matching "+
+			"branch in inspectionsEnv is accepted by the API server, stored, and then "+
+			"silently dropped on the way to the agent, which runs the shipped default "+
+			"while the CR says otherwise.", typ.NumField(), len(got)-1, got)
 	}
 }

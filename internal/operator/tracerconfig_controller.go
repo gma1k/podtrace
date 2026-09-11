@@ -122,7 +122,8 @@ func (r *TracerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if tc.Spec.BTFMode == podtracev1alpha1.BTFModeEmbedded {
 		logger.Info("spec.btfMode=embedded is not implemented; agent uses host BTF (auto)")
 	}
-	r.setCondition(&tc, ConditionReconciled, metav1.ConditionTrue, "Reconciled", "agent infrastructure reconciled")
+	r.setCondition(&tc, ConditionReconciled, metav1.ConditionTrue, "Reconciled",
+		reconciledMessageFor(&tc))
 	r.setCondition(&tc, ConditionReady,
 		conditionStatusFromBool(tc.Status.ReadyAgents == tc.Status.DesiredAgents && tc.Status.DesiredAgents > 0),
 		"AgentFleetReady",
@@ -349,6 +350,17 @@ func (r *TracerConfigReconciler) ensureAgentRBAC(ctx context.Context, tc *podtra
 }
 
 // agentObjectLabels is the label set every agent-owned object carries.
+// reconciledMessageFor renders the Reconciled condition's message, calling out
+// configuration the operator accepted but did not act on.
+func reconciledMessageFor(tc *podtracev1alpha1.TracerConfig) string {
+	msg := "agent infrastructure reconciled"
+	if tc != nil && tc.Spec.BTFMode == podtracev1alpha1.BTFModeEmbedded {
+		msg += "; spec.btfMode=embedded is not implemented and was ignored, " +
+			"the agent resolves BTF from the host as it does for \"auto\""
+	}
+	return msg
+}
+
 func agentObjectLabels(tracerConfigName string) map[string]string {
 	return map[string]string{
 		LabelManagedBy:    ManagedByValue,

@@ -16,6 +16,7 @@ func TestTheIssueVocabularyIsStable(t *testing.T) {
 		"resource.saturation",
 		"l7.error_rate",
 		"l7.latency_degraded",
+		"db.connection_acquire_slow",
 	}
 
 	got := make([]string, 0, len(Registry))

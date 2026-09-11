@@ -156,8 +156,8 @@ Outside the promise:
 - **Thresholds and `For` durations.** These are tuning, and their defaults may
   change in a minor release.
 - **Whether a rule exists for a given failure mode.** A rule is removed when
-  the signal it read turns out not to measure what its id claimed —
-  `pool.exhaustion` was withdrawn before release for exactly that reason.
+  the signal it read turns out not to measure what its id claimed,
+  `db.connection_acquire_slow` was withdrawn before release for exactly that reason.
 
 The vocabulary and the rules are documented in
 [docs/continuous-inspections.md](docs/continuous-inspections.md).

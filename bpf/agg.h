@@ -172,6 +172,7 @@ static __always_inline int agg_from_event(struct event *e, s32 status_num)
 	case EVENT_DNS_QUERY:
 	case EVENT_SCHED_SWITCH:
 	case EVENT_TLS_HANDSHAKE:
+	case EVENT_DB_ACQUIRE:
 		break;
 
 	case EVENT_READ:

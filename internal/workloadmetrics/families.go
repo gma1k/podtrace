@@ -35,6 +35,9 @@ func (s *Sink) collectorFor(full string) (prometheus.Collector, bool) {
 	if short == full {
 		return nil, false
 	}
+	if s.kernelHist.owns(short) {
+		return kernelFamilyCollector{k: s.kernelHist, family: short}, true
+	}
 	if h, ok := s.c.histogramFor(short); ok {
 		return h, true
 	}

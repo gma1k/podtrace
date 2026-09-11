@@ -699,8 +699,9 @@ func GeneratePoolSection(d Diagnostician, duration time.Duration) string {
 	acquireEvents := d.FilterEvents(events.EventPoolAcquire)
 	releaseEvents := d.FilterEvents(events.EventPoolRelease)
 	exhaustedEvents := d.FilterEvents(events.EventPoolExhausted)
+	acquireWaits := d.FilterEvents(events.EventDBAcquire)
 
-	if len(acquireEvents) == 0 && len(releaseEvents) == 0 {
+	if len(acquireEvents) == 0 && len(releaseEvents) == 0 && len(acquireWaits) == 0 {
 		return ""
 	}
 
@@ -727,6 +728,23 @@ func GeneratePoolSection(d Diagnostician, duration time.Duration) string {
 		if stats.P50WaitTime > 0 || stats.P95WaitTime > 0 || stats.P99WaitTime > 0 {
 			report += formatter.Percentiles(stats.P50WaitTime, stats.P95WaitTime, stats.P99WaitTime)
 		}
+	}
+
+	if waits := analyzer.AnalyzeAcquireWaits(acquireWaits); waits.Count > 0 {
+		report += "\n"
+		report += "Connection acquisition (Go database/sql):\n"
+		report += fmt.Sprintf("  Blocking acquisitions: %d (%.1f/sec)\n",
+			waits.Count, d.CalculateRate(waits.Count, duration))
+		report += fmt.Sprintf("  Total time waiting: %.2fms\n",
+			float64(waits.Total.Nanoseconds())/float64(config.NSPerMS))
+		report += fmt.Sprintf("  Average wait: %.2fms\n",
+			float64(waits.Avg.Nanoseconds())/float64(config.NSPerMS))
+		report += fmt.Sprintf("  Max wait: %.2fms\n",
+			float64(waits.Max.Nanoseconds())/float64(config.NSPerMS))
+		report += formatter.Percentiles(waits.P50, waits.P95, waits.P99)
+		report += "  Note: covers queueing for a free slot and establishing a new\n"
+		report += "        connection; compare with the app's sql.DBStats.WaitCount to\n"
+		report += "        tell them apart. Only acquisitions slower than 1ms appear.\n"
 	}
 
 	poolSummaries := tracker.GetPoolSummaryFromEvents(acquireEvents, releaseEvents, exhaustedEvents)

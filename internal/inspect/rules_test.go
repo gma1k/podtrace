@@ -1,6 +1,8 @@
 package inspect
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -51,6 +53,19 @@ func TestEveryRuleIsRegisteredAndDocumented(t *testing.T) {
 		}
 		if rule.Eval == nil {
 			t.Fatalf("rule %q has no Eval", rule.ID)
+		}
+	}
+
+	doc, err := os.ReadFile(filepath.Join("..", "..", "docs", "continuous-inspections.md"))
+	if err != nil {
+		t.Fatalf("read docs/continuous-inspections.md: %v", err)
+	}
+	for _, rule := range Rules() {
+		if !strings.Contains(string(doc), string(rule.ID)) {
+			t.Errorf("rule %q is not mentioned in docs/continuous-inspections.md.\n\nIssue "+
+				"ids are contractual and show up in podtrace_issue_active and in alert "+
+				"routing, so a rule that can page someone has to be findable by the id they "+
+				"are paged with.", rule.ID)
 		}
 	}
 }
@@ -347,7 +362,7 @@ func TestRuleFamiliesCoversEveryFamilyTheRulesRead(t *testing.T) {
 	}
 
 	read := map[string]bool{}
-	for _, family := range []string{familyL7Requests, familyL7Duration, familyUtilization} {
+	for _, family := range []string{familyL7Requests, familyL7Duration, familyUtilization, familyAcquire} {
 		read[family] = true
 	}
 

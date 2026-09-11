@@ -171,6 +171,9 @@ data:
               {{- with .meanLatency }}
               meanLatency: {{ . | quote }}
               {{- end }}
+              {{- with .acquireMean }}
+              acquireMean: {{ . | quote }}
+              {{- end }}
             {{- end }}
           {{- end }}
         {{- end }}

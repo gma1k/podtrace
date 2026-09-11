@@ -82,16 +82,29 @@ of large requests.
 | `resource.saturation` | a container is near its CPU, memory or I/O limit | 1m |
 | `l7.error_rate` | the workload's application-layer error ratio exceeds its threshold | 2m |
 | `l7.latency_degraded` | the workload's mean request duration exceeds its threshold | 3m |
+| `db.connection_acquire_slow` | callers spend a mean of 100ms or more obtaining a database connection | 2m |
 
-There is no rule for connection-pool exhaustion yet. Pooling lives inside the
-application, and the connection counters this surface exposes watch the
-connect path rather than the in-process queue a caller waits on — so a rule
-built on them would alert on something else while claiming to alert on
-exhaustion. A `pool.exhaustion` id was withdrawn before release for exactly
-that reason.
+`db.connection_acquire_slow` replaces the `pool.exhaustion` id that was
+withdrawn before an earlier release. The withdrawal was right for the reason
+given then, no metric measured the thing the name claimed, and the
+replacement is named more narrowly on purpose. It reads
+`podtrace_workload_db_connection_acquire_seconds`, which times
+`database/sql.(*DB).conn` end to end and therefore cannot separate two causes:
 
-The signal is reachable for Go's `database/sql` with machinery podtrace
-already ships, and that is a roadmap item; the rule follows the metric.
+- **queueing** for a free slot once the pool is at `SetMaxOpenConns`, which is
+  exhaustion
+- **establishing** a new connection while the pool is below its maximum,
+  which is churn, usually from `SetMaxIdleConns` being too low
+
+Both block the caller, so both deserve an issue; calling it exhaustion would
+have been wrong in the second case. A workload churning connections fires this
+rule while its own `sql.DBStats.WaitCount` reads zero, comparing the two is
+how an operator tells which cause they have. The remediation text says so.
+
+It keys on the mean rather than the count, because a thousand callers each
+waiting a microsecond is a busy pool, not a slow one. Go `database/sql` only:
+absence is not evidence of a healthy pool on a JVM, Node or Python workload.
+See the saturation section of [continuous-metrics.md](continuous-metrics.md).
 
 Each rule carries the PromQL an operator can run to see what it saw. For
 example, `l7.error_rate` is:

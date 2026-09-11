@@ -110,3 +110,40 @@ func AnalyzePool(acquireEvents, releaseEvents, exhaustedEvents []*events.Event) 
 
 	return stats
 }
+
+// AcquireWaitStats summarises time callers spent obtaining a pooled database
+// connection, measured end to end across database/sql.(*DB).conn.
+type AcquireWaitStats struct {
+	Count int
+	Total time.Duration
+	Avg   time.Duration
+	Max   time.Duration
+	P50   float64
+	P95   float64
+	P99   float64
+}
+
+// AnalyzeAcquireWaits summarises connection-acquisition waits.
+func AnalyzeAcquireWaits(acquireWaitEvents []*events.Event) AcquireWaitStats {
+	stats := AcquireWaitStats{Count: len(acquireWaitEvents)}
+	if stats.Count == 0 {
+		return stats
+	}
+
+	waits := make([]float64, 0, len(acquireWaitEvents))
+	for _, e := range acquireWaitEvents {
+		d := e.Latency()
+		stats.Total += d
+		if d > stats.Max {
+			stats.Max = d
+		}
+		waits = append(waits, float64(d.Nanoseconds())/float64(config.NSPerMS))
+	}
+
+	stats.Avg = stats.Total / time.Duration(stats.Count)
+	sort.Float64s(waits)
+	stats.P50 = Percentile(waits, 50)
+	stats.P95 = Percentile(waits, 95)
+	stats.P99 = Percentile(waits, 99)
+	return stats
+}

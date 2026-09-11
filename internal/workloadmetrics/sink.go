@@ -406,6 +406,10 @@ func (s *Sink) record(e *events.Event, base []string) bool {
 		s.observe(s.c.tlsHandshakeDuration, "tls_handshake_duration_seconds", base, seconds)
 		return true
 
+	case events.EventDBAcquire:
+		s.observe(s.c.sat.acquireWait, "db_connection_acquire_seconds", base, seconds)
+		return true
+
 	case events.EventResourceLimit, events.EventPoolAcquire,
 		events.EventPoolRelease, events.EventPoolExhausted:
 		return s.recordSaturation(e, base)

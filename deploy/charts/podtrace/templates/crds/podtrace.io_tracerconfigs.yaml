@@ -1065,6 +1065,11 @@ spec:
                           thresholds:
                             description: Thresholds tune when the built-in rules fire.
                             properties:
+                              acquireMean:
+                                description: |-
+                                  AcquireMean is the mean time callers spend queued for a free database
+                                  connection above which db.connection_acquire_slow fires. Go database/sql only.
+                                type: string
                               errorRatePercent:
                                 description: |-
                                   ErrorRatePercent is the application-layer error ratio above which
@@ -1191,7 +1196,13 @@ spec:
                     type: boolean
                 type: object
               btfMode:
-                description: BTFMode controls how the agent resolves BTF for CO-RE.
+                description: |-
+                  BTFMode controls how the agent resolves BTF for CO-RE.
+
+                  "embedded" is accepted but NOT IMPLEMENTED: no BTF is shipped in the image,
+                  so the agent behaves as for "auto" and the admission webhook warns. It stays
+                  in the enum because removing a value from a published API is a breaking
+                  change; see docs/crd-tracerconfig.md.
                 enum:
                 - auto
                 - host
