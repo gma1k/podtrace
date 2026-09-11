@@ -7,12 +7,18 @@ import (
 )
 
 // BTFMode controls how the agent resolves BTF for CO-RE.
+//
+// "embedded" is accepted but NOT IMPLEMENTED: no BTF is shipped in the image,
+// so the agent behaves as for "auto" and the admission webhook warns. It stays
+// in the enum because removing a value from a published API is a breaking
+// change; see docs/crd-tracerconfig.md.
 // +kubebuilder:validation:Enum=auto;host;embedded
 type BTFMode string
 
 const (
-	BTFModeAuto     BTFMode = "auto"
-	BTFModeHost     BTFMode = "host"
+	BTFModeAuto BTFMode = "auto"
+	BTFModeHost BTFMode = "host"
+
 	BTFModeEmbedded BTFMode = "embedded"
 )
 
@@ -158,6 +164,11 @@ type AgentInspectionThresholdsSpec struct {
 	// l7.latency_degraded fires.
 	// +optional
 	MeanLatency *metav1.Duration `json:"meanLatency,omitempty"`
+
+	// AcquireMean is the mean time callers spend queued for a free database
+	// connection above which db.connection_acquire_slow fires. Go database/sql only.
+	// +optional
+	AcquireMean *metav1.Duration `json:"acquireMean,omitempty"`
 }
 
 // AgentMetricsLabelsSpec opts into labels that are deliberately absent by

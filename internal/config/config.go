@@ -177,6 +177,7 @@ var (
 	InspectionErrorRatePercent     = getFloatEnvOrDefault("PODTRACE_INSPECTIONS_ERROR_RATE_PCT", 5)
 	InspectionMinRequestsPerSecond = getFloatEnvOrDefault("PODTRACE_INSPECTIONS_MIN_REQUEST_RATE", 0.1)
 	InspectionMeanLatency          = getDurationEnvOrDefault("PODTRACE_INSPECTIONS_MEAN_LATENCY", time.Second)
+	InspectionAcquireMean          = getDurationEnvOrDefault("PODTRACE_INSPECTIONS_ACQUIRE_MEAN", 100*time.Millisecond)
 
 	InspectionsHoldTime = getDurationEnvOrDefault("PODTRACE_INSPECTIONS_HOLD_TIME", 0)
 )

@@ -94,6 +94,8 @@ var probeGroupMap = map[string]ProbeGroup{
 	"uretprobe_PQexec": GroupDatabase,
 
 	// Pool
+	"uprobe_go_db_conn":            GroupPool,
+	"uprobe_go_db_conn_ret":        GroupPool,
 	"uprobe_sqlite3_prepare_v2":    GroupPool,
 	"uprobe_sqlite3_prepare":       GroupPool,
 	"uprobe_sqlite3_prepare16":     GroupPool,

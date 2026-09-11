@@ -43,6 +43,7 @@ var allEventTypes = map[events.EventType]string{
 	events.EventPoolAcquire:    "EventPoolAcquire",
 	events.EventPoolRelease:    "EventPoolRelease",
 	events.EventPoolExhausted:  "EventPoolExhausted",
+	events.EventDBAcquire:      "EventDBAcquire",
 	events.EventUnlink:         "EventUnlink",
 	events.EventRename:         "EventRename",
 	events.EventRedisCmd:       "EventRedisCmd",
@@ -103,6 +104,30 @@ func recordOne(t *testing.T, e *events.Event) (map[string][]*dto.Metric, bool) {
 		}
 	}
 	return out, mapped
+}
+
+func TestAllEventTypesListCoversTheWholeEnum(t *testing.T) {
+	highest := events.EventType(0)
+	for typ := range allEventTypes {
+		if typ > highest {
+			highest = typ
+		}
+	}
+
+	for typ := events.EventType(0); typ <= highest; typ++ {
+		if _, listed := allEventTypes[typ]; !listed {
+			t.Errorf("event type %d sits inside the listed range but is missing from "+
+				"allEventTypes", typ)
+		}
+	}
+
+	beyond := highest + 1
+	if got := (&events.Event{Type: beyond}).TypeString(); got != "UNKNOWN" {
+		t.Errorf("event type %d resolves to %q, so the enum has grown past allEventTypes.\n\n"+
+			"TestEveryEventTypeIsAccountedFor iterates that list, so a type appended to the "+
+			"enum without being added here is skipped in silence and the plane can ignore it "+
+			"with every guard still green.", beyond, got)
+	}
 }
 
 func TestEveryEventTypeIsAccountedFor(t *testing.T) {

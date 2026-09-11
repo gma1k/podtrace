@@ -31,6 +31,7 @@ const (
 	envInspectionMinRequests = "PODTRACE_INSPECTIONS_MIN_REQUEST_RATE"
 	envInspectionMeanLatency = "PODTRACE_INSPECTIONS_MEAN_LATENCY"
 	envInspectionsHoldTime   = "PODTRACE_INSPECTIONS_HOLD_TIME"
+	envInspectionAcquireMean = "PODTRACE_INSPECTIONS_ACQUIRE_MEAN"
 )
 
 // metricsEnv renders AgentMetricsSpec onto the agent container's
@@ -138,6 +139,12 @@ func inspectionsEnv(spec *podtracev1alpha1.AgentInspectionsSpec) []corev1.EnvVar
 		env = append(env, corev1.EnvVar{
 			Name:  envInspectionMeanLatency,
 			Value: t.MeanLatency.Duration.String(),
+		})
+	}
+	if t.AcquireMean != nil && t.AcquireMean.Duration > 0 {
+		env = append(env, corev1.EnvVar{
+			Name:  envInspectionAcquireMean,
+			Value: t.AcquireMean.Duration.String(),
 		})
 	}
 	return env

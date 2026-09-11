@@ -610,6 +610,7 @@ func AttachPoolProbesWithPID(coll *ebpf.Collection, containerID string, pid uint
 		if binaryPath != "" {
 			binaryPaths = append(binaryPaths, binaryPath)
 			logger.Debug("Found Go binary for pool monitoring", zap.String("path", binaryPath), zap.Uint32("pid", pid))
+			links = append(links, attachGoAcquireProbes(coll, binaryPath, pid)...)
 		} else {
 			logger.Debug("Go binary not found for process", zap.Uint32("pid", pid))
 		}
@@ -2010,6 +2011,64 @@ func attachGoTLSReadProbes(coll *ebpf.Collection, exe *link.Executable, exePath 
 		attached++
 	}
 	logger.Debug("Go TLS Read uprobes attached",
+		zap.Uint32("pid", pid), zap.Int("ret_sites", attached))
+	return links
+}
+
+// attachGoAcquireProbes attaches the entry + return uprobes on
+// database/sql.(*DB).conn, whose entry-to-return duration is the time a
+// caller spent waiting for a free pooled connection.
+func attachGoAcquireProbes(coll *ebpf.Collection, exePath string, pid uint32) []link.Link {
+	var links []link.Link
+
+	entryProg := coll.Programs["uprobe_go_db_conn"]
+	retProg := coll.Programs["uprobe_go_db_conn_ret"]
+	if entryProg == nil || retProg == nil {
+		return links
+	}
+
+	const sym = "database/sql.(*DB).conn"
+	entryOff, retOffs, ok := goFuncReturnOffsets(exePath, sym)
+	if !ok {
+		logger.Debug("Go pool wait probe: symbol not resolved",
+			zap.String("path", exePath), zap.Uint32("pid", pid))
+		return links
+	}
+
+	exe, err := link.OpenExecutable(exePath)
+	if err != nil {
+		logger.Debug("Go pool wait probe: cannot open executable",
+			zap.String("path", exePath), zap.Error(err))
+		return links
+	}
+
+	el, err := exe.Uprobe("", entryProg, &link.UprobeOptions{Address: entryOff})
+	if err != nil {
+		logger.Debug("Go pool wait entry uprobe not attached", zap.Error(err))
+		return links
+	}
+	links = append(links, el)
+
+	attached := 0
+	for _, ro := range retOffs {
+		rl, err := exe.Uprobe("", retProg, &link.UprobeOptions{Address: ro})
+		if err != nil {
+			continue
+		}
+		links = append(links, rl)
+		attached++
+	}
+
+	if attached == 0 {
+		for _, l := range links {
+			_ = l.Close()
+		}
+		logger.Debug("Go pool wait probe: no return sites attached, entry probe dropped",
+			zap.Uint32("pid", pid))
+		return nil
+	}
+
+	logger.Debug("Go pool wait uprobes attached",
 		zap.Uint32("pid", pid), zap.Int("ret_sites", attached))
 	return links
 }

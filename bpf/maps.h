@@ -682,6 +682,13 @@ struct {
 } go_tls_read_args SEC(".maps");
 
 struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 4096);
+	__type(key, u64);
+	__type(value, u64);
+} go_acquire_starts SEC(".maps");
+
+struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
 	__uint(max_entries, 2 * 1024 * 1024);
 } h3_txn_events SEC(".maps");

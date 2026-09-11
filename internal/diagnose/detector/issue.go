@@ -20,6 +20,8 @@ const (
 	IDL7ErrorRate ID = "l7.error_rate"
 
 	IDL7LatencyDegraded ID = "l7.latency_degraded"
+
+	IDDBAcquireSlow ID = "db.connection_acquire_slow"
 )
 
 // Registry is the documented issue vocabulary. Every ID the detector or the
@@ -30,6 +32,7 @@ var Registry = []ID{
 	IDResourceSaturation,
 	IDL7ErrorRate,
 	IDL7LatencyDegraded,
+	IDDBAcquireSlow,
 }
 
 // Subject is what an issue is about.

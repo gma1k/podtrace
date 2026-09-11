@@ -88,7 +88,12 @@ spec:
     fall back to embedded stub types.
   - `host`: require `/sys/kernel/btf/vmlinux` (fails closed on minimal
     distros without BTF).
-  - `embedded`: force the embedded stub even if host BTF is available.
+  - `embedded`: **accepted but not implemented.** No BTF is shipped in the
+    image, so the agent behaves exactly as for `auto`, and the admission
+    webhook warns when you set it. It is still in the enum because removing
+    a published enum value is a breaking change. On a node without host BTF
+    this means the stub types, not an embedded blob, so setting it does not
+    make a BTF-less node work.
 - **`maxConcurrentSessionsPerNode`** — protects nodes from privileged
   Job pile-ups when many sessions land on the same node.
 - **`fleetPriority`** — orders fleets that target the same node. Advisory:

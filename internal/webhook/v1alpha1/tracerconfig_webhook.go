@@ -53,16 +53,17 @@ func (v *TracerConfigCustomValidator) validate(ctx context.Context, tc *podtrace
 	if err := validateTracerConfigNameLength(tc.Name); err != nil {
 		return nil, err
 	}
+	unimplemented := warnOnUnimplementedBTFMode(tc)
 	if err := imagepolicy.RepoAllowed(tc.Spec.Image, config.AllowedAgentImageRepos()); err != nil {
 		return nil, err
 	}
 	if v.Client == nil {
-		return nil, nil
+		return unimplemented, nil
 	}
 
 	var others podtracev1alpha1.TracerConfigList
 	if err := v.Client.List(ctx, &others); err != nil {
-		return nil, fmt.Errorf("list TracerConfigs to check for fleet overlap: %w", err)
+		return unimplemented, fmt.Errorf("list TracerConfigs to check for fleet overlap: %w", err)
 	}
 	siblings := make([]podtracev1alpha1.TracerConfig, 0, len(others.Items))
 	for i := range others.Items {
@@ -74,7 +75,27 @@ func (v *TracerConfigCustomValidator) validate(ctx context.Context, tc *podtrace
 	if err := validateSelectorCollision(tc, siblings); err != nil {
 		return nil, err
 	}
-	return v.warnOnCurrentOverlap(ctx, tc, siblings), nil
+	return append(unimplemented, v.warnOnCurrentOverlap(ctx, tc, siblings)...), nil
+}
+
+// warnOnUnimplementedBTFMode tells the author, at apply time, that
+// spec.btfMode=embedded does nothing.
+//
+// The operator logged this already, but an operator log is the wrong place: it
+// is not where the person who wrote the field is looking, and the field is
+// accepted by the CRD's enum, so nothing else contradicts them. A silently
+// ignored knob is worse than a missing one -- someone setting it on a node
+// without host BTF concludes the problem is covered when no probe will load.
+func warnOnUnimplementedBTFMode(tc *podtracev1alpha1.TracerConfig) admission.Warnings {
+	if tc == nil || tc.Spec.BTFMode != podtracev1alpha1.BTFModeEmbedded {
+		return nil
+	}
+	return admission.Warnings{
+		"spec.btfMode=embedded is not implemented: the agent resolves BTF from the host " +
+			"exactly as it does for \"auto\", and no BTF is shipped in the image. On a node " +
+			"without /sys/kernel/btf/vmlinux the agent falls back to its stub types rather " +
+			"than to an embedded blob. Leave it unset unless you are tracking the feature.",
+	}
 }
 
 func validateTracerConfigNameLength(name string) error {

@@ -43,7 +43,7 @@ func dbSystemLabel(target string) string {
 }
 
 // newSaturationCollectors builds the saturation families.
-func newSaturationCollectors(_ Options, withBase func(...string) []string) saturationCollectors {
+func newSaturationCollectors(native bool, withBase func(...string) []string) saturationCollectors {
 	return saturationCollectors{
 		resourceUtilization: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: metricPrefix + "resource_utilization_percent",
@@ -59,6 +59,20 @@ func newSaturationCollectors(_ Options, withBase func(...string) []string) satur
 			Name: metricPrefix + "db_connections_closed_total",
 			Help: "Database connections closed, by db_system. Undercounts when a process exits without closing, so compare rates rather than trusting the absolute difference.",
 		}, withBase("db_system")),
+
+		acquireWait: prometheus.NewHistogramVec(
+			histogramOpts("db_connection_acquire_seconds",
+				"Time callers spent obtaining a pooled database connection, from either cause: "+
+					"queueing for a free slot once the pool is at its maximum, or establishing "+
+					"a new connection while it is below it. Both are time the caller is blocked "+
+					"before its query starts, which is why they share a metric -- but that means "+
+					"this is NOT Go's DBStats.WaitCount, which counts only the first. A workload "+
+					"churning connections because MaxIdleConns is too low reports here while "+
+					"DBStats reports zero waits. Only samples above 1ms are recorded, and only "+
+					"Go database/sql is instrumented, so absence means a fast pool or a runtime "+
+					"this cannot see. No db_system label: acquisition is upstream of the driver.", native),
+			withBase(),
+		),
 	}
 }
 
@@ -69,6 +83,8 @@ type saturationCollectors struct {
 
 	connectionsOpened *prometheus.CounterVec
 	connectionsClosed *prometheus.CounterVec
+
+	acquireWait *prometheus.HistogramVec
 }
 
 var utilizationHoldWindow = 6 * config.DefaultResourceMonitorInterval
@@ -85,6 +101,20 @@ func (s saturationCollectors) all() []prometheus.Collector {
 		s.connectionsOpened,
 		s.connectionsClosed,
 	}
+}
+
+// histograms are registered separately: when the kernel aggregates, the
+// kernelHist collector owns these series and registering the plain vec under
+// the same name would leave an empty family shadowing it.
+func (s saturationCollectors) histograms() []prometheus.Collector {
+	return []prometheus.Collector{s.acquireWait}
+}
+
+func (s saturationCollectors) histogramFor(family string) (*prometheus.HistogramVec, bool) {
+	if family == "db_connection_acquire_seconds" {
+		return s.acquireWait, true
+	}
+	return nil, false
 }
 
 func (s saturationCollectors) counterFor(family string) (*prometheus.CounterVec, bool) {
@@ -119,15 +149,6 @@ func (s *Sink) recordSaturation(e *events.Event, base []string) bool {
 		return true
 
 	default:
-		// Connection lifecycle. One lookup rather than two: resolving the
-		// family and then its collector separately left a second guard no
-		// input could reach, because both switches were keyed on the same
-		// event types.
-		//
-		// EventPoolExhausted resolves to nothing here on purpose and so falls
-		// through as unmapped. The repo's ignoredEventTypes list is where that
-		// choice is recorded, and a test fails if a type appears in neither
-		// place; see connectionCounter for the events this family does own.
 		counter, family, ok := s.connectionCounter(e.Type)
 		if !ok {
 			return false
@@ -140,12 +161,6 @@ func (s *Sink) recordSaturation(e *events.Event, base []string) bool {
 // connectionCounter resolves a connection-lifecycle event to the counter that
 // records it and the family name that counter is admitted under, reporting
 // false for every event type this family does not own.
-//
-// One switch, deliberately. Chaining an event-to-name lookup into a
-// name-to-collector lookup left a branch no input could reach, because the two
-// switches were keyed on the same set. Returning both from one place makes
-// them impossible to diverge; the reap path's counterFor still resolves these
-// names, and TestEveryConnectionFamilyIsEvictable holds the two in agreement.
 func (s *Sink) connectionCounter(t events.EventType) (*prometheus.CounterVec, string, bool) {
 	switch t {
 	case events.EventPoolAcquire:

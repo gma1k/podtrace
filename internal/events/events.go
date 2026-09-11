@@ -107,6 +107,7 @@ const (
 	EventAFALG
 	EventHTTP3
 	EventUSDT
+	EventDBAcquire
 )
 
 type Event struct {
@@ -251,7 +252,7 @@ func (e *Event) TypeString() string {
 		return "TLS"
 	case EventResourceLimit:
 		return "RESOURCE"
-	case EventPoolAcquire, EventPoolRelease, EventPoolExhausted:
+	case EventPoolAcquire, EventPoolRelease, EventPoolExhausted, EventDBAcquire:
 		return "POOL"
 	case EventUnlink, EventRename:
 		return "FS"

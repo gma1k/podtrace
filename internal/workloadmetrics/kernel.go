@@ -114,6 +114,7 @@ var kernelHistogramLabels = map[string][]string{
 	"filesystem_latency_seconds":     {"operation"},
 	"cpu_blocked_seconds":            {},
 	"tls_handshake_duration_seconds": {},
+	"db_connection_acquire_seconds":  {},
 }
 
 var kernelHelp = map[string]string{
@@ -124,6 +125,7 @@ var kernelHelp = map[string]string{
 	"filesystem_latency_seconds":     "Latency of filesystem operations.",
 	"cpu_blocked_seconds":            "Time a workload spent blocked off-CPU.",
 	"tls_handshake_duration_seconds": "Duration of TLS handshakes.",
+	"db_connection_acquire_seconds":  "Time callers spent obtaining a pooled database connection, queueing or reconnecting.",
 }
 
 func kernelSeriesKey(family string, labelValues []string) string {
@@ -167,30 +169,53 @@ func (k *kernelHistograms) Collect(ch chan<- prometheus.Metric) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 
-	for family, byLabels := range k.series {
-		desc := k.descs[family]
-		if desc == nil {
+	for family := range k.series {
+		k.collectFamilyLocked(family, ch)
+	}
+}
+
+// collectFamilyLocked emits one family's series. Callers hold k.mu.
+func (k *kernelHistograms) collectFamilyLocked(family string, ch chan<- prometheus.Metric) {
+	desc := k.descs[family]
+	if desc == nil {
+		return
+	}
+	for _, entry := range k.series[family] {
+		if entry.count == 0 {
 			continue
 		}
-		for _, entry := range byLabels {
-			if entry.count == 0 {
-				continue
-			}
-			buckets := make(map[int]int64, len(entry.buckets))
-			for idx, n := range entry.buckets {
-				buckets[idx] = n
-			}
-			metric, err := prometheus.NewConstNativeHistogram(
-				desc, entry.count, entry.sum, buckets, nil, 0,
-				kernelagg.Schema, kernelZeroThreshold, time.Time{},
-				entry.labelValues...,
-			)
-			if err != nil {
-				continue
-			}
-			ch <- metric
+		buckets := make(map[int]int64, len(entry.buckets))
+		for idx, n := range entry.buckets {
+			buckets[idx] = n
 		}
+		metric, err := prometheus.NewConstNativeHistogram(
+			desc, entry.count, entry.sum, buckets, nil, 0,
+			kernelagg.Schema, kernelZeroThreshold, time.Time{},
+			entry.labelValues...,
+		)
+		if err != nil {
+			continue
+		}
+		ch <- metric
 	}
+}
+
+// kernelFamilyCollector exposes a single kernel-fed family as a Collector.
+type kernelFamilyCollector struct {
+	k      *kernelHistograms
+	family string
+}
+
+func (c kernelFamilyCollector) Describe(ch chan<- *prometheus.Desc) {
+	if d := c.k.descs[c.family]; d != nil {
+		ch <- d
+	}
+}
+
+func (c kernelFamilyCollector) Collect(ch chan<- prometheus.Metric) {
+	c.k.mu.Lock()
+	defer c.k.mu.Unlock()
+	c.k.collectFamilyLocked(c.family, ch)
 }
 
 const kernelZeroThreshold = 1e-12
@@ -266,6 +291,9 @@ func (s *Sink) ingestKernelRow(row *kernelagg.Row) bool {
 
 	case events.EventTLSHandshake:
 		s.kernelObserve("tls_handshake_duration_seconds", base, row, seconds)
+
+	case events.EventDBAcquire:
+		s.kernelObserve("db_connection_acquire_seconds", base, row, seconds)
 
 	case events.EventHTTPResp, events.EventHTTP3, events.EventGRPCMethod,
 		events.EventFastCGIResp, events.EventRedisCmd, events.EventMemcachedCmd,
