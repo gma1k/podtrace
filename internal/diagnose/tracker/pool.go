@@ -141,14 +141,19 @@ type PoolSummary struct {
 }
 
 func GetPoolSummaryFromEvents(acquireEvents, releaseEvents, exhaustedEvents []*events.Event) []PoolSummary {
+	merged := make([]*events.Event, 0, len(acquireEvents)+len(releaseEvents)+len(exhaustedEvents))
+	merged = append(merged, acquireEvents...)
+	merged = append(merged, releaseEvents...)
+	merged = append(merged, exhaustedEvents...)
+	sort.SliceStable(merged, func(i, j int) bool {
+		if merged[i] == nil || merged[j] == nil {
+			return merged[j] != nil
+		}
+		return merged[i].Timestamp < merged[j].Timestamp
+	})
+
 	tracker := NewPoolTracker()
-	for _, event := range acquireEvents {
-		tracker.ProcessEvent(event)
-	}
-	for _, event := range releaseEvents {
-		tracker.ProcessEvent(event)
-	}
-	for _, event := range exhaustedEvents {
+	for _, event := range merged {
 		tracker.ProcessEvent(event)
 	}
 	return tracker.GetPoolSummary()
@@ -186,8 +191,11 @@ func GeneratePoolCorrelation(events []*events.Event) string {
 
 		if summary.ExhaustedCount > 0 {
 			report += fmt.Sprintf("        Exhaustion events: %d\n", summary.ExhaustedCount)
-			report += fmt.Sprintf("        Avg wait time: %.2fms\n", float64(summary.AvgWaitTime.Nanoseconds())/float64(config.NSPerMS))
-			report += fmt.Sprintf("        Max wait time: %.2fms\n", float64(summary.MaxWaitTime.Nanoseconds())/float64(config.NSPerMS))
+			// Named as in the diagnose report: the client-library probe
+			// timestamps a connection on acquire and never refreshes it, so
+			// this is the connection's age when a query ran, not queue time.
+			report += fmt.Sprintf("        Avg connection age at query: %.2fms\n", float64(summary.AvgWaitTime.Nanoseconds())/float64(config.NSPerMS))
+			report += fmt.Sprintf("        Max connection age at query: %.2fms\n", float64(summary.MaxWaitTime.Nanoseconds())/float64(config.NSPerMS))
 		}
 		if !summary.LastAcquire.IsZero() {
 			report += fmt.Sprintf("        Last acquire: %s\n", summary.LastAcquire.Format("15:04:05.000"))

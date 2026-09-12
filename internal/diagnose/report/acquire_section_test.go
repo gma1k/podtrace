@@ -118,3 +118,26 @@ func TestClientLibraryCountersStillRenderWhenThatPathSawEvents(t *testing.T) {
 		t.Errorf("the health verdict vanished:\n%s", got)
 	}
 }
+
+func TestExhaustionFiguresAreNamedConsistentlyEverywhere(t *testing.T) {
+	d := &mockDiagnostician{events: []*events.Event{
+		{Type: events.EventPoolAcquire},
+		{Type: events.EventPoolRelease},
+		{Type: events.EventPoolExhausted, LatencyNS: 100_000_000},
+	}}
+
+	got := GeneratePoolSection(d, time.Minute)
+
+	if strings.Contains(got, "wait time") {
+		t.Errorf("the report still calls a connection age a wait time:\n%s\n\nThe "+
+			"client-library probe timestamps a connection when it is acquired and never "+
+			"refreshes it, so the figure is how long the connection had been held. The "+
+			"section carries a real queue time right below it, and two different numbers "+
+			"sharing one name is how an operator reads the wrong one.", got)
+	}
+	if n := strings.Count(got, "connection age at query"); n < 2 {
+		t.Errorf("only %d of the two blocks name it as a connection age:\n%s\n\nThe "+
+			"per-pool block renders the same figure as the summary above it, so the two "+
+			"drifting apart puts both names in one report.", n, got)
+	}
+}
