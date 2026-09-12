@@ -302,8 +302,8 @@ func TestGeneratePoolCorrelation_WithExhaustion(t *testing.T) {
 		t.Errorf("GeneratePoolCorrelation() should show exhaustion events, got %q", result)
 	}
 
-	if !strings.Contains(result, "Avg wait time") {
-		t.Errorf("GeneratePoolCorrelation() should show wait times, got %q", result)
+	if !strings.Contains(result, "Avg connection age at query") {
+		t.Errorf("GeneratePoolCorrelation() should show connection age, got %q", result)
 	}
 }
 

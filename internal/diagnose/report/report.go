@@ -770,8 +770,8 @@ func GeneratePoolSection(d Diagnostician, duration time.Duration) string {
 
 			if summary.ExhaustedCount > 0 {
 				report += fmt.Sprintf("        Exhaustion events: %d\n", summary.ExhaustedCount)
-				report += fmt.Sprintf("        Avg wait time: %.2fms\n", float64(summary.AvgWaitTime.Nanoseconds())/float64(config.NSPerMS))
-				report += fmt.Sprintf("        Max wait time: %.2fms\n", float64(summary.MaxWaitTime.Nanoseconds())/float64(config.NSPerMS))
+				report += fmt.Sprintf("        Avg connection age at query: %.2fms\n", float64(summary.AvgWaitTime.Nanoseconds())/float64(config.NSPerMS))
+				report += fmt.Sprintf("        Max connection age at query: %.2fms\n", float64(summary.MaxWaitTime.Nanoseconds())/float64(config.NSPerMS))
 			}
 			if !summary.LastAcquire.IsZero() {
 				report += fmt.Sprintf("        Last acquire: %s\n", summary.LastAcquire.Format("15:04:05.000"))
