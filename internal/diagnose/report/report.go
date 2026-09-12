@@ -709,29 +709,32 @@ func GeneratePoolSection(d Diagnostician, duration time.Duration) string {
 	report += formatter.SectionHeader("Connection Pool")
 
 	stats := analyzer.AnalyzePool(acquireEvents, releaseEvents, exhaustedEvents)
-	acquireRate := d.CalculateRate(stats.TotalAcquires, duration)
-	releaseRate := d.CalculateRate(stats.TotalReleases, duration)
-	report += fmt.Sprintf("  Total acquires: %d (%.1f/sec)\n", stats.TotalAcquires, acquireRate)
-	report += fmt.Sprintf("  Total releases: %d (%.1f/sec)\n", stats.TotalReleases, releaseRate)
-	report += fmt.Sprintf("  Release ratio: %.2f%% (releases/acquires)\n", stats.ReleaseRatio*100)
-	report += fmt.Sprintf("  Peak connections: %d\n", stats.PeakConnections)
-	report += fmt.Sprintf("  Average connections: %.1f\n", stats.AvgConnections)
 
-	healthStatus := determinePoolHealth(stats)
-	report += fmt.Sprintf("  Status: %s\n", healthStatus)
+	if len(acquireEvents) > 0 || len(releaseEvents) > 0 {
+		acquireRate := d.CalculateRate(stats.TotalAcquires, duration)
+		releaseRate := d.CalculateRate(stats.TotalReleases, duration)
+		report += fmt.Sprintf("  Total acquires: %d (%.1f/sec)\n", stats.TotalAcquires, acquireRate)
+		report += fmt.Sprintf("  Total releases: %d (%.1f/sec)\n", stats.TotalReleases, releaseRate)
+		report += fmt.Sprintf("  Release ratio: %.2f%% (releases/acquires)\n", stats.ReleaseRatio*100)
+		report += fmt.Sprintf("  Peak connections: %d\n", stats.PeakConnections)
+		report += fmt.Sprintf("  Average connections: %.1f\n", stats.AvgConnections)
+		report += fmt.Sprintf("  Status: %s\n", determinePoolHealth(stats))
+	}
 
 	if stats.ExhaustedCount > 0 {
 		exhaustedRate := d.CalculateRate(stats.ExhaustedCount, duration)
 		report += fmt.Sprintf("  Pool exhaustion events: %d (%.1f/sec)\n", stats.ExhaustedCount, exhaustedRate)
-		report += fmt.Sprintf("  Average wait time: %.2fms\n", float64(stats.AvgWaitTime.Nanoseconds())/float64(config.NSPerMS))
-		report += fmt.Sprintf("  Max wait time: %.2fms\n", float64(stats.MaxWaitTime.Nanoseconds())/float64(config.NSPerMS))
+		report += fmt.Sprintf("  Average connection age at query: %.2fms\n", float64(stats.AvgWaitTime.Nanoseconds())/float64(config.NSPerMS))
+		report += fmt.Sprintf("  Max connection age at query: %.2fms\n", float64(stats.MaxWaitTime.Nanoseconds())/float64(config.NSPerMS))
 		if stats.P50WaitTime > 0 || stats.P95WaitTime > 0 || stats.P99WaitTime > 0 {
 			report += formatter.Percentiles(stats.P50WaitTime, stats.P95WaitTime, stats.P99WaitTime)
 		}
 	}
 
 	if waits := analyzer.AnalyzeAcquireWaits(acquireWaits); waits.Count > 0 {
-		report += "\n"
+		if len(acquireEvents) > 0 || len(releaseEvents) > 0 {
+			report += "\n"
+		}
 		report += "Connection acquisition (Go database/sql):\n"
 		report += fmt.Sprintf("  Blocking acquisitions: %d (%.1f/sec)\n",
 			waits.Count, d.CalculateRate(waits.Count, duration))

@@ -239,7 +239,7 @@ spec:
             content: |
               node=$(cat /tmp/chainsaw-redaction-node 2>/dev/null || true)
               if [ -n "$node" ]; then
-                kubectl label node "$node" podtrace.io/test-redaction-pool- --ignore-not-found || true
+                kubectl label node "$node" podtrace.io/test-redaction-pool- || true
               fi
               kubectl delete tracerconfig redacted-pool --ignore-not-found --wait=true || true
               rm -f /tmp/chainsaw-redaction-node

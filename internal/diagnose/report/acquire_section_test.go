@@ -80,3 +80,41 @@ func TestAcquisitionWaitsDoNotOverwriteExhaustionWaits(t *testing.T) {
 		t.Errorf("the acquisition figures vanished:\n%s", got)
 	}
 }
+
+func TestNoLeakWarningWhenThereAreNoClientLibraryEvents(t *testing.T) {
+	d := &mockDiagnostician{events: []*events.Event{
+		acquireWaitEvent(300), acquireWaitEvent(400),
+	}}
+
+	got := GeneratePoolSection(d, time.Minute)
+
+	if strings.Contains(got, "possible leak") {
+		t.Errorf("a leak warning for a workload that acquired nothing:\n%s\n\n"+
+			"determinePoolHealth reads a release ratio computed from zero acquires and "+
+			"zero releases. Rendering it for Go database/sql, which emits neither, "+
+			"accuses the workload of leaking connections it never took.", got)
+	}
+	if strings.Contains(got, "Total acquires: 0") {
+		t.Errorf("client-library counters rendered with nothing behind them:\n%s", got)
+	}
+	if !strings.Contains(got, "Connection acquisition") {
+		t.Errorf("the acquisition subsection went missing:\n%s", got)
+	}
+}
+
+func TestClientLibraryCountersStillRenderWhenThatPathSawEvents(t *testing.T) {
+	d := &mockDiagnostician{events: []*events.Event{
+		{Type: events.EventPoolAcquire},
+		{Type: events.EventPoolAcquire},
+		{Type: events.EventPoolRelease},
+	}}
+
+	got := GeneratePoolSection(d, time.Minute)
+
+	if !strings.Contains(got, "Total acquires: 2") {
+		t.Errorf("the client-library counters vanished for a workload that does emit them:\n%s", got)
+	}
+	if !strings.Contains(got, "Status:") {
+		t.Errorf("the health verdict vanished:\n%s", got)
+	}
+}
