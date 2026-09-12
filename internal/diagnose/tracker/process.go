@@ -5,7 +5,10 @@ import (
 	"sort"
 	"strings"
 
+	"go.uber.org/zap"
+
 	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/logger"
 	"github.com/gma1k/podtrace/internal/procfs"
 	"github.com/gma1k/podtrace/internal/validation"
 )
@@ -25,14 +28,32 @@ func (p PidInfo) PodSuffix() string {
 	return " [pod: " + p.Pod + "]"
 }
 
+// implausiblePID is the kernel's ceiling on pid values. Anything at or above
+// it did not come from the kernel.
+const implausiblePID = 4194304
+
 func AnalyzeProcessActivity(events []*events.Event) []PidInfo {
 	pidMap := make(map[uint32]int)
 	totalEvents := len(events)
+	unattributable := 0
+	sampled := false
+	var samplePID uint32
+	var sampleType, sampleComm string
+	var sampleCgroup uint64
 
 	pidPod := make(map[uint32]string)
 
 	for _, e := range events {
 		if e == nil {
+			continue
+		}
+		if e.PID >= implausiblePID {
+			unattributable++
+			if !sampled {
+				sampled = true
+				samplePID, sampleType = e.PID, e.TypeString()
+				sampleComm, sampleCgroup = e.ProcessName, e.CgroupID
+			}
 			continue
 		}
 		pidMap[e.PID]++
@@ -86,6 +107,16 @@ func AnalyzeProcessActivity(events []*events.Event) []PidInfo {
 		})
 	}
 
+	if unattributable > 0 && sampled {
+		logger.Warn("Events carried a pid the kernel could not have issued; excluded "+
+			"from process attribution",
+			zap.Int("events", unattributable),
+			zap.Uint32("sample_pid", samplePID),
+			zap.String("sample_type", sampleType),
+			zap.String("sample_comm", fmt.Sprintf("%q", sampleComm)),
+			zap.Uint64("sample_cgroup", sampleCgroup))
+	}
+
 	sort.Slice(pidInfos, func(i, j int) bool {
 		return pidInfos[i].Count > pidInfos[j].Count
 	})
@@ -94,9 +125,8 @@ func AnalyzeProcessActivity(events []*events.Event) []PidInfo {
 }
 
 // isTransientName flags comm values that the kernel sets briefly during
-// container setup — they get superseded by the user's command after runc's
-// setns+exec dance. Aggregation prefers a stable name over these whenever
-// the same PID also has events tagged with the post-exec identity.
+// container setup, they get superseded by the user's command after runc's
+// setns+exec dance.
 func isTransientName(name string) bool {
 	if strings.HasPrefix(name, "runc-bootstrap[") {
 		return true

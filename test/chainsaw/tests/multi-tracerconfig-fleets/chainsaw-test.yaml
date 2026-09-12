@@ -162,7 +162,7 @@ spec:
             content: |
               node=$(cat /tmp/chainsaw-fleet-node 2>/dev/null || true)
               if [ -n "$node" ]; then
-                kubectl label node "$node" podtrace.io/test-fleet-pool- --ignore-not-found || true
+                kubectl label node "$node" podtrace.io/test-fleet-pool- || true
               fi
               kubectl delete tracerconfig secondary --ignore-not-found --wait=true || true
               rm -f /tmp/chainsaw-fleet-node

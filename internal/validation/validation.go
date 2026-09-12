@@ -105,6 +105,9 @@ func ValidatePID(pid uint32) bool {
 }
 
 func SanitizeProcessName(name string) string {
+	if end := strings.IndexByte(name, 0); end >= 0 {
+		name = name[:end]
+	}
 	name = strings.TrimSpace(name)
 	var result strings.Builder
 	result.Grow(len(name))

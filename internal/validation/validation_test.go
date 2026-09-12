@@ -178,7 +178,7 @@ func TestSanitizeProcessName(t *testing.T) {
 		{"with spaces", "nginx worker", "nginx worker"},
 		{"with percent", "nginx%20worker", "nginx20worker"},
 		{"with newline", "nginx\nworker", "nginxworker"},
-		{"with control chars", "nginx\x00worker", "nginxworker"},
+		{"NUL terminates the comm", "nginx\x00worker", "nginx"},
 		{"empty", "", ""},
 		{"only spaces", "   ", ""},
 		{"unicode", "nginx-中文", "nginx-"},

@@ -1243,7 +1243,15 @@ func (t *Tracer) SetContainerIDs(containerIDs []string) error {
 			continue
 		}
 		seen[id] = struct{}{}
-		targets = append(targets, ContainerProbeTarget{ID: id})
+
+		target := ContainerProbeTarget{ID: id}
+		if pid := probes.FindContainerProcess(id); pid != 0 {
+			target.PIDs = []uint32{pid}
+		} else {
+			logger.Debug("No process found for container; its uprobes will not attach",
+				zap.String("container_id", id))
+		}
+		targets = append(targets, target)
 	}
 	if len(targets) == 0 {
 		return fmt.Errorf("all container IDs are empty")
@@ -1263,8 +1271,6 @@ func (t *Tracer) lastContainerID() string {
 	return t.containerID
 }
 
-// pidForContainer resolves the PID used to discover a container's binaries
-// for uprobe attachment.
 const maxDistinctBinariesPerContainer = 8
 
 // pidsForContainer resolves the PIDs used to discover a container's binaries

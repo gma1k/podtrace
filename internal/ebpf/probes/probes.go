@@ -878,6 +878,12 @@ func fileInProcMapFiles(pid uint32, addrRange string) string {
 	return ""
 }
 
+// FindContainerProcess resolves a container's main process id by scanning
+// /proc for a task whose cgroup names the container.
+func FindContainerProcess(containerID string) uint32 {
+	return findContainerProcess(containerID)
+}
+
 func findContainerProcess(containerID string) uint32 {
 	entries, err := os.ReadDir(config.ProcBasePath)
 	if err != nil {
