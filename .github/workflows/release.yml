@@ -292,21 +292,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          cat > dist/quickstart.yaml <<'NSEOF'
-          apiVersion: v1
-          kind: Namespace
-          metadata:
-            name: podtrace-system
-            labels:
-              app.kubernetes.io/managed-by: podtrace-quickstart
-          NSEOF
-          echo "---" >> dist/quickstart.yaml
-          helm template podtrace ${{ env.CHART_PATH }} \
-            --namespace podtrace-system \
-            --include-crds \
-            --set namespace.create=true \
-            --set operator.enabled=true \
-            >> dist/quickstart.yaml
+          # Same renderer test/e2e/quickstart-smoke.sh uses, so the released
+          # artifact is produced by the code CI exercises on every PR.
+          ./hack/render-quickstart.sh "${{ env.CHART_PATH }}" dist/quickstart.yaml
           cp deploy/quickstart-sample.yaml dist/quickstart-demo.yaml
           echo "Rendered $(wc -l < dist/quickstart.yaml) + $(wc -l < dist/quickstart-demo.yaml) lines"
 

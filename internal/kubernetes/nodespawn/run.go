@@ -59,6 +59,8 @@ type RunOptions struct {
 	ExtraEnv []corev1.EnvVar
 
 	SplunkToken string
+
+	BTFFile string
 }
 
 // Run orchestrates the spawn + stream lifecycle. It returns when every per-node
@@ -120,6 +122,7 @@ func Run(ctx context.Context, opts RunOptions) error {
 			OwnerPID:              opts.OwnerPID,
 			ExtraEnv:              opts.ExtraEnv,
 			SplunkToken:           opts.SplunkToken,
+			BTFFile:               opts.BTFFile,
 		})
 		if err != nil {
 			cmu.Lock()

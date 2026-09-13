@@ -34,6 +34,21 @@ uname -r                       # 5.8 or higher
 ls /sys/kernel/btf/vmlinux     # exists → BTF available
 ```
 
+### If the node has no BTF
+
+Rare above the 5.8 floor: essentially every distro kernel that clears it
+ships `CONFIG_DEBUG_INFO_BTF`. BTFHub, the archive that exists to serve
+BTF-less kernels, carries almost nothing above 5.8, RHEL/CentOS 7 and 8,
+Ubuntu 16.04 and 18.04, Debian 9 and 10, SLES 12 and 15.3, Fedora up to 31
+and Amazon Linux are all below podtrace's floor already.
+
+What remains is custom and vendor-built kernels with the option left off.
+For those, supply the BTF yourself with `btfMode: file` for the agent and
+sessions, and `--btf-file` for the CLI, see
+[crd-tracerconfig.md](crd-tracerconfig.md#supplying-btf-for-a-kernel-without-it).
+(`btfMode: embedded` is deprecated and does nothing; podtrace ships no BTF
+archive.)
+
 ### Building without bpftool
 
 When `bpftool` is unavailable at build time there is no kernel BTF to

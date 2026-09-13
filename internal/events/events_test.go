@@ -27,6 +27,8 @@ func TestEvent_IsError(t *testing.T) {
 		{"grpc non-ok is error", Event{Type: EventHTTPResp, Error: 5}, true},
 		{"resource utilization 85 not error", Event{Type: EventResourceLimit, Error: 85}, false},
 		{"resource utilization 100 not error", Event{Type: EventResourceLimit, Error: 100}, false},
+		{"pool utilization 90 not error", Event{Type: EventDBPoolStats, Error: 90}, false},
+		{"pool utilization 100 not error", Event{Type: EventDBPoolStats, Error: 100}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

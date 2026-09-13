@@ -4,8 +4,10 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 )
@@ -102,5 +104,46 @@ func TestBuildAgentDaemonSetSpec_DNSPacketCaptureEnabledOmitsEnv(t *testing.T) {
 	}), "podtrace-system")
 	if _, ok := envValue(spec.Template.Spec.Containers[0].Env, "PODTRACE_DNS_PACKET_CAPTURE"); ok {
 		t.Error("PODTRACE_DNS_PACKET_CAPTURE must be absent when capture is enabled")
+	}
+}
+
+func TestRolloutMaxUnavailableReachesTheUpdateStrategy(t *testing.T) {
+	for name, want := range map[string]intstr.IntOrString{
+		"percentage": intstr.FromString("100%"),
+		"count":      intstr.FromInt32(2),
+	} {
+		t.Run(name, func(t *testing.T) {
+			value := want
+			ds := buildAgentDaemonSetSpec(&podtracev1alpha1.TracerConfig{
+				Spec: podtracev1alpha1.TracerConfigSpec{
+					Agent: podtracev1alpha1.AgentSpec{RolloutMaxUnavailable: &value},
+				},
+			}, "podtrace-system")
+
+			if ds.UpdateStrategy.Type != appsv1.RollingUpdateDaemonSetStrategyType {
+				t.Fatalf("strategy type = %q, want RollingUpdate", ds.UpdateStrategy.Type)
+			}
+			if ds.UpdateStrategy.RollingUpdate == nil {
+				t.Fatal("rolloutMaxUnavailable was set but no RollingUpdate block was " +
+					"rendered.\n\nThe chart surfaces this value and the agent fleet then " +
+					"rolls one pod at a time, so a fleet-wide restart takes minutes longer " +
+					"than the operator asked for.")
+			}
+			if got := ds.UpdateStrategy.RollingUpdate.MaxUnavailable; got == nil || *got != want {
+				t.Errorf("MaxUnavailable = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestNoRolloutMaxUnavailableLeavesTheDefaultStrategy(t *testing.T) {
+	ds := buildAgentDaemonSetSpec(&podtracev1alpha1.TracerConfig{}, "podtrace-system")
+
+	if ds.UpdateStrategy.Type != appsv1.RollingUpdateDaemonSetStrategyType {
+		t.Errorf("strategy type = %q, want RollingUpdate", ds.UpdateStrategy.Type)
+	}
+	if ds.UpdateStrategy.RollingUpdate != nil {
+		t.Errorf("RollingUpdate = %+v with nothing configured; the Kubernetes default "+
+			"should stand rather than being pinned here", ds.UpdateStrategy.RollingUpdate)
 	}
 }

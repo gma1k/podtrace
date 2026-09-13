@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"path/filepath"
 	"strconv"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -95,6 +96,9 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 	env = append(env, captureEnv(tc.Spec.Capture)...)
 	env = append(env, metricsEnv(tc.Spec.Agent.Metrics)...)
 
+	btfEnv, btfVolume, btfMount := btfFileWiring(tc)
+	env = append(env, btfEnv...)
+
 	args := []string{
 		"agent",
 		"--system-namespace", systemNS,
@@ -156,23 +160,23 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 						InitialDelaySeconds: 5,
 						PeriodSeconds:       10,
 					},
-					VolumeMounts: []corev1.VolumeMount{
+					VolumeMounts: append([]corev1.VolumeMount{
 						{Name: "bpf", MountPath: "/sys/fs/bpf", MountPropagation: mountPropagationHostToContainer()},
 						{Name: "btf", MountPath: "/sys/kernel/btf", ReadOnly: true},
 						{Name: "proc", MountPath: "/host/proc", ReadOnly: true},
 						{Name: "cgroup", MountPath: "/sys/fs/cgroup", ReadOnly: true},
 						{Name: "debugfs", MountPath: "/sys/kernel/debug", ReadOnly: true},
 						{Name: "tracefs", MountPath: "/sys/kernel/tracing", ReadOnly: true},
-					},
+					}, btfMount...),
 				}},
-				Volumes: []corev1.Volume{
+				Volumes: append([]corev1.Volume{
 					{Name: "bpf", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/fs/bpf", Type: &hostPathType}}},
 					{Name: "btf", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/kernel/btf", Type: &hostPathType}}},
 					{Name: "proc", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/proc", Type: &hostPathType}}},
 					{Name: "cgroup", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/fs/cgroup", Type: &hostPathType}}},
 					{Name: "debugfs", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/kernel/debug", Type: &hostPathType}}},
 					{Name: "tracefs", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/kernel/tracing", Type: &hostPathType}}},
-				},
+				}, btfVolume...),
 			},
 		},
 	}
@@ -226,4 +230,51 @@ func agentUpdateStrategy(tc *podtracev1alpha1.TracerConfig) appsv1.DaemonSetUpda
 		MaxUnavailable: tc.Spec.Agent.RolloutMaxUnavailable,
 	}
 	return strategy
+}
+
+// btfFileMountDir is where a supplied BTF blob is mounted in the agent.
+const btfFileMountDir = "/etc/podtrace/btf"
+
+// btfFileWiring translates btfMode "file" into the mount and the environment
+// variable the tracer already consumes.
+func btfFileWiring(tc *podtracev1alpha1.TracerConfig) ([]corev1.EnvVar, []corev1.Volume, []corev1.VolumeMount) {
+	if tc == nil || tc.Spec.BTFMode != podtracev1alpha1.BTFModeFile || tc.Spec.BTFSource == nil {
+		return nil, nil, nil
+	}
+	src := tc.Spec.BTFSource
+
+	var filePath, mountPath string
+	var volumeSource corev1.VolumeSource
+
+	switch {
+	case src.ConfigMap != nil && src.ConfigMap.Name != "":
+		key := src.ConfigMap.Key
+		if key == "" {
+			key = podtracev1alpha1.DefaultBTFConfigMapKey
+		}
+		filePath = filepath.Join(btfFileMountDir, key)
+		mountPath = btfFileMountDir
+		volumeSource = corev1.VolumeSource{
+			ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{Name: src.ConfigMap.Name},
+				Items:                []corev1.KeyToPath{{Key: key, Path: key}},
+			},
+		}
+
+	case src.HostPath != "":
+		fileType := corev1.HostPathFile
+		filePath = filepath.Join(btfFileMountDir, filepath.Base(src.HostPath))
+		mountPath = filePath
+		volumeSource = corev1.VolumeSource{
+			HostPath: &corev1.HostPathVolumeSource{Path: src.HostPath, Type: &fileType},
+		}
+
+	default:
+		return nil, nil, nil
+	}
+
+	env := []corev1.EnvVar{{Name: "PODTRACE_BTF_FILE", Value: filePath}}
+	volumes := []corev1.Volume{{Name: "btf-file", VolumeSource: volumeSource}}
+	mounts := []corev1.VolumeMount{{Name: "btf-file", MountPath: mountPath, ReadOnly: true}}
+	return env, volumes, mounts
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -44,6 +45,9 @@ func waitForPodRunningOrTerminated(ctx context.Context, clientset kubernetes.Int
 	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
+	watchdog := newStuckPodWatchdog(waitCtx, clientset, namespace, name, cancel)
+	defer watchdog.stop()
+
 	pendingSince := time.Time{} // zero until we first see Pending; reset on transition
 	evt, err := watchtools.UntilWithSync(waitCtx, lw, &corev1.Pod{}, nil, func(e watch.Event) (bool, error) {
 		switch e.Type {
@@ -69,9 +73,6 @@ func waitForPodRunningOrTerminated(ctx context.Context, clientset kubernetes.Int
 			if r := containerStartFailureReason(p); r != "" {
 				return false, fmt.Errorf("spawn pod %s/%s container failed to start: %s", namespace, name, r)
 			}
-			// Pod is in Pending without a structured container Waiting reason
-			// we recognize. After a short grace period, consult Events to
-			// catch FailedMount / FailedAttachVolume / FailedCreatePodSandBox.
 			if pendingSince.IsZero() {
 				pendingSince = time.Now()
 			} else if time.Since(pendingSince) >= stuckPodEventThreshold {
@@ -83,16 +84,77 @@ func waitForPodRunningOrTerminated(ctx context.Context, clientset kubernetes.Int
 		return false, nil
 	})
 	if err != nil {
+		if reason := watchdog.reason(); reason != "" {
+			return nil, fmt.Errorf("spawn pod %s/%s stuck in Pending: %s", namespace, name, reason)
+		}
 		return nil, err
 	}
 	pod, _ := evt.Object.(*corev1.Pod)
 	return pod, nil
 }
 
+// stuckPodWatchdog polls a Pending pod's Events on a timer and cancels the
+// wait as soon as one of them explains why the pod is not starting.
+type stuckPodWatchdog struct {
+	mu       sync.Mutex
+	found    string
+	cancel   context.CancelFunc
+	finished chan struct{}
+	once     sync.Once
+}
+
+func newStuckPodWatchdog(ctx context.Context, clientset kubernetes.Interface, namespace, name string, cancelWait context.CancelFunc) *stuckPodWatchdog {
+	watchCtx, watchCancel := context.WithCancel(ctx)
+	w := &stuckPodWatchdog{cancel: watchCancel, finished: make(chan struct{})}
+
+	interval := stuckPodEventThreshold
+
+	go func() {
+		defer watchCancel()
+		defer close(w.finished)
+
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-watchCtx.Done():
+				return
+			case <-ticker.C:
+			}
+
+			pod, err := clientset.CoreV1().Pods(namespace).Get(watchCtx, name, metav1.GetOptions{})
+			if err != nil || pod == nil || pod.Status.Phase != corev1.PodPending {
+				continue
+			}
+			if reason := stuckPodEventReason(watchCtx, clientset, pod); reason != "" {
+				w.mu.Lock()
+				w.found = reason
+				w.mu.Unlock()
+				cancelWait()
+				return
+			}
+		}
+	}()
+
+	return w
+}
+
+func (w *stuckPodWatchdog) reason() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.found
+}
+
+// stop cancels the poll and waits for it to finish, so no goroutine outlives
+// the wait it was started for.
+func (w *stuckPodWatchdog) stop() {
+	w.once.Do(w.cancel)
+	<-w.finished
+}
+
 // containerStartFailureReason returns a non-empty reason when any container's
 // Waiting reason indicates a permanent failure to start (vs. transient
-// ContainerCreating). These reasons signal the kubelet has rejected the
-// container outright and waiting will not help.
+// ContainerCreating).
 func containerStartFailureReason(p *corev1.Pod) string {
 	fatal := map[string]struct{}{
 		"CreateContainerError":       {},

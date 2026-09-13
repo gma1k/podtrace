@@ -190,47 +190,16 @@ static __always_inline int h3_walk_peer(u64 base, const struct h3_peer_path *p,
 	return 1;
 }
 
-#define H3_PIDNS_MAX_LEVELS 8
-
-static __always_inline u32 h3_current_tgid(void)
-{
-	u32 init_tgid = bpf_get_current_pid_tgid() >> 32;
-	u32 zero = 0;
-	struct h3_pidns_info *want = bpf_map_lookup_elem(&h3_pidns, &zero);
-	if (!want || !want->ino)
-		return init_tgid;
-
-	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-	if (!task)
-		return init_tgid;
-	struct pid *tpid = BPF_CORE_READ(task, group_leader, thread_pid);
-	if (!tpid)
-		return init_tgid;
-	u32 level = BPF_CORE_READ(tpid, level);
-
-#pragma unroll
-	for (int i = 0; i < H3_PIDNS_MAX_LEVELS; i++) {
-		if ((u32)i > level)
-			break;
-		struct upid up;
-		if (BPF_CORE_READ_INTO(&up, tpid, numbers[i]) != 0)
-			break;
-		if (up.ns && BPF_CORE_READ(up.ns, ns.inum) == (u32)want->ino)
-			return (u32)up.nr;
-	}
-	return init_tgid;
-}
-
 static __always_inline struct h3_peer_paths *h3_peer_path_lookup(void)
 {
-	u32 tgid = h3_current_tgid();
+	u32 tgid = agent_ns_tgid();
 	return bpf_map_lookup_elem(&h3_peer_paths_map, &tgid);
 }
 
 
 static __always_inline struct h3_field_offsets h3_field_offs(void)
 {
-	u32 tgid = h3_current_tgid();
+	u32 tgid = agent_ns_tgid();
 	struct h3_field_offsets *o = bpf_map_lookup_elem(&h3_offsets, &tgid);
 	if (o)
 		return *o;

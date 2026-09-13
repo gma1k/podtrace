@@ -80,7 +80,7 @@ func computeSessionSummary(d *diagnose.Diagnostician, node string) SessionSummar
 		case "proc":
 			summary.ProcEvents++
 		}
-		if ev.Error != 0 {
+		if ev.IsError() {
 			summary.ErrorsDetected++
 		}
 	}

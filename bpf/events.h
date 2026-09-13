@@ -49,6 +49,7 @@ enum event_type {
 	EVENT_HTTP3,
 	EVENT_USDT,
 	EVENT_DB_ACQUIRE,
+	EVENT_DB_POOL_STATS,
 };
 
 struct event {

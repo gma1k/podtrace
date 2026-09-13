@@ -411,7 +411,8 @@ func (s *Sink) record(e *events.Event, base []string) bool {
 		return true
 
 	case events.EventResourceLimit, events.EventPoolAcquire,
-		events.EventPoolRelease, events.EventPoolExhausted:
+		events.EventPoolRelease, events.EventPoolExhausted,
+		events.EventDBPoolStats:
 		return s.recordSaturation(e, base)
 
 	default:

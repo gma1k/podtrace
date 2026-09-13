@@ -25,7 +25,32 @@
           }
         },
         "btfMode": {
-          "type": "string"
+          "type": "string",
+          "enum": ["auto", "host", "file", "embedded"]
+        },
+        "btfSource": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "configMap": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "key": {
+                  "type": "string"
+                }
+              }
+            },
+            "hostPath": {
+              "type": "string",
+              "pattern": "^/.*"
+            }
+          }
         },
         "dnsFullAnswers": {
           "type": "boolean"

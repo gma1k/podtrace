@@ -1199,15 +1199,50 @@ spec:
                 description: |-
                   BTFMode controls how the agent resolves BTF for CO-RE.
 
-                  "embedded" is accepted but NOT IMPLEMENTED: no BTF is shipped in the image,
-                  so the agent behaves as for "auto" and the admission webhook warns. It stays
-                  in the enum because removing a value from a published API is a breaking
-                  change; see docs/crd-tracerconfig.md.
+                  "auto" and "host" both read /sys/kernel/btf/vmlinux. "file" loads a BTF blob
+                  the operator supplies through btfSource, for a node whose kernel was built
+                  without CONFIG_DEBUG_INFO_BTF; see docs/crd-tracerconfig.md for how to
+                  produce one.
+
+                  "embedded" is DEPRECATED and does nothing: no BTF is shipped in the image, so
+                  the agent behaves as for "auto" and the admission webhook warns. Use "file".
+                  It stays in the enum because removing a value from a published API is a
+                  breaking change; it will go at the next stored-version cutover.
                 enum:
                 - auto
                 - host
+                - file
                 - embedded
                 type: string
+              btfSource:
+                description: |-
+                  BTFSource supplies the blob for btfMode "file". Ignored in every other
+                  mode.
+                properties:
+                  configMap:
+                    description: |-
+                      ConfigMap names a ConfigMap in the system namespace whose binaryData
+                      holds the blob. Preferred: it survives node replacement and needs no
+                      access to the node's filesystem. A ConfigMap caps at 1MiB, so the blob
+                      must be minimised.
+                    properties:
+                      key:
+                        description: Key defaults to "vmlinux.btf".
+                        type: string
+                      name:
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  hostPath:
+                    description: |-
+                      HostPath reads the blob from an absolute path present on every node the
+                      agent runs on. For a blob too large for a ConfigMap, or one already
+                      staged on the node by other tooling.
+                    pattern: ^/.*
+                    type: string
+                type: object
               capture:
                 description: CaptureSpec selects additional L7 request/response data
                   to capture.

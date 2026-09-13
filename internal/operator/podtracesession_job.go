@@ -146,6 +146,11 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 		if lvl := tc.Spec.Agent.LogLevel; lvl != "" {
 			mainEnv = append(mainEnv, corev1.EnvVar{Name: "PODTRACE_LOG_LEVEL", Value: lvl})
 		}
+
+		btfEnv, btfVolume, btfMount := btfFileWiring(tc)
+		mainEnv = append(mainEnv, btfEnv...)
+		volumes = append(volumes, btfVolume...)
+		mainVolumeMounts = append(mainVolumeMounts, btfMount...)
 	}
 
 	mainContainer := corev1.Container{

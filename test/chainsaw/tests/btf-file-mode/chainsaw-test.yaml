@@ -1,0 +1,238 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: btf-file-mode
+spec:
+  concurrent: false
+  description: |
+    Property tested: btfMode=file actually supplies the BTF the agent
+    relocates against, and a blob that cannot be loaded stops the agent
+    instead of being silently stepped over.
+
+    Why the negative control is the real assertion. Kind nodes have host
+    BTF, so a test that only checks "agent is Ready under btfMode=file"
+    passes just as well when the supplied blob is ignored entirely --
+    which is exactly the bug this mode exists to prevent, and exactly what
+    the code did before: a blob that failed to load only logged a warning
+    and fell back to host BTF. On the one node type this mode is for, that
+    fallback means stub types and no working CO-RE. So the load-bearing
+    step is step 3: with host BTF present and readable, a deliberately
+    invalid blob must take the agent down. If it does not, the file is not
+    being used.
+
+    Deliberately NOT done: making /sys/kernel/btf/vmlinux unreadable.
+    It is sysfs, it cannot be chmod-ed, and hiding it means mounting over
+    a path the operator owns. The garbage blob proves more, for less.
+
+    Steps:
+      1. Stage a copy of the node's own BTF at a host path.
+      2. Point btfMode=file at it; agents converge and report the blob.
+      3. Swap to an unloadable blob; agents must go NotReady.
+      4. Restore; agents must recover with no other intervention.
+      5. Name a ConfigMap that does not exist; the CR must say so.
+  timeouts:
+    apply: 30s
+    assert: 180s
+    exec: 600s
+    cleanup: 120s
+  steps:
+    - name: stage-a-blob-on-every-node
+      description: |
+        The node's own BTF is a valid blob for that node by definition, so
+        no bpftool and no generated fixture are needed. It is copied to a
+        host path rather than referenced at /sys/kernel/btf/vmlinux
+        directly: bind-mounting a single sysfs file is the kind of thing
+        that works until it does not, and a 5MB blob exceeds the 1MiB
+        ConfigMap cap in any case.
+      try:
+        - apply:
+            file: ./stage-blob.yaml
+        - script:
+            timeout: 240s
+            content: |
+              set -eu
+              kubectl -n podtrace-system rollout status ds/btf-stage --timeout=180s
+              echo "blob staged on every node"
+      cleanup:
+        - script:
+            timeout: 180s
+            content: |
+              kubectl patch tracerconfig default --type=json \
+                -p '[{"op": "remove", "path": "/spec/btfSource"}]' >/dev/null 2>&1 || true
+              kubectl patch tracerconfig default --type=merge \
+                -p '{"spec": {"btfMode": "auto"}}' >/dev/null 2>&1 || true
+              for _ in $(seq 1 90); do
+                desired=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.desiredNumberScheduled}' 2>/dev/null)
+                ready=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.numberReady}' 2>/dev/null)
+                if [ -n "${desired}" ] && [ "${ready}" = "${desired}" ]; then break; fi
+                sleep 2
+              done
+        - delete:
+            ref:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              namespace: podtrace-system
+              name: btf-stage
+
+    - name: point-the-fleet-at-it
+      try:
+        - script:
+            timeout: 300s
+            content: |
+              set -eu
+              kubectl patch tracerconfig default --type=merge -p '{
+                "spec": {
+                  "btfMode": "file",
+                  "btfSource": {"hostPath": "/var/lib/podtrace-e2e/vmlinux.btf"}
+                }
+              }'
+
+              for _ in $(seq 1 150); do
+                desired=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.desiredNumberScheduled}')
+                updated=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.updatedNumberScheduled}')
+                ready=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.numberReady}')
+                if [ -n "${desired}" ] && [ "${updated}" = "${desired}" ] && [ "${ready}" = "${desired}" ]; then
+                  echo "all ${desired} agents ready on the supplied blob"
+                  break
+                fi
+                sleep 2
+              done
+              if [ "${ready:-0}" != "${desired:-1}" ]; then
+                echo "FAIL: agents did not converge on the supplied blob (ready=${ready:-?} desired=${desired:-?})" >&2
+                kubectl -n podtrace-system get pod -l podtrace.io/component=agent
+                exit 1
+              fi
+
+              msg=$(kubectl get tracerconfig default -o jsonpath='{range .status.conditions[?(@.type=="Reconciled")]}{.message}{end}')
+              case "${msg}" in
+                *"btfMode=file"*"host path /var/lib/podtrace-e2e/vmlinux.btf"*)
+                  echo "ok: the CR names the blob it loaded" ;;
+                *)
+                  echo "FAIL: Reconciled message does not name the blob: ${msg}" >&2
+                  exit 1 ;;
+              esac
+
+              found=0
+              for pod in $(kubectl -n podtrace-system get pod -l podtrace.io/component=agent -o jsonpath='{range .items[*]}{.metadata.name} {end}'); do
+                if kubectl -n podtrace-system logs "${pod}" 2>/dev/null | grep -q "Using BTF from file instead of host BTF"; then
+                  found=$((found + 1))
+                fi
+              done
+              if [ "${found}" -eq 0 ]; then
+                echo "FAIL: no agent logged that it loaded BTF from the file" >&2
+                exit 1
+              fi
+              echo "ok: ${found} agent(s) loaded BTF from the file"
+
+    - name: an-unloadable-blob-must-stop-the-agent
+      description: |
+        The load-bearing step. Host BTF is present and readable here, so an
+        agent that silently fell back would stay Ready and this step would
+        fail -- which is the point.
+      try:
+        - script:
+            timeout: 300s
+            content: |
+              set -eu
+              kubectl patch tracerconfig default --type=merge -p '{
+                "spec": {"btfSource": {"hostPath": "/var/lib/podtrace-e2e/garbage.btf"}}
+              }'
+
+              notready=0
+              for _ in $(seq 1 90); do
+                desired=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.desiredNumberScheduled}')
+                ready=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.numberReady}')
+                if [ -n "${desired}" ] && [ "${ready:-0}" -lt "${desired}" ]; then
+                  notready=1
+                  break
+                fi
+                sleep 2
+              done
+              if [ "${notready}" -ne 1 ]; then
+                echo "FAIL: every agent stayed Ready on a blob that cannot be parsed." >&2
+                echo "That means the supplied file is being ignored and host BTF is" >&2
+                echo "silently standing in for it -- on a node without host BTF the" >&2
+                echo "agent would relocate against stub types while reporting healthy." >&2
+                exit 1
+              fi
+              echo "ok: an unloadable blob took the fleet NotReady"
+
+              for pod in $(kubectl -n podtrace-system get pod -l podtrace.io/component=agent -o jsonpath='{range .items[*]}{.metadata.name} {end}'); do
+                if kubectl -n podtrace-system logs "${pod}" 2>/dev/null | grep -q "btf_unavailable"; then
+                  echo "ok: the agent reported btf_unavailable"
+                  exit 0
+                fi
+              done
+              echo "note: no agent had logged btf_unavailable yet; NotReady is the assertion"
+
+    - name: restoring-the-blob-recovers-the-fleet
+      try:
+        - script:
+            timeout: 300s
+            content: |
+              set -eu
+              kubectl patch tracerconfig default --type=merge -p '{
+                "spec": {"btfSource": {"hostPath": "/var/lib/podtrace-e2e/vmlinux.btf"}}
+              }'
+              for _ in $(seq 1 150); do
+                desired=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.desiredNumberScheduled}')
+                ready=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.numberReady}')
+                if [ -n "${desired}" ] && [ "${ready}" = "${desired}" ]; then
+                  echo "ok: fleet recovered on the good blob"
+                  exit 0
+                fi
+                sleep 2
+              done
+              echo "FAIL: fleet did not recover after the blob was restored" >&2
+              kubectl -n podtrace-system get pod -l podtrace.io/component=agent
+              exit 1
+
+    - name: a-missing-configmap-is-reported-not-claimed
+      description: |
+        The chart ships webhook.enabled=false, so admission rejects nothing
+        on a default install and the CR's own status is the only place a
+        missing blob surfaces. Rendering the mount is not the same as the
+        ConfigMap existing.
+      try:
+        - script:
+            timeout: 180s
+            content: |
+              set -eu
+              kubectl patch tracerconfig default --type=merge -p '{
+                "spec": {"btfSource": {"hostPath": null, "configMap": {"name": "btf-file-mode-absent"}}}
+              }'
+
+              for _ in $(seq 1 60); do
+                msg=$(kubectl get tracerconfig default -o jsonpath='{range .status.conditions[?(@.type=="Reconciled")]}{.message}{end}')
+                case "${msg}" in
+                  *"cannot be loaded"*"does not exist"*)
+                    echo "ok: the CR names the missing ConfigMap"
+                    exit 0 ;;
+                  *"the agent loads BTF from"*)
+                    echo "FAIL: the CR claims a blob is loaded that does not exist: ${msg}" >&2
+                    exit 1 ;;
+                esac
+                sleep 3
+              done
+              echo "FAIL: the CR never reported the missing ConfigMap: ${msg}" >&2
+              exit 1
+
+    - name: restore-defaults
+      try:
+        - script:
+            timeout: 300s
+            content: |
+              set -eu
+              kubectl patch tracerconfig default --type=json -p '[
+                {"op": "remove", "path": "/spec/btfSource"},
+                {"op": "replace", "path": "/spec/btfMode", "value": "auto"}
+              ]' || kubectl patch tracerconfig default --type=merge -p '{"spec": {"btfMode": "auto"}}'
+              for _ in $(seq 1 150); do
+                desired=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.desiredNumberScheduled}')
+                ready=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.numberReady}')
+                if [ -n "${desired}" ] && [ "${ready}" = "${desired}" ]; then
+                  echo "fleet restored to btfMode=auto"
+                  break
+                fi
+                sleep 2
+              done

@@ -8,7 +8,7 @@ import (
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 )
 
-func TestEmbeddedBTFModeWarnsThatItIsNotImplemented(t *testing.T) {
+func TestEmbeddedBTFModeWarnsThatItIsDeprecatedAndNamesTheReplacement(t *testing.T) {
 	v := tracerConfigValidator(t)
 
 	warnings, err := v.ValidateCreate(context.Background(),
@@ -20,11 +20,16 @@ func TestEmbeddedBTFModeWarnsThatItIsNotImplemented(t *testing.T) {
 	}
 
 	joined := strings.Join(warnings, " ")
-	if !strings.Contains(joined, "not implemented") {
-		t.Errorf("no warning said the mode is unimplemented, got %v\n\nThe CRD enum "+
+	if !strings.Contains(joined, "deprecated") || !strings.Contains(joined, "does nothing") {
+		t.Errorf("no warning said the mode is deprecated and inert, got %v\n\nThe CRD enum "+
 			"accepts embedded, so without a warning at apply time nothing tells the "+
 			"author the field does nothing; the operator log is not where they are "+
 			"looking.", warnings)
+	}
+	if !strings.Contains(joined, "btfMode=file") {
+		t.Errorf("the warning does not name the replacement, got %v\n\nTelling someone a "+
+			"knob is dead without naming the working one leaves them exactly as stuck as "+
+			"the silent version did.", warnings)
 	}
 }
 

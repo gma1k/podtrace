@@ -26,7 +26,7 @@ func TestEmbeddedBTFModeIsReportedOnTheTracerConfigItself(t *testing.T) {
 	}
 	r := &TracerConfigReconciler{}
 	r.setCondition(tc, ConditionReconciled, metav1.ConditionTrue, "Reconciled",
-		reconciledMessageFor(tc))
+		reconciledMessageFor(tc, ""))
 
 	msg := reconciledMessage(t, tc.Status.Conditions)
 	if !strings.Contains(msg, "btfMode=embedded") {
@@ -35,8 +35,11 @@ func TestEmbeddedBTFModeIsReportedOnTheTracerConfigItself(t *testing.T) {
 			"nobody on a default install. The CR's own status is the only place left "+
 			"where kubectl describe shows the author that the knob did nothing.", msg)
 	}
-	if !strings.Contains(msg, "not implemented") {
-		t.Errorf("Reconciled message = %q, which does not say the mode is unimplemented", msg)
+	if !strings.Contains(msg, "deprecated") {
+		t.Errorf("Reconciled message = %q, which does not say the mode is deprecated", msg)
+	}
+	if !strings.Contains(msg, "btfMode=file") {
+		t.Errorf("Reconciled message = %q, which does not name the working replacement", msg)
 	}
 }
 
@@ -49,7 +52,7 @@ func TestOtherBTFModesLeaveTheReconciledMessageAlone(t *testing.T) {
 		tc := &podtracev1alpha1.TracerConfig{
 			Spec: podtracev1alpha1.TracerConfigSpec{BTFMode: mode},
 		}
-		if msg := reconciledMessageFor(tc); strings.Contains(msg, "btfMode") {
+		if msg := reconciledMessageFor(tc, ""); strings.Contains(msg, "btfMode") {
 			t.Errorf("btfMode %q produced %q; only the unimplemented mode should be called out",
 				mode, msg)
 		}

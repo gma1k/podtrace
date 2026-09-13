@@ -9,25 +9,85 @@
 
 #if defined(__TARGET_ARCH_x86) || defined(__x86_64__)
 #define GO_ACQUIRE_GOROUTINE(ctx) ((u64)(ctx)->r14)
+#define GO_ACQUIRE_RECV(ctx)      ((u64)(ctx)->ax)
 #define GO_ACQUIRE_SUPPORTED 1
 #elif defined(__TARGET_ARCH_arm64) || defined(__aarch64__)
 #define GO_ACQUIRE_GOROUTINE(ctx) ((u64)(ctx)->regs[28])
+#define GO_ACQUIRE_RECV(ctx)      ((u64)PT_REGS_PARM1(ctx))
 #define GO_ACQUIRE_SUPPORTED 1
 #endif
+
+#define POOL_STATS_INTERVAL_NS (1000ULL * 1000ULL * 1000ULL)
 
 
 #ifdef GO_ACQUIRE_SUPPORTED
 
-// database/sql.(*DB).conn is where a caller blocks for a free pooled
-// connection, so entry-to-return is the pool wait itself. No struct field is
-// read: the duration alone is the signal, which is why this probe needs no
-// per-Go-version offset table and does not care how database/sql is laid out.
-//
-// The key is the goroutine pointer (r14 on x86, x28 on arm64), not the thread
-// id. A goroutine waiting on a free connection is precisely the case where
-// Go's scheduler parks it and may resume it on a different OS thread, so
-// pairing on pid_tgid would mismatch every wait that actually blocked -- the
-// only ones worth recording.
+static __always_inline void emit_pool_stats(struct pt_regs *ctx, u64 now)
+{
+	u32 tgid = agent_ns_tgid();
+
+	struct pool_field_offsets *off = bpf_map_lookup_elem(&pool_offsets, &tgid);
+	if (!off)
+		return;
+
+	u64 db = GO_ACQUIRE_RECV(ctx);
+	if (db == 0)
+		return;
+
+	s64 num_open = 0, max_open = 0;
+	if (bpf_probe_read_user(&num_open, sizeof(num_open), (void *)(db + off->num_open)) != 0)
+		return;
+	if (bpf_probe_read_user(&max_open, sizeof(max_open), (void *)(db + off->max_open)) != 0)
+		return;
+
+	if (num_open < 0 || max_open < 0 || num_open > 1000000 || max_open > 1000000)
+		return;
+
+	u32 pct = 0;
+	if (max_open > 0) {
+		pct = (u32)((num_open * 100) / max_open);
+		if (pct > 100)
+			pct = 100;
+	}
+
+	struct pool_sample *s = bpf_map_lookup_elem(&pool_samples, &tgid);
+	if (!s) {
+		struct pool_sample fresh = {};
+		fresh.last_emit_ns = now;
+		bpf_map_update_elem(&pool_samples, &tgid, &fresh, BPF_ANY);
+	} else {
+		if ((u32)num_open > s->peak_open) {
+			s->peak_open = (u32)num_open;
+			s->peak_pct = pct;
+			s->peak_max_open = (u32)max_open;
+		}
+		if (now <= s->last_emit_ns || (now - s->last_emit_ns) < POOL_STATS_INTERVAL_NS)
+			return;
+
+		if (s->peak_open > (u32)num_open) {
+			num_open = s->peak_open;
+			pct = s->peak_pct;
+			max_open = s->peak_max_open;
+		}
+		s->last_emit_ns = now;
+		s->peak_open = 0;
+		s->peak_pct = 0;
+		s->peak_max_open = 0;
+	}
+
+	struct event *e = get_event_buf();
+	if (!e)
+		return;
+
+	e->timestamp = now;
+	e->pid = bpf_get_current_pid_tgid() >> 32;
+	e->type = EVENT_DB_POOL_STATS;
+	e->error = (s32)pct;
+	e->bytes = (u64)num_open;
+	e->tcp_state = (u32)max_open;
+
+	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+}
 
 SEC("uprobe/go_db_conn")
 int uprobe_go_db_conn(struct pt_regs *ctx)
@@ -39,6 +99,8 @@ int uprobe_go_db_conn(struct pt_regs *ctx)
 		return 0;
 
 	bpf_map_update_elem(&go_acquire_starts, &key, &now, BPF_ANY);
+
+	emit_pool_stats(ctx, now);
 	return 0;
 }
 
@@ -54,9 +116,6 @@ int uprobe_go_db_conn_ret(struct pt_regs *ctx)
 		return 0;
 
 	u64 began = *start;
-	// Dropped before any other early return: a stale start would pair with
-	// some later acquisition on the same goroutine and report a wait that
-	// never happened.
 	bpf_map_delete_elem(&go_acquire_starts, &key);
 
 	u64 now = bpf_ktime_get_ns();
@@ -65,10 +124,6 @@ int uprobe_go_db_conn_ret(struct pt_regs *ctx)
 
 	u64 wait = now - began;
 
-	// Below the floor the call took a free connection straight off the pool's
-	// free list. Go counts only blocking acquisitions in DBStats.WaitCount,
-	// so dropping these keeps the metric's meaning the same as the number
-	// application authors already reason about.
 	if (wait < MIN_LATENCY_NS)
 		return 0;
 

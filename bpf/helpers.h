@@ -6,6 +6,37 @@
 #include "common.h"
 #include "maps.h"
 
+#define PIDNS_MAX_LEVELS 8
+
+static __always_inline u32 agent_ns_tgid(void)
+{
+	u32 init_tgid = bpf_get_current_pid_tgid() >> 32;
+	u32 zero = 0;
+	struct pidns_info *want = bpf_map_lookup_elem(&pidns_ref, &zero);
+	if (!want || !want->ino)
+		return init_tgid;
+
+	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+	if (!task)
+		return init_tgid;
+	struct pid *tpid = BPF_CORE_READ(task, group_leader, thread_pid);
+	if (!tpid)
+		return init_tgid;
+	u32 level = BPF_CORE_READ(tpid, level);
+
+#pragma unroll
+	for (int i = 0; i < PIDNS_MAX_LEVELS; i++) {
+		if ((u32)i > level)
+			break;
+		struct upid up;
+		if (BPF_CORE_READ_INTO(&up, tpid, numbers[i]) != 0)
+			break;
+		if (up.ns && BPF_CORE_READ(up.ns, ns.inum) == (u32)want->ino)
+			return (u32)up.nr;
+	}
+	return init_tgid;
+}
+
 static inline u64 get_key(u32 pid, u32 tid) {
 	return ((u64)pid << 32) | tid;
 }

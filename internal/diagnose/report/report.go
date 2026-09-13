@@ -691,6 +691,32 @@ func GenerateIssuesSection(d Diagnostician) string {
 	return report
 }
 
+// poolCapacityBlock renders what a Go database/sql pool reported about its own
+// occupancy.
+func poolCapacityBlock(capacitySamples []*events.Event, precededByABlock bool) string {
+	capacity := analyzer.AnalyzePoolCapacity(capacitySamples)
+	if capacity.Samples == 0 {
+		return ""
+	}
+
+	var report string
+	if precededByABlock {
+		report += "\n"
+	}
+	report += "Pool capacity (Go database/sql):\n"
+	report += fmt.Sprintf("  Samples: %d\n", capacity.Samples)
+	if capacity.Limited {
+		report += fmt.Sprintf("  Peak connections open: %d of %d (%d%% utilized)\n",
+			capacity.PeakOpen, capacity.MaxOpen, capacity.PeakPercent)
+	} else {
+		report += fmt.Sprintf("  Peak connections open: %d (SetMaxOpenConns unlimited)\n",
+			capacity.PeakOpen)
+		report += "  Note: with no ceiling there is no utilization to report; a count\n"
+		report += "        that only grows is the leak signal here.\n"
+	}
+	return report
+}
+
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
 }
@@ -700,8 +726,10 @@ func GeneratePoolSection(d Diagnostician, duration time.Duration) string {
 	releaseEvents := d.FilterEvents(events.EventPoolRelease)
 	exhaustedEvents := d.FilterEvents(events.EventPoolExhausted)
 	acquireWaits := d.FilterEvents(events.EventDBAcquire)
+	capacitySamples := d.FilterEvents(events.EventDBPoolStats)
 
-	if len(acquireEvents) == 0 && len(releaseEvents) == 0 && len(acquireWaits) == 0 {
+	if len(acquireEvents) == 0 && len(releaseEvents) == 0 && len(acquireWaits) == 0 &&
+		len(capacitySamples) == 0 {
 		return ""
 	}
 
@@ -748,7 +776,14 @@ func GeneratePoolSection(d Diagnostician, duration time.Duration) string {
 		report += "  Note: covers queueing for a free slot and establishing a new\n"
 		report += "        connection; compare with the app's sql.DBStats.WaitCount to\n"
 		report += "        tell them apart. Only acquisitions slower than 1ms appear.\n"
+		if len(capacitySamples) == 0 {
+			report += "        Pool capacity is not shown: reading it needs the binary's\n"
+			report += "        DWARF, which -ldflags=-w strips.\n"
+		}
 	}
+
+	report += poolCapacityBlock(capacitySamples,
+		len(acquireEvents) > 0 || len(releaseEvents) > 0 || len(acquireWaits) > 0)
 
 	poolSummaries := tracker.GetPoolSummaryFromEvents(acquireEvents, releaseEvents, exhaustedEvents)
 	if len(poolSummaries) > 0 {

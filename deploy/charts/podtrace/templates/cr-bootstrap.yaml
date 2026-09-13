@@ -83,6 +83,10 @@ data:
       {{- if .Values.agent.btfMode }}
       btfMode: {{ .Values.agent.btfMode }}
       {{- end }}
+      {{- with .Values.agent.btfSource }}
+      btfSource:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.agent.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

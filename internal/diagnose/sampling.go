@@ -36,7 +36,7 @@ func getEventPriority(event *events.Event) int {
 		return config.PriorityLow
 	}
 
-	if event.Error != 0 {
+	if event.IsError() {
 		return config.PriorityCritical
 	}
 
