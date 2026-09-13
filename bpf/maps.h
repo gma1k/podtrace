@@ -688,6 +688,32 @@ struct {
 	__type(value, u64);
 } go_acquire_starts SEC(".maps");
 
+struct pool_field_offsets {
+	u32 num_open;
+	u32 max_open;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u32);
+	__type(value, struct pool_field_offsets);
+} pool_offsets SEC(".maps");
+
+struct pool_sample {
+	u64 last_emit_ns;
+	u32 peak_open;
+	u32 peak_pct;
+	u32 peak_max_open;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u32);
+	__type(value, struct pool_sample);
+} pool_samples SEC(".maps");
+
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
 	__uint(max_entries, 2 * 1024 * 1024);
@@ -735,7 +761,7 @@ struct {
 	__type(value, struct h3_peer_paths);
 } h3_peer_paths_map SEC(".maps");
 
-struct h3_pidns_info {
+struct pidns_info {
 	u64 dev;
 	u64 ino;
 };
@@ -743,8 +769,8 @@ struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
 	__uint(max_entries, 1);
 	__type(key, u32);
-	__type(value, struct h3_pidns_info);
-} h3_pidns SEC(".maps");
+	__type(value, struct pidns_info);
+} pidns_ref SEC(".maps");
 
 struct h3_hdr_name {
 	u8   len;

@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: btf-stage
+  namespace: podtrace-system
+  labels:
+    app: btf-stage
+spec:
+  selector:
+    matchLabels:
+      app: btf-stage
+  template:
+    metadata:
+      labels:
+        app: btf-stage
+    spec:
+      tolerations:
+        - effect: NoSchedule
+          operator: Exists
+      initContainers:
+        - name: stage
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              mkdir -p /stage
+              cp /host-btf/vmlinux /stage/vmlinux.btf
+              printf 'this is not BTF' > /stage/garbage.btf
+              chmod 0644 /stage/vmlinux.btf /stage/garbage.btf
+              ls -l /stage
+          volumeMounts:
+            - name: host-btf
+              mountPath: /host-btf
+              readOnly: true
+            - name: stage
+              mountPath: /stage
+      containers:
+        - name: pause
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep 86400"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+      volumes:
+        - name: host-btf
+          hostPath:
+            path: /sys/kernel/btf
+            type: Directory
+        - name: stage
+          hostPath:
+            path: /var/lib/podtrace-e2e
+            type: DirectoryOrCreate

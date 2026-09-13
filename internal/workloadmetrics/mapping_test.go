@@ -44,6 +44,7 @@ var allEventTypes = map[events.EventType]string{
 	events.EventPoolRelease:    "EventPoolRelease",
 	events.EventPoolExhausted:  "EventPoolExhausted",
 	events.EventDBAcquire:      "EventDBAcquire",
+	events.EventDBPoolStats:    "EventDBPoolStats",
 	events.EventUnlink:         "EventUnlink",
 	events.EventRename:         "EventRename",
 	events.EventRedisCmd:       "EventRedisCmd",

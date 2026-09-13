@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -36,11 +37,16 @@ func SplunkSecretName(podName string) string {
 	return podName + "-splunk"
 }
 
+// btfFileMountDir is where a supplied BTF blob is mounted in the spawned pod.
+const btfFileMountDir = "/etc/podtrace/btf"
+
 // PodSpecOptions configures BuildPodSpec.
 type PodSpecOptions struct {
 	ExtraEnv []corev1.EnvVar
 
 	SplunkToken string
+
+	BTFFile string
 
 	NodeName              string
 	Namespace             string
@@ -130,6 +136,23 @@ func BuildPodSpec(opts PodSpecOptions) (*corev1.Pod, error) {
 		}
 	}
 	env = append(env, opts.ExtraEnv...)
+
+	if opts.BTFFile != "" {
+		mountPath := filepath.Join(btfFileMountDir, filepath.Base(opts.BTFFile))
+		fileType := corev1.HostPathFile
+		env = append(env, corev1.EnvVar{Name: "PODTRACE_BTF_FILE", Value: mountPath})
+		volumes = append(volumes, corev1.Volume{
+			Name: "btf-file",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{Path: opts.BTFFile, Type: &fileType},
+			},
+		})
+		// Mounted as the file itself rather than its directory: the blob may
+		// sit beside unrelated files and this pod is privileged already.
+		mounts = append(mounts, corev1.VolumeMount{
+			Name: "btf-file", MountPath: mountPath, ReadOnly: true,
+		})
+	}
 
 	if opts.SplunkToken != "" {
 		env = append(env, corev1.EnvVar{

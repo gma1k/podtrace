@@ -30,6 +30,7 @@ applies the CR from `values.yaml` via a post-install hook Job:
 | `agent.eventBufferSize` | `spec.agent.eventBufferSize` |
 | `agent.statusReportInterval` | `spec.agent.statusReportInterval` |
 | `agent.btfMode` | `spec.btfMode` |
+| `agent.btfSource` | `spec.btfSource` |
 | `agent.nodeSelector` | `spec.nodeSelector` |
 | `agent.tolerations` | `spec.tolerations` |
 | `session.resources` | `spec.session.resources` |
@@ -56,7 +57,7 @@ spec:
   imagePullPolicy: IfNotPresent
   systemNamespace: podtrace-system
   maxConcurrentSessionsPerNode: 2
-  btfMode: auto                # auto | host | embedded
+  btfMode: auto                # auto | host | file | embedded(deprecated)
   nodeSelector: {}
   tolerations: []
   fleetPriority: 0             # tie-break when fleets overlap
@@ -88,12 +89,16 @@ spec:
     fall back to embedded stub types.
   - `host`: require `/sys/kernel/btf/vmlinux` (fails closed on minimal
     distros without BTF).
-  - `embedded`: **accepted but not implemented.** No BTF is shipped in the
+  - `file`: load BTF from a blob you supply through `btfSource`. See
+    [Supplying BTF for a kernel without it](#supplying-btf-for-a-kernel-without-it).
+  - `embedded`: **deprecated, and does nothing.** No BTF is shipped in the
     image, so the agent behaves exactly as for `auto`, and the admission
-    webhook warns when you set it. It is still in the enum because removing
-    a published enum value is a breaking change. On a node without host BTF
-    this means the stub types, not an embedded blob, so setting it does not
-    make a BTF-less node work.
+    webhook warns when you set it. Use `file`. It stays in the enum because
+    removing a published enum value is a breaking change; it goes at the next
+    stored-version cutover.
+- **`btfSource`** — where `btfMode: file` reads the blob. Exactly one of
+  `configMap` or `hostPath`. Ignored, and rejected at admission, in any other
+  mode: a staged blob nothing loads reads as a configured feature.
 - **`maxConcurrentSessionsPerNode`** — protects nodes from privileged
   Job pile-ups when many sessions land on the same node.
 - **`fleetPriority`** — orders fleets that target the same node. Advisory:
@@ -282,3 +287,118 @@ ClusterRole, overlap detection reports `Conflict=Unknown` with reason
 - [installation.md](installation.md) — Helm install
 - [crd-podtrace.md](crd-podtrace.md) — continuous tracing
 - [crd-podtracesession.md](crd-podtracesession.md) — bounded diagnose
+
+## Supplying BTF for a kernel without it
+
+Almost nobody needs this. podtrace requires kernel **5.8+** (BPF ring
+buffers), and essentially every distro kernel at or above that level ships
+`CONFIG_DEBUG_INFO_BTF`. BTFHub, the archive that exists precisely to serve
+BTF-less kernels, carries almost nothing above the 5.8 line: RHEL/CentOS
+7 and 8, Ubuntu 16.04 and 18.04, Debian 9 and 10, SLES 12 and 15.3, Fedora
+up to 31 and Amazon Linux are all below podtrace's floor already.
+
+What is left is **custom and vendor-built kernels** at 5.8+ where whoever
+built them left `CONFIG_DEBUG_INFO_BTF` off. If that is you, you built the
+kernel, so you can produce its BTF.
+
+### Check whether you need it at all
+
+```bash
+ls -l /sys/kernel/btf/vmlinux     # present: you need nothing here
+podtrace diagnose-env             # reports btfVmlinux and btfFile
+```
+
+### Produce the blob
+
+From a `vmlinux` with DWARF (the debug build of the kernel you are running):
+
+```bash
+pahole -J vmlinux                 # writes a .BTF section into vmlinux
+```
+
+That file works as-is, but it is megabytes. Minimise it against podtrace's
+own BPF object, which drops every type podtrace never relocates against.
+The object is compiled into the binary rather than shipped as a file, so
+write it out first:
+
+```bash
+podtrace diagnose-env --dump-bpf-object ./podtrace.bpf.o
+bpftool gen min_core_btf vmlinux vmlinux.btf ./podtrace.bpf.o
+```
+
+Measured against a 6.x kernel, that turns a **5.4MB** BTF into **2.7KB** —
+podtrace relocates against very few kernel types. A ConfigMap caps at 1MiB,
+so minimising is what makes the ConfigMap path usable at all.
+
+**Regenerate the blob when you upgrade podtrace.** `min_core_btf` output is
+specific to the BPF object it was generated against; a podtrace release that
+relocates against a type your blob omits will fail to load on that node.
+The `hostPath` route with a full unminimised BTF avoids that coupling.
+
+### Hand it to the agent
+
+ConfigMap (preferred, travels with the cluster, survives node replacement):
+
+```bash
+kubectl -n podtrace-system create configmap node-btf \
+  --from-file=vmlinux.btf=./vmlinux.btf
+```
+
+```yaml
+spec:
+  btfMode: file
+  btfSource:
+    configMap:
+      name: node-btf
+      key: vmlinux.btf     # optional, this is the default
+```
+
+Or through Helm:
+
+```bash
+helm upgrade --reuse-values podtrace deploy/charts/podtrace \
+  --set agent.btfMode=file \
+  --set agent.btfSource.configMap.name=node-btf
+```
+
+hostPath, for a blob too large for a ConfigMap or already staged on the node:
+
+```yaml
+spec:
+  btfMode: file
+  btfSource:
+      hostPath: /var/lib/podtrace/vmlinux.btf
+```
+
+The path is mounted as the file itself, not as its directory, so nothing
+else beside it is exposed to the agent. It must exist on **every** node the
+agent runs on, a node missing it leaves that agent's pod stuck in
+`ContainerCreating`.
+
+### The CLI needs it too
+
+The agent DaemonSet and the session Jobs the operator renders both pick the
+blob up from `btfSource`. The CLI does not: `podtrace <pod> --diagnose` spawns
+its own privileged pod, and that pod loads its own BPF collection. It also runs
+happily with no operator installed at all, so there is no TracerConfig for it
+to read. Pass the node path instead:
+
+```bash
+podtrace -n shop checkout-7d9f --diagnose 30s \
+  --btf-file /var/lib/podtrace/vmlinux.btf
+```
+
+The path is on the **node**, not on your workstation, and is mounted as the
+file itself. Unnecessary on any node with `/sys/kernel/btf/vmlinux`, which is
+nearly all of them.
+
+### Confirm it took
+
+```bash
+kubectl describe tracerconfig default | grep -A2 Reconciled
+```
+
+The `Reconciled` condition names the blob it loaded, for example
+`spec.btfMode=file, the agent loads BTF from ConfigMap node-btf key
+vmlinux.btf`. A heterogeneous fleet needs one TracerConfig per kernel, with
+`nodeSelector` narrowing each to its own nodes.

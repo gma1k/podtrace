@@ -151,6 +151,7 @@ func maybeSpawnOnNode(ctx context.Context, cmd *cobra.Command, resolver pkgkube.
 		DynamicReSpawn:        dynamic,
 		ServiceAccountName:    sa,
 		KeepSpawnPodOnFailure: keepSpawnPodOnFailure,
+		BTFFile:               spawnBTFFile,
 	})
 	if err != nil {
 		var exitErr *nodespawn.ExitError

@@ -111,6 +111,48 @@ func AnalyzePool(acquireEvents, releaseEvents, exhaustedEvents []*events.Event) 
 	return stats
 }
 
+// PoolCapacityStats summarises what a Go database/sql pool reported about
+// itself while the trace ran: how many connections it held and what ceiling it
+// held them against.
+type PoolCapacityStats struct {
+	Samples     int
+	PeakOpen    uint64
+	MaxOpen     uint32
+	PeakPercent int32
+	Limited     bool
+}
+
+// AnalyzePoolCapacity folds pool samples into their peak. The BPF side packs
+// each sample across three fields the event already carries: Error is the
+// utilization percentage, Bytes is numOpen and TCPState is maxOpen.
+func AnalyzePoolCapacity(statsEvents []*events.Event) PoolCapacityStats {
+	var stats PoolCapacityStats
+
+	for _, e := range statsEvents {
+		if e == nil || e.Error < 0 {
+			continue
+		}
+		stats.Samples++
+		if e.Bytes > stats.PeakOpen {
+			stats.PeakOpen = e.Bytes
+		}
+		// maxOpen of 0 is SetMaxOpenConns unlimited: there is no ceiling for
+		// the count to be a fraction of, so the percentage is not a reading.
+		if e.TCPState == 0 {
+			continue
+		}
+		stats.Limited = true
+		if e.TCPState > stats.MaxOpen {
+			stats.MaxOpen = e.TCPState
+		}
+		if e.Error > stats.PeakPercent {
+			stats.PeakPercent = e.Error
+		}
+	}
+
+	return stats
+}
+
 // AcquireWaitStats summarises time callers spent obtaining a pooled database
 // connection, measured end to end across database/sql.(*DB).conn.
 type AcquireWaitStats struct {

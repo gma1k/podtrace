@@ -8,19 +8,65 @@ import (
 
 // BTFMode controls how the agent resolves BTF for CO-RE.
 //
-// "embedded" is accepted but NOT IMPLEMENTED: no BTF is shipped in the image,
-// so the agent behaves as for "auto" and the admission webhook warns. It stays
-// in the enum because removing a value from a published API is a breaking
-// change; see docs/crd-tracerconfig.md.
-// +kubebuilder:validation:Enum=auto;host;embedded
+// "auto" and "host" both read /sys/kernel/btf/vmlinux. "file" loads a BTF blob
+// the operator supplies through btfSource, for a node whose kernel was built
+// without CONFIG_DEBUG_INFO_BTF; see docs/crd-tracerconfig.md for how to
+// produce one.
+//
+// "embedded" is DEPRECATED and does nothing: no BTF is shipped in the image, so
+// the agent behaves as for "auto" and the admission webhook warns. Use "file".
+// It stays in the enum because removing a value from a published API is a
+// breaking change; it will go at the next stored-version cutover.
+// +kubebuilder:validation:Enum=auto;host;file;embedded
 type BTFMode string
 
 const (
 	BTFModeAuto BTFMode = "auto"
 	BTFModeHost BTFMode = "host"
 
+	// BTFModeFile loads BTF from the blob named by TracerConfigSpec.BTFSource.
+	BTFModeFile BTFMode = "file"
+
+	// BTFModeEmbedded is deprecated and inert. Use BTFModeFile.
 	BTFModeEmbedded BTFMode = "embedded"
 )
+
+// BTFSource locates the BTF blob the agent loads when btfMode is "file".
+// Exactly one of its fields may be set.
+//
+// The blob may be a raw BTF file -- what "bpftool gen min_core_btf" and the
+// BTFHub archive produce -- or an ELF carrying a .BTF section, such as a
+// vmlinux built with CONFIG_DEBUG_INFO_BTF. A minimised blob is tens of
+// kilobytes and fits a ConfigMap; a whole vmlinux does not.
+type BTFSource struct {
+	// ConfigMap names a ConfigMap in the system namespace whose binaryData
+	// holds the blob. Preferred: it survives node replacement and needs no
+	// access to the node's filesystem. A ConfigMap caps at 1MiB, so the blob
+	// must be minimised.
+	// +optional
+	ConfigMap *BTFConfigMapSource `json:"configMap,omitempty"`
+
+	// HostPath reads the blob from an absolute path present on every node the
+	// agent runs on. For a blob too large for a ConfigMap, or one already
+	// staged on the node by other tooling.
+	// +kubebuilder:validation:Pattern=`^/.*`
+	// +optional
+	HostPath string `json:"hostPath,omitempty"`
+}
+
+// BTFConfigMapSource names the ConfigMap and key holding a BTF blob.
+type BTFConfigMapSource struct {
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// Key defaults to "vmlinux.btf".
+	// +optional
+	Key string `json:"key,omitempty"`
+}
+
+// DefaultBTFConfigMapKey is the ConfigMap key used when BTFConfigMapSource
+// leaves Key empty.
+const DefaultBTFConfigMapKey = "vmlinux.btf"
 
 // AgentSpec tunes the per-node tracer DaemonSet.
 type AgentSpec struct {
@@ -292,6 +338,11 @@ type TracerConfigSpec struct {
 
 	// +optional
 	BTFMode BTFMode `json:"btfMode,omitempty"`
+
+	// BTFSource supplies the blob for btfMode "file". Ignored in every other
+	// mode.
+	// +optional
+	BTFSource *BTFSource `json:"btfSource,omitempty"`
 
 	// +kubebuilder:validation:Minimum=1
 	// +optional

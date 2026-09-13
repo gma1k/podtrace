@@ -2021,6 +2021,29 @@ func attachGoTLSReadProbes(coll *ebpf.Collection, exe *link.Executable, exePath 
 	return links
 }
 
+// publishPoolOffsets resolves database/sql.DB's field offsets for one target
+// and hands them to BPF, keyed by tgid.
+func publishPoolOffsets(coll *ebpf.Collection, exePath string, pid uint32) {
+	m := coll.Maps["pool_offsets"]
+	if m == nil || pid == 0 {
+		return
+	}
+	off, ok := resolvePoolFieldOffsets(exePath)
+	if !ok {
+		return
+	}
+	value := struct{ NumOpen, MaxOpen uint32 }{NumOpen: off.NumOpen, MaxOpen: off.MaxOpen}
+	if err := m.Update(pid, value, ebpf.UpdateAny); err != nil {
+		logger.Debug("Pool utilization: could not publish field offsets",
+			zap.Uint32("pid", pid), zap.Error(err))
+		return
+	}
+	logger.Debug("Pool utilization: field offsets published",
+		zap.Uint32("pid", pid),
+		zap.Uint32("num_open", off.NumOpen),
+		zap.Uint32("max_open", off.MaxOpen))
+}
+
 // attachGoAcquireProbes attaches the entry + return uprobes on
 // database/sql.(*DB).conn, whose entry-to-return duration is the time a
 // caller spent waiting for a free pooled connection.
@@ -2054,6 +2077,11 @@ func attachGoAcquireProbes(coll *ebpf.Collection, exePath string, pid uint32) []
 		return links
 	}
 	links = append(links, el)
+
+	// Publish the DB field offsets before the probe can fire. Without an
+	// entry the BPF side emits no pool stats at all, which is the intended
+	// behaviour for a binary that shipped no DWARF.
+	publishPoolOffsets(coll, exePath, pid)
 
 	attached := 0
 	for _, ro := range retOffs {

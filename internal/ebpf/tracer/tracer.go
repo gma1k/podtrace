@@ -572,6 +572,26 @@ func bpfLoopAvailable() bool {
 // pruneL7ProbesIfNoBPFLoop removes the L7 protocol programs (identified by an
 // actual bpf_loop call in their instruction stream, no hardcoded list) from
 // the collection spec when the kernel lacks bpf_loop.
+// kernelTypesFromFile resolves the BTF the collection relocates against when
+// the operator named a blob, reporting nil when none was named.
+//
+// A named blob that cannot be read is an error rather than a fallback. The
+// operator only reaches here through btfMode=file, which is set on a node whose
+// kernel carries no BTF of its own -- so falling back to host BTF means the
+// stub types, no working CO-RE, and an agent that reports healthy while
+// relocating against nothing. That silent half-state is what btfMode=embedded
+// was, and the point of this path is to stop having one.
+func kernelTypesFromFile(path string) (*btf.Spec, error) {
+	if path == "" {
+		return nil, nil
+	}
+	spec, err := btf.LoadSpec(path)
+	if err != nil {
+		return nil, fmt.Errorf("load BTF from PODTRACE_BTF_FILE %s: %w", path, err)
+	}
+	return spec, nil
+}
+
 func pruneL7ProbesIfNoBPFLoop(spec *ebpf.CollectionSpec) {
 	if bpfLoopAvailable() {
 		return
@@ -651,14 +671,14 @@ func NewTracer(tracerOpts ...Option) (*Tracer, error) {
 	}
 
 	var opts ebpf.CollectionOptions
-	if config.BTFFilePath != "" {
-		if _, err := os.Stat(config.BTFFilePath); err == nil {
-			if kspec, err := btf.LoadSpec(config.BTFFilePath); err == nil {
-				opts.Programs.KernelTypes = kspec
-			} else {
-				logger.Warn("Failed to load external BTF file", zap.String("path", config.BTFFilePath), zap.Error(err))
-			}
-		}
+	kspec, err := kernelTypesFromFile(config.BTFFilePath)
+	if err != nil {
+		return nil, err
+	}
+	if kspec != nil {
+		opts.Programs.KernelTypes = kspec
+		logger.Info("Using BTF from file instead of host BTF",
+			zap.String("path", config.BTFFilePath))
 	}
 	applyVerifierLogOptions(&opts)
 
@@ -756,7 +776,7 @@ func NewTracer(tracerOpts ...Option) (*Tracer, error) {
 		}
 	}
 	populateCaptureHeaderNames(coll, captureHeaders)
-	populatePidNamespace(coll)
+	_ = populatePidNamespace(coll)
 	setGRPCPort(coll, config.GRPCPort)
 
 	var quicrd *ringbuf.Reader
@@ -1694,7 +1714,10 @@ func (t *Tracer) processAndDispatch(ctx context.Context, event *events.Event,
 		t.cpAnalyzer.Feed(event)
 	}
 
-	if event.Error != 0 {
+	// IsError, not Error != 0: a couple of event types carry a utilization
+	// percentage in that field rather than an error code, and counting those
+	// reports every busy pool and every loaded container as a failure.
+	if event.IsError() {
 		metricsexporter.RecordError(event.TypeString(), event.Error)
 	}
 
@@ -2167,7 +2190,21 @@ func (t *Tracer) runH3ParkedFlusher(ctx context.Context, eventChan chan<- *event
 	}
 }
 
-// pidNamespaceInfo mirrors struct h3_pidns_info in bpf/maps.h.
+// pidNamespaceStat resolves the pid namespace the agent's pid views belong to,
+// preferring the node's init namespace under the mounted host /proc and
+// falling back to the agent's own when that is not mounted.
+func pidNamespaceStat(procBase string) (string, syscall.Stat_t, error) {
+	nsPath := filepath.Join(procBase, "1", "ns", "pid")
+	var st syscall.Stat_t
+	if err := syscall.Stat(nsPath, &st); err != nil {
+		if fallbackErr := syscall.Stat("/proc/self/ns/pid", &st); fallbackErr != nil {
+			return nsPath, st, fallbackErr
+		}
+	}
+	return nsPath, st, nil
+}
+
+// pidNamespaceInfo mirrors struct pidns_info in bpf/maps.h.
 type pidNamespaceInfo struct {
 	Dev uint64
 	Ino uint64
@@ -2178,27 +2215,39 @@ type pidNamespaceInfo struct {
 // with. On nested nodes (kind, container-in-container runtimes) the
 // init-namespace tgid from bpf_get_current_pid_tgid() differs from the pid
 // the agent sees.
-func populatePidNamespace(coll *ebpf.Collection) {
-	m := coll.Maps["h3_pidns"]
+// It returns the reason no reference could be recorded, or "" on success.
+// Every failure is warned about rather than logged at debug: BPF falls back to
+// the init-namespace tgid, which is correct only where no translation was
+// needed, so on a nested node the per-pid maps silently stop resolving and the
+// probes that depend on them report nothing at all.
+func populatePidNamespace(coll *ebpf.Collection) string {
+	const warning = "pid namespace not recorded; per-pid maps miss on a nested node"
+
+	m := coll.Maps["pidns_ref"]
 	if m == nil {
-		return
+		// Reachable with a stale BPF object: a binary that expects the map
+		// loaded against one built before it existed.
+		reason := "BPF object has no pidns_ref map"
+		logger.Warn(warning, zap.String("reason", reason))
+		return reason
 	}
-	nsPath := filepath.Join(config.ProcBasePath, "1", "ns", "pid")
-	var st syscall.Stat_t
-	if err := syscall.Stat(nsPath, &st); err != nil {
-		if err = syscall.Stat("/proc/self/ns/pid", &st); err != nil {
-			logger.Debug("pid namespace stat failed", zap.Error(err))
-			return
-		}
+	nsPath, st, err := pidNamespaceStat(config.ProcBasePath)
+	if err != nil {
+		reason := "pid namespace not readable"
+		logger.Warn(warning, zap.String("reason", reason),
+			zap.String("path", nsPath), zap.Error(err))
+		return reason
 	}
 	k := uint32(0)
 	v := pidNamespaceInfo{Dev: uint64(st.Dev), Ino: st.Ino}
 	if err := m.Update(&k, &v, ebpf.UpdateAny); err != nil {
-		logger.Debug("pid namespace map update failed", zap.Error(err))
-	} else {
-		logger.Debug("pid namespace reference recorded",
-			zap.String("path", nsPath), zap.Uint64("ino", st.Ino))
+		reason := "pidns_ref update failed"
+		logger.Warn(warning, zap.String("reason", reason), zap.Error(err))
+		return reason
 	}
+	logger.Debug("pid namespace reference recorded",
+		zap.String("path", nsPath), zap.Uint64("ino", st.Ino))
+	return ""
 }
 
 // captureHeaderName mirrors struct h3_hdr_name in bpf/maps.h.

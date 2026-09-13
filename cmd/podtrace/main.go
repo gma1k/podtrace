@@ -71,6 +71,7 @@ var (
 	spawnServiceAccount   string
 	dynamicSpawn          bool
 	keepSpawnPodOnFailure bool
+	spawnBTFFile          string
 	preresolvedPods       []string
 
 	exporterFromFile       string
@@ -158,6 +159,7 @@ func main() {
 	rootCmd.Flags().StringVar(&spawnNamespace, "spawn-namespace", "", "Namespace for the ephemeral spawn pod (defaults to the target pod's namespace; overridable via PODTRACE_SPAWN_NAMESPACE)")
 	rootCmd.Flags().BoolVar(&dynamicSpawn, "dynamic-spawn", false, "Continuously poll target selection and spawn additional pods on newly-matched nodes (incompatible with --diagnose; covers new nodes only, not new pods on already-covered nodes)")
 	rootCmd.Flags().BoolVar(&keepSpawnPodOnFailure, "keep-spawn-pod", false, "On failure, leave the spawn pod in place so its logs and state can be inspected (the reaper still cleans it up on the next podtrace invocation)")
+	rootCmd.Flags().StringVar(&spawnBTFFile, "btf-file", "", "Absolute path on the node to a BTF blob, for a kernel built without CONFIG_DEBUG_INFO_BTF. The CLI's equivalent of TracerConfig btfMode=file; see docs/crd-tracerconfig.md for how to produce one. Unnecessary when /sys/kernel/btf/vmlinux exists, which is nearly always")
 	rootCmd.Flags().StringVar(&spawnServiceAccount, "service-account", "", "ServiceAccount the spawn pod runs as. Only required when --dynamic-spawn watches selector changes from inside the pod; otherwise the workstation pre-resolves everything and the spawn pod needs no RBAC.")
 	rootCmd.Flags().StringSliceVar(&preresolvedPods, "preresolved-pod", nil, "internal: workstation pre-resolved target as ns/name/containerID/containerName, lets the spawn pod skip its own K8s lookup")
 	_ = rootCmd.Flags().MarkHidden("preresolved-pod")

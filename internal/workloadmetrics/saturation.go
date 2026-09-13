@@ -64,15 +64,19 @@ func newSaturationCollectors(native bool, withBase func(...string) []string) sat
 			histogramOpts("db_connection_acquire_seconds",
 				"Time callers spent obtaining a pooled database connection, from either cause: "+
 					"queueing for a free slot once the pool is at its maximum, or establishing "+
-					"a new connection while it is below it. Both are time the caller is blocked "+
-					"before its query starts, which is why they share a metric -- but that means "+
-					"this is NOT Go's DBStats.WaitCount, which counts only the first. A workload "+
-					"churning connections because MaxIdleConns is too low reports here while "+
-					"DBStats reports zero waits. Only samples above 1ms are recorded, and only "+
-					"Go database/sql is instrumented, so absence means a fast pool or a runtime "+
-					"this cannot see. No db_system label: acquisition is upstream of the driver.", native),
+					"a new connection while it is below it.", native),
 			withBase(),
 		),
+
+		poolUtilization: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: metricPrefix + "db_pool_utilization_percent",
+			Help: "How full a Go database/sql connection pool is, 0-100, sampled from the pool's own numOpen and maxOpen. Alert on this before callers start queueing, which is what db_connection_acquire_seconds shows after the fact. Absent when SetMaxOpenConns is unlimited, since there is no capacity to be a fraction of, and absent for binaries built without DWARF.",
+		}, withBase()),
+
+		poolOpen: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: metricPrefix + "db_pool_connections_open",
+			Help: "Connections a Go database/sql pool currently holds open, read from the pool's own numOpen. Reported even when the pool is unlimited, where the utilization percentage cannot be.",
+		}, withBase()),
 	}
 }
 
@@ -85,9 +89,15 @@ type saturationCollectors struct {
 	connectionsClosed *prometheus.CounterVec
 
 	acquireWait *prometheus.HistogramVec
+
+	poolUtilization *prometheus.GaugeVec
+	poolOpen        *prometheus.GaugeVec
 }
 
 var utilizationHoldWindow = 6 * config.DefaultResourceMonitorInterval
+
+// maxPlausiblePoolConnections bounds what a pool sample may claim.
+const maxPlausiblePoolConnections = 1_000_000
 
 // utilizationPeak is one series' held maximum.
 type utilizationPeak struct {
@@ -100,6 +110,8 @@ func (s saturationCollectors) all() []prometheus.Collector {
 		s.resourceUtilization,
 		s.connectionsOpened,
 		s.connectionsClosed,
+		s.poolUtilization,
+		s.poolOpen,
 	}
 }
 
@@ -129,10 +141,16 @@ func (s saturationCollectors) counterFor(family string) (*prometheus.CounterVec,
 }
 
 func (s saturationCollectors) gaugeFor(family string) (*prometheus.GaugeVec, bool) {
-	if family == "resource_utilization_percent" {
+	switch family {
+	case "resource_utilization_percent":
 		return s.resourceUtilization, true
+	case "db_pool_utilization_percent":
+		return s.poolUtilization, true
+	case "db_pool_connections_open":
+		return s.poolOpen, true
+	default:
+		return nil, false
 	}
-	return nil, false
 }
 
 // recordSaturation folds a saturation event into its family, reporting whether
@@ -148,6 +166,9 @@ func (s *Sink) recordSaturation(e *events.Event, base []string) bool {
 			labels, s.holdPeak("resource_utilization_percent", labels, float64(e.Error)))
 		return true
 
+	case events.EventDBPoolStats:
+		return s.recordPoolStats(e, base)
+
 	default:
 		counter, family, ok := s.connectionCounter(e.Type)
 		if !ok {
@@ -156,6 +177,23 @@ func (s *Sink) recordSaturation(e *events.Event, base []string) bool {
 		s.add(counter, family, appendLabels(base, dbSystemLabel(e.Target)), 1)
 		return true
 	}
+}
+
+// recordPoolStats folds one sample of a Go database/sql pool's own counters
+// into the two capacity gauges.
+func (s *Sink) recordPoolStats(e *events.Event, base []string) bool {
+	if e.Error < 0 || e.Bytes > maxPlausiblePoolConnections {
+		return true
+	}
+
+	s.setGauge(s.c.sat.poolOpen, "db_pool_connections_open",
+		base, s.holdPeak("db_pool_connections_open", base, float64(e.Bytes)))
+
+	if e.TCPState > 0 {
+		s.setGauge(s.c.sat.poolUtilization, "db_pool_utilization_percent",
+			base, s.holdPeak("db_pool_utilization_percent", base, float64(e.Error)))
+	}
+	return true
 }
 
 // connectionCounter resolves a connection-lifecycle event to the counter that

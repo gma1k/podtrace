@@ -454,14 +454,16 @@ errors everywhere else, with nothing in either family saying what ran out.
 | `podtrace_workload_db_connections_opened_total` | Counter | `db_system` |
 | `podtrace_workload_db_connections_closed_total` | Counter | `db_system` |
 | `podtrace_workload_db_connection_acquire_seconds` | Histogram | — |
+| `podtrace_workload_db_pool_utilization_percent` | Gauge | — |
+| `podtrace_workload_db_pool_connections_open` | Gauge | — |
 
 `resource` is `cpu`, `memory`, `io` or `other`. `db_system` is `postgresql`,
 `mysql`, `sqlite` or `other`, following OpenTelemetry's `db.system` vocabulary.
 
 #### Utilization holds its peak
 
-A gauge collapses. Every other family on this surface is a counter or a
-histogram, which sum correctly when several replicas of a workload land on the
+A gauge collapses. The other families on this surface are counters and
+histograms, which sum correctly when several replicas of a workload land on the
 same node, but a gauge does not sum, it overwrites. Two replicas write the
 same series, because the label set here is workload-scoped like the rest of the
 surface, so a plain last-write-wins would let a healthy replica erase a
@@ -472,8 +474,8 @@ alternating 98% and 5% make the series oscillate, and a rule that requires its
 condition to hold continuously would restart its hold timer every other
 evaluation and never fire at all.
 
-So this family reports the **highest reading seen in the last 30 seconds**
-rather than the most recent one. Once that window passes without a higher
+So every gauge in this section reports the **highest reading seen in the last
+30 seconds** rather than the most recent one. Once that window passes without a higher
 reading, the newer value wins, that decay is what lets a genuinely recovered
 workload stop looking saturated. The window is driven by the clock rather than
 by a scrape, so a Prometheus scrape and the inspection engine's own gather
@@ -484,6 +486,11 @@ pod labels on this surface are opt-in precisely because each one multiplies
 series count, and quietly forcing one onto a new family would break a
 documented compatibility contract. Set `agent.metrics.labels.pod=true` if you
 want per-replica saturation, and the peak-hold then applies per pod.
+
+The `podtrace_workload_db_pool_connections_open` count holds its peak for the
+same reason, even though a count is normally a "right now" number. Reporting a
+held 95% utilization beside a current 2 connections would put two readings of
+the same pool, taken at different moments, next to each other on one dashboard.
 
 #### Database connections
 
@@ -549,11 +556,12 @@ the callers are still blocked, and this metric reports that. **When the two
 disagree, the gap is connection churn**, raise `SetMaxIdleConns`.
 
 Separating the two would mean reading `numOpen` and `maxOpen` out of the `*DB`
-struct, which needs a table of field offsets per Go release keyed on whatever
-version the target application was built with, and a wrong offset there does
-not fail, it returns a plausible number. The end-to-end duration needs no
-struct layout at all, which is what makes this probe correct on every Go
-version, at the cost of not attributing the cause.
+struct. The pool capacity gauges below do read them, but they are a different
+measurement rather than a split of this one: they sample what the pool looks
+like, they do not attribute an individual acquisition to a cause. The
+end-to-end duration needs no struct layout at all, which is what keeps this
+probe correct on stripped binaries and on every Go version, at the cost of not
+attributing the cause.
 
 ```promql
 # Acquisitions per second slower than 1ms
@@ -585,8 +593,60 @@ through `.gopclntab` so it works on stripped binaries. The symbol is absent
 when a program never queries, and absence is treated as "not applicable"
 rather than as a failure.
 
+#### Pool capacity, for Go only
+
+`podtrace_workload_db_connection_acquire_seconds` tells you callers already
+wait. These two gauges tell you how close the pool is to making them wait,
+which is the reading worth alerting on:
+
+| Metric | Reads | Absent when |
+|---|---|---|
+| `podtrace_workload_db_pool_connections_open` | `database/sql.DB.numOpen` | the binary carries no DWARF |
+| `podtrace_workload_db_pool_utilization_percent` | `numOpen` as a percentage of `maxOpen` | the same, or the pool is unlimited |
+
+An unlimited pool `SetMaxOpenConns` unset or zero, reports the count but no
+percentage. There is no ceiling for the count to be a fraction of, and
+publishing 0% would read as an idle pool rather than an unbounded one. The
+count still carries the leak signal there.
+
+```promql
+# Pools within 10% of their ceiling, before anyone queues for a slot
+podtrace_workload_db_pool_utilization_percent > 90
+```
+
+Both come from the same `database/sql.(*DB).conn` probe that times acquisition.
+Every call is read; one reading per second per process is emitted, and it is
+the **highest** occupancy seen since the last one. Emitting whatever the pool
+happened to hold at one arbitrary instant per second reads the trough of a
+workload that queries in bursts -- measured on kind, a pool pinned at its
+ceiling of 4 reported 50% that way. A pool nobody uses emits nothing rather
+than zeros, and its series is reaped like any other once the workload stops
+being observed.
+
+##### This half needs DWARF, and says nothing without it
+
+`numOpen` and `maxOpen` are unexported fields of an unexported struct. There is
+no symbol to hook and no accessor to call, so the probe reads them at a byte
+offset from the `*DB` receiver, and it gets that offset from the target
+binary's own DWARF at attach time, per process, published into a BPF map keyed
+by pid.
+
+Reading the offsets out of the binary in front of us, rather than out of a
+table of Go releases, is what makes this tractable: Go emits DWARF by default,
+so any application not built with `-ldflags=-w` describes its own struct layout
+and no table needs maintaining as Go changes.
+
+**There is no fallback when DWARF is missing, deliberately.** A wrong offset
+here does not fail, it returns a plausible connection count, and nothing
+downstream can tell it from a real one. A missing percentage is recoverable; a
+confident wrong one is not. So a stripped binary gets no pool capacity at all,
+while the acquisition histogram above keeps working on it through
+`.gopclntab`. The kernel side additionally refuses negative or absurd readings
+as evidence the offsets are not describing the struct it expected.
+
 Earlier versions of this document listed `pool_connections`,
-`pool_utilization` and `pool_wait_time_seconds`. None of them ever existed.
+`pool_utilization` and `pool_wait_time_seconds`. None of those names ever
+existed; the two above are what capacity is reported under.
 
 
 Note the BPF side also emits an internal "pool exhausted" event, which this
@@ -607,8 +667,10 @@ The two connection families do carry one extra requirement: they come from
 uprobes on the client library, so they populate only for containers whose
 processes have `libpq`, `libmysqlclient` or `libsqlite3` mapped. A process too
 short-lived to be seen by target reconciliation — a per-request CLI invocation,
-for instance — will not be instrumented. `resource_utilization_percent` has no
-such caveat: it comes from a kernel-side probe.
+for instance — will not be instrumented. The acquisition histogram and the two
+pool capacity gauges carry the same requirement against the Go binary itself,
+plus DWARF for the gauges. `resource_utilization_percent` has no such caveat:
+it comes from a kernel-side probe.
 
 ## Plane internals
 

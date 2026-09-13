@@ -98,7 +98,7 @@ func (tt *TraceTracker) ProcessEvent(event *events.Event, k8sContext interface{}
 
 	span.Events = append(span.Events, event)
 	span.UpdateDuration()
-	if event.Error != 0 {
+	if event.IsError() {
 		span.Error = true
 	}
 

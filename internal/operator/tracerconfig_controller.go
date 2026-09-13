@@ -49,6 +49,7 @@ type TracerConfigReconciler struct {
 // +kubebuilder:rbac:groups=apps,resources=daemonsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles;clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile ensures the agent DaemonSet and its RBAC match spec.
@@ -120,10 +121,11 @@ func (r *TracerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	r.applyFleetPartitionStatus(ctx, &tc, logger)
 
 	if tc.Spec.BTFMode == podtracev1alpha1.BTFModeEmbedded {
-		logger.Info("spec.btfMode=embedded is not implemented; agent uses host BTF (auto)")
+		logger.Info("spec.btfMode=embedded is deprecated and does nothing; agent uses host BTF (auto). Use btfMode=file with spec.btfSource")
 	}
+	blobProblem := r.btfBlobProblem(ctx, &tc, systemNS)
 	r.setCondition(&tc, ConditionReconciled, metav1.ConditionTrue, "Reconciled",
-		reconciledMessageFor(&tc))
+		reconciledMessageFor(&tc, blobProblem))
 	r.setCondition(&tc, ConditionReady,
 		conditionStatusFromBool(tc.Status.ReadyAgents == tc.Status.DesiredAgents && tc.Status.DesiredAgents > 0),
 		"AgentFleetReady",
@@ -137,8 +139,15 @@ func (r *TracerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 		return ctrl.Result{}, fmt.Errorf("update status: %w", err)
 	}
+	if blobProblem != "" {
+		return ctrl.Result{RequeueAfter: btfBlobRecheckInterval}, nil
+	}
 	return ctrl.Result{}, nil
 }
+
+// btfBlobRecheckInterval is how often a TracerConfig naming an unusable BTF
+// blob is re-examined, so the condition clears on its own once the blob lands.
+const btfBlobRecheckInterval = 15 * time.Second
 
 // SetupWithManager registers the reconciler, declaring owned resources
 // so controller-runtime requeues the TracerConfig whenever an owned
@@ -352,13 +361,83 @@ func (r *TracerConfigReconciler) ensureAgentRBAC(ctx context.Context, tc *podtra
 // agentObjectLabels is the label set every agent-owned object carries.
 // reconciledMessageFor renders the Reconciled condition's message, calling out
 // configuration the operator accepted but did not act on.
-func reconciledMessageFor(tc *podtracev1alpha1.TracerConfig) string {
+// btfBlobProblem reports why the blob a TracerConfig names cannot be loaded, or
+// "" when there is nothing to say.
+func (r *TracerConfigReconciler) btfBlobProblem(ctx context.Context, tc *podtracev1alpha1.TracerConfig, systemNS string) string {
+	if tc == nil || tc.Spec.BTFMode != podtracev1alpha1.BTFModeFile {
+		return ""
+	}
+	src := tc.Spec.BTFSource
+	if src == nil || src.ConfigMap == nil || src.ConfigMap.Name == "" {
+		return ""
+	}
+
+	key := src.ConfigMap.Key
+	if key == "" {
+		key = podtracev1alpha1.DefaultBTFConfigMapKey
+	}
+
+	var cm corev1.ConfigMap
+	err := r.Get(ctx, types.NamespacedName{Namespace: systemNS, Name: src.ConfigMap.Name}, &cm)
+	if apierrors.IsNotFound(err) {
+		return fmt.Sprintf("ConfigMap %s/%s does not exist, so no agent can start",
+			systemNS, src.ConfigMap.Name)
+	}
+	if err != nil {
+		return ""
+	}
+	if _, ok := cm.BinaryData[key]; ok {
+		return ""
+	}
+	if _, ok := cm.Data[key]; ok {
+		return ""
+	}
+	return fmt.Sprintf("ConfigMap %s/%s has no key %q", systemNS, src.ConfigMap.Name, key)
+}
+
+func reconciledMessageFor(tc *podtracev1alpha1.TracerConfig, blobProblem string) string {
 	msg := "agent infrastructure reconciled"
-	if tc != nil && tc.Spec.BTFMode == podtracev1alpha1.BTFModeEmbedded {
-		msg += "; spec.btfMode=embedded is not implemented and was ignored, " +
-			"the agent resolves BTF from the host as it does for \"auto\""
+	if tc == nil {
+		return msg
+	}
+	switch tc.Spec.BTFMode {
+	case podtracev1alpha1.BTFModeEmbedded:
+		msg += "; spec.btfMode=embedded is deprecated and was ignored, the agent " +
+			"resolves BTF from the host as it does for \"auto\" -- use btfMode=file " +
+			"with spec.btfSource to supply a blob"
+	case podtracev1alpha1.BTFModeFile:
+		if env, _, _ := btfFileWiring(tc); len(env) > 0 {
+			if blobProblem != "" {
+				msg += "; spec.btfMode=file names a blob that cannot be loaded: " + blobProblem
+				break
+			}
+			msg += "; spec.btfMode=file, the agent loads BTF from " + btfSourceDescription(tc.Spec.BTFSource)
+		} else {
+			msg += "; spec.btfMode=file but spec.btfSource names no usable blob, so the " +
+				"agent resolves BTF from the host as it does for \"auto\" -- on a node " +
+				"without host BTF that means stub types and no working CO-RE"
+		}
 	}
 	return msg
+}
+
+// btfSourceDescription names where a supplied blob comes from, so the
+// condition says what was acted on rather than only that something was.
+func btfSourceDescription(src *podtracev1alpha1.BTFSource) string {
+	switch {
+	case src == nil:
+		return "an unset source"
+	case src.ConfigMap != nil:
+		key := src.ConfigMap.Key
+		if key == "" {
+			key = podtracev1alpha1.DefaultBTFConfigMapKey
+		}
+		return "ConfigMap " + src.ConfigMap.Name + " key " + key
+	case src.HostPath != "":
+		return "host path " + src.HostPath
+	default:
+		return "an unset source"
+	}
 }
 
 func agentObjectLabels(tracerConfigName string) map[string]string {

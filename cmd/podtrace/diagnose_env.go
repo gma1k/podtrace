@@ -40,17 +40,47 @@ type envReport struct {
 }
 
 func newDiagnoseEnvCmd() *cobra.Command {
+	var dumpBPFObject string
+
 	cmd := &cobra.Command{
 		Use:   "diagnose-env",
 		Short: "Print environment diagnostics for Podtrace (kernel/BTF/cgroups/CRI/BPF)",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if dumpBPFObject != "" {
+				return writeEmbeddedBPFObject(dumpBPFObject)
+			}
 			rep := collectEnvReport()
 			out, _ := json.MarshalIndent(rep, "", "  ")
 			fmt.Println(string(out))
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&dumpBPFObject, "dump-bpf-object", "",
+		"Write the embedded BPF object to this path and exit. Needed to minimise a BTF "+
+			"blob for btfMode=file: bpftool gen min_core_btf takes the object podtrace "+
+			"will actually load, and it is embedded in this binary rather than shipped "+
+			"as a file.")
 	return cmd
+}
+
+// writeEmbeddedBPFObject writes the BPF object compiled into this binary so it
+// can be passed to "bpftool gen min_core_btf".
+func writeEmbeddedBPFObject(path string) error {
+	return writeBPFObject(path, embedded.EmbeddedPodtraceBPFObj)
+}
+
+// writeBPFObject takes the bytes rather than reading the embedded variable so
+// the branches stay reachable in a test build, where the embed_bpf tag is off
+// and the embedded object is empty.
+func writeBPFObject(path string, obj []byte) error {
+	if len(obj) == 0 {
+		return fmt.Errorf("this build embeds no BPF object (built without the embed_bpf tag), so there is nothing to write; use the object from a release build or from internal/ebpf/embedded in the source tree")
+	}
+	if err := os.WriteFile(path, obj, 0o600); err != nil {
+		return fmt.Errorf("write BPF object to %s: %w", path, err)
+	}
+	fmt.Fprintf(os.Stderr, "wrote %d bytes to %s\n", len(obj), path)
+	return nil
 }
 
 func collectEnvReport() envReport {

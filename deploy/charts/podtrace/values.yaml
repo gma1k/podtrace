@@ -74,7 +74,18 @@ agent:
   priorityClassName: system-node-critical
   eventBufferSize: 10000
   statusReportInterval: 30s
+  # auto and host both read the node's /sys/kernel/btf/vmlinux. Set "file" and
+  # btfSource below only for a kernel built without CONFIG_DEBUG_INFO_BTF.
   btfMode: auto
+
+  # Only read when btfMode is "file". Set exactly one of configMap or hostPath.
+  # The ConfigMap lives in the release namespace and holds the blob under
+  # binaryData; see docs/crd-tracerconfig.md for how to produce one.
+  #   btfSource:
+  #     configMap:
+  #       name: node-btf
+  #       key: vmlinux.btf
+  btfSource: {}
 
   logLevel: ""
 

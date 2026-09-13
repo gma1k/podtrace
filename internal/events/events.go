@@ -108,6 +108,7 @@ const (
 	EventHTTP3
 	EventUSDT
 	EventDBAcquire
+	EventDBPoolStats
 )
 
 type Event struct {
@@ -152,7 +153,7 @@ func (e *Event) Latency() time.Duration {
 // IsError reports whether the event represents a failure.
 func (e *Event) IsError() bool {
 	switch e.Type {
-	case EventResourceLimit:
+	case EventResourceLimit, EventDBPoolStats:
 		return false
 	default:
 		return e.Error != 0
@@ -252,7 +253,8 @@ func (e *Event) TypeString() string {
 		return "TLS"
 	case EventResourceLimit:
 		return "RESOURCE"
-	case EventPoolAcquire, EventPoolRelease, EventPoolExhausted, EventDBAcquire:
+	case EventPoolAcquire, EventPoolRelease, EventPoolExhausted, EventDBAcquire,
+		EventDBPoolStats:
 		return "POOL"
 	case EventUnlink, EventRename:
 		return "FS"
