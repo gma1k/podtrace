@@ -268,7 +268,7 @@ static __always_inline void h3_emit_txn(u64 goroutine, u16 status, u8 is_client,
 	rec->timestamp = in->start_ts;
 	rec->latency_ns = now > in->start_ts ? now - in->start_ts : 0;
 	rec->cgroup_id = bpf_get_current_cgroup_id();
-	rec->pid = bpf_get_current_pid_tgid() >> 32;
+	rec->pid = agent_ns_tgid();
 	rec->status = status;
 	rec->is_client = is_client;
 	rec->flags = flags;

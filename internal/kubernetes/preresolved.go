@@ -12,13 +12,13 @@ type PreResolvedRef struct {
 	PodName       string
 	ContainerID   string
 	ContainerName string
+	PodIP         string
 }
 
-// ParsePreResolvedRef parses the "namespace/podName/containerID/containerName"
-// form. Each ref names exactly one container; a multi-container pod arrives
-// as one ref per container. Empty containerName is allowed.
+// ParsePreResolvedRef parses the "namespace/podName/containerID/containerName/podIP"
+// form.
 func ParsePreResolvedRef(s string) (PreResolvedRef, error) {
-	parts := strings.SplitN(s, "/", 4)
+	parts := strings.SplitN(s, "/", 5)
 	if len(parts) < 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
 		return PreResolvedRef{}, fmt.Errorf("preresolved ref %q must be ns/name/containerID[/containerName]", s)
 	}
@@ -27,8 +27,11 @@ func ParsePreResolvedRef(s string) (PreResolvedRef, error) {
 		PodName:     parts[1],
 		ContainerID: parts[2],
 	}
-	if len(parts) == 4 {
+	if len(parts) >= 4 {
 		ref.ContainerName = parts[3]
+	}
+	if len(parts) == 5 {
+		ref.PodIP = parts[4]
 	}
 	return ref, nil
 }
@@ -55,6 +58,7 @@ func BuildPodInfoFromPreResolved(ref PreResolvedRef) (*PodInfo, error) {
 	return &PodInfo{
 		PodName:   ref.PodName,
 		Namespace: ref.Namespace,
+		PodIP:     ref.PodIP,
 		Containers: []ContainerTarget{
 			{Name: ref.ContainerName, ID: ref.ContainerID, CgroupPath: cgroupPath},
 		},

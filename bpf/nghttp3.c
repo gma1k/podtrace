@@ -150,7 +150,7 @@ static __always_inline struct h3_adapter_stream_key
 h3_adapter_key(u64 conn, u64 stream_id)
 {
 	struct h3_adapter_stream_key k = {
-		.tgid = bpf_get_current_pid_tgid() >> 32,
+		.tgid = agent_ns_tgid(),
 		.conn = conn,
 		.stream_id = stream_id,
 	};
@@ -161,7 +161,7 @@ static __always_inline void h3_adapter_emit(struct h3_txn_record *rec,
 					    u8 is_client, u8 flags)
 {
 	rec->cgroup_id = bpf_get_current_cgroup_id();
-	rec->pid = bpf_get_current_pid_tgid() >> 32;
+	rec->pid = agent_ns_tgid();
 	rec->is_client = is_client;
 	rec->flags = flags;
 	bpf_ringbuf_output(&h3_txn_events, rec, sizeof(*rec), 0);
@@ -267,7 +267,7 @@ static __always_inline void h3_capture_stream_bytes(u64 conn, u64 stream_id,
 	u32 n = nghttp3_clamp_len(srclen, H3_CHUNK_DATA_MAX);
 	if (n == 0)
 		return;
-	c->tgid = bpf_get_current_pid_tgid() >> 32;
+	c->tgid = agent_ns_tgid();
 	c->conn = conn;
 	c->stream_id = stream_id;
 	c->stream_len = (u32)srclen;

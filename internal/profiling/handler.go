@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/diagnose/stacktrace"
 	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/internal/logger"
 	"github.com/gma1k/podtrace/internal/metricsexporter"
@@ -222,7 +223,11 @@ func (h *Handler) GenerateSection(allEvents []*events.Event, duration time.Durat
 		goroutine = storedHeap.GoroutineProfile
 	}
 
-	cr := Correlate(allEvents, heap, goroutine, config.ProfilingAutoTriggerMS)
+	ctx, cancel := context.WithTimeout(context.Background(), symbolizeBudget)
+	defer cancel()
+
+	cr := Correlate(ctx, allEvents, heap, goroutine,
+		config.ProfilingAutoTriggerMS, stacktrace.NewResolver())
 	cr.PodIP = h.podIP
 
 	// Merge pprof availability from profiler discovery.

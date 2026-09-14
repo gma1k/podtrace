@@ -77,7 +77,7 @@ int uprobe_redisCommand(struct pt_regs *ctx)
 SEC("uretprobe/redisCommand")
 int uretprobe_redisCommand(struct pt_regs *ctx)
 {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	return redis_emit(ctx, PAIR_REDIS_COMMAND, pid, tid);
 }
@@ -107,7 +107,7 @@ int uprobe_redisCommandArgv(struct pt_regs *ctx)
 SEC("uretprobe/redisCommandArgv")
 int uretprobe_redisCommandArgv(struct pt_regs *ctx)
 {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	return redis_emit(ctx, PAIR_REDIS_COMMAND_ARGV, pid, tid);
 }

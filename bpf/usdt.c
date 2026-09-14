@@ -69,7 +69,7 @@ int uprobe_usdt(struct pt_regs *ctx)
 		return 0;
 
 	e->timestamp = bpf_ktime_get_ns();
-	e->pid = bpf_get_current_pid_tgid() >> 32;
+	e->pid = agent_ns_tgid();
 	e->type = EVENT_USDT;
 	e->latency_ns = 0;
 	e->error = 0;

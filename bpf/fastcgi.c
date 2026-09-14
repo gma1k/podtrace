@@ -10,7 +10,7 @@
 SEC("kprobe/unix_stream_recvmsg")
 int kprobe_unix_stream_recvmsg(struct pt_regs *ctx)
 {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_key(pid, tid);
 
@@ -37,7 +37,7 @@ int kprobe_unix_stream_recvmsg(struct pt_regs *ctx)
 SEC("kretprobe/unix_stream_recvmsg")
 int kretprobe_unix_stream_recvmsg(struct pt_regs *ctx)
 {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_key(pid, tid);
 
@@ -207,7 +207,7 @@ emit_params: ;
 SEC("kprobe/unix_stream_sendmsg")
 int kprobe_unix_stream_sendmsg(struct pt_regs *ctx)
 {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 
 	struct msghdr *msg = (struct msghdr *)PT_REGS_PARM2(ctx);

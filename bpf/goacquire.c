@@ -80,7 +80,7 @@ static __always_inline void emit_pool_stats(struct pt_regs *ctx, u64 now)
 		return;
 
 	e->timestamp = now;
-	e->pid = bpf_get_current_pid_tgid() >> 32;
+	e->pid = agent_ns_tgid();
 	e->type = EVENT_DB_POOL_STATS;
 	e->error = (s32)pct;
 	e->bytes = (u64)num_open;
@@ -132,7 +132,7 @@ int uprobe_go_db_conn_ret(struct pt_regs *ctx)
 		return 0;
 
 	e->timestamp = now;
-	e->pid = bpf_get_current_pid_tgid() >> 32;
+	e->pid = agent_ns_tgid();
 	e->type = EVENT_DB_ACQUIRE;
 	e->latency_ns = wait;
 

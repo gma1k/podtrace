@@ -1,6 +1,7 @@
 package profiling
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"sort"
@@ -13,18 +14,26 @@ import (
 	"github.com/gma1k/podtrace/internal/sanitize"
 )
 
-// maxCorrelatedSlowEvents caps the slow events retained for reporting and, more
-// importantly, the number of time windows the SchedSwitch scan tests each event
-// against, keeping that scan O(N_sched * maxCorrelatedSlowEvents) rather than
-// O(N_sched * N_slow), which blows up on a busy pod where both counts reach
-// config.MaxEvents.
 const maxCorrelatedSlowEvents = 20
+
+const maxCorrelatedStackDepth = 16
+
+const maxSymbolizedFrames = 64
+
+const maxReportedFrames = 10
+
+const symbolizeBudget = 15 * time.Second
 
 func safeInt64(v uint64) int64 {
 	if v > math.MaxInt64 {
 		return math.MaxInt64
 	}
 	return int64(v)
+}
+
+// FrameResolver renders one captured instruction pointer.
+type FrameResolver interface {
+	Resolve(ctx context.Context, pid uint32, addr uint64) string
 }
 
 // FrameCount holds a stack frame address/symbol and how many times it appeared
@@ -71,10 +80,12 @@ type CorrelatedResult struct {
 // cpuTriggerMS is the latency threshold in milliseconds above which an event is
 // considered "slow" and included in SlowEvents.
 func Correlate(
+	ctx context.Context,
 	allEvents []*events.Event,
 	heap *ProfileResult,
 	goroutine *ProfileResult,
 	cpuTriggerMS float64,
+	resolver FrameResolver,
 ) *CorrelatedResult {
 	result := &CorrelatedResult{
 		PageFaultCounts: map[uint32]int{},
@@ -131,7 +142,7 @@ func Correlate(
 	}
 
 	pidStats := map[uint32]*ProcessCPU{}
-	frameAgg := map[string]int{}
+	frameAgg := map[frameAddr]int{}
 
 	for _, e := range allEvents {
 		if e == nil || e.Type != events.EventSchedSwitch {
@@ -157,14 +168,13 @@ func Correlate(
 			}
 			if inWindow {
 				for i, addr := range e.Stack {
-					if i >= 3 {
+					if i >= maxCorrelatedStackDepth {
 						break
 					}
 					if addr == 0 {
 						continue
 					}
-					frameKey := fmt.Sprintf("0x%x", addr)
-					frameAgg[frameKey]++
+					frameAgg[frameAddr{pid: e.PID, addr: addr}]++
 				}
 			}
 		}
@@ -183,15 +193,7 @@ func Correlate(
 		result.CPUHotProcesses = result.CPUHotProcesses[:10]
 	}
 
-	for frame, count := range frameAgg {
-		result.HotFrames = append(result.HotFrames, FrameCount{Frame: frame, Count: count})
-	}
-	sort.Slice(result.HotFrames, func(i, j int) bool {
-		return result.HotFrames[i].Count > result.HotFrames[j].Count
-	})
-	if len(result.HotFrames) > 10 {
-		result.HotFrames = result.HotFrames[:10]
-	}
+	result.HotFrames = symbolizeHotFrames(ctx, frameAgg, resolver)
 
 	if len(allEvents) > 0 {
 		result.StartTime = clock.BPFTimestampToWall(allEvents[0].Timestamp)
@@ -199,6 +201,72 @@ func Correlate(
 	}
 
 	return result
+}
+
+// frameAddr is one captured instruction pointer, kept with the pid whose
+// address space it belongs to: user addresses are only meaningful against that
+// process's mappings, so aggregating on the address alone would merge frames
+// from unrelated binaries.
+type frameAddr struct {
+	pid  uint32
+	addr uint64
+}
+
+// symbolizeHotFrames turns raw addresses into named frames, keeping only the
+// ones worth printing.
+func symbolizeHotFrames(ctx context.Context, counts map[frameAddr]int, resolver FrameResolver) []FrameCount {
+	if len(counts) == 0 {
+		return nil
+	}
+
+	ranked := make([]struct {
+		frame frameAddr
+		count int
+	}, 0, len(counts))
+	for f, c := range counts {
+		ranked = append(ranked, struct {
+			frame frameAddr
+			count int
+		}{f, c})
+	}
+	sort.Slice(ranked, func(i, j int) bool {
+		if ranked[i].count != ranked[j].count {
+			return ranked[i].count > ranked[j].count
+		}
+		if ranked[i].frame.pid != ranked[j].frame.pid {
+			return ranked[i].frame.pid < ranked[j].frame.pid
+		}
+		return ranked[i].frame.addr < ranked[j].frame.addr
+	})
+
+	merged := map[string]int{}
+	order := []string{}
+	for i, r := range ranked {
+		if i >= maxSymbolizedFrames {
+			break
+		}
+		name := ""
+		if resolver != nil {
+			name = resolver.Resolve(ctx, r.frame.pid, r.frame.addr)
+		}
+		if name == "" {
+			name = fmt.Sprintf("0x%x", r.frame.addr)
+		}
+		if _, seen := merged[name]; !seen {
+			order = append(order, name)
+		}
+		merged[name] += r.count
+	}
+
+	out := make([]FrameCount, 0, len(order))
+	for _, name := range order {
+		out = append(out, FrameCount{Frame: name, Count: merged[name]})
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Count > out[j].Count })
+	if len(out) > maxReportedFrames {
+		out = out[:maxReportedFrames]
+	}
+	return out
 }
 
 // isSlowEventType returns true for event types where LatencyNS reflects a real
@@ -279,7 +347,8 @@ func GenerateSection(cr *CorrelatedResult, duration time.Duration) string {
 			}
 			fmt.Fprintf(&sb, "    %-5d  %s\n", f.Count, f.Frame)
 		}
-		sb.WriteString("  (Use addr2line or go tool pprof to resolve addresses to function names)\n\n")
+		sb.WriteString("  Frames are resolved where the process was still running; any that\n")
+		sb.WriteString("  remain as raw addresses belong to a process that had already exited.\n\n")
 	}
 
 	if cr.GoroutineProfile != nil && cr.GoroutineProfile.Available {

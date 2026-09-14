@@ -203,7 +203,8 @@ struct podtrace_sockaddr_alg {
 #define BPF_ANY 0
 #endif
 #ifndef BPF_F_USER_STACK
-#define BPF_F_USER_STACK 8
+#define BPF_F_USER_STACK 256
 #endif
+_Static_assert(BPF_F_USER_STACK == (1U << 8), "BPF_F_USER_STACK must be 1<<8; 8 selects BPF_F_REUSE_STACKID and yields kernel frames");
 
 #endif

@@ -46,7 +46,7 @@ static __always_inline void stash_sk_owner(struct pt_regs *ctx)
 		return;
 	struct sk_owner o = {};
 	o.cgroup_id = bpf_get_current_cgroup_id();
-	o.pid = bpf_get_current_pid_tgid() >> 32;
+	o.pid = agent_ns_tgid();
 	bpf_get_current_comm(&o.comm, sizeof(o.comm));
 	bpf_map_update_elem(&sk_owner, &sk, &o, BPF_ANY);
 }
@@ -236,7 +236,7 @@ int kprobe_tcp_v6_connect(struct pt_regs *ctx) {
 
 SEC("kretprobe/tcp_v6_connect")
 int kretprobe_tcp_v6_connect(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_TCP_CONNECT_V6);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
@@ -283,7 +283,7 @@ int kretprobe_tcp_v6_connect(struct pt_regs *ctx) {
 
 SEC("kretprobe/tcp_v4_connect")
 int kretprobe_tcp_connect(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_TCP_CONNECT_V4);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
@@ -341,7 +341,7 @@ int kprobe_tcp_sendmsg(struct pt_regs *ctx) {
 
 SEC("kretprobe/tcp_sendmsg")
 int kretprobe_tcp_sendmsg(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_TCP_SENDMSG);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
@@ -428,7 +428,7 @@ int kprobe_tcp_recvmsg(struct pt_regs *ctx) {
 
 SEC("kretprobe/tcp_recvmsg")
 int kretprobe_tcp_recvmsg(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_TCP_RECVMSG);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
@@ -496,7 +496,7 @@ int uprobe_getaddrinfo(struct pt_regs *ctx) {
 
 SEC("uretprobe/getaddrinfo")
 int uretprobe_getaddrinfo(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_GETADDRINFO);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
@@ -572,7 +572,7 @@ _Static_assert(__builtin_offsetof(struct inet_sock_set_state_args, daddr_v6) == 
 
 SEC("tp/sock/inet_sock_set_state")
 int tracepoint_inet_sock_set_state(void *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 
 	struct inet_sock_set_state_args args_local;
 	if (bpf_probe_read_kernel(&args_local, sizeof(args_local), ctx) != 0) {
@@ -641,7 +641,7 @@ _Static_assert(__builtin_offsetof(struct tcp_retransmit_skb_args, daddr_v6) == 5
 
 SEC("tp/tcp/tcp_retransmit_skb")
 int tracepoint_tcp_retransmit_skb(void *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	struct tcp_retransmit_skb_args args_local;
 	if (bpf_probe_read_kernel(&args_local, sizeof(args_local), ctx) != 0) {
 		return 0;
@@ -692,7 +692,7 @@ _Static_assert(__builtin_offsetof(struct net_dev_xmit_args, name_loc) == 24, "ne
 
 SEC("tp/net/net_dev_xmit")
 int tracepoint_net_dev_xmit(void *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	struct net_dev_xmit_args args_local;
 	if (bpf_probe_read_kernel(&args_local, sizeof(args_local), ctx) != 0) {
 		return 0;
@@ -730,7 +730,7 @@ int kprobe_udp_sendmsg(struct pt_regs *ctx) {
 
 SEC("kretprobe/udp_sendmsg")
 int kretprobe_udp_sendmsg(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_UDP_SENDMSG);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
@@ -788,7 +788,7 @@ int kprobe_udp_recvmsg(struct pt_regs *ctx) {
 
 SEC("kretprobe/udp_recvmsg")
 int kretprobe_udp_recvmsg(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_UDP_RECVMSG);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
@@ -829,7 +829,7 @@ int kretprobe_udp_recvmsg(struct pt_regs *ctx) {
 
 SEC("uprobe/http_request")
 int uprobe_http_request(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_HTTP_REQUEST);
 	u64 ts = bpf_ktime_get_ns();
@@ -847,7 +847,7 @@ int uprobe_http_request(struct pt_regs *ctx) {
 
 SEC("uretprobe/http_request")
 int uretprobe_http_request(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_HTTP_REQUEST);
 	u64 conn_key = get_key(pid, tid);
@@ -897,7 +897,7 @@ int uprobe_http_response(struct pt_regs *ctx) {
 
 SEC("uretprobe/http_response")
 int uretprobe_http_response(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_HTTP_RESPONSE);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
@@ -957,7 +957,7 @@ int uprobe_PQexec(struct pt_regs *ctx) {
 
 SEC("uretprobe/PQexec")
 int uretprobe_PQexec(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_PQEXEC);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
@@ -1016,7 +1016,7 @@ int uprobe_mysql_real_query(struct pt_regs *ctx) {
 
 SEC("uretprobe/mysql_real_query")
 int uretprobe_mysql_real_query(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_MYSQL_QUERY);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
@@ -1061,7 +1061,7 @@ int uprobe_SSL_connect(struct pt_regs *ctx) {
 
 SEC("uretprobe/SSL_connect")
 int uretprobe_SSL_connect(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_SSL_CONNECT);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
@@ -1100,7 +1100,7 @@ int uprobe_SSL_accept(struct pt_regs *ctx) {
 
 SEC("uretprobe/SSL_accept")
 int uretprobe_SSL_accept(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_SSL_ACCEPT);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
@@ -1139,7 +1139,7 @@ int uprobe_SSL_do_handshake(struct pt_regs *ctx) {
 
 SEC("uretprobe/SSL_do_handshake")
 int uretprobe_SSL_do_handshake(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_SSL_DO_HANDSHAKE);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
@@ -1178,7 +1178,7 @@ int uprobe_gnutls_handshake(struct pt_regs *ctx) {
 
 SEC("uretprobe/gnutls_handshake")
 int uretprobe_gnutls_handshake(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_GNUTLS_HANDSHAKE);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
@@ -1217,7 +1217,7 @@ int uprobe_mbedtls_ssl_handshake(struct pt_regs *ctx) {
 
 SEC("uretprobe/mbedtls_ssl_handshake")
 int uretprobe_mbedtls_ssl_handshake(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_MBEDTLS_HANDSHAKE);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);

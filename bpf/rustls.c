@@ -70,7 +70,7 @@ int uprobe_rustls_read(struct pt_regs *ctx)
 {
 	if (!http_should_trace())
 		return 0;
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_key(pid, tid);
 	struct ssl_read_state st = {
@@ -84,7 +84,7 @@ int uprobe_rustls_read(struct pt_regs *ctx)
 SEC("uretprobe/rustls_read")
 int uretprobe_rustls_read(struct pt_regs *ctx)
 {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_key(pid, tid);
 	struct ssl_read_state *st = bpf_map_lookup_elem(&rustls_read_args, &key);

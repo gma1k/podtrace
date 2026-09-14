@@ -99,7 +99,7 @@ static inline void handle_pool_exhaustion(u32 pid, u32 tid, u64 key, u64 now) {
 
 SEC("uprobe/sqlite3_prepare_v2")
 int uprobe_sqlite3_prepare_v2(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_pool_key(pid, tid);
 	u64 now = bpf_ktime_get_ns();
@@ -109,7 +109,7 @@ int uprobe_sqlite3_prepare_v2(struct pt_regs *ctx) {
 
 SEC("uprobe/sqlite3_prepare")
 int uprobe_sqlite3_prepare(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_pool_key(pid, tid);
 	u64 now = bpf_ktime_get_ns();
@@ -119,7 +119,7 @@ int uprobe_sqlite3_prepare(struct pt_regs *ctx) {
 
 SEC("uprobe/sqlite3_prepare16")
 int uprobe_sqlite3_prepare16(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_pool_key(pid, tid);
 	u64 now = bpf_ktime_get_ns();
@@ -129,7 +129,7 @@ int uprobe_sqlite3_prepare16(struct pt_regs *ctx) {
 
 SEC("uprobe/sqlite3_prepare16_v2")
 int uprobe_sqlite3_prepare16_v2(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_pool_key(pid, tid);
 	u64 now = bpf_ktime_get_ns();
@@ -139,7 +139,7 @@ int uprobe_sqlite3_prepare16_v2(struct pt_regs *ctx) {
 
 SEC("uretprobe/sqlite3_finalize")
 int uretprobe_sqlite3_finalize(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_pool_key(pid, tid);
 	handle_pool_release(pid, tid, key);
@@ -148,7 +148,7 @@ int uretprobe_sqlite3_finalize(struct pt_regs *ctx) {
 
 SEC("uprobe/sqlite3_step")
 int uprobe_sqlite3_step(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_pool_key(pid, tid);
 	u64 now = bpf_ktime_get_ns();
@@ -158,7 +158,7 @@ int uprobe_sqlite3_step(struct pt_regs *ctx) {
 
 SEC("uretprobe/sqlite3_step")
 int uretprobe_sqlite3_step(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_pool_key(pid, tid);
 	bpf_map_delete_elem(&pool_acquire_times, &key);
@@ -167,7 +167,7 @@ int uretprobe_sqlite3_step(struct pt_regs *ctx) {
 
 SEC("uprobe/PQconnectStart")
 int uprobe_PQconnectStart(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_pool_key(pid, tid);
 	u64 now = bpf_ktime_get_ns();
@@ -177,7 +177,7 @@ int uprobe_PQconnectStart(struct pt_regs *ctx) {
 
 SEC("uretprobe/PQfinish")
 int uretprobe_PQfinish(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_pool_key(pid, tid);
 	handle_pool_release(pid, tid, key);
@@ -186,7 +186,7 @@ int uretprobe_PQfinish(struct pt_regs *ctx) {
 
 SEC("uprobe/PQexec_pool")
 int uprobe_PQexec_pool(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_pool_key(pid, tid);
 	u64 now = bpf_ktime_get_ns();
@@ -196,7 +196,7 @@ int uprobe_PQexec_pool(struct pt_regs *ctx) {
 
 SEC("uprobe/mysql_real_connect")
 int uprobe_mysql_real_connect(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_pool_key(pid, tid);
 	u64 now = bpf_ktime_get_ns();
@@ -206,7 +206,7 @@ int uprobe_mysql_real_connect(struct pt_regs *ctx) {
 
 SEC("uretprobe/mysql_close")
 int uretprobe_mysql_close(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_pool_key(pid, tid);
 	handle_pool_release(pid, tid, key);
@@ -215,7 +215,7 @@ int uretprobe_mysql_close(struct pt_regs *ctx) {
 
 SEC("uprobe/mysql_real_query_pool")
 int uprobe_mysql_real_query_pool(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_pool_key(pid, tid);
 	u64 now = bpf_ktime_get_ns();

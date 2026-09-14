@@ -29,7 +29,7 @@ int tracepoint_sched_process_exec(void *ctx) {
 		return 0;
 	}
 	e->timestamp = bpf_ktime_get_ns();
-	e->pid = bpf_get_current_pid_tgid() >> 32;
+	e->pid = agent_ns_tgid();
 	e->type = EVENT_EXEC;
 	e->latency_ns = 0;
 	e->error = 0;
@@ -103,7 +103,7 @@ int kprobe_do_sys_openat2(struct pt_regs *ctx) {
 
 SEC("kretprobe/do_sys_openat2")
 int kretprobe_do_sys_openat2(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_OPENAT);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
@@ -166,7 +166,7 @@ int kprobe_vfs_unlink(struct pt_regs *ctx) {
 
 SEC("kretprobe/vfs_unlink")
 int kretprobe_vfs_unlink(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_VFS_UNLINK);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
@@ -241,7 +241,7 @@ int kprobe_vfs_rename(struct pt_regs *ctx) {
 
 SEC("kretprobe/vfs_rename")
 int kretprobe_vfs_rename(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_VFS_RENAME);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
@@ -281,7 +281,7 @@ int kretprobe_vfs_rename(struct pt_regs *ctx) {
 
 SEC("kprobe/close_fd")
 int kprobe_close_fd(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	unsigned int fd = (unsigned int)PT_REGS_PARM1(ctx);
 

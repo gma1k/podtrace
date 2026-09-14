@@ -7,7 +7,7 @@
 
 SEC("tp/exceptions/page_fault_user")
 int tracepoint_page_fault_user(void *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 
 	u32 zero = 0;
 	u64 *seq = bpf_map_lookup_elem(&page_fault_seq, &zero);
