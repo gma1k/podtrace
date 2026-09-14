@@ -9,6 +9,25 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.14.9](https://github.com/gma1k/podtrace/compare/v0.14.8...v0.14.9) (2026-09-14)
+
+
+### Features
+
+* add Go pool utilization metrics and user-supplied BTF ([#503](https://github.com/gma1k/podtrace/issues/503)) ([f11d87a](https://github.com/gma1k/podtrace/commit/f11d87af0a6b095036d013ed5db23613a3c9c885))
+* correlate slow requests with symbolised stack frames ([#505](https://github.com/gma1k/podtrace/issues/505)) ([613d490](https://github.com/gma1k/podtrace/commit/613d490a98d02cfce1e69c890870eea67a2e5f7a))
+
+
+### Bug Fixes
+
+* correct process names and pool figures in the diagnose report ([#500](https://github.com/gma1k/podtrace/issues/500)) ([8ef3183](https://github.com/gma1k/podtrace/commit/8ef3183ba1c7882bf7b7340896511988c8ca5884))
+* report pool peak connections and connection age consistently ([#502](https://github.com/gma1k/podtrace/issues/502)) ([719eb12](https://github.com/gma1k/podtrace/commit/719eb123a721c53679b1d36b9b894fc063ab1d5b))
+
+
+### Maintenance
+
+* **deps:** update module sigs.k8s.io/controller-runtime to v0.25.1 ([#504](https://github.com/gma1k/podtrace/issues/504)) ([f4289d5](https://github.com/gma1k/podtrace/commit/f4289d55038bc2f46565c18cde8e3ec30d5ad7be))
+
 ## [0.14.8](https://github.com/gma1k/podtrace/compare/v0.14.7...v0.14.8) (2026-09-11)
 
 
