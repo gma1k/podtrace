@@ -160,7 +160,7 @@ static __noinline void http_emit_request(void *ctx, void *base, u64 avail,
 		return;
 	req.endpoint[p & (MAX_STRING_LEN - 1)] = '\0';
 
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 now = req.start_ns;
 
@@ -226,7 +226,7 @@ static __noinline void http_emit_response(void *ctx, void *base, u64 len,
 	if (status[0] == '1')
 		return;
 
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 
 	struct http_req *req = bpf_map_lookup_elem(&http_reqs, &conn);
@@ -277,7 +277,7 @@ int kprobe_http_tcp_recvmsg(struct pt_regs *ctx)
 	if (!http_should_trace())
 		return 0;
 
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_key(pid, tid);
 
@@ -295,7 +295,7 @@ int kprobe_http_tcp_recvmsg(struct pt_regs *ctx)
 SEC("kretprobe/tcp_recvmsg")
 int kretprobe_http_tcp_recvmsg(struct pt_regs *ctx)
 {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_key(pid, tid);
 
@@ -351,7 +351,7 @@ int uprobe_SSL_read(struct pt_regs *ctx)
 {
 	if (!http_should_trace())
 		return 0;
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_key(pid, tid);
 	struct ssl_read_state st = {
@@ -365,7 +365,7 @@ int uprobe_SSL_read(struct pt_regs *ctx)
 SEC("uretprobe/SSL_read")
 int uretprobe_SSL_read(struct pt_regs *ctx)
 {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_key(pid, tid);
 	struct ssl_read_state *st = bpf_map_lookup_elem(&ssl_read_args, &key);
@@ -412,7 +412,7 @@ int uprobe_gnutls_record_recv(struct pt_regs *ctx)
 {
 	if (!http_should_trace())
 		return 0;
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_key(pid, tid);
 	struct ssl_read_state st = {
@@ -426,7 +426,7 @@ int uprobe_gnutls_record_recv(struct pt_regs *ctx)
 SEC("uretprobe/gnutls_record_recv")
 int uretprobe_gnutls_record_recv(struct pt_regs *ctx)
 {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_key(pid, tid);
 	struct ssl_read_state *st = bpf_map_lookup_elem(&ssl_read_args, &key);

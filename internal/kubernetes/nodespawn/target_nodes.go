@@ -26,6 +26,7 @@ type ContainerRef struct {
 type PodRef struct {
 	Namespace     string
 	Name          string
+	PodIP         string
 	ContainerID   string
 	ContainerName string
 	Containers    []ContainerRef
@@ -36,7 +37,7 @@ func (r PodRef) String() string {
 	return r.Namespace + "/" + r.Name
 }
 
-// PreResolved returns one "ns/name/containerID/containerName" string per
+// PreResolved returns one "ns/name/containerID/containerName/podIP" string per
 // traced container, each accepted by --preresolved-pod.
 func (r PodRef) PreResolved() []string {
 	containers := r.Containers
@@ -48,7 +49,11 @@ func (r PodRef) PreResolved() []string {
 		if c.ID == "" {
 			continue
 		}
-		out = append(out, r.Namespace+"/"+r.Name+"/"+c.ID+"/"+c.Name)
+		ref := r.Namespace + "/" + r.Name + "/" + c.ID + "/" + c.Name
+		if r.PodIP != "" {
+			ref += "/" + r.PodIP
+		}
+		out = append(out, ref)
 	}
 	return out
 }
@@ -80,7 +85,7 @@ func ResolveTargetNodes(ctx context.Context, clientset kubernetes.Interface, sel
 	seen := map[string]struct{}{}
 
 	add := func(pod *corev1.Pod) {
-		ref := PodRef{Namespace: pod.Namespace, Name: pod.Name}
+		ref := PodRef{Namespace: pod.Namespace, Name: pod.Name, PodIP: pod.Status.PodIP}
 		if _, dup := seen[ref.String()]; dup {
 			return
 		}

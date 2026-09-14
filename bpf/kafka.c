@@ -63,7 +63,7 @@ int uprobe_rd_kafka_produce(struct pt_regs *ctx)
 SEC("uretprobe/rd_kafka_produce")
 int uretprobe_rd_kafka_produce(struct pt_regs *ctx)
 {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_KAFKA_PRODUCE);
 
@@ -119,7 +119,7 @@ int uprobe_rd_kafka_consumer_poll(struct pt_regs *ctx)
 SEC("uretprobe/rd_kafka_consumer_poll")
 int uretprobe_rd_kafka_consumer_poll(struct pt_regs *ctx)
 {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_KAFKA_POLL);
 

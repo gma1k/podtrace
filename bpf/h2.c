@@ -275,7 +275,7 @@ static __always_inline void h2_emit_frames(void *base, u64 avail, u64 conn,
 		.cgroup_id = bpf_get_current_cgroup_id(),
 		.ts = bpf_ktime_get_ns(),
 		.avail = avail < 0xffffffffULL ? (u32)avail : 0xffffffffU,
-		.pid = bpf_get_current_pid_tgid() >> 32,
+		.pid = agent_ns_tgid(),
 		.dir = dir,
 		.transport = transport,
 	};
@@ -294,7 +294,7 @@ int kprobe_h2_tcp_sendmsg(struct pt_regs *ctx)
 	if (!base)
 		return 0;
 
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_key(pid, tid);
 
@@ -309,7 +309,7 @@ int kprobe_h2_tcp_sendmsg(struct pt_regs *ctx)
 SEC("kretprobe/tcp_sendmsg")
 int kretprobe_h2_tcp_sendmsg(struct pt_regs *ctx)
 {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_key(pid, tid);
 
@@ -340,7 +340,7 @@ int kprobe_h2_tcp_recvmsg(struct pt_regs *ctx)
 	if (!base)
 		return 0;
 
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_key(pid, tid);
 
@@ -355,7 +355,7 @@ int kprobe_h2_tcp_recvmsg(struct pt_regs *ctx)
 SEC("kretprobe/tcp_recvmsg")
 int kretprobe_h2_tcp_recvmsg(struct pt_regs *ctx)
 {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_key(pid, tid);
 

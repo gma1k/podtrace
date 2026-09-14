@@ -25,7 +25,7 @@ int tracepoint_sys_enter_bind(struct trace_event_raw_sys_enter *ctx) {
 		return 0;
 	}
 	e->timestamp = bpf_ktime_get_ns();
-	e->pid = bpf_get_current_pid_tgid() >> 32;
+	e->pid = agent_ns_tgid();
 	e->type = EVENT_AF_ALG;
 	e->latency_ns = 0;
 	e->error = 0;

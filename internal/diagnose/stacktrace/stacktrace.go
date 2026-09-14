@@ -7,11 +7,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+
+	"go.uber.org/zap"
 
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/internal/hostfs"
+	"github.com/gma1k/podtrace/internal/logger"
 	"github.com/gma1k/podtrace/internal/procfs"
 	"github.com/gma1k/podtrace/internal/procmaps"
 	"github.com/gma1k/podtrace/internal/safeconv"
@@ -29,7 +33,23 @@ type stackSummary struct {
 	FirstFrame string
 }
 
+type Resolver struct {
+	inner stackResolver
+}
+
+// NewResolver returns a Resolver with an empty cache. It is not safe for
+// concurrent use; construct one per report.
+func NewResolver() *Resolver {
+	return &Resolver{inner: stackResolver{cache: make(map[string]string)}}
+}
+
+// Resolve renders one instruction pointer captured in pid's address space.
+func (r *Resolver) Resolve(ctx context.Context, pid uint32, addr uint64) string {
+	return r.inner.resolve(ctx, pid, addr)
+}
+
 type stackResolver struct {
+	symbols  symbolTableCache
 	cache    map[string]string
 	segments map[string][]loadSegment
 	mappings map[string][]exeMapping
@@ -74,13 +94,23 @@ func (r *stackResolver) resolve(ctx context.Context, pid uint32, addr uint64) st
 	if err != nil || exePath == "" {
 		return fmt.Sprintf("0x%x", addr)
 	}
-	if _, err := hostfs.Stat(exePath); err != nil {
+	exePath, err = exeInTargetRoot(pid, exePath)
+	if err != nil {
 		return fmt.Sprintf("0x%x", addr)
 	}
 	key := exePath + "|" + fmt.Sprintf("%x", addr)
 	if v, ok := r.cache[key]; ok {
 		return v
 	}
+	symAddrForTable := addr
+	if v, ok := r.translateAddr(pid, exePath, addr); ok {
+		symAddrForTable = v
+	}
+	if name := r.symbols.get(exePath).lookup(symAddrForTable); name != "" {
+		r.cache[key] = name
+		return name
+	}
+
 	timeoutCtx, cancel := context.WithTimeout(ctx, config.DefaultAddr2lineTimeout)
 	defer cancel()
 	addr2lineBin, err := exec.LookPath("addr2line")
@@ -108,6 +138,22 @@ func (r *stackResolver) resolve(ctx context.Context, pid uint32, addr uint64) st
 	}
 	r.cache[key] = line
 	return line
+}
+
+// exeInTargetRoot turns the exe path /proc/<pid>/exe reports into one this
+// process can actually open.
+func exeInTargetRoot(pid uint32, exePath string) (string, error) {
+	viaRoot := filepath.Join(config.ProcBasePath, strconv.FormatUint(uint64(pid), 10),
+		"root", strings.TrimPrefix(exePath, "/"))
+	if _, err := hostfs.Stat(viaRoot); err == nil {
+		return viaRoot, nil
+	}
+	if _, err := hostfs.Stat(exePath); err == nil {
+		return exePath, nil
+	}
+	logger.Debug("stack symbolisation: executable not reachable",
+		zap.Uint32("pid", pid), zap.String("via_root", viaRoot), zap.String("bare", exePath))
+	return "", fmt.Errorf("executable for pid %d not reachable at %s or %s", pid, viaRoot, exePath)
 }
 
 // translateAddr converts a runtime instruction pointer into the ELF virtual
@@ -191,7 +237,7 @@ func GenerateStackTraceSectionWithContext(d Diagnostician, ctx context.Context) 
 		return ""
 	}
 
-	resolver := &stackResolver{cache: make(map[string]string)}
+	resolver := NewResolver()
 	stackMap := make(map[string]*stackSummary)
 	processed := 0
 
@@ -210,7 +256,7 @@ func GenerateStackTraceSectionWithContext(d Diagnostician, ctx context.Context) 
 		}
 		processed++
 		top := e.Stack[0]
-		frame := resolver.resolve(ctx, e.PID, top)
+		frame := resolver.Resolve(ctx, e.PID, top)
 		if frame == "" {
 			continue
 		}
@@ -262,7 +308,7 @@ func GenerateStackTraceSectionWithContext(d Diagnostician, ctx context.Context) 
 		}
 		for j := 0; j < maxFrames; j++ {
 			addr := e.Stack[j]
-			frame := resolver.resolve(ctx, e.PID, addr)
+			frame := resolver.Resolve(ctx, e.PID, addr)
 			report += fmt.Sprintf("    #%d %s\n", j, frame)
 		}
 	}

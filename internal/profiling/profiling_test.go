@@ -344,7 +344,7 @@ runtime.gopark()
 // ─── correlator.go ────────────────────────────────────────────────────────────
 
 func TestCorrelate_NilEvents(t *testing.T) {
-	cr := Correlate(nil, nil, nil, 100.0)
+	cr := Correlate(context.Background(), nil, nil, nil, 100.0, nil)
 	if cr == nil {
 		t.Fatal("expected non-nil CorrelatedResult")
 		return
@@ -355,7 +355,7 @@ func TestCorrelate_NilEvents(t *testing.T) {
 }
 
 func TestCorrelate_EmptyEvents(t *testing.T) {
-	cr := Correlate([]*events.Event{}, nil, nil, 100.0)
+	cr := Correlate(context.Background(), []*events.Event{}, nil, nil, 100.0, nil)
 	if cr == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -368,7 +368,7 @@ func TestCorrelate_OOMAndPageFault(t *testing.T) {
 		{Type: events.EventPageFault, PID: 42},
 		{Type: events.EventPageFault, PID: 99},
 	}
-	cr := Correlate(evts, nil, nil, 100.0)
+	cr := Correlate(context.Background(), evts, nil, nil, 100.0, nil)
 	if len(cr.OOMEvents) != 1 {
 		t.Errorf("expected 1 OOM event, got %d", len(cr.OOMEvents))
 	}
@@ -386,7 +386,7 @@ func TestCorrelate_SlowEvents_SortedByLatency(t *testing.T) {
 		{Type: events.EventTCPSend, LatencyNS: 1_000_000_000, PID: 2}, // 1s
 		{Type: events.EventTCPSend, LatencyNS: 100_000_000, PID: 3},   // 100ms
 	}
-	cr := Correlate(evts, nil, nil, 50.0) // 50ms threshold
+	cr := Correlate(context.Background(), evts, nil, nil, 50.0, nil) // 50ms threshold
 	if len(cr.SlowEvents) == 0 {
 		t.Fatal("expected slow events above 50ms threshold")
 	}
@@ -416,8 +416,8 @@ func TestCorrelate_SchedSwitchCorrelation(t *testing.T) {
 			Stack:     []uint64{0xdeadbeef, 0xcafebabe},
 		},
 	}
-	cr := Correlate(evts, nil, nil, 100.0) // 100ms threshold
-	_ = cr                                 // result depends on clock alignment; just ensure no panic
+	cr := Correlate(context.Background(), evts, nil, nil, 100.0, nil) // 100ms threshold
+	_ = cr                                                            // result depends on clock alignment; just ensure no panic
 }
 
 func TestCorrelate_WithPprofData(t *testing.T) {
@@ -434,7 +434,7 @@ func TestCorrelate_WithPprofData(t *testing.T) {
 		GoroutineCount: 10,
 		BlockedCount:   3,
 	}
-	cr := Correlate([]*events.Event{}, heap, goroutine, 100.0)
+	cr := Correlate(context.Background(), []*events.Event{}, heap, goroutine, 100.0, nil)
 	if !cr.PprofAvailable {
 		t.Error("expected PprofAvailable=true when heap and goroutine profiles are available")
 	}
@@ -447,7 +447,7 @@ func TestCorrelate_WithPprofData(t *testing.T) {
 }
 
 func TestCorrelate_NilProfileResults(t *testing.T) {
-	cr := Correlate([]*events.Event{}, nil, nil, 100.0)
+	cr := Correlate(context.Background(), []*events.Event{}, nil, nil, 100.0, nil)
 	if cr.PprofAvailable {
 		t.Error("expected PprofAvailable=false when both profiles are nil")
 	}

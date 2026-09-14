@@ -40,7 +40,7 @@ int kprobe_grpc_tcp_sendmsg(struct pt_regs *ctx)
 	if (buf[3] != HTTP2_HEADERS)
 		return 0;
 
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_key(pid, tid);
 

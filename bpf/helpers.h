@@ -8,7 +8,7 @@
 
 #define PIDNS_MAX_LEVELS 8
 
-static __always_inline u32 agent_ns_tgid(void)
+static __noinline u32 agent_ns_tgid(void)
 {
 	u32 init_tgid = bpf_get_current_pid_tgid() >> 32;
 	u32 zero = 0;

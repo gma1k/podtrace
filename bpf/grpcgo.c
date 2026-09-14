@@ -137,7 +137,7 @@ static __always_inline void grpc_go_process(void *ctx, u64 fields, u64 n, u32 st
 	};
 	bpf_loop(GRPC_HF_MAX, grpc_hf_cb, &c, 0);
 
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct grpc_pair_key pk;
 	int have_key = grpc_pair_key_build(&pk, stream);

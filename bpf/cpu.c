@@ -100,7 +100,7 @@ int tracepoint_sched_switch(void *ctx) {
 			struct event *e = get_event_buf();
 			if (e) {
 				e->timestamp = now;
-				e->pid = bpf_get_current_pid_tgid() >> 32;
+				e->pid = agent_ns_tgid();
 				e->type = EVENT_SCHED_SWITCH;
 				e->latency_ns = blocked;
 				e->error = 0;
@@ -160,7 +160,7 @@ int kprobe_do_futex(struct pt_regs *ctx) {
 
 SEC("kretprobe/do_futex")
 int kretprobe_do_futex(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_FUTEX);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
@@ -237,7 +237,7 @@ int uprobe_pthread_mutex_lock(struct pt_regs *ctx) {
 
 SEC("uretprobe/pthread_mutex_lock")
 int uretprobe_pthread_mutex_lock(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_PTHREAD_MUTEX);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);

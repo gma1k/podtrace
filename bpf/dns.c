@@ -216,7 +216,7 @@ static __always_inline void emit_encrypted_dns(struct __sk_buff *skb, u8 is_v6, 
 	}
 	__builtin_memset(e, 0, sizeof(*e));
 	e->timestamp = bpf_ktime_get_ns();
-	e->pid = bpf_get_current_pid_tgid() >> 32;
+	e->pid = agent_ns_tgid();
 	e->type = EVENT_DNS;
 	e->cgroup_id = bpf_skb_cgroup_id(skb);
 	if (is_v6) {
@@ -346,9 +346,6 @@ int dns_egress(struct __sk_buff *skb) {
 	__builtin_memcpy(e->dns_server_ip6, q.server_ip6, 16);
 	__builtin_memcpy(e->comm, q.comm, COMM_LEN);
 	__builtin_memcpy(e->target, q.name, MAX_STRING_LEN);
-	/* A reserved record must be released either way: discard rather than
-	 * submit when the map already absorbed it, or the reservation leaks
-	 * and the ring wedges. */
 	if (agg_absorbed(e, 0))
 		bpf_ringbuf_discard(e, 0);
 	else

@@ -42,7 +42,7 @@ int kprobe_vfs_read(struct pt_regs *ctx) {
 
 SEC("kretprobe/vfs_read")
 int kretprobe_vfs_read(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_VFS_READ);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
@@ -94,7 +94,7 @@ int kretprobe_vfs_read(struct pt_regs *ctx) {
 
 SEC("kretprobe/vfs_write")
 int kretprobe_vfs_write(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_VFS_WRITE);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
@@ -163,7 +163,7 @@ int kprobe_vfs_fsync(struct pt_regs *ctx) {
 
 SEC("kretprobe/vfs_fsync")
 int kretprobe_vfs_fsync(struct pt_regs *ctx) {
-	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_VFS_FSYNC);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);

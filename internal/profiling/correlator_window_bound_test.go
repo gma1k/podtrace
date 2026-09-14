@@ -1,6 +1,7 @@
 package profiling
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -33,7 +34,7 @@ func TestCorrelate_FrameWindowsBoundedToRetainedSlowEvents(t *testing.T) {
 		Timestamp: clock.WallToBPFTimestamp(droppedAt),
 	})
 
-	result := Correlate(all, nil, nil, 0.5)
+	result := Correlate(context.Background(), all, nil, nil, 0.5, nil)
 
 	if len(result.SlowEvents) != maxCorrelatedSlowEvents {
 		t.Fatalf("SlowEvents = %d, want capped at %d", len(result.SlowEvents), maxCorrelatedSlowEvents)

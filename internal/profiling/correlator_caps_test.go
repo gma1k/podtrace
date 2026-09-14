@@ -1,6 +1,7 @@
 package profiling
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +17,7 @@ func TestCorrelate_NilEventSkipped(t *testing.T) {
 		nil,
 		{Type: events.EventPageFault, PID: 2},
 	}
-	cr := Correlate(evts, nil, nil, 100.0)
+	cr := Correlate(context.Background(), evts, nil, nil, 100.0, nil)
 	if len(cr.SlowEvents) != 1 {
 		t.Errorf("expected 1 slow event (nils skipped), got %d", len(cr.SlowEvents))
 	}
@@ -31,7 +32,7 @@ func TestCorrelate_SlowEventsCappedAt20(t *testing.T) {
 			PID:       uint32(i + 1),
 		})
 	}
-	cr := Correlate(evts, nil, nil, 100.0)
+	cr := Correlate(context.Background(), evts, nil, nil, 100.0, nil)
 	if len(cr.SlowEvents) != 20 {
 		t.Errorf("expected slow events capped at 20, got %d", len(cr.SlowEvents))
 	}
@@ -55,7 +56,7 @@ func TestCorrelate_ProcessesSortedAndCappedAt10(t *testing.T) {
 			})
 		}
 	}
-	cr := Correlate(evts, nil, nil, 100.0)
+	cr := Correlate(context.Background(), evts, nil, nil, 100.0, nil)
 	if len(cr.CPUHotProcesses) != 10 {
 		t.Fatalf("expected CPU hot processes capped at 10, got %d", len(cr.CPUHotProcesses))
 	}
@@ -99,7 +100,7 @@ func TestCorrelate_WindowHotFrames(t *testing.T) {
 		Stack:     []uint64{0, 0xAAAA1, 0xBBBB2, 0xCCCC3, 0xDDDD4},
 	})
 
-	cr := Correlate(evts, nil, nil, 100.0)
+	cr := Correlate(context.Background(), evts, nil, nil, 100.0, nil)
 	if len(cr.HotFrames) == 0 {
 		t.Fatal("expected hot frames from sched-switch inside the slow window")
 	}
