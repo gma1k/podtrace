@@ -15,13 +15,13 @@ description: |
   Single source of truth for the node image so the chainsaw and
   quickstart-smoke jobs cannot drift on it. Keep KIND_NODE_IMAGE in step
   with the `version:` pinned for helm/kind-action — the digest is the one
-  kind v0.24.0 pins for Kubernetes v1.31.0.
+  kind v0.33.0 pins for Kubernetes v1.37.0.
 
 inputs:
   image:
     description: Fully qualified kind node image, tag pinned by digest.
     required: false
-    default: "kindest/node:v1.31.0@sha256:53df588e04085fd41ae12de0c3fe4c72f7013bba32a20e7325357a1ac94ba865"
+    default: "kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5"
 
 runs:
   using: composite

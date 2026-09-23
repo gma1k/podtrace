@@ -28,7 +28,7 @@ import (
 //
 // PodTrace is a continuous realtime eBPF trace over a dynamic set of pods.
 type PodTraceApplyConfiguration struct {
-	v1.TypeMetaApplyConfiguration    `json:",inline"`
+	v1.TypeMetaApplyConfiguration    `json:""`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                             *PodTraceSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                           *PodTraceStatusApplyConfiguration `json:"status,omitempty"`

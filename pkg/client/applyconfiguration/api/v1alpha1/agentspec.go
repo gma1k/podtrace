@@ -20,6 +20,7 @@ package v1alpha1
 import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	intstr "k8s.io/apimachinery/pkg/util/intstr"
 )
 
 // AgentSpecApplyConfiguration represents a declarative configuration of the AgentSpec type for use
@@ -37,6 +38,9 @@ type AgentSpecApplyConfiguration struct {
 	USDT                 *bool                                `json:"usdt,omitempty"`
 	Alerting             *AgentAlertingSpecApplyConfiguration `json:"alerting,omitempty"`
 	Metrics              *AgentMetricsSpecApplyConfiguration  `json:"metrics,omitempty"`
+	// RolloutMaxUnavailable is how many agents may be updated at once when
+	// the DaemonSet's pod template changes, as a count or a percentage.
+	RolloutMaxUnavailable *intstr.IntOrString `json:"rolloutMaxUnavailable,omitempty"`
 }
 
 // AgentSpecApplyConfiguration constructs a declarative configuration of the AgentSpec type for use with
@@ -122,5 +126,13 @@ func (b *AgentSpecApplyConfiguration) WithAlerting(value *AgentAlertingSpecApply
 // If called multiple times, the Metrics field is set to the value of the last call.
 func (b *AgentSpecApplyConfiguration) WithMetrics(value *AgentMetricsSpecApplyConfiguration) *AgentSpecApplyConfiguration {
 	b.Metrics = value
+	return b
+}
+
+// WithRolloutMaxUnavailable sets the RolloutMaxUnavailable field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the RolloutMaxUnavailable field is set to the value of the last call.
+func (b *AgentSpecApplyConfiguration) WithRolloutMaxUnavailable(value intstr.IntOrString) *AgentSpecApplyConfiguration {
+	b.RolloutMaxUnavailable = &value
 	return b
 }

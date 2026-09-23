@@ -36,17 +36,10 @@ type PodTraceSessionSpecApplyConfiguration struct {
 	ContainerName     *string                             `json:"containerName,omitempty"`
 	Duration          *metav1.Duration                    `json:"duration,omitempty"`
 	Filters           []apiv1alpha1.EventFilter           `json:"filters,omitempty"`
-	ExporterRef       *corev1.LocalObjectReference        `json:"exporterRef,omitempty"`
+	// ExporterRef names the ExporterConfig this session ships spans to.
+	ExporterRef *corev1.LocalObjectReference `json:"exporterRef,omitempty"`
 	// TracerConfigRef pins every Job this session spawns to one
 	// TracerConfig, overriding the per-node fleet lookup.
-	//
-	// Left unset, each per-node Job takes the config of the fleet that
-	// targets its node, so a session spanning two node pools picks up each
-	// pool's own image and redaction policy. Set this when a session must
-	// run under one known configuration regardless of placement.
-	//
-	// TracerConfig is cluster-scoped, so this is a bare name with no
-	// namespace.
 	TracerConfigRef         *corev1.LocalObjectReference       `json:"tracerConfigRef,omitempty"`
 	Thresholds              *ThresholdsApplyConfiguration      `json:"thresholds,omitempty"`
 	SamplePercent           *int32                             `json:"samplePercent,omitempty"`

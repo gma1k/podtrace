@@ -28,10 +28,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-latest
+          - runner: ubuntu-26.04
             goarch: amd64
             bpf_arch: x86
-          - runner: ubuntu-24.04-arm
+          - runner: ubuntu-26.04-arm
             goarch: arm64
             bpf_arch: arm64
 

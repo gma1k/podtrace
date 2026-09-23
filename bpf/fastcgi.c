@@ -146,9 +146,11 @@ emit_params: ;
 						copy = MAX_STRING_LEN - 1;
 					if (vstart + copy > FCGI_PARAMS_SCAN_LEN)
 						copy = FCGI_PARAMS_SCAN_LEN - vstart;
-					bpf_probe_read_kernel(e->target, copy & (MAX_STRING_LEN - 1),
+					barrier_var(copy);
+					copy &= (MAX_STRING_LEN - 1);
+					bpf_probe_read_kernel(e->target, copy,
 					                     &params[vstart]);
-					e->target[copy & (MAX_STRING_LEN - 1)] = '\0';
+					e->target[copy] = '\0';
 					found_uri = 1;
 				}
 			}
@@ -171,9 +173,11 @@ emit_params: ;
 					}
 					if (vstart + copy > FCGI_PARAMS_SCAN_LEN)
 						copy = FCGI_PARAMS_SCAN_LEN - vstart;
-					bpf_probe_read_kernel(e->details, copy & 0xF,
+					barrier_var(copy);
+					copy &= 0xF;
+					bpf_probe_read_kernel(e->details, copy,
 					                     &params[vstart]);
-					e->details[copy & 0xF] = '\0';
+					e->details[copy] = '\0';
 					found_method = 1;
 				}
 			}

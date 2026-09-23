@@ -31,7 +31,7 @@ concurrency:
 jobs:
   chainsaw:
     if: ${{ !startsWith(github.head_ref, 'release-please--') }}
-    runs-on: ${{ vars.CHAINSAW_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CHAINSAW_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 30
 
     strategy:
@@ -64,7 +64,7 @@ jobs:
         with:
           cluster_name: podtrace-chainsaw
           config: ./test/chainsaw/kind-config.yaml
-          version: v0.24.0
+          version: v0.33.0
 
       - name: Install Helm
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5.0.1
@@ -135,7 +135,13 @@ jobs:
 
       - name: Load images into kind
         run: |
-          kind load docker-image --name podtrace-chainsaw \
+          set -euo pipefail
+
+          arch="$(dpkg --print-architecture)"
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "${tmp}"' EXIT
+
+          for image in \
             ghcr.io/gma1k/podtrace:ci \
             podtrace-h2demo:ci \
             podtrace-otlp-sink:ci \
@@ -143,6 +149,12 @@ jobs:
             nginx:1.29 \
             alpine/k8s:1.30.4 \
             polinux/stress:1.0.4
+          do
+            archive="${tmp}/$(echo "${image}" | tr '/:' '__').tar"
+            docker image save --platform "linux/${arch}" "${image}" -o "${archive}"
+            kind load image-archive --name podtrace-chainsaw "${archive}"
+            rm -f "${archive}"
+          done
 
       - name: Install operator via Helm
         run: |
@@ -190,7 +202,7 @@ jobs:
 
   quickstart-smoke:
     if: ${{ !startsWith(github.head_ref, 'release-please--') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -211,7 +223,7 @@ jobs:
         with:
           cluster_name: podtrace-quickstart
           config: ./test/chainsaw/kind-config.yaml
-          version: v0.24.0
+          version: v0.33.0
 
       - name: Install Helm
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5.0.1
@@ -224,8 +236,13 @@ jobs:
       - name: Build podtrace image
         run: |
           make docker-build IMAGE_TAG=ci
-          kind load docker-image ghcr.io/gma1k/podtrace:ci \
+
+          arch="$(dpkg --print-architecture)"
+          docker image save --platform "linux/${arch}" \
+            ghcr.io/gma1k/podtrace:ci -o /tmp/podtrace-ci.tar
+          kind load image-archive /tmp/podtrace-ci.tar \
             --name podtrace-quickstart
+          rm -f /tmp/podtrace-ci.tar
 
       - name: Run quickstart smoke
         env:
