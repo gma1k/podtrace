@@ -268,17 +268,17 @@ test-changed:
 		$(GO) test -short -count=1 -parallel=4 $(shell $(GO) list ./... | grep -v '/test$$'); \
 	fi
 
-COVERAGE_EXCLUDE ?= github.com/gma1k/podtrace/internal/ebpf/probes/
+COVERAGE_EXCLUDE ?= github.com/gma1k/podtrace/internal/ebpf/probes/|github.com/gma1k/podtrace/pkg/client/
 
 coverage: test-unit
 	@echo "Generating coverage report..."
-	@grep -v '$(COVERAGE_EXCLUDE)' coverage.out > coverage.unit.out
+	@grep -vE '$(COVERAGE_EXCLUDE)' coverage.out > coverage.unit.out
 	$(GO) tool cover -html=coverage.unit.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
-	@echo "Coverage summary (excluding e2e-covered BPF integration code):"
+	@echo "Coverage summary (excluding e2e-covered BPF integration code and the generated client):"
 	$(GO) tool cover -func=coverage.unit.out | tail -1
 
-CONTROLLER_GEN_VERSION ?= v0.18.0
+CONTROLLER_GEN_VERSION ?= v0.22.0
 CONTROLLER_GEN ?= $(shell go env GOPATH 2>/dev/null)/bin/controller-gen
 CRD_OUT_DIR ?= deploy/charts/podtrace/templates/crds
 BOILERPLATE ?= hack/boilerplate.go.txt
@@ -297,7 +297,7 @@ operator-tools:
 generate: operator-tools
 	$(CONTROLLER_GEN) object:headerFile=$(BOILERPLATE) paths=./api/v1alpha1/...
 
-CLIENT_GEN_VERSION ?= v0.36.1
+CLIENT_GEN_VERSION ?= v0.37.0
 CLIENT_GEN ?= $(shell go env GOPATH 2>/dev/null)/bin/client-gen
 APPLYCONFIGURATION_GEN ?= $(shell go env GOPATH 2>/dev/null)/bin/applyconfiguration-gen
 
@@ -345,11 +345,11 @@ docker-build: bpf-btf-header
 	  --build-arg IMAGE_REPO=$(IMAGE_REPO) \
 	  -t $(IMAGE) .
 
-ENVTEST_K8S_VERSION ?= 1.36.x
+ENVTEST_K8S_VERSION ?= 1.37.x
 ENVTEST_BIN_DIR ?= $(shell go env GOPATH 2>/dev/null)/envtest-assets
 SETUP_ENVTEST ?= $(shell go env GOPATH 2>/dev/null)/bin/setup-envtest
 envtest:
-	@GOBIN=$(dir $(SETUP_ENVTEST)) $(GO) install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.24
+	@GOBIN=$(dir $(SETUP_ENVTEST)) $(GO) install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.25
 	KUBEBUILDER_ASSETS=$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir=$(ENVTEST_BIN_DIR) -p path) \
 	  $(GO) test -tags=envtest -count=1 -timeout 300s \
 	    ./api/v1alpha1/... ./internal/operator/... ./internal/agent/...

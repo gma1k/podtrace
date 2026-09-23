@@ -29,7 +29,7 @@ import (
 // TracerConfig is the infrastructure configuration for one podtrace agent
 // fleet.
 type TracerConfigApplyConfiguration struct {
-	v1.TypeMetaApplyConfiguration    `json:",inline"`
+	v1.TypeMetaApplyConfiguration    `json:""`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                             *TracerConfigSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                           *TracerConfigStatusApplyConfiguration `json:"status,omitempty"`

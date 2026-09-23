@@ -19,7 +19,8 @@
 #define FCGI_STDOUT          6
 #define FCGI_STDERR          7
 
-/* === HTTP/2 Frame Types === */
+#define HTTP2_FRAME_HDR      9
+
 #define HTTP2_DATA           0x0
 #define HTTP2_HEADERS        0x1
 #define HTTP2_PRIORITY       0x2

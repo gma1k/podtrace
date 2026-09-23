@@ -7,7 +7,6 @@
 #include "protocols.h"
 
 #define GRPC_INSPECT_LEN 50
-#define HTTP2_FRAME_HDR  9
 
 
 SEC("kprobe/tcp_sendmsg")

@@ -33,6 +33,10 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 	// Group=podtrace.io, Version=v1alpha1
 	case v1alpha1.SchemeGroupVersion.WithKind("AgentAlertingSpec"):
 		return &apiv1alpha1.AgentAlertingSpecApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("AgentInspectionsSpec"):
+		return &apiv1alpha1.AgentInspectionsSpecApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("AgentInspectionThresholdsSpec"):
+		return &apiv1alpha1.AgentInspectionThresholdsSpecApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("AgentMetricsLabelsSpec"):
 		return &apiv1alpha1.AgentMetricsLabelsSpecApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("AgentMetricsSpec"):
@@ -47,6 +51,10 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1alpha1.ApplicationTraceStatusApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("AppSelector"):
 		return &apiv1alpha1.AppSelectorApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("BTFConfigMapSource"):
+		return &apiv1alpha1.BTFConfigMapSourceApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("BTFSource"):
+		return &apiv1alpha1.BTFSourceApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("CaptureSpec"):
 		return &apiv1alpha1.CaptureSpecApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("DataDogExporter"):

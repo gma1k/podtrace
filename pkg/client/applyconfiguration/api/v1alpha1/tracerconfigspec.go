@@ -25,20 +25,23 @@ import (
 // TracerConfigSpecApplyConfiguration represents a declarative configuration of the TracerConfigSpec type for use
 // with apply.
 type TracerConfigSpecApplyConfiguration struct {
-	Image                        *string                               `json:"image,omitempty"`
-	ImagePullPolicy              *v1.PullPolicy                        `json:"imagePullPolicy,omitempty"`
-	ImagePullSecrets             []v1.LocalObjectReference             `json:"imagePullSecrets,omitempty"`
-	Agent                        *AgentSpecApplyConfiguration          `json:"agent,omitempty"`
-	Session                      *SessionRuntimeSpecApplyConfiguration `json:"session,omitempty"`
-	Redaction                    *RedactionSpecApplyConfiguration      `json:"redaction,omitempty"`
-	Capture                      *CaptureSpecApplyConfiguration        `json:"capture,omitempty"`
-	NodeSelector                 map[string]string                     `json:"nodeSelector,omitempty"`
-	Tolerations                  []v1.Toleration                       `json:"tolerations,omitempty"`
-	Affinity                     *v1.Affinity                          `json:"affinity,omitempty"`
-	BTFMode                      *apiv1alpha1.BTFMode                  `json:"btfMode,omitempty"`
-	MaxConcurrentSessionsPerNode *int32                                `json:"maxConcurrentSessionsPerNode,omitempty"`
-	SystemNamespace              *string                               `json:"systemNamespace,omitempty"`
-	FleetPriority                *int32                                `json:"fleetPriority,omitempty"`
+	Image            *string                               `json:"image,omitempty"`
+	ImagePullPolicy  *v1.PullPolicy                        `json:"imagePullPolicy,omitempty"`
+	ImagePullSecrets []v1.LocalObjectReference             `json:"imagePullSecrets,omitempty"`
+	Agent            *AgentSpecApplyConfiguration          `json:"agent,omitempty"`
+	Session          *SessionRuntimeSpecApplyConfiguration `json:"session,omitempty"`
+	Redaction        *RedactionSpecApplyConfiguration      `json:"redaction,omitempty"`
+	Capture          *CaptureSpecApplyConfiguration        `json:"capture,omitempty"`
+	NodeSelector     map[string]string                     `json:"nodeSelector,omitempty"`
+	Tolerations      []v1.Toleration                       `json:"tolerations,omitempty"`
+	Affinity         *v1.Affinity                          `json:"affinity,omitempty"`
+	BTFMode          *apiv1alpha1.BTFMode                  `json:"btfMode,omitempty"`
+	// BTFSource supplies the blob for btfMode "file". Ignored in every other
+	// mode.
+	BTFSource                    *BTFSourceApplyConfiguration `json:"btfSource,omitempty"`
+	MaxConcurrentSessionsPerNode *int32                       `json:"maxConcurrentSessionsPerNode,omitempty"`
+	SystemNamespace              *string                      `json:"systemNamespace,omitempty"`
+	FleetPriority                *int32                       `json:"fleetPriority,omitempty"`
 }
 
 // TracerConfigSpecApplyConfiguration constructs a declarative configuration of the TracerConfigSpec type for use with
@@ -142,6 +145,14 @@ func (b *TracerConfigSpecApplyConfiguration) WithAffinity(value v1.Affinity) *Tr
 // If called multiple times, the BTFMode field is set to the value of the last call.
 func (b *TracerConfigSpecApplyConfiguration) WithBTFMode(value apiv1alpha1.BTFMode) *TracerConfigSpecApplyConfiguration {
 	b.BTFMode = &value
+	return b
+}
+
+// WithBTFSource sets the BTFSource field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the BTFSource field is set to the value of the last call.
+func (b *TracerConfigSpecApplyConfiguration) WithBTFSource(value *BTFSourceApplyConfiguration) *TracerConfigSpecApplyConfiguration {
+	b.BTFSource = value
 	return b
 }
 

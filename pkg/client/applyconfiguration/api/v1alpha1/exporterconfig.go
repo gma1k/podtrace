@@ -30,7 +30,7 @@ import (
 // PodTrace and PodTraceSession. It decouples endpoint/credential management
 // from trace intent.
 type ExporterConfigApplyConfiguration struct {
-	v1.TypeMetaApplyConfiguration    `json:",inline"`
+	v1.TypeMetaApplyConfiguration    `json:""`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                             *ExporterConfigSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                           *ExporterConfigStatusApplyConfiguration `json:"status,omitempty"`

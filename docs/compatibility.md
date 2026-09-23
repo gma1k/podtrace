@@ -100,7 +100,7 @@ Five `BPF_GOARCH` values are wired in the [Makefile](../Makefile):
 | s390x    | `s390`            | ❌        | Best-effort |
 | riscv64  | `riscv`           | ❌        | Best-effort |
 
-CI builds amd64 (ubuntu-latest) and arm64 (ubuntu-24.04-arm) on every
+CI builds amd64 (ubuntu-26.04) and arm64 (ubuntu-26.04-arm) on every
 push, see [.github/workflows/ebpf-build.yml](../.github/workflows/ebpf-build.yml).
 Other architectures may build but have no test coverage; report
 breakage and we will look at it.

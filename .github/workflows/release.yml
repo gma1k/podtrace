@@ -50,9 +50,9 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - runner: ubuntu-latest
+          - runner: ubuntu-26.04
             goarch: amd64
-          - runner: ubuntu-24.04-arm
+          - runner: ubuntu-26.04-arm
             goarch: arm64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
@@ -96,7 +96,7 @@ jobs:
   image:
     needs: bpf-objects
     if: (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') && !inputs.olm_bundle_only
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: write
@@ -108,8 +108,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a  # v4.3.0
-      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1  # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
 
       - name: Generate BTF vmlinux.h for the build context
         run: |
@@ -146,7 +146,7 @@ jobs:
             type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
 
       - id: build
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -184,7 +184,7 @@ jobs:
 
   chart:
     if: (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') && !inputs.olm_bundle_only
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: image
     permissions:
       contents: read
@@ -275,7 +275,7 @@ jobs:
 
   quickstart:
     if: (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') && !inputs.olm_bundle_only
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: chart
     permissions:
       contents: write
@@ -329,7 +329,7 @@ jobs:
   cli:
     needs: bpf-objects
     if: ${{ !inputs.olm_bundle_only }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
       id-token: write
@@ -436,7 +436,7 @@ jobs:
         (github.event_name == 'workflow_dispatch' && inputs.olm_bundle_only && startsWith(inputs.version, 'v') && !contains(inputs.version, '-'))
         || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') && !startsWith(github.ref_name, 'test'))
       )
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     env:

@@ -24,7 +24,10 @@ static __always_inline u32 h2_next_seq(u64 conn_id, u32 dir)
 		if (!cur)
 			return 0;
 	}
-	return (u32)__sync_fetch_and_add(cur, 1);
+
+	u32 seq = (u32)*cur;
+	__sync_fetch_and_add(cur, 1);
+	return seq;
 }
 
 struct h2_raw_ctx {

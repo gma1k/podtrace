@@ -30,7 +30,7 @@ import (
 // controller creates a new session on each cron tick, subject to the
 // ConcurrencyPolicy.
 type PodTraceScheduleApplyConfiguration struct {
-	v1.TypeMetaApplyConfiguration    `json:",inline"`
+	v1.TypeMetaApplyConfiguration    `json:""`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                             *PodTraceScheduleSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                           *PodTraceScheduleStatusApplyConfiguration `json:"status,omitempty"`

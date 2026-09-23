@@ -29,7 +29,7 @@ import (
 // ApplicationTrace is the user-facing "application" object: it owns and keeps
 // in sync a single PodTrace that traces all of the application's workloads.
 type ApplicationTraceApplyConfiguration struct {
-	v1.TypeMetaApplyConfiguration    `json:",inline"`
+	v1.TypeMetaApplyConfiguration    `json:""`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                             *ApplicationTraceSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                           *ApplicationTraceStatusApplyConfiguration `json:"status,omitempty"`

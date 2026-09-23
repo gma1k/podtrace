@@ -38,7 +38,7 @@ concurrency:
 jobs:
   build-and-test:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
 
     steps:
@@ -89,11 +89,12 @@ jobs:
             -coverprofile=coverage.out -covermode=atomic \
             ./cmd/... ./internal/... | tee test-report.txt
 
-      - name: Exclude e2e-covered BPF integration code from unit coverage
+      - name: Exclude e2e-covered BPF code and generated client from unit coverage
         if: always()
         run: |
           if [ -f coverage.out ]; then
-            grep -v 'github.com/gma1k/podtrace/internal/ebpf/probes/' coverage.out > coverage.filtered.out
+            grep -vE 'github.com/gma1k/podtrace/internal/ebpf/probes/|github.com/gma1k/podtrace/pkg/client/' \
+              coverage.out > coverage.filtered.out
             mv coverage.filtered.out coverage.out
           fi
 
@@ -132,7 +133,7 @@ jobs:
           fi
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v7.0.0
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
         if: hashFiles('coverage.out') != ''
         with:
           files: ./coverage.out
@@ -149,7 +150,7 @@ jobs:
 
   envtest:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
 
     steps:
@@ -179,7 +180,7 @@ jobs:
 
   cross-compile:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -212,7 +213,7 @@ jobs:
         run: GOTOOLCHAIN=auto go build ./...
 
   benchmarks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
@@ -242,7 +243,7 @@ jobs:
 
   manifests-drift:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
 
     steps:
@@ -255,19 +256,23 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Regenerate CRDs, deepcopy, and webhook reference
-        run: GOTOOLCHAIN=auto make manifests generate
+      - name: Regenerate CRDs, deepcopy, webhook reference, and clientset
+        run: GOTOOLCHAIN=auto make manifests generate clientset
 
       - name: Fail on manifest drift
         run: |
-          if ! git diff --exit-code -- deploy/charts/podtrace/templates/crds hack/reference api/v1alpha1; then
-            echo "::error::Generated manifests are stale. Run 'make manifests generate' and commit the result." >&2
+          git add --intent-to-add -- \
+            deploy/charts/podtrace/templates/crds hack/reference api/v1alpha1 pkg/client
+
+          if ! git diff --exit-code -- \
+            deploy/charts/podtrace/templates/crds hack/reference api/v1alpha1 pkg/client; then
+            echo "::error::Generated code is stale. Run 'make manifests generate clientset' and commit the result." >&2
             exit 1
           fi
 
   crd-schema-compat:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
 
     steps:

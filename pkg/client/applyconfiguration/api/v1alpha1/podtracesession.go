@@ -30,7 +30,7 @@ import (
 // creates one privileged Job per node hosting a matched pod, each invoking
 // `podtrace --diagnose <duration>` against the local subset.
 type PodTraceSessionApplyConfiguration struct {
-	v1.TypeMetaApplyConfiguration    `json:",inline"`
+	v1.TypeMetaApplyConfiguration    `json:""`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                             *PodTraceSessionSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                           *PodTraceSessionStatusApplyConfiguration `json:"status,omitempty"`
