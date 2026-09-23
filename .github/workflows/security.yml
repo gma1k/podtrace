@@ -51,6 +51,7 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
+          trap-caching: false
 
       - name: Install BPF toolchain
         if: matrix.language == 'cpp'
