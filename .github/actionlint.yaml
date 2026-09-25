@@ -1,0 +1,9 @@
+# actionlint configuration.
+#
+# actionlint validates `runs-on:` against a list of runner labels baked into
+# the binary at release time.
+#
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04
+    - ubuntu-26.04-arm

@@ -119,6 +119,8 @@ data:
         dnsPacketCapture: {{ .Values.agent.dnsPacketCapture }}
         dnsFullAnswers: {{ .Values.agent.dnsFullAnswers }}
         usdt: {{ .Values.agent.usdt }}
+        continuousProfiling: {{ .Values.agent.continuousProfiling }}
+        sockOpsRTT: {{ .Values.agent.sockOpsRTT }}
         {{- with .Values.agent.rolloutMaxUnavailable }}
         rolloutMaxUnavailable: {{ . | quote }}
         {{- end }}

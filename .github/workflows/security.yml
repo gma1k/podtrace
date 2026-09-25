@@ -47,7 +47,7 @@ jobs:
           cache: true
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd  # v4.38.1
+        uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2  # v4.38.2
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -82,7 +82,7 @@ jobs:
 
       - name: Upload gosec SARIF results
         if: matrix.language == 'go'
-        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd  # v4.38.1
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2  # v4.38.2
         with:
           sarif_file: gosec-results.sarif
           category: gosec
@@ -93,7 +93,7 @@ jobs:
           make internal/ebpf/embedded/podtrace.amd64.bpf.o BPF_GOARCH=amd64
 
       - name: Analyze
-        uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd  # v4.38.1
+        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2  # v4.38.2
 
   govulncheck:
     name: govulncheck
@@ -141,7 +141,7 @@ jobs:
           test -s semgrep.sarif || echo '{"version":"2.1.0","runs":[]}' > semgrep.sarif
 
       - name: Upload semgrep SARIF
-        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd  # v4.38.1
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2  # v4.38.2
         with:
           sarif_file: semgrep.sarif
           category: semgrep
@@ -183,7 +183,7 @@ jobs:
             --severity HIGH,CRITICAL --exit-code 0 --no-progress .
 
       - name: Upload Trivy SARIF
-        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd  # v4.38.1
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2  # v4.38.2
         with:
           sarif_file: trivy.sarif
           category: trivy
@@ -219,7 +219,7 @@ jobs:
         run: python3 .github/scripts/cppcheck_to_sarif.py cppcheck.xml cppcheck.sarif
 
       - name: Upload cppcheck SARIF
-        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd  # v4.38.1
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2  # v4.38.2
         with:
           sarif_file: cppcheck.sarif
           category: cppcheck

@@ -214,6 +214,15 @@ static inline struct event *get_event_buf_unfiltered(void) {
 	return e;
 }
 
+static inline int cgroup_allows(u64 cgid) {
+	u32 zero = 0;
+	u32 *enabled = bpf_map_lookup_elem(&cgroup_filter_enabled, &zero);
+	if (!enabled || !*enabled) {
+		return 1;
+	}
+	return bpf_map_lookup_elem(&target_cgroup_ids, &cgid) != NULL;
+}
+
 static inline struct event *get_event_buf(void) {
 	struct event *e = get_event_buf_unfiltered();
 	if (!e) {

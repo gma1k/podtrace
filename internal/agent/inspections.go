@@ -146,7 +146,17 @@ func inspectionThresholds() inspect.Thresholds {
 		UtilizationWarn:      config.AlertWarnPct,
 		UtilizationCritical:  config.AlertCritPct,
 		UtilizationEmergency: config.AlertEmergPct,
-		HoldTime:             config.InspectionsHoldTime,
+
+		RTTSpikeBound:    time.Duration(config.RTTSpikeThresholdMS) * time.Millisecond,
+		SpikeRatePercent: config.SpikeRateThreshold,
+
+		PoolUtilizationWarn:     config.InspectionPoolUtilizationPct,
+		PoolUtilizationCritical: config.InspectionPoolUtilizationPct + 10,
+
+		CPUBlockedMean: config.InspectionCPUBlockedMean,
+		MinPreemptions: uint64(max(config.InspectionMinPreemptions, 0)),
+
+		HoldTime: config.InspectionsHoldTime,
 	}
 }
 

@@ -178,14 +178,18 @@ func GenerateConnectionSection(d Diagnostician, duration time.Duration) string {
 		return ""
 	}
 
-	avgLatency, maxLatency, errors, p50, p95, p99, topTargets, errorBreakdown := analyzer.AnalyzeConnections(connectEvents)
+	avgLatency, maxLatency, _, p50, p95, p99, topTargets, _ := analyzer.AnalyzeConnections(connectEvents)
+	attempts, errors, unreachable, errorBreakdown := analyzer.ConnectionOutcomes(connectEvents, d.FilterEvents(events.EventConnectResult))
 	var report string
 	report += formatter.SectionHeader("Connection")
 	connRate := d.CalculateRate(len(connectEvents), duration)
 	report += formatter.TotalWithRate("connections", len(connectEvents), connRate)
 	report += formatter.LatencyMetrics(avgLatency, maxLatency)
 	report += formatter.Percentiles(p50, p95, p99)
-	report += fmt.Sprintf("  Failed connections: %d (%.1f%%)\n", errors, float64(errors)*float64(config.Percent100)/float64(len(connectEvents)))
+	report += fmt.Sprintf("  Failed connections: %d of %d attempts (%.1f%%)\n", errors, attempts, analyzer.FailurePercent(errors, attempts))
+	if unreachable > 0 {
+		report += fmt.Sprintf("  No route for address family: %d (IPv6-to-IPv4 fallback; not counted as failures)\n", unreachable)
+	}
 	if len(errorBreakdown) > 0 {
 		report += "  Error breakdown:\n"
 		for errCode, count := range errorBreakdown {
@@ -1171,27 +1175,6 @@ func formatFastCGIActivity(d Diagnostician, duration time.Duration) string {
 		}
 	}
 
-	pctMs := func(sorted []uint64, p int) float64 {
-		n := len(sorted)
-		if n == 0 {
-			return 0
-		}
-		if n == 1 || p <= 0 {
-			return float64(sorted[0]) / 1e6
-		}
-		if p >= 100 {
-			return float64(sorted[n-1]) / 1e6
-		}
-		rank := (float64(p) / 100) * float64(n-1)
-		lo := int(rank)
-		if lo+1 >= n {
-			return float64(sorted[n-1]) / 1e6
-		}
-		frac := rank - float64(lo)
-		val := float64(sorted[lo]) + frac*(float64(sorted[lo+1])-float64(sorted[lo]))
-		return val / 1e6
-	}
-
 	stats := make([]*uriStat, 0, len(byURI))
 	for _, s := range byURI {
 		sort.Slice(s.latencies, func(i, j int) bool { return s.latencies[i] < s.latencies[j] })
@@ -1216,8 +1199,8 @@ func formatFastCGIActivity(d Diagnostician, duration time.Duration) string {
 		line := fmt.Sprintf("    - %s %s: %d req", sanitize.Terminal(method), sanitize.Terminal(s.uri), s.count)
 		if len(s.latencies) > 0 {
 			line += fmt.Sprintf(", p50=%.2fms, p95=%.2fms, p99=%.2fms, max=%.2fms",
-				pctMs(s.latencies, 50), pctMs(s.latencies, 95),
-				pctMs(s.latencies, 99), pctMs(s.latencies, 100))
+				percentileMs(s.latencies, 50), percentileMs(s.latencies, 95),
+				percentileMs(s.latencies, 99), percentileMs(s.latencies, 100))
 		}
 		if s.appErrors > 0 {
 			line += fmt.Sprintf(", errors=%d", s.appErrors)
@@ -1324,6 +1307,26 @@ func formatFastCGIActivity(d Diagnostician, duration time.Duration) string {
 	return result
 }
 
+// percentileMs linearly interpolates the p-th percentile of sorted
+// nanosecond latencies, in milliseconds.
+func percentileMs(sorted []uint64, p int) float64 {
+	n := len(sorted)
+	if n == 0 {
+		return 0
+	}
+	if n == 1 || p <= 0 {
+		return float64(sorted[0]) / 1e6
+	}
+	if p >= 100 {
+		return float64(sorted[n-1]) / 1e6
+	}
+	rank := (float64(p) / 100) * float64(n-1)
+	lo := int(rank)
+	frac := rank - float64(lo)
+	val := float64(sorted[lo]) + frac*(float64(sorted[lo+1])-float64(sorted[lo]))
+	return val / 1e6
+}
+
 func formatProcessActivity(allEvents []*events.Event) string {
 	pidActivity := tracker.AnalyzeProcessActivity(allEvents)
 	if len(pidActivity) == 0 {
@@ -1337,12 +1340,8 @@ func formatProcessActivity(allEvents []*events.Event) string {
 		if i >= config.TopProcessesLimit {
 			break
 		}
-		name := pidInfo.Name
-		if name == "" {
-			name = "unknown"
-		}
 		result += fmt.Sprintf("    - PID %d (%s)%s: %d events (%.1f%%)\n",
-			pidInfo.Pid, sanitize.Terminal(name), pidInfo.PodSuffix(), pidInfo.Count, pidInfo.Percentage)
+			pidInfo.Pid, sanitize.Terminal(pidInfo.Name), pidInfo.PodSuffix(), pidInfo.Count, pidInfo.Percentage)
 	}
 	result += "\n"
 	return result

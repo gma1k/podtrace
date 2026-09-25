@@ -80,21 +80,25 @@ int tracepoint_sched_switch(void *ctx) {
 	u64 now = bpf_ktime_get_ns();
 
 	if (next_pid > 0) {
-		u64 *out_ts = bpf_map_lookup_elem(&sched_out_ts, &next_pid);
-		if (out_ts) {
-			u64 blocked = now > *out_ts ? now - *out_ts : 0;
+		struct sched_interval *out = bpf_map_lookup_elem(&sched_out_ts, &next_pid);
+		if (out) {
+			struct sched_interval pending = {
+				.ns = now > out->ns ? now - out->ns : 0,
+				.preempted = out->preempted,
+			};
 			bpf_map_delete_elem(&sched_out_ts, &next_pid);
-			if (blocked > MIN_LATENCY_NS && blocked < MAX_SCHED_BLOCK_NS) {
-				bpf_map_update_elem(&sched_pending_blocked, &next_pid, &blocked, BPF_ANY);
+			if (pending.ns > MIN_LATENCY_NS && pending.ns < MAX_SCHED_BLOCK_NS) {
+				bpf_map_update_elem(&sched_pending_blocked, &next_pid, &pending, BPF_ANY);
 			}
 		}
 		bpf_map_update_elem(&sched_in_ts, &next_pid, &now, BPF_ANY);
 	}
 
 	if (prev_pid > 0) {
-		u64 *pending = bpf_map_lookup_elem(&sched_pending_blocked, &prev_pid);
+		struct sched_interval *pending = bpf_map_lookup_elem(&sched_pending_blocked, &prev_pid);
 		if (pending) {
-			u64 blocked = *pending;
+			u64 blocked = pending->ns;
+			u64 was_preempted = pending->preempted;
 			bpf_map_delete_elem(&sched_pending_blocked, &prev_pid);
 
 			struct event *e = get_event_buf();
@@ -105,7 +109,7 @@ int tracepoint_sched_switch(void *ctx) {
 				e->latency_ns = blocked;
 				e->error = 0;
 				e->bytes = 0;
-				e->tcp_state = 0;
+				e->tcp_state = (u32)was_preempted;
 				e->target[0] = '\0';
 				e->details[0] = '\0';
 
@@ -123,7 +127,11 @@ int tracepoint_sched_switch(void *ctx) {
 			}
 		}
 
-		bpf_map_update_elem(&sched_out_ts, &prev_pid, &now, BPF_ANY);
+		struct sched_interval out = {
+			.ns = now,
+			.preempted = ((args_local.prev_state & 0xFF) == 0) ? 1 : 0,
+		};
+		bpf_map_update_elem(&sched_out_ts, &prev_pid, &out, BPF_ANY);
 	}
 
 	return 0;

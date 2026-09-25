@@ -127,7 +127,7 @@ func (s *Sink) recordEdgeL7(e *events.Event, outcomeValue string, seconds float6
 	}
 	ex, _ := exemplarFor(e)
 	s.addExemplar(s.edges.requests, edgeRequestsTotal, appendLabels(identity, outcomeValue), 1, ex)
-	s.observeExemplar(s.edges.duration, edgeRequestDuration, identity, seconds, ex)
+	s.observeExemplar(e, s.edges.duration, edgeRequestDuration, identity, seconds, ex)
 }
 
 // recordEdgeNetwork adds one network transfer to the topology, so the map

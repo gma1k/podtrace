@@ -7,6 +7,7 @@
 #include "protocols.h"
 #include "resources.c"
 #include "network.c"
+#include "sockops.c"
 #include "dns.c"
 #include "http3.c"
 #include "filesystem.c"

@@ -3,6 +3,7 @@ package stacktrace
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gma1k/podtrace/internal/config"
@@ -142,5 +143,18 @@ func TestKallsymsLoadMissing(t *testing.T) {
 	}
 	if k.loaded {
 		t.Errorf("expected loaded=false when kallsyms is missing")
+	}
+}
+
+func TestATruncatedKallsymsKeepsTheSymbolsReadBeforeIt(t *testing.T) {
+	content := "ffffffff81000000 T first\nffffffff81000100 T second\n" +
+		strings.Repeat("x", 2<<20) + "\nffffffff81000200 T after\n"
+	cleanup := writeKallsyms(t, content)
+	defer cleanup()
+
+	k := &kallsymsLookup{}
+	if got := k.Resolve(0xffffffff81000010); got != "first+0x10" {
+		t.Errorf("Resolve = %q, want first+0x10: a line past the scanner's limit stops the "+
+			"read, but what was read before it is still a usable table", got)
 	}
 }

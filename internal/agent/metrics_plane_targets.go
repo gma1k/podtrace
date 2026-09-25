@@ -10,12 +10,38 @@ import (
 	"github.com/gma1k/podtrace/pkg/tracer"
 )
 
-// MetricsPlaneConfig is the agent's view of TracerConfig.spec.agent.metrics
-// as it affects attachment, rather than as it affects the metric surface.
+// MetricsPlaneConfig is the agent's node-wide coverage as it affects
+// attachment, rather than as it affects the metric surface: whether every
+// local pod is observed without a PodTrace, and with which event categories.
 type MetricsPlaneConfig struct {
 	Enabled bool
 
+	Categories []string
+
 	ExcludeNamespaces []string
+}
+
+// NodeCoverage decides what the agent observes node-wide.
+func NodeCoverage(metricsOn, profilingOn bool, excludeNamespaces []string) MetricsPlaneConfig {
+	switch {
+	case metricsOn:
+		return MetricsPlaneConfig{Enabled: true, Categories: metricsPlaneCategories(), ExcludeNamespaces: excludeNamespaces}
+	case profilingOn:
+		return MetricsPlaneConfig{Enabled: true, Categories: []string{string(podtracev1alpha1.FilterCPU)}, ExcludeNamespaces: excludeNamespaces}
+	default:
+		return MetricsPlaneConfig{ExcludeNamespaces: excludeNamespaces}
+	}
+}
+
+// categories returns the coverage's categories, nil when it is off.
+func (c MetricsPlaneConfig) categories() []string {
+	if !c.Enabled {
+		return nil
+	}
+	if len(c.Categories) > 0 {
+		return c.Categories
+	}
+	return metricsPlaneCategories()
 }
 
 func (c MetricsPlaneConfig) excludes(namespace string) bool {
@@ -35,11 +61,11 @@ func MetricsPlaneCategories() []string {
 
 // StartupCategories is the category set the agent wants attached the moment
 // the tracer comes up, before any PodTrace has been observed.
-func StartupCategories(planeEnabled bool) []string {
-	if !planeEnabled {
-		return []string{}
+func StartupCategories(coverage MetricsPlaneConfig) []string {
+	if cs := coverage.categories(); cs != nil {
+		return cs
 	}
-	return metricsPlaneCategories()
+	return []string{}
 }
 
 func metricsPlaneCategories() []string {
@@ -59,7 +85,7 @@ func unionCategories(fromRules []string, plane MetricsPlaneConfig) []string {
 	for _, c := range fromRules {
 		seen[c] = struct{}{}
 	}
-	for _, c := range metricsPlaneCategories() {
+	for _, c := range plane.categories() {
 		seen[c] = struct{}{}
 	}
 	out := make([]string, 0, len(seen))

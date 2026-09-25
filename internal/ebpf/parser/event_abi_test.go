@@ -45,3 +45,19 @@ func TestV9DecodeFailureReturnsNilRatherThanAPartialEvent(t *testing.T) {
 			"a caller that believes it read the kernel", got)
 	}
 }
+
+func TestADecodeFailureReturnsNilForEveryRecordLayout(t *testing.T) {
+	original := binaryRead
+	binaryRead = func(io.Reader, binary.ByteOrder, any) error {
+		return errors.New("short read")
+	}
+	defer func() { binaryRead = original }()
+
+	for size := 0; size <= 432; size++ {
+		if got := ParseEvent(make([]byte, size)); got != nil {
+			t.Fatalf("a %d-byte record returned %+v on a decode failure, want nil. Every "+
+				"layout the parser still accepts decodes into a pooled event, so each one must "+
+				"refuse rather than hand back the previous event's fields", size, got)
+		}
+	}
+}

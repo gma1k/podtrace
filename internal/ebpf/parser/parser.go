@@ -211,8 +211,9 @@ func ParseEvent(data []byte) *events.Event {
 
 	type rawEventV9 struct {
 		rawEventV8
-		HTTPMethod uint8
-		_          [7]uint8
+		HTTPMethod  uint8
+		AggRecorded uint8
+		_           [6]uint8
 	}
 
 	expectedV9 := int(unsafe.Sizeof(rawEventV9{}))
@@ -238,6 +239,7 @@ func ParseEvent(data []byte) *events.Event {
 	event.DNSServerIP6 = [16]byte{}
 	event.PeerSrcIP = ""
 	event.HTTPMethod = ""
+	event.KernelAggregated = false
 	event.PeerDstIP = ""
 	event.PeerSrcPort = 0
 	event.PeerDstPort = 0
@@ -270,6 +272,7 @@ func ParseEvent(data []byte) *events.Event {
 		event.PeerDstPort = e.PeerDport
 		event.CorrelationID = e.CorrelationID
 		event.HTTPMethod = events.HTTPMethodFromCode(e.HTTPMethod)
+		event.KernelAggregated = e.AggRecorded != 0
 		return event
 	}
 

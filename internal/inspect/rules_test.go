@@ -72,9 +72,16 @@ func TestEveryRuleIsRegisteredAndDocumented(t *testing.T) {
 
 func TestEveryRuleReadsAFamilyTheSurfaceActuallyExports(t *testing.T) {
 	surface := map[string]bool{
-		familyL7Requests:  true,
-		familyL7Duration:  true,
-		familyUtilization: true,
+		familyL7Requests:      true,
+		familyL7Duration:      true,
+		familyUtilization:     true,
+		familyAcquire:         true,
+		familyConnections:     true,
+		familyNetworkLatency:  true,
+		familyPoolUtilization: true,
+		familyCPURunqueue:     true,
+		familyLockContention:  true,
+		familyNetworkRTT:      true,
 	}
 	for family := range surface {
 		if !strings.HasPrefix(family, "podtrace_workload_") {
@@ -362,7 +369,11 @@ func TestRuleFamiliesCoversEveryFamilyTheRulesRead(t *testing.T) {
 	}
 
 	read := map[string]bool{}
-	for _, family := range []string{familyL7Requests, familyL7Duration, familyUtilization, familyAcquire} {
+	for _, family := range []string{
+		familyL7Requests, familyL7Duration, familyUtilization, familyAcquire,
+		familyConnections, familyNetworkLatency, familyPoolUtilization,
+		familyCPURunqueue, familyLockContention, familyNetworkRTT,
+	} {
 		read[family] = true
 	}
 

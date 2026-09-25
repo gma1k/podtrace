@@ -84,6 +84,7 @@ type Tracer struct {
 	probeGroups    map[probes.ProbeGroup][]link.Link
 	dnsPacketLinks map[string][]link.Link
 	http3Links     map[string][]link.Link
+	sockOpsLinks   map[string][]link.Link
 
 	probesClosed bool
 
@@ -196,9 +197,7 @@ func (s *containerUprobeSet) allLinks() []link.Link {
 }
 
 func closeLinks(ls []link.Link) {
-	for _, l := range ls {
-		_ = l.Close()
-	}
+	closeLinksConcurrently(ls, maxConcurrentLinkCloses)
 }
 
 // containerUprobeGroups lists the probe groups that carry container-scoped
@@ -421,49 +420,22 @@ func (t *Tracer) syncDNSPacketProbes(paths []string) {
 	if t.collection == nil {
 		return
 	}
-	want := make(map[string]struct{}, len(paths))
-	for _, p := range paths {
-		if p != "" {
-			want[p] = struct{}{}
-		}
-	}
+	t.reconcileCgroupLinks(&t.dnsPacketLinks, cgroupSet(paths), attachDNSPacketProbes)
+}
 
-	t.probeGroupsMu.Lock()
-	if t.probesClosed {
-		t.probeGroupsMu.Unlock()
+// syncSockOpsProbes reconciles the per-cgroup sock_ops RTT observer with the
+// current target set, on the same pattern as the two cgroup_skb groups above.
+func (t *Tracer) syncSockOpsProbes(paths []string) {
+	if t.collection == nil || !probes.SockOpsEnabled() {
 		return
 	}
-	if t.dnsPacketLinks == nil {
-		t.dnsPacketLinks = map[string][]link.Link{}
-	}
-	for p, ls := range t.dnsPacketLinks {
-		if _, ok := want[p]; ok {
-			continue
-		}
-		for _, l := range ls {
-			_ = l.Close()
-		}
-		delete(t.dnsPacketLinks, p)
-	}
-	var missing []string
-	for p := range want {
-		if _, ok := t.dnsPacketLinks[p]; !ok {
-			missing = append(missing, p)
+	want := cgroupSet(paths)
+	if len(want) == 0 {
+		if root := kubepodsRoot(); root != "" {
+			want[root] = struct{}{}
 		}
 	}
-	t.probeGroupsMu.Unlock()
-
-	for _, p := range missing {
-		ls := probes.AttachDNSPacketProbes(t.collection, []string{p})
-		t.probeGroupsMu.Lock()
-		if t.probesClosed {
-			t.probeGroupsMu.Unlock()
-			closeLinks(ls)
-			continue
-		}
-		t.dnsPacketLinks[p] = ls
-		t.probeGroupsMu.Unlock()
-	}
+	t.reconcileCgroupLinks(&t.sockOpsLinks, want, attachSockOpsProbes)
 }
 
 // syncHTTP3Probes reconciles the per-cgroup http3_egress/http3_ingress QUIC
@@ -472,47 +444,65 @@ func (t *Tracer) syncHTTP3Probes(paths []string) {
 	if t.collection == nil {
 		return
 	}
+	t.reconcileCgroupLinks(&t.http3Links, cgroupSet(paths), attachHTTP3Probes)
+}
+
+// The per-cgroup attach functions, replaceable so the reconcile logic can be
+// exercised without loading programs into a kernel.
+var (
+	attachDNSPacketProbes = probes.AttachDNSPacketProbes
+	attachHTTP3Probes     = probes.AttachHTTP3Probes
+	attachSockOpsProbes   = probes.AttachSockOpsProbes
+	kubepodsRoot          = probes.KubepodsRoot
+)
+
+// cgroupSet is paths as a set, without empty entries.
+func cgroupSet(paths []string) map[string]struct{} {
 	want := make(map[string]struct{}, len(paths))
 	for _, p := range paths {
 		if p != "" {
 			want[p] = struct{}{}
 		}
 	}
+	return want
+}
 
+// reconcileCgroupLinks makes *links hold exactly one attachment per cgroup in
+// want: it closes the links of cgroups no longer wanted and attaches the ones
+// not yet present.
+func (t *Tracer) reconcileCgroupLinks(links *map[string][]link.Link, want map[string]struct{}, attach func(*ebpf.Collection, []string) []link.Link) {
 	t.probeGroupsMu.Lock()
 	if t.probesClosed {
 		t.probeGroupsMu.Unlock()
 		return
 	}
-	if t.http3Links == nil {
-		t.http3Links = map[string][]link.Link{}
+	if *links == nil {
+		*links = map[string][]link.Link{}
 	}
-	for p, ls := range t.http3Links {
+	for p, ls := range *links {
 		if _, ok := want[p]; ok {
 			continue
 		}
-		for _, l := range ls {
-			_ = l.Close()
-		}
-		delete(t.http3Links, p)
+		closeLinks(ls)
+		delete(*links, p)
 	}
 	var missing []string
 	for p := range want {
-		if _, ok := t.http3Links[p]; !ok {
+		if _, ok := (*links)[p]; !ok {
 			missing = append(missing, p)
 		}
 	}
 	t.probeGroupsMu.Unlock()
 
 	for _, p := range missing {
-		ls := probes.AttachHTTP3Probes(t.collection, []string{p})
+		ls := attach(t.collection, []string{p})
 		t.probeGroupsMu.Lock()
 		if t.probesClosed {
 			t.probeGroupsMu.Unlock()
 			closeLinks(ls)
 			continue
 		}
-		t.http3Links[p] = ls
+		(*links)[p] = ls
 		t.probeGroupsMu.Unlock()
 	}
 }
@@ -572,15 +562,6 @@ func bpfLoopAvailable() bool {
 // pruneL7ProbesIfNoBPFLoop removes the L7 protocol programs (identified by an
 // actual bpf_loop call in their instruction stream, no hardcoded list) from
 // the collection spec when the kernel lacks bpf_loop.
-// kernelTypesFromFile resolves the BTF the collection relocates against when
-// the operator named a blob, reporting nil when none was named.
-//
-// A named blob that cannot be read is an error rather than a fallback. The
-// operator only reaches here through btfMode=file, which is set on a node whose
-// kernel carries no BTF of its own -- so falling back to host BTF means the
-// stub types, no working CO-RE, and an agent that reports healthy while
-// relocating against nothing. That silent half-state is what btfMode=embedded
-// was, and the point of this path is to stop having one.
 func kernelTypesFromFile(path string) (*btf.Spec, error) {
 	if path == "" {
 		return nil, nil
@@ -919,6 +900,7 @@ func (t *Tracer) SetCgroups(cgroupPaths []string) error {
 		t.cgroupWriteMu.Unlock()
 		t.syncDNSPacketProbes(nil)
 		t.syncHTTP3Probes(nil)
+		t.syncSockOpsProbes(nil)
 		logger.Debug("Detached all cgroups")
 		return nil
 	}
@@ -1041,6 +1023,7 @@ func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 	currentPaths := allPaths
 	t.syncDNSPacketProbes(currentPaths)
 	t.syncHTTP3Probes(currentPaths)
+	t.syncSockOpsProbes(currentPaths)
 
 	if t.resourceMgr != nil {
 		t.resourceMgr.reconcile(currentPaths)
@@ -1234,15 +1217,30 @@ func isCgroupV2Base(basePath string) bool {
 }
 
 func getCgroupIDFromPath(path string) (uint64, error) {
-	st, err := os.Stat(path)
+	sys, err := statRecord(path)
 	if err != nil {
 		return 0, err
 	}
+	return sys.Ino, nil
+}
+
+// statRecord stats path and returns the platform stat record, failing both
+// when the path is gone and when the file system gives no inode.
+func statRecord(path string) (*syscall.Stat_t, error) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	return statRecordOf(st)
+}
+
+// statRecordOf returns the platform stat record behind a FileInfo.
+func statRecordOf(st os.FileInfo) (*syscall.Stat_t, error) {
 	sys, ok := st.Sys().(*syscall.Stat_t)
 	if !ok || sys == nil {
-		return 0, fmt.Errorf("unsupported stat type for cgroup path")
+		return nil, fmt.Errorf("unsupported stat type for %s", st.Name())
 	}
-	return sys.Ino, nil
+	return sys, nil
 }
 
 func (t *Tracer) SetContainerID(containerID string) error {
@@ -1338,12 +1336,8 @@ func (t *Tracer) pidsForContainer(id string, seeds []uint32) []uint32 {
 	out := make([]uint32, 0, maxDistinctBinariesPerContainer)
 	dropped := 0
 	for _, pid := range procs {
-		st, err := os.Stat(filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "exe"))
+		sys, err := statRecord(filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "exe"))
 		if err != nil {
-			continue
-		}
-		sys, ok := st.Sys().(*syscall.Stat_t)
-		if !ok {
 			continue
 		}
 		k := exeKey{dev: uint64(sys.Dev), ino: sys.Ino}
@@ -1419,6 +1413,7 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 	t.cgroupWriteMu.Unlock()
 	t.syncDNSPacketProbes(dnsCgroups)
 	t.syncHTTP3Probes(dnsCgroups)
+	t.syncSockOpsProbes(dnsCgroups)
 
 	t.resourceMgr.activate(ctx, eventChan,
 		t.collection.Maps["cgroup_limits"],
@@ -1740,6 +1735,16 @@ func (t *Tracer) processAndDispatch(ctx context.Context, event *events.Event,
 	} else if t.idleDeny() {
 		allowed = false
 		ec.filtered.Add(1)
+	} else if event.PID == 0 && event.CgroupID != 0 {
+		// Some events have no owning task to check. A sock_ops RTT
+		// callback runs from the ACK path, so there is no "current" to
+		// resolve a PID from and IsPIDInCgroup would reject every one of
+		// them. These carry the socket's own cgroup id instead, and the
+		// probe already tested that id against the same target set this
+		// filter enforces, in the kernel, before emitting. Confinement is
+		// not being skipped here, it is being applied on the only key the
+		// event has.
+		allowed = true
 	} else if t.useUserspaceCgroupFilter.Load() {
 		allowed = t.filter.IsPIDInCgroup(event.PID)
 		if !allowed {
@@ -2190,14 +2195,13 @@ func (t *Tracer) runH3ParkedFlusher(ctx context.Context, eventChan chan<- *event
 	}
 }
 
-// pidNamespaceStat resolves the pid namespace the agent's pid views belong to,
-// preferring the node's init namespace under the mounted host /proc and
-// falling back to the agent's own when that is not mounted.
+var selfPIDNamespace = "/proc/self/ns/pid"
+
 func pidNamespaceStat(procBase string) (string, syscall.Stat_t, error) {
 	nsPath := filepath.Join(procBase, "1", "ns", "pid")
 	var st syscall.Stat_t
 	if err := syscall.Stat(nsPath, &st); err != nil {
-		if fallbackErr := syscall.Stat("/proc/self/ns/pid", &st); fallbackErr != nil {
+		if fallbackErr := syscall.Stat(selfPIDNamespace, &st); fallbackErr != nil {
 			return nsPath, st, fallbackErr
 		}
 	}
@@ -2215,18 +2219,11 @@ type pidNamespaceInfo struct {
 // with. On nested nodes (kind, container-in-container runtimes) the
 // init-namespace tgid from bpf_get_current_pid_tgid() differs from the pid
 // the agent sees.
-// It returns the reason no reference could be recorded, or "" on success.
-// Every failure is warned about rather than logged at debug: BPF falls back to
-// the init-namespace tgid, which is correct only where no translation was
-// needed, so on a nested node the per-pid maps silently stop resolving and the
-// probes that depend on them report nothing at all.
 func populatePidNamespace(coll *ebpf.Collection) string {
 	const warning = "pid namespace not recorded; per-pid maps miss on a nested node"
 
 	m := coll.Maps["pidns_ref"]
 	if m == nil {
-		// Reachable with a stale BPF object: a binary that expects the map
-		// loaded against one built before it existed.
 		reason := "BPF object has no pidns_ref map"
 		logger.Warn(warning, zap.String("reason", reason))
 		return reason
@@ -2455,6 +2452,10 @@ func (t *Tracer) Stop() error {
 		closing = append(closing, ls...)
 	}
 	t.dnsPacketLinks = nil
+	for _, ls := range t.sockOpsLinks {
+		closeLinks(ls)
+	}
+	t.sockOpsLinks = nil
 	for _, ls := range t.http3Links {
 		closing = append(closing, ls...)
 	}
@@ -2464,9 +2465,7 @@ func (t *Tracer) Stop() error {
 	}
 	t.containerUprobes = nil
 	t.probeGroupsMu.Unlock()
-	for _, l := range closing {
-		_ = l.Close()
-	}
+	closeLinks(closing)
 
 	t.readerWG.Wait()
 
@@ -2626,11 +2625,7 @@ func (t *Tracer) SetEnabledCategories(categories []string) error {
 		if probeGroupNeededBy(g, wanted) {
 			continue
 		}
-		if err := t.DisableProbeGroup(g); err != nil {
-			logger.Warn("SetEnabledCategories: disable failed",
-				zap.String("group", string(g)), zap.Error(err))
-			continue
-		}
+		t.DisableProbeGroup(g)
 		t.probeGroupsMu.Lock()
 		if t.intentionallyDisabled == nil {
 			t.intentionallyDisabled = map[probes.ProbeGroup]struct{}{}
@@ -2810,7 +2805,7 @@ var groupCategoryNeeds = map[probes.ProbeGroup][]string{
 
 // DisableProbeGroup closes all links associated with the given group,
 // including the container-scoped uprobes attached for it.
-func (t *Tracer) DisableProbeGroup(g probes.ProbeGroup) error {
+func (t *Tracer) DisableProbeGroup(g probes.ProbeGroup) {
 	t.probeGroupsMu.Lock()
 	defer t.probeGroupsMu.Unlock()
 	ls := t.probeGroups[g]
@@ -2822,7 +2817,7 @@ func (t *Tracer) DisableProbeGroup(g probes.ProbeGroup) error {
 		}
 	}
 	if len(ls) == 0 && len(containerLinks) == 0 {
-		return nil
+		return
 	}
 	closed := make(map[link.Link]struct{}, len(ls))
 	for _, l := range ls {
@@ -2844,7 +2839,6 @@ func (t *Tracer) DisableProbeGroup(g probes.ProbeGroup) error {
 		zap.String("group", string(g)),
 		zap.Int("links", len(ls)),
 		zap.Int("container_links", len(containerLinks)))
-	return nil
 }
 
 // serveManagementAPI starts a lightweight HTTP server for probe group management.
@@ -2873,10 +2867,7 @@ func (t *Tracer) serveManagementAPI(ctx context.Context, port int) {
 		action := parts[1]
 		switch action {
 		case "disable":
-			if err := t.DisableProbeGroup(group); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
+			t.DisableProbeGroup(group)
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.Error(w, "unknown action", http.StatusBadRequest)

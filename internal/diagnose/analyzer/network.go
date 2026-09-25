@@ -51,6 +51,38 @@ func AnalyzeTCP(events []*events.Event, rttSpikeThreshold float64) (avgRTT, maxR
 	return
 }
 
+// ConnectionOutcomes scores connection attempts from connect calls and
+// handshake results together, each attempt once, and breaks the failures down
+// by errno.
+func ConnectionOutcomes(connects, results []*events.Event) (attempts, failed, unreachable int, breakdown map[int32]int) {
+	breakdown = make(map[int32]int)
+	for _, group := range [][]*events.Event{connects, results} {
+		for _, e := range group {
+			if e == nil || !events.CountsAsConnectionAttempt(e.Type, e.Error != 0) {
+				continue
+			}
+			if events.IsUnreachableConnect(e) {
+				unreachable++
+				continue
+			}
+			attempts++
+			if e.Error != 0 {
+				failed++
+				breakdown[e.Error]++
+			}
+		}
+	}
+	return attempts, failed, unreachable, breakdown
+}
+
+// FailurePercent is failed as a share of attempts, 0 when there were none.
+func FailurePercent(failed, attempts int) float64 {
+	if attempts == 0 {
+		return 0
+	}
+	return float64(failed) * float64(config.Percent100) / float64(attempts)
+}
+
 func AnalyzeConnections(events []*events.Event) (avgLatency, maxLatency float64, errors int, p50, p95, p99 float64, topTargets []TargetCount, errorBreakdown map[int32]int) {
 	var totalLatency float64
 	var latencies []float64

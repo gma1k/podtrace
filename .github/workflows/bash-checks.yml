@@ -48,18 +48,18 @@ jobs:
       - name: Run ShellCheck
         run: |
           echo "Running strict ShellCheck..."
-          shellcheck --enable=all -x $(git ls-files '*.sh')
+          git ls-files -z '*.sh' | xargs -0 -r shellcheck --enable=all -x
 
       - name: Check for bashisms
         run: |
           echo "Checking for bashisms..."
-          checkbashisms $(git ls-files '*.sh')
+          git ls-files -z '*.sh' | xargs -0 -r checkbashisms
 
       - name: Run bashate
         run: |
           echo "Running bashate..."
           if command -v bashate >/dev/null 2>&1; then
-            bashate $(git ls-files '*.sh') || echo "bashate check completed with warnings"
+            git ls-files -z '*.sh' | xargs -0 -r bashate || echo "bashate check completed with warnings"
           else
             echo "bashate not available, skipping..."
           fi

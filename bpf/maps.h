@@ -418,17 +418,29 @@ struct {
 } connect_addrs SEC(".maps");
 
 struct {
+	__uint(type, BPF_MAP_TYPE_SK_STORAGE);
+	__uint(map_flags, BPF_F_NO_PREALLOC);
+	__type(key, int);
+	__type(value, __u64);
+} sk_cgroup_ids SEC(".maps");
+
+struct sched_interval {
+	u64 ns;
+	u64 preempted;
+};
+
+struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 8192);
 	__type(key, u32);
-	__type(value, u64);
+	__type(value, struct sched_interval);
 } sched_out_ts SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 8192);
 	__type(key, u32);
-	__type(value, u64);
+	__type(value, struct sched_interval);
 } sched_pending_blocked SEC(".maps");
 
 struct {

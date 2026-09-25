@@ -109,6 +109,8 @@ const (
 	EventUSDT
 	EventDBAcquire
 	EventDBPoolStats
+	EventTCPRTT
+	EventConnectResult
 )
 
 type Event struct {
@@ -143,6 +145,8 @@ type Event struct {
 
 	HTTPMethod string
 
+	KernelAggregated bool
+
 	K8s *K8sMetadata
 }
 
@@ -158,6 +162,39 @@ func (e *Event) IsError() bool {
 	default:
 		return e.Error != 0
 	}
+}
+
+// CountsAsConnectionAttempt decides which connect events score an attempt, so that
+// each one is counted exactly once.
+func CountsAsConnectionAttempt(t EventType, failed bool) bool {
+	switch t {
+	case EventConnectResult:
+		return true
+	case EventConnect:
+		return failed
+	default:
+		return false
+	}
+}
+
+const (
+	errnoEAFNOSUPPORT = 97
+	errnoENETUNREACH  = 101
+)
+
+// IsAddressFamilyUnreachable reports whether a failed connect() had no route
+// for the destination's address family, rather than failing to reach a peer.
+func IsAddressFamilyUnreachable(errno int32) bool {
+	if errno < 0 {
+		errno = -errno
+	}
+	return errno == errnoENETUNREACH || errno == errnoEAFNOSUPPORT
+}
+
+// IsUnreachableConnect reports whether e is a synchronous connect failure of
+// that kind. A handshake result never is: its SYN was already sent.
+func IsUnreachableConnect(e *Event) bool {
+	return e != nil && e.Type == EventConnect && IsAddressFamilyUnreachable(e.Error)
 }
 
 // TimestampTime returns the event's timestamp as wall-clock time.
@@ -243,7 +280,7 @@ func (e *Event) TypeString() string {
 		return e.HTTPProtoLabel()
 	case EventLockContention:
 		return "LOCK"
-	case EventTCPRetrans, EventNetDevError:
+	case EventTCPRetrans, EventNetDevError, EventTCPRTT, EventConnectResult:
 		return "NET"
 	case EventDBQuery:
 		return "DB"

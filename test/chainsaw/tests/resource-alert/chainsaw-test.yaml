@@ -59,6 +59,10 @@ spec:
             timeout: 150s
             content: |
               set -eu
+              saved=$(kubectl get tracerconfig default -o jsonpath='{.spec.agent.alerting}')
+              kubectl -n "${NAMESPACE}" create configmap tracerconfig-before \
+                --from-literal=alerting="${saved}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
               kubectl patch tracerconfig default --type=merge -p \
                 "{\"spec\":{\"agent\":{\"alerting\":{\"enabled\":true,\"allowInsecureWebhook\":true,\"webhookURL\":\"http://alert-receiver.${NAMESPACE}.svc.cluster.local:8080\"}}}}"
               for i in $(seq 1 30); do
@@ -87,8 +91,20 @@ spec:
               echo "expected resource-limit alerts for 2 distinct cgroups, got ${subjects:-0}" >&2
               kubectl -n "${NAMESPACE}" logs deploy/alert-receiver --tail=50 >&2 || true
               exit 1
-      finally:
+      cleanup:
         - script:
             content: |
-              kubectl patch tracerconfig default --type=merge -p \
-                "{\"spec\":{\"agent\":{\"alerting\":{\"enabled\":false}}}}" || true
+              if ! kubectl -n "${NAMESPACE}" get configmap tracerconfig-before >/dev/null 2>&1; then
+                echo "no snapshot taken, so the tracerconfig was never changed"
+                exit 0
+              fi
+              saved=$(kubectl -n "${NAMESPACE}" get configmap tracerconfig-before \
+                -o jsonpath='{.data.alerting}')
+              if [ -n "${saved}" ]; then
+                kubectl patch tracerconfig default --type=json \
+                  -p "[{\"op\":\"replace\",\"path\":\"/spec/agent/alerting\",\"value\":${saved}}]"
+              else
+                kubectl patch tracerconfig default --type=json \
+                  -p '[{"op":"remove","path":"/spec/agent/alerting"}]' || true
+              fi
+              echo "spec.agent.alerting restored to what the test found"

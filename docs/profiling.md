@@ -2,6 +2,111 @@
 
 Podtrace integrates on-demand CPU and memory profiling with eBPF event correlation, letting you pinpoint the exact goroutines and call stacks active during slow or anomalous events — without modifying your application.
 
+There are two profilers, and they answer different questions.
+
+| | Continuous profiling | Session profiling |
+|---|---|---|
+| Answers | what has this workload been spending CPU on | what was running during *these* slow requests |
+| Runs | always, in the agent | inside a session you start |
+| Needs | nothing from the workload | a pprof endpoint and a Go runtime |
+| Works for | any language | Go |
+| Read at | the agent's `/profile` | the diagnose report |
+
+Continuous profiling is the one that makes podtrace an APM rather than a
+debugger you point at a problem after someone reports it. The rest of this
+document is the session profiler; continuous profiling is immediately below.
+
+## Continuous profiling
+
+On by default, and there is nothing to add to the workload. Turn it off in
+the chart, or on the TracerConfig directly:
+
+```yaml
+agent:
+  continuousProfiling: false
+```
+
+```yaml
+apiVersion: podtrace.io/v1alpha1
+kind: TracerConfig
+spec:
+  agent:
+    continuousProfiling: false
+```
+
+Setting `PODTRACE_CONTINUOUS_PROFILING_ENABLED` on the DaemonSet by hand does
+not work: the operator owns the agent's environment and reconciles hand-edits
+away on its next pass. The CRD field is the only durable switch.
+
+Every `sched_switch` already carries the user-space stack of the task going
+off-CPU, so the samples exist whether or not anyone is looking. The agent folds
+them into a rolling per-workload count of hot instruction pointers and serves
+the result as JSON on `/profile`, alongside `/metrics`:
+
+```bash
+# The agent image ships no shell tools, so read it through a port-forward.
+# Pick the agent on the node whose workloads you want.
+kubectl -n podtrace-system port-forward pod/<agent-pod> 9090:9090 &
+curl -s localhost:9090/profile
+```
+
+```json
+{
+  "profiles": [
+    {
+      "namespace": "shop",
+      "workload": "checkout",
+      "samples": 18432,
+      "frames": [
+        {"Frame": "encoding/json.(*decodeState).object", "Count": 4211},
+        {"Frame": "runtime.mallocgc", "Count": 2980}
+      ],
+      "schedulerFrames": 36864
+    }
+  ],
+  "droppedSamples": 0
+}
+```
+
+Three properties are worth knowing, because they are what keep it affordable:
+
+**Addresses are counted raw and symbolised only at snapshot time.** Resolving
+one frame means opening the target's executable and reading its symbol table.
+Doing that per sample at `sched_switch` rates would cost more than the workload
+being profiled. The event path does a map increment; only the frames that reach
+a snapshot are ever named, at most 64 of them. For a Go 1.18+ binary the agent
+keeps only `.gopclntab`'s function table in memory, 8 bytes per function, and
+reads each name from the file when it is asked for; the index is shared by
+every snapshot, so a scrape does not parse the binary again.
+
+**Go scheduler frames are hidden, and counted.** Every `sched_switch` stack
+passes through the scheduler on its way off the CPU, so `runtime.schedule`,
+`runtime.park_m`, `runtime.mcall` and `runtime.goexit` are in every sample and
+would lead every profile. They are left out of `frames` and their hits are
+reported in `schedulerFrames`. Blocking points such as `runtime.chanrecv`,
+`runtime.selectgo` and `sync.runtime_Semacquire` are kept, because they say
+what the code is waiting on. The same filter applies to the diagnose report's
+hot frames, which prints how many it hid.
+
+**Counts age out.** Samples live in two half-windows that rotate every five
+minutes, so a snapshot reflects the last five to ten minutes rather than
+everything since the agent started. A workload that was hot an hour ago should
+not still look hot.
+
+**It is bounded in both directions.** At most 200 workloads per node and 4096
+distinct addresses per workload. Anything refused is counted in
+`droppedSamples`, so a node profiling only part of what it sees says so rather
+than quietly under-reporting.
+
+### Why it is not a Prometheus metric
+
+A function name is an unbounded label. This plane has already had one
+production incident from putting an unbounded label on a metric, and a stack
+shape is a worse offender than a process name. The snapshot endpoint carries
+the same information without letting a workload's call graph consume the series
+budget. If you want profiles in long-term storage, scrape `/profile` on your
+own interval and keep them where profiles belong.
+
 ## Overview
 
 The profiling system combines three data sources:

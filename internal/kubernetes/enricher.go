@@ -240,6 +240,7 @@ func parseTarget(target string) (string, int) {
 
 func isNetworkEvent(eventType events.EventType) bool {
 	return eventType == events.EventConnect ||
+		eventType == events.EventConnectResult ||
 		eventType == events.EventTCPSend ||
 		eventType == events.EventTCPRecv ||
 		eventType == events.EventUDPSend ||

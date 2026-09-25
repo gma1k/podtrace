@@ -1,6 +1,7 @@
 package inspect
 
 import (
+	"math"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -21,6 +22,17 @@ type Sample struct {
 
 	Count uint64
 	Sum   float64
+
+	Buckets []Bucket
+
+	NativeBuckets bool
+	NativeSchema  int32
+}
+
+// Bucket is one cumulative histogram bucket.
+type Bucket struct {
+	UpperBound float64
+	Count      uint64
 }
 
 // Label returns one family-specific label, empty when absent.
@@ -112,10 +124,78 @@ func sampleOf(m *dto.Metric) Sample {
 		s.Count = h.GetSampleCount()
 		s.Sum = h.GetSampleSum()
 		s.Value = h.GetSampleSum()
+		if raw := h.GetBucket(); len(raw) > 0 {
+			s.Buckets = make([]Bucket, 0, len(raw))
+			for _, b := range raw {
+				s.Buckets = append(s.Buckets, Bucket{
+					UpperBound: b.GetUpperBound(),
+					Count:      b.GetCumulativeCount(),
+				})
+			}
+		} else if native := nativeBuckets(h); len(native) > 0 {
+			s.Buckets = native
+			s.NativeBuckets = true
+			s.NativeSchema = h.GetSchema()
+		}
 	case m.GetUntyped() != nil:
 		s.Value = m.GetUntyped().GetValue()
 	}
 	return s
+}
+
+// nativeBuckets decodes a native (exponential) histogram into cumulative
+// buckets in upper-bound order.
+func nativeBuckets(h *dto.Histogram) []Bucket {
+	if len(h.GetPositiveSpan()) == 0 && h.GetZeroCount() == 0 {
+		return nil
+	}
+	base := nativeBase(h.GetSchema())
+
+	out := make([]Bucket, 0, len(h.GetPositiveDelta())+1)
+	var cumulative uint64
+	if zero := h.GetZeroCount(); zero > 0 {
+		cumulative = zero
+		out = append(out, Bucket{UpperBound: h.GetZeroThreshold(), Count: cumulative})
+	}
+
+	deltas := h.GetPositiveDelta()
+	var index int32
+	var count int64
+	next := 0
+	for spanNumber, span := range h.GetPositiveSpan() {
+		if spanNumber == 0 {
+			index = span.GetOffset()
+		} else {
+			index += span.GetOffset()
+		}
+		for i := uint32(0); i < span.GetLength(); i++ {
+			if next >= len(deltas) {
+				return nil
+			}
+			count += deltas[next]
+			next++
+			if count < 0 {
+				return nil
+			}
+			cumulative += uint64(count)
+			out = append(out, Bucket{UpperBound: math.Pow(base, float64(index)), Count: cumulative})
+			index++
+		}
+	}
+	return out
+}
+
+// nativeBase is the growth factor between adjacent buckets of a schema.
+func nativeBase(schema int32) float64 {
+	return math.Pow(2, math.Pow(2, -float64(schema)))
+}
+
+// nativeBoundaryAtOrAbove returns the smallest bucket boundary of the schema
+// that is not below bound.
+func nativeBoundaryAtOrAbove(bound float64, schema int32) float64 {
+	base := nativeBase(schema)
+	index := math.Ceil(math.Log(bound)/math.Log(base) - 1e-9)
+	return math.Pow(base, index)
 }
 
 // seriesKey identifies a series across snapshots so a delta can be taken.

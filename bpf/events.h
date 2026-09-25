@@ -50,6 +50,8 @@ enum event_type {
 	EVENT_USDT,
 	EVENT_DB_ACQUIRE,
 	EVENT_DB_POOL_STATS,
+	EVENT_TCP_RTT,
+	EVENT_CONNECT_RESULT,
 };
 
 struct event {
@@ -81,7 +83,8 @@ struct event {
 	u8  peer_daddr6[16];
 	u64 correlation_id;
 	u8  http_method;
-	u8  _pad5[7];
+	u8  agg_recorded;
+	u8  _pad5[6];
 };
 
 #define H2_HDR_FRAG_MAX 1024

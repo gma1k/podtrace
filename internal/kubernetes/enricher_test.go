@@ -103,6 +103,7 @@ func TestIsNetworkEvent(t *testing.T) {
 		expected  bool
 	}{
 		{events.EventConnect, true},
+		{events.EventConnectResult, true},
 		{events.EventTCPSend, true},
 		{events.EventTCPRecv, true},
 		{events.EventUDPSend, true},

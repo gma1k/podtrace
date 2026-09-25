@@ -192,6 +192,7 @@ SEC("kprobe/tcp_v4_connect")
 int kprobe_tcp_connect(struct pt_regs *ctx) {
 	struct pair_key key = make_pair_key(PAIR_TCP_CONNECT_V4);
 	record_start_time(&key);
+	stash_sk_owner(ctx);
 
 	void *uaddr = (void *)PT_REGS_PARM2(ctx);
 	if (uaddr) {
@@ -212,6 +213,7 @@ SEC("kprobe/tcp_v6_connect")
 int kprobe_tcp_v6_connect(struct pt_regs *ctx) {
 	struct pair_key key = make_pair_key(PAIR_TCP_CONNECT_V6);
 	record_start_time(&key);
+	stash_sk_owner(ctx);
 
 	void *uaddr = (void *)PT_REGS_PARM2(ctx);
 	if (uaddr) {
@@ -258,7 +260,7 @@ int kretprobe_tcp_v6_connect(struct pt_regs *ctx) {
 	e->latency_ns = calc_latency(*start_ts);
 	e->error = PT_REGS_RC(ctx);
 	e->bytes = 0;
-	e->tcp_state = 0;
+	e->tcp_state = (e->error == -101 || e->error == -97) ? 1 : 0;
 	e->target[0] = '\0';
 	e->details[0] = '\0';
 
@@ -305,7 +307,7 @@ int kretprobe_tcp_connect(struct pt_regs *ctx) {
 	e->latency_ns = calc_latency(*start_ts);
 	e->error = PT_REGS_RC(ctx);
 	e->bytes = 0;
-	e->tcp_state = 0;
+	e->tcp_state = (e->error == -101 || e->error == -97) ? 1 : 0;
 	e->target[0] = '\0';
 	e->details[0] = '\0';
 
@@ -570,6 +572,35 @@ _Static_assert(__builtin_offsetof(struct inet_sock_set_state_args, daddr) == 36,
 _Static_assert(__builtin_offsetof(struct inet_sock_set_state_args, saddr_v6) == 40, "inet_sock_set_state: saddr_v6 must be at offset 40");
 _Static_assert(__builtin_offsetof(struct inet_sock_set_state_args, daddr_v6) == 56, "inet_sock_set_state: daddr_v6 must be at offset 56");
 
+#define PT_TCP_ESTABLISHED 1
+#define PT_TCP_SYN_SENT    2
+#define PT_TCP_CLOSE       7
+
+static __always_inline void emit_connect_result(const void *skaddr, int oldstate, int newstate, struct event *e)
+{
+	if (oldstate != PT_TCP_SYN_SENT)
+		return;
+	if (newstate != PT_TCP_ESTABLISHED && newstate != PT_TCP_CLOSE)
+		return;
+	if (e->cgroup_id == 0 || !cgroup_allows(e->cgroup_id))
+		return;
+
+	s32 err = 0;
+	if (newstate == PT_TCP_CLOSE) {
+		err = BPF_CORE_READ((struct sock *)skaddr, sk_err);
+		if (err <= 0)
+			return;
+		err = -err;
+	}
+
+	e->type = EVENT_CONNECT_RESULT;
+	e->error = err;
+	e->tcp_state = 0;
+	e->stack_key = 0;
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+}
+
 SEC("tp/sock/inet_sock_set_state")
 int tracepoint_inet_sock_set_state(void *ctx) {
 	u32 pid = agent_ns_tgid();
@@ -609,6 +640,8 @@ int tracepoint_inet_sock_set_state(void *ctx) {
 	capture_user_stack(ctx, pid, 0, e);
 	if (!agg_absorbed(e, 0))
 		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+
+	emit_connect_result(args_local.skaddr, args_local.oldstate, args_local.newstate, e);
 	return 0;
 }
 

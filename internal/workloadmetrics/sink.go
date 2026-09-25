@@ -10,6 +10,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 
+	"github.com/gma1k/podtrace/internal/ebpf/kernelagg"
 	"github.com/gma1k/podtrace/internal/events"
 )
 
@@ -39,6 +40,10 @@ type Options struct {
 
 	KernelAggregation bool
 }
+
+// schedPreempted is the value bpf/cpu.c puts in TCPState when the task left
+// the CPU while still runnable.
+const schedPreempted = 1
 
 // seriesEntry records enough about an admitted series to delete it later.
 type seriesEntry struct {
@@ -230,22 +235,86 @@ func (s *Sink) Reap(maxIdle time.Duration) int {
 }
 
 // deleteSeries removes one series from whichever collector owns its family.
+//
+// Every family that passes through admit must resolve here. One that does not
+// is still dropped from s.seen, so the budget counts it as gone while the
+// collector goes on exporting it: kernel-aggregated histograms, the service
+// map and the semantic-convention histograms all leaked that way, and a
+// departed workload's series outlived it for the life of the agent.
 func (s *Sink) deleteSeries(entry *seriesEntry) bool {
-	remove, ok := s.c.deleterFor(entry.family)
-	if !ok {
-		return false
+	if s.kernelHist.owns(entry.family) {
+		return s.kernelHist.delete(entry.family, entry.labels)
 	}
-	return remove(entry.labels)
+	if v, ok := s.vecFor(entry.family); ok {
+		return v.DeleteLabelValues(entry.labels...)
+	}
+	return false
 }
 
-func (s *Sink) observe(h *prometheus.HistogramVec, family string, labelValues []string, seconds float64) {
-	s.observeExemplar(h, family, labelValues, seconds, nil)
+// labelledVec is what every event-path collector shares: the ability to drop
+// one series by its label values.
+type labelledVec interface {
+	DeleteLabelValues(labelValues ...string) bool
+}
+
+// vecFor resolves an event-path family to its collector.
+func (s *Sink) vecFor(family string) (labelledVec, bool) {
+	if h, ok := s.c.histogramFor(family); ok {
+		return h, true
+	}
+	if v, ok := s.c.counterFor(family); ok {
+		return v, true
+	}
+	if g, ok := s.c.sat.gaugeFor(family); ok {
+		return g, true
+	}
+	if s.edges != nil {
+		switch family {
+		case edgeRequestsTotal:
+			return s.edges.requests, true
+		case edgeRequestDuration:
+			return s.edges.duration, true
+		case edgeBytesTotal:
+			return s.edges.bytes, true
+		}
+	}
+	if s.sc != nil {
+		switch family {
+		case semconvHTTPDuration:
+			return s.sc.httpDuration, true
+		case semconvRPCDuration:
+			return s.sc.rpcDuration, true
+		case semconvDBDuration:
+			return s.sc.dbDuration, true
+		}
+	}
+	return nil, false
+}
+
+func (s *Sink) observe(e *events.Event, h *prometheus.HistogramVec, family string, labelValues []string, seconds float64) {
+	s.observeExemplar(e, h, family, labelValues, seconds, nil)
 }
 
 // observeExemplar records an observation and, when the event carried a trace
 // id, the exemplar that links this bucket back to that trace.
-func (s *Sink) observeExemplar(h *prometheus.HistogramVec, family string, labelValues []string, seconds float64, ex prometheus.Labels) {
+//
+// Under kernel aggregation a family is exported by the kernel store alone, so
+// an observation of it is folded into that store: not every probe aggregates
+// in the kernel. An event the kernel already counted never gets here; record
+// returns before any family is touched.
+// Skipping by family instead, as this once did, silently dropped every
+// sched_switch, lock, filesystem-metadata and most L7 observation whenever
+// kernel aggregation was on: cpu.contention could never fire.
+func (s *Sink) observeExemplar(e *events.Event, h *prometheus.HistogramVec, family string, labelValues []string, seconds float64, ex prometheus.Labels) {
 	if s.kernelHist.owns(family) {
+		if !s.admit(family, labelValues) {
+			return
+		}
+		ns := uint64(0)
+		if seconds > 0 {
+			ns = uint64(seconds * 1e9)
+		}
+		s.kernelHist.observeBucket(family, labelValues, kernelagg.BucketIndex(ns), 1, seconds)
 		return
 	}
 	if !s.admit(family, labelValues) {
@@ -344,11 +413,38 @@ func appendLabels(base []string, extra ...string) []string {
 	return out
 }
 
+// isL7Response reports whether t is a decoded application-protocol response,
+// the event types that feed the L7 and semantic-convention families.
+func isL7Response(t events.EventType) bool {
+	switch t {
+	case events.EventHTTPResp, events.EventHTTP3, events.EventGRPCMethod,
+		events.EventFastCGIResp, events.EventRedisCmd, events.EventMemcachedCmd,
+		events.EventKafkaProduce, events.EventKafkaFetch, events.EventDBQuery:
+		return true
+	default:
+		return false
+	}
+}
+
 // record routes one event to its family. Returns false when no family
 // maps to the event type, which is expected: this surface deliberately
 // covers golden signals rather than every event podtrace can emit.
 func (s *Sink) record(e *events.Event, base []string) bool {
 	seconds := e.Latency().Seconds()
+
+	// The kernel already turned this event into its counters, histograms,
+	// errors and service-map edges, and IngestKernel exports them from the
+	// drained row. Recording them again here counted every observation twice
+	// whenever a PodTrace kept the ring buffer open alongside the map: one
+	// 1500-byte send read as 3000 bytes. Only the semantic-convention
+	// histograms need fields the map does not carry, so they are the one
+	// thing left to do.
+	if e.KernelAggregated && s.kernelHist != nil {
+		if isL7Response(e.Type) {
+			s.recordSemconv(e, seconds)
+		}
+		return true
+	}
 
 	ex, _ := exemplarFor(e)
 
@@ -366,7 +462,7 @@ func (s *Sink) record(e *events.Event, base []string) bool {
 		protocol := protocolLabel(e)
 		s.addExemplar(s.c.l7Requests, "l7_requests_total",
 			appendLabels(base, protocol, statusClass(e), outcome(e)), 1, ex)
-		s.observeExemplar(s.c.l7Duration, "l7_request_duration_seconds",
+		s.observeExemplar(e, s.c.l7Duration, "l7_request_duration_seconds",
 			appendLabels(base, protocol), seconds, ex)
 		s.recordSemconv(e, seconds)
 		s.recordEdgeL7(e, outcome(e), seconds)
@@ -374,7 +470,7 @@ func (s *Sink) record(e *events.Event, base []string) bool {
 
 	case events.EventTCPSend, events.EventTCPRecv, events.EventUDPSend, events.EventUDPRecv:
 		direction, transport := networkDimensions(e.Type)
-		s.observeExemplar(s.c.networkLatency, "network_latency_seconds",
+		s.observeExemplar(e, s.c.networkLatency, "network_latency_seconds",
 			appendLabels(base, direction, transport), seconds, ex)
 		if e.Bytes > 0 {
 			s.add(s.c.networkBytes, "network_bytes_total",
@@ -383,14 +479,42 @@ func (s *Sink) record(e *events.Event, base []string) bool {
 		s.recordEdgeNetwork(e, direction)
 		return true
 
+	case events.EventConnect:
+		if events.CountsAsConnectionAttempt(e.Type, e.IsError()) {
+			s.add(s.c.networkConnections, "network_connections_total",
+				appendLabels(base, "tcp", connectOutcome(e)), 1)
+		}
+		return true
+
+	case events.EventConnectResult:
+		s.add(s.c.networkConnections, "network_connections_total",
+			appendLabels(base, "tcp", outcome(e)), 1)
+		return true
+
+	case events.EventTCPRetrans:
+		s.add(s.c.networkRetransmits, "network_retransmits_total", base, 1)
+		return true
+
+	case events.EventNetDevError:
+		s.add(s.c.networkDeviceErrors, "network_device_errors_total", base, 1)
+		return true
+
+	case events.EventTCPRTT:
+		s.observe(e, s.c.networkRTT, "network_rtt_seconds", base, seconds)
+		return true
+
+	case events.EventLockContention:
+		s.observe(e, s.c.lockContention, "lock_contention_seconds", base, seconds)
+		return true
+
 	case events.EventDNS, events.EventDNSQuery:
-		s.observeExemplar(s.c.dnsLatency, "dns_latency_seconds", base, seconds, ex)
+		s.observeExemplar(e, s.c.dnsLatency, "dns_latency_seconds", base, seconds, ex)
 		return true
 
 	case events.EventRead, events.EventWrite, events.EventFsync,
 		events.EventOpen, events.EventClose, events.EventUnlink, events.EventRename:
 		operation := filesystemOperation(e.Type)
-		s.observe(s.c.filesystemLatency, "filesystem_latency_seconds",
+		s.observe(e, s.c.filesystemLatency, "filesystem_latency_seconds",
 			appendLabels(base, operation), seconds)
 		if e.Bytes > 0 && (e.Type == events.EventRead || e.Type == events.EventWrite) {
 			s.add(s.c.filesystemBytes, "filesystem_bytes_total",
@@ -399,15 +523,18 @@ func (s *Sink) record(e *events.Event, base []string) bool {
 		return true
 
 	case events.EventSchedSwitch:
-		s.observe(s.c.cpuBlocked, "cpu_blocked_seconds", base, seconds)
+		s.observe(e, s.c.cpuBlocked, "cpu_blocked_seconds", base, seconds)
+		if e.TCPState == schedPreempted {
+			s.observe(e, s.c.cpuRunqueue, "cpu_runqueue_latency_seconds", base, seconds)
+		}
 		return true
 
 	case events.EventTLSHandshake:
-		s.observe(s.c.tlsHandshakeDuration, "tls_handshake_duration_seconds", base, seconds)
+		s.observe(e, s.c.tlsHandshakeDuration, "tls_handshake_duration_seconds", base, seconds)
 		return true
 
 	case events.EventDBAcquire:
-		s.observe(s.c.sat.acquireWait, "db_connection_acquire_seconds", base, seconds)
+		s.observe(e, s.c.sat.acquireWait, "db_connection_acquire_seconds", base, seconds)
 		return true
 
 	case events.EventResourceLimit, events.EventPoolAcquire,
@@ -432,17 +559,17 @@ func (s *Sink) recordSemconv(e *events.Event, seconds float64) {
 
 	switch e.Type {
 	case events.EventHTTPResp, events.EventHTTP3:
-		s.observe(s.sc.httpDuration, semconvHTTPDuration,
+		s.observe(e, s.sc.httpDuration, semconvHTTPDuration,
 			appendLabels(id, httpRequestMethod(e), statusCodeLabel(e), networkProtocolName(e)), seconds)
 
 	case events.EventGRPCMethod:
 		method := s.sc.methodValues.bound(firstLine(e.Target))
-		s.observe(s.sc.rpcDuration, semconvRPCDuration,
+		s.observe(e, s.sc.rpcDuration, semconvRPCDuration,
 			appendLabels(id, rpcSystem(e.Type), method), seconds)
 
 	case events.EventRedisCmd, events.EventMemcachedCmd, events.EventDBQuery:
 		op := s.sc.operationValues.bound(firstLine(e.Details))
-		s.observe(s.sc.dbDuration, semconvDBDuration,
+		s.observe(e, s.sc.dbDuration, semconvDBDuration,
 			appendLabels(id, dbSystem(e.Type), op), seconds)
 	}
 }

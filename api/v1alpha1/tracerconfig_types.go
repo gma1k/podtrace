@@ -96,6 +96,23 @@ type AgentSpec struct {
 	// +optional
 	USDT *bool `json:"usdt,omitempty"`
 
+	// ContinuousProfiling builds an always-on per-workload CPU profile from
+	// the user stacks already captured on every sched_switch, served as JSON
+	// on the agent's /profile. It needs nothing exposed by the workload and
+	// works for any language, unlike the session profiler which needs a Go
+	// pprof endpoint.
+	// +optional
+	ContinuousProfiling *bool `json:"continuousProfiling,omitempty"`
+
+	// SockOpsRTT attaches a sock_ops program that reads the kernel's own
+	// smoothed round-trip time, which no kprobe, uprobe, tracepoint or
+	// cgroup_skb hook can reach. It makes net.rtt_spike_rate measure the
+	// wire rather than syscall duration. Observation only: no sockmap, no
+	// redirect, no payload access. Needs kernel 5.10 or newer and cgroup v2;
+	// where it cannot attach the rule falls back to syscall latency.
+	// +optional
+	SockOpsRTT *bool `json:"sockOpsRTT,omitempty"`
+
 	// +optional
 	Alerting *AgentAlertingSpec `json:"alerting,omitempty"`
 
@@ -215,6 +232,20 @@ type AgentInspectionThresholdsSpec struct {
 	// connection above which db.connection_acquire_slow fires. Go database/sql only.
 	// +optional
 	AcquireMean *metav1.Duration `json:"acquireMean,omitempty"`
+
+	// CPUBlockedMean is the mean time a workload spends off-CPU waiting to
+	// be scheduled above which cpu.contention fires.
+	// +optional
+	CPUBlockedMean *metav1.Duration `json:"cpuBlockedMean,omitempty"`
+
+	// PoolUtilizationPercent is the share of SetMaxOpenConns at which
+	// db.pool_saturated fires as a warning; it escalates to critical ten
+	// points higher. This fires before db.connection_acquire_slow, which
+	// only notices once callers are already queueing.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100
+	PoolUtilizationPercent *int32 `json:"poolUtilizationPercent,omitempty"`
 }
 
 // AgentMetricsLabelsSpec opts into labels that are deliberately absent by

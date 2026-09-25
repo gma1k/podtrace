@@ -352,14 +352,20 @@ func TestChart_ServiceMonitorToggle(t *testing.T) {
 // only when enabled and selects pods by the operator-applied
 // component label.
 func TestChart_PodMonitorToggle(t *testing.T) {
-	off := renderChartWithAPIVersions(t, []string{"monitoring.coreos.com/v1"})
-	on := renderChartWithAPIVersions(t, []string{"monitoring.coreos.com/v1"}, "metrics.podMonitor.enabled=true")
+	on := renderChartWithAPIVersions(t, []string{"monitoring.coreos.com/v1"})
+	off := renderChartWithAPIVersions(t, []string{"monitoring.coreos.com/v1"}, "metrics.podMonitor.enabled=false")
+	noOperator := renderChart(t)
 
-	if bytes.Contains(off, []byte("kind: PodMonitor")) {
-		t.Error("PodMonitor should not render when toggle is off")
-	}
 	if !bytes.Contains(on, []byte("kind: PodMonitor")) {
-		t.Fatal("metrics.podMonitor.enabled=true should render a PodMonitor")
+		t.Fatal("the PodMonitor did not render by default where the Prometheus Operator is " +
+			"installed; the continuous plane would go unscraped out of the box")
+	}
+	if bytes.Contains(off, []byte("kind: PodMonitor")) {
+		t.Error("PodMonitor should not render when metrics.podMonitor.enabled=false")
+	}
+	if bytes.Contains(noOperator, []byte("kind: PodMonitor")) {
+		t.Error("a PodMonitor rendered on a cluster without monitoring.coreos.com/v1; " +
+			"being on by default is only safe because it is skipped there")
 	}
 	for _, marker := range []string{
 		"podtrace.io/managed-by: podtrace-operator",

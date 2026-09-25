@@ -79,8 +79,10 @@ func ExportJSON(d Diagnostician) ExportData {
 
 	connectEvents := d.FilterEvents(events.EventConnect)
 	if len(connectEvents) > 0 {
-		avgLatency, maxLatency, errors, p50, p95, p99, topTargets, errorBreakdown := analyzer.AnalyzeConnections(connectEvents)
-		data.Connections = buildConnectionExportData(connectEvents, duration, avgLatency, maxLatency, errors, p50, p95, p99, topTargets, errorBreakdown)
+		avgLatency, maxLatency, _, p50, p95, p99, topTargets, _ := analyzer.AnalyzeConnections(connectEvents)
+		attempts, errors, unreachable, errorBreakdown := analyzer.ConnectionOutcomes(connectEvents, d.FilterEvents(events.EventConnectResult))
+		data.Connections = buildConnectionExportData(connectEvents, duration, avgLatency, maxLatency, attempts, errors, p50, p95, p99, topTargets, errorBreakdown)
+		data.Connections["unreachable"] = unreachable
 	}
 
 	writeEvents := d.FilterEvents(events.EventWrite)
@@ -156,7 +158,7 @@ func buildTCPExportData(tcpSendEvents, tcpRecvEvents, allTCP []*events.Event, du
 	}
 }
 
-func buildConnectionExportData(connectEvents []*events.Event, duration time.Duration, avgLatency, maxLatency float64, errors int, p50, p95, p99 float64, topTargets []analyzer.TargetCount, errorBreakdown map[int32]int) map[string]interface{} {
+func buildConnectionExportData(connectEvents []*events.Event, duration time.Duration, avgLatency, maxLatency float64, attempts, errors int, p50, p95, p99 float64, topTargets []analyzer.TargetCount, errorBreakdown map[int32]int) map[string]interface{} {
 	return map[string]interface{}{
 		"total_connections": len(connectEvents),
 		"rate_per_second":   calculateRate(len(connectEvents), duration),
@@ -165,8 +167,9 @@ func buildConnectionExportData(connectEvents []*events.Event, duration time.Dura
 		"p50_ms":            p50,
 		"p95_ms":            p95,
 		"p99_ms":            p99,
+		"attempts":          attempts,
 		"failed":            errors,
-		"failure_rate":      float64(errors) * float64(config.Percent100) / float64(len(connectEvents)),
+		"failure_rate":      analyzer.FailurePercent(errors, attempts),
 		"error_breakdown":   errorBreakdown,
 		"top_targets":       topTargets,
 	}
@@ -199,14 +202,12 @@ func buildCPUExportData(schedEvents []*events.Event, avgBlock, maxBlock, p50, p9
 	}
 }
 
+// ExportCSV writes every event as a CSV row. csv.Writer buffers, so a failing
+// destination often surfaces only at the final flush.
 func ExportCSV(d Diagnostician, w io.Writer) error {
 	writer := csv.NewWriter(w)
-	defer writer.Flush()
 
-	header := []string{"timestamp", "pid", "process_name", "type", "latency_ms", "error", "target"}
-	if err := writer.Write(header); err != nil {
-		return err
-	}
+	_ = writer.Write([]string{"timestamp", "pid", "process_name", "type", "latency_ms", "error", "target"})
 
 	allEvents := d.GetEvents()
 	for _, event := range allEvents {
@@ -227,5 +228,6 @@ func ExportCSV(d Diagnostician, w io.Writer) error {
 		}
 	}
 
-	return nil
+	writer.Flush()
+	return writer.Error()
 }

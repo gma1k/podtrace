@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -170,10 +171,21 @@ func TestAnUnattributableRowIsDropped(t *testing.T) {
 }
 
 func TestKernelHistogramsRetireWithTheirWorkload(t *testing.T) {
-	sink, _ := kernelSink(t)
+	clock := time.Now()
+	reg := prometheus.NewRegistry()
+	sink, err := New(reg, Options{
+		NativeHistograms:  true,
+		KernelAggregation: true,
+		Lookup:            kernelTestLookup,
+		Now:               func() time.Time { return clock },
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	sink.IngestKernel([]kernelagg.Row{kernelRow(events.EventDNS, 0, 100, 1, 1000, 0)})
 
-	if removed := sink.kernelHist.reap(0); removed == 0 {
+	clock = clock.Add(20 * time.Minute)
+	if removed := sink.Reap(15 * time.Minute); removed == 0 {
 		t.Error("no series retired; a departed pod would keep reporting its last distribution " +
 			"forever, and the series budget would never recover")
 	}
@@ -413,7 +425,7 @@ func TestCollectSkipsSeriesThatCannotBeBuilt(t *testing.T) {
 func TestCollectSkipsAFamilyWithNoDescriptor(t *testing.T) {
 	k := newKernelHistograms([]string{"namespace"}, false)
 	k.series["orphan"] = map[string]*kernelHistogram{
-		"x": {labelValues: []string{"ns"}, count: 1, buckets: map[int]int64{1: 1}},
+		"x": {labelValues: []string{"ns"}, count: 1, buckets: map[uint16]int64{1: 1}},
 	}
 
 	if got := len(collectAll(k)); got != 0 {
@@ -453,16 +465,17 @@ func TestTheBudgetBoundsTheKernelPathToo(t *testing.T) {
 	}
 }
 
-func TestTheEventPathStopsObservingFamiliesTheKernelOwns(t *testing.T) {
+func TestTheEventPathSkipsAnEventTheKernelAlreadyCounted(t *testing.T) {
 	sink, reg := kernelSink(t)
 
 	sink.record(&events.Event{
 		Type: events.EventDNS, CgroupID: kernelTestCgroup, LatencyNS: 5_000_000,
+		KernelAggregated: true,
 	}, []string{"shop", "checkout", "Deployment", "app"})
 
 	if got := len(gather(t, reg, "podtrace_workload_dns_latency_seconds")); got != 0 {
-		t.Errorf("the event path produced %d dns series while the kernel owns the family; both "+
-			"feeding it would double every latency distribution", got)
+		t.Errorf("the event path produced %d dns series for an event the kernel already "+
+			"aggregated; both feeding it would double every latency distribution", got)
 	}
 }
 

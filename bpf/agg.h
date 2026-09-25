@@ -81,6 +81,14 @@ static __always_inline u32 agg_msb(u64 v)
 	return pos;
 }
 
+static __always_inline u64 agg_scale(u64 ns)
+{
+	u64 whole = ns / 1000000000ULL;
+	u64 rest = ns - whole * 1000000000ULL;
+
+	return ns + whole * 73741824ULL + rest * 73741824ULL / 1000000000ULL;
+}
+
 static __always_inline u16 agg_bucket(u64 ns)
 {
 	u32 msb, sub;
@@ -123,7 +131,7 @@ static __always_inline int agg_record(u64 cgroup_id, u8 event_type, u8 variant,
 	key.peer_port = peer_port;
 	key.event_type = event_type;
 	key.variant = variant;
-	key.bucket = bucketed ? agg_bucket(latency_ns) : AGG_BUCKET_NONE;
+	key.bucket = bucketed ? agg_bucket(agg_scale(latency_ns)) : AGG_BUCKET_NONE;
 
 	val = bpf_map_lookup_elem(&agg_metrics, &key);
 	if (!val) {
@@ -168,11 +176,34 @@ static __always_inline int agg_from_event(struct event *e, s32 status_num)
 		bytes = e->bytes;
 		break;
 
+	case EVENT_SCHED_SWITCH:
+		variant = AGG_VARIANT(e->tcp_state, 0, 0);
+		break;
+
 	case EVENT_DNS:
 	case EVENT_DNS_QUERY:
-	case EVENT_SCHED_SWITCH:
 	case EVENT_TLS_HANDSHAKE:
 	case EVENT_DB_ACQUIRE:
+	case EVENT_LOCK_CONTENTION:
+	case EVENT_TCP_RTT:
+		break;
+
+	case EVENT_TCP_RETRANS:
+		bucketed = 0;
+		break;
+
+	case EVENT_CONNECT:
+		variant = AGG_VARIANT(e->tcp_state, 0, is_error);
+		bucketed = 0;
+		break;
+
+	case EVENT_CONNECT_RESULT:
+		bucketed = 0;
+		break;
+
+	case EVENT_NET_DEV_ERROR:
+		bytes = e->bytes;
+		bucketed = 0;
 		break;
 
 	case EVENT_READ:
@@ -215,7 +246,10 @@ static __always_inline int agg_from_event(struct event *e, s32 status_num)
 
 static __always_inline int agg_absorbed(struct event *e, s32 status_num)
 {
-	if (!agg_from_event(e, status_num))
+	int recorded = agg_from_event(e, status_num);
+
+	e->agg_recorded = (u8)recorded;
+	if (!recorded)
 		return 0;
 	return agg_mode() == AGG_MODE_BYPASS;
 }

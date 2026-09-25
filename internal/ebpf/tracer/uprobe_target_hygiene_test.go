@@ -39,9 +39,7 @@ func TestDisableProbeGroup_ClosesContainerUprobeLinks(t *testing.T) {
 		}},
 	}
 
-	if err := tr.DisableProbeGroup(probes.GroupTLS); err != nil {
-		t.Fatalf("DisableProbeGroup: %v", err)
-	}
+	tr.DisableProbeGroup(probes.GroupTLS)
 
 	if tlsA.closes.Load() != 1 || tlsB.closes.Load() != 1 {
 		t.Errorf("TLS container link closes = %d/%d, want 1/1",
@@ -76,9 +74,7 @@ func TestEnableProbeGroup_ReattachesContainerUprobes(t *testing.T) {
 		}},
 	}
 
-	if err := tr.DisableProbeGroup(probes.GroupTLS); err != nil {
-		t.Fatalf("DisableProbeGroup: %v", err)
-	}
+	tr.DisableProbeGroup(probes.GroupTLS)
 	if err := tr.EnableProbeGroup(probes.GroupTLS); err != nil {
 		t.Fatalf("EnableProbeGroup: %v", err)
 	}

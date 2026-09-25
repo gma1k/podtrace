@@ -2113,17 +2113,13 @@ func TestGroupsNeededFor_RoundTrip(t *testing.T) {
 
 func TestDisableProbeGroup_NotPresent(t *testing.T) {
 	tr := &Tracer{probeGroups: make(map[probes.ProbeGroup][]link.Link)}
-	if err := tr.DisableProbeGroup(probes.GroupNetwork); err != nil {
-		t.Errorf("unexpected error disabling non-existent group: %v", err)
-	}
+	tr.DisableProbeGroup(probes.GroupNetwork)
 }
 
 func TestDisableProbeGroup_EmptyLinks(t *testing.T) {
 	tr := &Tracer{probeGroups: make(map[probes.ProbeGroup][]link.Link)}
 	tr.probeGroups[probes.GroupDatabase] = nil
-	if err := tr.DisableProbeGroup(probes.GroupDatabase); err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
+	tr.DisableProbeGroup(probes.GroupDatabase)
 	if _, ok := tr.probeGroups[probes.GroupDatabase]; !ok {
 		t.Error("expected group to still be present when links slice is nil")
 	}
@@ -2189,10 +2185,7 @@ func TestServeManagementAPI_DisableGroup(t *testing.T) {
 		group := probes.ProbeGroup(parts[0])
 		switch parts[1] {
 		case "disable":
-			if err := tr.DisableProbeGroup(group); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
+			tr.DisableProbeGroup(group)
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.Error(w, "unknown action", http.StatusBadRequest)

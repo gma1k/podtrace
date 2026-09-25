@@ -60,6 +60,8 @@ func withMetricPushers(p *metricPusherPool) sdkOption {
 // adapter, OTLP, Zipkin, etc.) into a TracerProvider shaped to the
 // bundle's sampling, resource attribution, and batch settings, then
 // returns a tracer.Exporter that emits one span per event.
+var buildResource = resource.New
+
 func newSDKEventExporter(name string, cr CRKey, b *BundlePayload, spanExporter sdktrace.SpanExporter, opts ...sdkOption) (tracer.Exporter, error) {
 	var cfg sdkOptions
 	for _, opt := range opts {
@@ -70,12 +72,10 @@ func newSDKEventExporter(name string, cr CRKey, b *BundlePayload, spanExporter s
 
 	sampler := sdktrace.AlwaysSample()
 	if b.Sample != nil && *b.Sample < 1 {
-		// An explicit 0 means "export nothing" — TraceIDRatioBased(0)
-		// never samples, which is exactly the user's request.
 		sampler = sdktrace.TraceIDRatioBased(*b.Sample)
 	}
 
-	res, err := resource.New(ctx,
+	res, err := buildResource(ctx,
 		resource.WithAttributes(
 			semconv.ServiceName("podtrace"),
 			attribute.String("podtrace.cr.namespace", cr.Namespace),
@@ -98,9 +98,6 @@ func newSDKEventExporter(name string, cr CRKey, b *BundlePayload, spanExporter s
 		sdktrace.WithMaxExportBatchSize(128),
 		sdktrace.WithBatchTimeout(2*time.Second),
 	)
-	// One processor, shared by the base provider and every per-workload
-	// provider, so there is a single queue, a single exporter and a single
-	// shutdown owner.
 	processor := &countingSpanProcessor{inner: bsp, cr: cr, metrics: cfg.metrics}
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithSpanProcessor(processor),
@@ -173,8 +170,6 @@ func (e *sdkEventExporter) Export(ctx context.Context, batch []*events.Event) er
 		if ev == nil {
 			continue
 		}
-		// Per event, not per batch: a batch spans many workloads, and the
-		// provider is what carries service.name.
 		tr := e.providers.tracerFor(ev.K8s)
 		var startedAt time.Time
 		if ev.Timestamp == 0 {
@@ -183,9 +178,6 @@ func (e *sdkEventExporter) Export(ctx context.Context, batch []*events.Event) er
 			startedAt = ev.TimestampTime()
 		}
 		endedAt := startedAt.Add(time.Duration(safeUint64ToInt64(ev.LatencyNS)))
-		if endedAt.Before(startedAt) {
-			endedAt = startedAt
-		}
 
 		spanCtx := ctx
 		if parent, ok := e.remoteParent(ev); ok {

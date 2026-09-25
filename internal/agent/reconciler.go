@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	"github.com/gma1k/podtrace/internal/ebpf/probes"
 	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/internal/operator"
 	"github.com/gma1k/podtrace/internal/sysfs"
@@ -525,24 +526,21 @@ func mainPIDFromCgroupProcs(cgroupDir string) uint32 {
 	return main
 }
 
-// kubepodsRootCandidates lists the well-known cgroup directories
-// kubelet publishes per-pod slices under.
-var kubepodsRootCandidates = []string{
-	"/sys/fs/cgroup/kubepods.slice",
-	"/sys/fs/cgroup/kubepods",
-	"/sys/fs/cgroup/kubelet.slice/kubelet-kubepods.slice",
-	"/sys/fs/cgroup/system.slice/kubelet.service/kubepods",
-}
+// kubepodsRootOverride points the cgroup scan at a temporary tree in tests.
+// Empty everywhere else.
+var kubepodsRootOverride string
 
-// discoverKubepodsRoot returns the first kubepods root that exists on
-// this node.
+// discoverKubepodsRoot returns the first kubepods root that exists on this
+// node. The candidate list lives in the probes package so the sock_ops hook
+// and the agent cannot disagree about where pods are.
 func discoverKubepodsRoot() string {
-	for _, c := range kubepodsRootCandidates {
-		if _, err := os.Stat(c); err == nil {
-			return c
+	if kubepodsRootOverride != "" {
+		if _, err := os.Stat(kubepodsRootOverride); err != nil {
+			return ""
 		}
+		return kubepodsRootOverride
 	}
-	return ""
+	return probes.KubepodsRoot()
 }
 
 // cgroupPathForPod composes the per-pod cgroup directory under a
@@ -587,6 +585,11 @@ func cgroupIDFromPath(path string) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
+	return cgroupIDFromInfo(path, st)
+}
+
+// cgroupIDFromInfo reads the inode out of a stat result.
+func cgroupIDFromInfo(path string, st os.FileInfo) (uint64, error) {
 	sys, ok := st.Sys().(*syscall.Stat_t)
 	if !ok || sys == nil {
 		return 0, fmt.Errorf("unsupported stat type for %s", path)
@@ -793,7 +796,8 @@ func filterToEventTypes(f podtracev1alpha1.EventFilter) []events.EventType {
 		return []events.EventType{
 			events.EventConnect, events.EventTCPSend, events.EventTCPRecv,
 			events.EventUDPSend, events.EventUDPRecv, events.EventTCPState,
-			events.EventTCPRetrans, events.EventNetDevError,
+			events.EventTCPRetrans, events.EventNetDevError, events.EventTCPRTT,
+			events.EventConnectResult,
 			events.EventFastCGIReq, events.EventFastCGIResp,
 			events.EventHTTPReq, events.EventHTTPResp,
 			events.EventGRPCMethod, events.EventHTTP3,

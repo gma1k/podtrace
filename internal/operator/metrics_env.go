@@ -32,6 +32,8 @@ const (
 	envInspectionMeanLatency = "PODTRACE_INSPECTIONS_MEAN_LATENCY"
 	envInspectionsHoldTime   = "PODTRACE_INSPECTIONS_HOLD_TIME"
 	envInspectionAcquireMean = "PODTRACE_INSPECTIONS_ACQUIRE_MEAN"
+	envInspectionCPUBlocked  = "PODTRACE_INSPECTIONS_CPU_BLOCKED_MEAN"
+	envInspectionPoolWarn    = "PODTRACE_INSPECTIONS_POOL_UTILIZATION_PCT"
 )
 
 // metricsEnv renders AgentMetricsSpec onto the agent container's
@@ -145,6 +147,18 @@ func inspectionsEnv(spec *podtracev1alpha1.AgentInspectionsSpec) []corev1.EnvVar
 		env = append(env, corev1.EnvVar{
 			Name:  envInspectionAcquireMean,
 			Value: t.AcquireMean.Duration.String(),
+		})
+	}
+	if t.CPUBlockedMean != nil {
+		env = append(env, corev1.EnvVar{
+			Name:  envInspectionCPUBlocked,
+			Value: t.CPUBlockedMean.Duration.String(),
+		})
+	}
+	if t.PoolUtilizationPercent != nil {
+		env = append(env, corev1.EnvVar{
+			Name:  envInspectionPoolWarn,
+			Value: strconv.FormatInt(int64(*t.PoolUtilizationPercent), 10),
 		})
 	}
 	return env

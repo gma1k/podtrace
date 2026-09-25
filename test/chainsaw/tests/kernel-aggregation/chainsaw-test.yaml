@@ -53,6 +53,10 @@ spec:
                 sleep 2
               done
 
+              saved=$(kubectl get tracerconfig default -o jsonpath='{.spec.agent.metrics}')
+              kubectl -n "${NAMESPACE}" create configmap tracerconfig-before \
+                --from-literal=metrics="${saved}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
               kubectl patch tracerconfig default --type=merge -p '{
                 "spec": {
                   "agent": {
@@ -80,6 +84,23 @@ spec:
                 kubectl -n podtrace-system get pod -l podtrace.io/component=agent
                 exit 1
               fi
+      cleanup:
+        - script:
+            content: |
+              if ! kubectl -n "${NAMESPACE}" get configmap tracerconfig-before >/dev/null 2>&1; then
+                echo "no snapshot taken, so the tracerconfig was never changed"
+                exit 0
+              fi
+              saved=$(kubectl -n "${NAMESPACE}" get configmap tracerconfig-before \
+                -o jsonpath='{.data.metrics}')
+              if [ -n "${saved}" ]; then
+                kubectl patch tracerconfig default --type=json \
+                  -p "[{\"op\":\"replace\",\"path\":\"/spec/agent/metrics\",\"value\":${saved}}]"
+              else
+                kubectl patch tracerconfig default --type=json \
+                  -p '[{"op":"remove","path":"/spec/agent/metrics"}]' || true
+              fi
+              echo "spec.agent.metrics restored to what the test found"
 
     - name: agent-carries-the-env
       description: |
@@ -145,7 +166,10 @@ spec:
                   | grep '^podtrace_workload_dns_latency_seconds_sum' \
                   | grep 'namespace="kernel-agg-app"' \
                   | awk '{ if ($2 + 0 > 0) print }' | wc -l)
-                if [ "${has_workload}" -gt 0 ] && [ "${has_dns}" -gt 0 ]; then
+                has_bytes=$(printf '%s' "${out}" | grep -c 'podtrace_workload_network_bytes_total.*workload="shop-checkout"' || true)
+                has_edges=$(printf '%s' "${out}" | grep -c 'podtrace_workload_edge_' || true)
+                if [ "${has_workload}" -gt 0 ] && [ "${has_dns}" -gt 0 ] \
+                   && [ "${has_bytes}" -gt 0 ] && [ "${has_edges}" -gt 0 ]; then
                   found="${out}"
                   echo "kernel-fed series present on attempt ${attempt}"
                   break
@@ -153,7 +177,7 @@ spec:
                 sleep 5
               done
               if [ -z "${found}" ]; then
-                echo "FAIL: no workload series appeared; the aggregation map never reached the sink"
+                echo "FAIL: the kernel-fed series never all appeared (workload=${has_workload} dns=${has_dns} bytes=${has_bytes} edges=${has_edges})"
                 kubectl -n podtrace-system logs -l podtrace.io/component=agent --tail=60 || true
                 exit 1
               fi
@@ -268,13 +292,3 @@ spec:
             content: |
               kubectl -n kernel-agg-app delete podtrace kernel-agg-trace --ignore-not-found
               kubectl -n kernel-agg-app delete exporterconfig kernel-agg-ec --ignore-not-found
-
-    - name: restore-the-tracerconfig
-      try:
-        - script:
-            content: |
-              set -eu
-              kubectl patch tracerconfig default --type=merge -p '{
-                "spec": {"agent": {"metrics": {"enabled": false, "kernelAggregation": false}}}
-              }'
-              echo "plane restored to disabled"

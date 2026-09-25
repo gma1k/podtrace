@@ -114,7 +114,8 @@ func selectBackendFactory(mode string) (func() (tracer.TracerBackend, error), er
 
 func agentBackendFactory() (tracer.TracerBackend, error) {
 	tr, err := ebpf.NewTracer(ebpf.WithInitialCategories(
-		agent.StartupCategories(config.WorkloadMetricsEnabled),
+		agent.StartupCategories(agent.NodeCoverage(config.WorkloadMetricsEnabled,
+			config.ContinuousProfilingEnabled, config.WorkloadMetricsExcludedNamespaces)),
 	))
 	if err != nil {
 		return nil, err

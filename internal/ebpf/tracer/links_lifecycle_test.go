@@ -9,8 +9,6 @@ import (
 	"github.com/gma1k/podtrace/internal/ebpf/probes"
 )
 
-// fakeLink counts Close calls so the tests can assert single-close
-// semantics.
 type fakeLink struct {
 	link.Link
 	closes atomic.Int32
@@ -21,10 +19,6 @@ func (f *fakeLink) Close() error {
 	return nil
 }
 
-// TestDisableProbeGroup_RemovesLinksFromFlatRegistry is a regression test:
-// DisableProbeGroup closed a group's links but left them in t.links, so
-// Stop() double-closed them and repeated disable/enable cycles grew t.links
-// with dead handles indefinitely.
 func TestDisableProbeGroup_RemovesLinksFromFlatRegistry(t *testing.T) {
 	tr := &Tracer{probeGroups: map[probes.ProbeGroup][]link.Link{}}
 
@@ -37,9 +31,7 @@ func TestDisableProbeGroup_RemovesLinksFromFlatRegistry(t *testing.T) {
 		t.Fatalf("linkCount = %d, want 2", tr.linkCount())
 	}
 
-	if err := tr.DisableProbeGroup(probes.GroupFastCGI); err != nil {
-		t.Fatalf("DisableProbeGroup: %v", err)
-	}
+	tr.DisableProbeGroup(probes.GroupFastCGI)
 	if grouped.closes.Load() != 1 {
 		t.Errorf("grouped link closes = %d, want 1", grouped.closes.Load())
 	}
@@ -58,10 +50,6 @@ func TestDisableProbeGroup_RemovesLinksFromFlatRegistry(t *testing.T) {
 	}
 }
 
-// TestRegisterGroupLinks_GroupGating: container-scoped uprobe batches must be
-// registered under their probe group so SetEnabledCategories and the
-// management endpoints can actually detach them — they used to land only in
-// the flat registry, making the FastCGI/TLS gating a silent no-op.
 func TestRegisterGroupLinks_GroupGating(t *testing.T) {
 	tr := &Tracer{probeGroups: map[probes.ProbeGroup][]link.Link{}}
 	l := &fakeLink{}
@@ -74,9 +62,7 @@ func TestRegisterGroupLinks_GroupGating(t *testing.T) {
 		t.Fatalf("GroupTLS registry has %d links, want 1", registered)
 	}
 
-	if err := tr.DisableProbeGroup(probes.GroupTLS); err != nil {
-		t.Fatalf("DisableProbeGroup: %v", err)
-	}
+	tr.DisableProbeGroup(probes.GroupTLS)
 	if l.closes.Load() != 1 {
 		t.Errorf("TLS uprobe link closes = %d, want 1 (gating must detach it)", l.closes.Load())
 	}

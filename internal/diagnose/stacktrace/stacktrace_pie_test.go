@@ -39,7 +39,7 @@ func TestTranslateAddr_StripsPIELoadBase(t *testing.T) {
 				segments: map[string][]loadSegment{"/bin/app": {tc.seg}},
 				mappings: map[string][]exeMapping{"7|/bin/app": {tc.mapping}},
 			}
-			got, ok := r.translateAddr(7, "/bin/app", tc.addr)
+			got, ok := r.translateAddr(7, "/bin/app", "/bin/app", tc.addr)
 			if !ok {
 				t.Fatalf("translateAddr(%#x) failed, want %#x", tc.addr, tc.want)
 			}
@@ -55,7 +55,7 @@ func TestTranslateAddr_MissReturnsFalse(t *testing.T) {
 		segments: map[string][]loadSegment{"/bin/app": {{off: 0x1000, vaddr: 0x1000, filesz: 0x1000}}},
 		mappings: map[string][]exeMapping{"7|/bin/app": {{start: 0x555555555000, end: 0x555555556000, pgoff: 0x1000}}},
 	}
-	if _, ok := r.translateAddr(7, "/bin/app", 0xdeadbeef); ok {
+	if _, ok := r.translateAddr(7, "/bin/app", "/bin/app", 0xdeadbeef); ok {
 		t.Fatal("translateAddr for an unmapped address must return ok=false")
 	}
 }

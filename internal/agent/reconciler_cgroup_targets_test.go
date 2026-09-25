@@ -207,9 +207,9 @@ func TestResolveCgroupIDs_MapsScannedEntries(t *testing.T) {
 
 func withKubepodsRoot(t *testing.T, root string) {
 	t.Helper()
-	saved := kubepodsRootCandidates
-	kubepodsRootCandidates = []string{root}
-	t.Cleanup(func() { kubepodsRootCandidates = saved })
+	saved := kubepodsRootOverride
+	kubepodsRootOverride = root
+	t.Cleanup(func() { kubepodsRootOverride = saved })
 }
 
 func TestScanPodCgroups_WalksPodAndContainerCgroups(t *testing.T) {
