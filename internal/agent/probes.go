@@ -32,11 +32,25 @@ type ProbeServer struct {
 	stall         time.Duration
 }
 
+const minimumStallWindow = 90 * time.Second
+
+// StallWindowFor is how old the heartbeat may get before /healthz reports a
+// stall.
+func StallWindowFor(reportInterval time.Duration) time.Duration {
+	if reportInterval <= 0 {
+		reportInterval = DefaultStatusReportInterval
+	}
+	if w := 3 * reportInterval; w > minimumStallWindow {
+		return w
+	}
+	return minimumStallWindow
+}
+
 // NewProbeServer returns a ProbeServer ready to serve /healthz and
 // /readyz at addr.
 func NewProbeServer(addr string, stallWindow time.Duration) *ProbeServer {
 	if stallWindow <= 0 {
-		stallWindow = 90 * time.Second
+		stallWindow = minimumStallWindow
 	}
 	s := &ProbeServer{Addr: addr, stall: stallWindow}
 	s.Heartbeat()

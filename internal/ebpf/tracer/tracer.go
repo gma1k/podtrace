@@ -78,13 +78,14 @@ type ProfilingControllerSetter interface {
 }
 
 type Tracer struct {
-	collection     *ebpf.Collection
-	links          []link.Link
-	probeGroupsMu  sync.Mutex
-	probeGroups    map[probes.ProbeGroup][]link.Link
-	dnsPacketLinks map[string][]link.Link
-	http3Links     map[string][]link.Link
-	sockOpsLinks   map[string][]link.Link
+	collection      *ebpf.Collection
+	links           []link.Link
+	probeGroupsMu   sync.Mutex
+	probeGroups     map[probes.ProbeGroup][]link.Link
+	dnsPacketLinks  map[string][]link.Link
+	http3Links      map[string][]link.Link
+	sockOpsLinks    map[string][]link.Link
+	sockOpsCoverage sockOpsCoverage
 
 	probesClosed bool
 
@@ -436,6 +437,52 @@ func (t *Tracer) syncSockOpsProbes(paths []string) {
 		}
 	}
 	t.reconcileCgroupLinks(&t.sockOpsLinks, want, attachSockOpsProbes)
+	t.reportSockOpsCoverage(len(want))
+}
+
+type sockOpsCoverage int
+
+const (
+	sockOpsCoverageUnreported sockOpsCoverage = iota
+	sockOpsCoverageAttached
+	sockOpsCoverageNone
+)
+
+// reportSockOpsCoverage logs the sock_ops outcome for the node when it
+// changes: attached somewhere, or wanted and attached nowhere.
+func (t *Tracer) reportSockOpsCoverage(wanted int) {
+	t.probeGroupsMu.Lock()
+	covered := 0
+	for _, ls := range t.sockOpsLinks {
+		if len(ls) > 0 {
+			covered++
+		}
+	}
+	now := sockOpsCoverageAttached
+	if covered == 0 {
+		if wanted == 0 {
+			t.probeGroupsMu.Unlock()
+			return
+		}
+		now = sockOpsCoverageNone
+	}
+	changed := now != t.sockOpsCoverage
+	t.sockOpsCoverage = now
+	t.probeGroupsMu.Unlock()
+	if changed {
+		logSockOpsCoverage(now, covered, wanted)
+	}
+}
+
+// logSockOpsCoverage is replaceable so tests can count what is logged.
+var logSockOpsCoverage = func(now sockOpsCoverage, covered, wanted int) {
+	if now == sockOpsCoverageAttached {
+		logger.Info("Smoothed-RTT sock_ops hook attached", zap.Int("cgroups", covered))
+		return
+	}
+	logger.Warn("Smoothed-RTT sock_ops hook attached to nothing; network_rtt_seconds stays "+
+		"empty and net.rtt_spike_rate falls back to syscall latency",
+		zap.Int("cgroupsConsidered", wanted), zap.String("kubepodsRoot", kubepodsRoot()))
 }
 
 // syncHTTP3Probes reconciles the per-cgroup http3_egress/http3_ingress QUIC

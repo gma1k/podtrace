@@ -50,7 +50,9 @@ type AgentSpecApplyConfiguration struct {
 	// where it cannot attach the rule falls back to syscall latency.
 	SockOpsRTT *bool                                `json:"sockOpsRTT,omitempty"`
 	Alerting   *AgentAlertingSpecApplyConfiguration `json:"alerting,omitempty"`
-	Metrics    *AgentMetricsSpecApplyConfiguration  `json:"metrics,omitempty"`
+	// Metrics configures the continuous metrics plane, which runs unless
+	// metrics.enabled is set to false.
+	Metrics *AgentMetricsSpecApplyConfiguration `json:"metrics,omitempty"`
 	// RolloutMaxUnavailable is how many agents may be updated at once when
 	// the DaemonSet's pod template changes, as a count or a percentage.
 	RolloutMaxUnavailable *intstr.IntOrString `json:"rolloutMaxUnavailable,omitempty"`

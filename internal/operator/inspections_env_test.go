@@ -11,31 +11,38 @@ import (
 	"github.com/gma1k/podtrace/internal/config"
 )
 
-func TestInspectionsEnvEmitsNothingWhenAbsentOrDisabled(t *testing.T) {
+func TestInspectionsEnvSaysOffExplicitlyWhenDisabled(t *testing.T) {
 	for name, spec := range map[string]*podtracev1alpha1.AgentInspectionsSpec{
-		"nil":      nil,
-		"disabled": {Enabled: false},
+		"disabled": {Enabled: ptr(false)},
 		"disabled with thresholds set": {
-			Enabled: false,
+			Enabled: ptr(false),
 			Thresholds: &podtracev1alpha1.AgentInspectionThresholdsSpec{
 				ErrorRatePercent: ptr(int32(1)),
 			},
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if got := inspectionsEnv(spec); len(got) != 0 {
-				t.Errorf("got %v, want no env; a disabled half must leave the pod template "+
-					"byte-identical so it triggers no rollout", envMap(got))
+			got := envMap(inspectionsEnv(spec))
+			if len(got) != 1 || got[envInspectionsEnabled] != "false" {
+				t.Errorf("got %v, want only %s=false", got, envInspectionsEnabled)
 			}
 		})
 	}
 }
 
+func TestInspectionsEnvTreatsAMissingSpecAsEveryDefault(t *testing.T) {
+	got := envMap(inspectionsEnv(nil))
+	if got[envInspectionsEnabled] != "true" || got[envInspectionsAlerts] != "true" {
+		t.Errorf("got %v, want inspections and alerts on; a metrics block without an "+
+			"inspections block would find nothing wrong", got)
+	}
+}
+
 func TestInspectionsEnvReachesTheAgentThroughTheMetricsSpec(t *testing.T) {
 	got := envMap(metricsEnv(&podtracev1alpha1.AgentMetricsSpec{
-		Enabled: true,
+		Enabled: ptr(true),
 		Inspections: &podtracev1alpha1.AgentInspectionsSpec{
-			Enabled: true,
+			Enabled: ptr(true),
 		},
 	}))
 	if got[envInspectionsEnabled] != "true" {
@@ -44,9 +51,9 @@ func TestInspectionsEnvReachesTheAgentThroughTheMetricsSpec(t *testing.T) {
 	}
 
 	off := envMap(metricsEnv(&podtracev1alpha1.AgentMetricsSpec{
-		Enabled: false,
+		Enabled: ptr(false),
 		Inspections: &podtracev1alpha1.AgentInspectionsSpec{
-			Enabled: true,
+			Enabled: ptr(true),
 		},
 	}))
 	if _, present := off[envInspectionsEnabled]; present {
@@ -57,7 +64,7 @@ func TestInspectionsEnvReachesTheAgentThroughTheMetricsSpec(t *testing.T) {
 
 func TestEveryInspectionFieldIsTranslated(t *testing.T) {
 	got := envMap(inspectionsEnv(&podtracev1alpha1.AgentInspectionsSpec{
-		Enabled:  true,
+		Enabled:  ptr(true),
 		Interval: &metav1.Duration{Duration: 90 * time.Second},
 		Alerts:   ptr(false),
 		Budget:   ptr(int32(64)),
@@ -87,7 +94,7 @@ func TestEveryInspectionFieldIsTranslated(t *testing.T) {
 
 func TestEveryTranslatedValueIsParsedBackByTheAgent(t *testing.T) {
 	env := envMap(inspectionsEnv(&podtracev1alpha1.AgentInspectionsSpec{
-		Enabled:  true,
+		Enabled:  ptr(true),
 		Interval: &metav1.Duration{Duration: 45 * time.Second},
 		Budget:   ptr(int32(7)),
 		Thresholds: &podtracev1alpha1.AgentInspectionThresholdsSpec{
@@ -114,7 +121,7 @@ func TestEveryTranslatedValueIsParsedBackByTheAgent(t *testing.T) {
 
 func TestAZeroOrNegativeIntervalIsLeftToTheAgentDefault(t *testing.T) {
 	got := envMap(inspectionsEnv(&podtracev1alpha1.AgentInspectionsSpec{
-		Enabled:  true,
+		Enabled:  ptr(true),
 		Interval: &metav1.Duration{Duration: 0},
 		Thresholds: &podtracev1alpha1.AgentInspectionThresholdsSpec{
 			MeanLatency: &metav1.Duration{Duration: 0},
@@ -130,7 +137,7 @@ func TestAZeroOrNegativeIntervalIsLeftToTheAgentDefault(t *testing.T) {
 
 func TestHoldTimeReachesTheAgentEnv(t *testing.T) {
 	got := envMap(inspectionsEnv(&podtracev1alpha1.AgentInspectionsSpec{
-		Enabled:  true,
+		Enabled:  ptr(true),
 		HoldTime: &metav1.Duration{Duration: 20 * time.Second},
 	}))
 	if got[envInspectionsHoldTime] != "20s" {
@@ -145,8 +152,8 @@ func TestHoldTimeReachesTheAgentEnv(t *testing.T) {
 
 func TestAZeroHoldTimeIsLeftToTheRuleDefaults(t *testing.T) {
 	for name, spec := range map[string]*podtracev1alpha1.AgentInspectionsSpec{
-		"absent": {Enabled: true},
-		"zero":   {Enabled: true, HoldTime: &metav1.Duration{Duration: 0}},
+		"absent": {Enabled: ptr(true)},
+		"zero":   {Enabled: ptr(true), HoldTime: &metav1.Duration{Duration: 0}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := envMap(inspectionsEnv(spec))
@@ -176,15 +183,15 @@ func TestEveryThresholdFieldOnTheCRDReachesTheAgent(t *testing.T) {
 	}
 
 	got := envMap(inspectionsEnv(&podtracev1alpha1.AgentInspectionsSpec{
-		Enabled:    true,
+		Enabled:    ptr(true),
 		Thresholds: spec,
 	}))
 
-	if len(got)-1 != typ.NumField() {
+	if len(got)-2 != typ.NumField() {
 		t.Errorf("%d threshold fields are set but inspectionsEnv emitted %d variables "+
-			"besides the enabled flag: %v\n\nA field added to the CRD without a matching "+
+			"besides the enabled and alerts flags: %v\n\nA field added to the CRD without a matching "+
 			"branch in inspectionsEnv is accepted by the API server, stored, and then "+
 			"silently dropped on the way to the agent, which runs the shipped default "+
-			"while the CR says otherwise.", typ.NumField(), len(got)-1, got)
+			"while the CR says otherwise.", typ.NumField(), len(got)-2, got)
 	}
 }

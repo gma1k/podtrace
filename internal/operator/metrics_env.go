@@ -36,14 +36,26 @@ const (
 	envInspectionPoolWarn    = "PODTRACE_INSPECTIONS_POOL_UTILIZATION_PCT"
 )
 
+// boolEnv renders a resolved toggle.
+func boolEnv(name string, value bool) corev1.EnvVar {
+	return corev1.EnvVar{Name: name, Value: strconv.FormatBool(value)}
+}
+
 // metricsEnv renders AgentMetricsSpec onto the agent container's
 // environment.
 func metricsEnv(spec *podtracev1alpha1.AgentMetricsSpec) []corev1.EnvVar {
-	if spec == nil || !spec.Enabled {
-		return nil
+	if !spec.MetricsEnabled() {
+		return []corev1.EnvVar{boolEnv(envMetricsEnabled, false)}
 	}
 
-	env := []corev1.EnvVar{{Name: envMetricsEnabled, Value: "true"}}
+	env := []corev1.EnvVar{
+		boolEnv(envMetricsEnabled, true),
+		boolEnv(envMetricsNativeHistograms, spec.NativeHistogramsEnabled()),
+		boolEnv(envMetricsKernelAggregation, spec.KernelAggregationEnabled()),
+	}
+	if spec == nil {
+		return append(env, inspectionsEnv(nil)...)
+	}
 
 	if namespaces := sanitizeExcludedNamespaces(spec.ExcludeNamespaces); len(namespaces) > 0 {
 		env = append(env, corev1.EnvVar{
@@ -57,17 +69,8 @@ func metricsEnv(spec *podtracev1alpha1.AgentMetricsSpec) []corev1.EnvVar {
 			Value: strconv.FormatInt(int64(*spec.SeriesBudget), 10),
 		})
 	}
-	if spec.NativeHistograms != nil {
-		env = append(env, corev1.EnvVar{
-			Name:  envMetricsNativeHistograms,
-			Value: strconv.FormatBool(*spec.NativeHistograms),
-		})
-	}
 	if spec.SemanticConventions {
 		env = append(env, corev1.EnvVar{Name: envMetricsSemanticConv, Value: "true"})
-	}
-	if spec.KernelAggregation {
-		env = append(env, corev1.EnvVar{Name: envMetricsKernelAggregation, Value: "true"})
 	}
 	if spec.AttributeCardinality != nil {
 		env = append(env, corev1.EnvVar{
@@ -89,22 +92,22 @@ func metricsEnv(spec *podtracev1alpha1.AgentMetricsSpec) []corev1.EnvVar {
 // inspectionsEnv renders AgentInspectionsSpec onto the agent container's
 // environment.
 func inspectionsEnv(spec *podtracev1alpha1.AgentInspectionsSpec) []corev1.EnvVar {
-	if spec == nil || !spec.Enabled {
-		return nil
+	if !spec.IsEnabled() {
+		return []corev1.EnvVar{boolEnv(envInspectionsEnabled, false)}
 	}
 
-	env := []corev1.EnvVar{{Name: envInspectionsEnabled, Value: "true"}}
+	env := []corev1.EnvVar{
+		boolEnv(envInspectionsEnabled, true),
+		boolEnv(envInspectionsAlerts, spec.RaiseAlerts()),
+	}
+	if spec == nil {
+		return env
+	}
 
 	if spec.Interval != nil && spec.Interval.Duration > 0 {
 		env = append(env, corev1.EnvVar{
 			Name:  envInspectionsInterval,
 			Value: spec.Interval.Duration.String(),
-		})
-	}
-	if spec.Alerts != nil {
-		env = append(env, corev1.EnvVar{
-			Name:  envInspectionsAlerts,
-			Value: strconv.FormatBool(*spec.Alerts),
 		})
 	}
 	if spec.Budget != nil {

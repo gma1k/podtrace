@@ -48,7 +48,10 @@ func (w *StatusWriter) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-t.C:
-			if err := w.emitOnce(ctx); err != nil {
+			tickCtx, cancel := context.WithTimeout(ctx, interval)
+			err := w.emitOnce(tickCtx)
+			cancel()
+			if err != nil {
 				logger.Error(err, "status patch failed")
 			}
 		}

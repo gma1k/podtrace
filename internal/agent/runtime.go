@@ -151,7 +151,7 @@ func Run(ctx context.Context, opts Options) error {
 	stats := newPerCRStats()
 	enricher := NewPodEnricher()
 	router := NewRouter(stats).WithEnricher(enricher)
-	probeSrv := NewProbeServer(opts.HealthAddr, 0)
+	probeSrv := NewProbeServer(opts.HealthAddr, StallWindowFor(opts.StatusReportInterval))
 	metrics := NewMetrics()
 	metrics.SetIdentity(opts.NodeName, opts.TracerConfigName)
 

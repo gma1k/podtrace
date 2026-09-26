@@ -132,9 +132,11 @@ data:
           {{- end }}
           allowInsecureWebhook: {{ .Values.agent.alerting.allowInsecureWebhook }}
         {{- end }}
-        {{- if .Values.agent.metrics.enabled }}
+        {{- /* Both switches are always written: the CRD defaults them to
+        on, so leaving a block out would turn it on, not off. */}}
         metrics:
-          enabled: true
+          enabled: {{ .Values.agent.metrics.enabled }}
+          {{- if .Values.agent.metrics.enabled }}
           {{- with .Values.agent.metrics.excludeNamespaces }}
           excludeNamespaces:
             {{- toYaml . | nindent 12 }}
@@ -153,9 +155,9 @@ data:
             pod: {{ .Values.agent.metrics.labels.pod }}
             process: {{ .Values.agent.metrics.labels.process }}
           {{- end }}
-          {{- if .Values.agent.metrics.inspections.enabled }}
           inspections:
-            enabled: true
+            enabled: {{ .Values.agent.metrics.inspections.enabled }}
+            {{- if .Values.agent.metrics.inspections.enabled }}
             {{- with .Values.agent.metrics.inspections.interval }}
             interval: {{ . | quote }}
             {{- end }}
@@ -168,21 +170,10 @@ data:
             {{- end }}
             {{- with .Values.agent.metrics.inspections.thresholds }}
             thresholds:
-              {{- if .errorRatePercent }}
-              errorRatePercent: {{ .errorRatePercent }}
-              {{- end }}
-              {{- if .minRequestsPerMinute }}
-              minRequestsPerMinute: {{ .minRequestsPerMinute }}
-              {{- end }}
-              {{- with .meanLatency }}
-              meanLatency: {{ . | quote }}
-              {{- end }}
-              {{- with .acquireMean }}
-              acquireMean: {{ . | quote }}
-              {{- end }}
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
             {{- end }}
           {{- end }}
-        {{- end }}
       session:
         {{- with .Values.session.resources }}
         resources:

@@ -97,13 +97,16 @@ func TestBuildAgentDaemonSetSpec_CapabilityExplicitDisable(t *testing.T) {
 	}
 }
 
-func TestBuildAgentDaemonSetSpec_DNSPacketCaptureEnabledOmitsEnv(t *testing.T) {
-	dpcOn := true
-	spec := buildAgentDaemonSetSpec(tc(func(x *podtracev1alpha1.TracerConfig) {
-		x.Spec.Agent.DNSPacketCapture = &dpcOn
-	}), "podtrace-system")
-	if _, ok := envValue(spec.Template.Spec.Containers[0].Env, "PODTRACE_DNS_PACKET_CAPTURE"); ok {
-		t.Error("PODTRACE_DNS_PACKET_CAPTURE must be absent when capture is enabled")
+func TestBuildAgentDaemonSetSpec_DNSPacketCaptureIsWrittenOut(t *testing.T) {
+	for name, field := range map[string]*bool{"unset": nil, "on": ptr(true)} {
+		t.Run(name, func(t *testing.T) {
+			spec := buildAgentDaemonSetSpec(tc(func(x *podtracev1alpha1.TracerConfig) {
+				x.Spec.Agent.DNSPacketCapture = field
+			}), "podtrace-system")
+			if v, ok := envValue(spec.Template.Spec.Containers[0].Env, "PODTRACE_DNS_PACKET_CAPTURE"); !ok || v != "true" {
+				t.Errorf("PODTRACE_DNS_PACKET_CAPTURE=%q ok=%v, want true", v, ok)
+			}
+		})
 	}
 }
 

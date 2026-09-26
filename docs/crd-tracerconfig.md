@@ -120,6 +120,50 @@ spec:
   Captured values pass through the redaction engine when `redaction` is
   enabled. See [http3.md](http3.md#header-allowlist-capture).
 
+### Defaults: everything on unless you say otherwise
+
+The continuous APM plane runs on any TracerConfig, however it was created.
+These toggles default to `true` in the CRD schema, so the API server fills in
+whatever you leave out, and `kubectl get tracerconfig -o yaml` shows the value
+the agent runs with:
+
+| Field | Turns on |
+|---|---|
+| `agent.metrics.enabled` | The continuous metrics plane |
+| `agent.metrics.inspections.enabled` | Continuous inspections (only while the plane is on) |
+| `agent.metrics.inspections.alerts` | Raising an activated issue as an alert |
+| `agent.metrics.kernelAggregation` | Folding observations in a BPF map |
+| `agent.metrics.nativeHistograms` | Native histograms on `/metrics` |
+| `agent.continuousProfiling` | The always-on profile on `/profile` |
+| `agent.sockOpsRTT` | Kernel smoothed RTT via `sock_ops` |
+| `agent.dnsPacketCapture`, `agent.dnsFullAnswers`, `agent.usdt` | Packet DNS capture, full DNS answers, USDT probes |
+
+Leaving out a whole block counts the same: a TracerConfig with no `agent` or
+no `agent.metrics` gets every toggle above. To turn one off, write `false`:
+
+```yaml
+spec:
+  agent:
+    continuousProfiling: false
+    metrics:
+      enabled: false       # also stops inspections, which read the plane
+```
+
+The operator applies the same defaults itself when a field is still unset, for
+example on an object stored before this schema, so what an agent runs never
+depends on which CRD version is installed.
+
+### The TracerConfig the operator creates
+
+With no TracerConfig in the cluster, as on an OLM install, the operator creates
+`default` itself, annotated `podtrace.io/bootstrap-source: operator`. It then
+keeps the fields it wrote current on every start: `image`, `tolerations`,
+`agent.resources`, `session.resources` and `agent.metrics.excludeNamespaces`.
+It only updates a field it still owns in `metadata.managedFields`; editing a
+field with `kubectl` makes it yours, and the operator leaves it alone. The
+annotation `podtrace.io/bootstrap-fields` lists what the operator has written,
+so a field you deleted is not put back.
+
 ## Status reference
 
 ```yaml

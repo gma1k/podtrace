@@ -50,7 +50,9 @@ agent:
       process: false
 ```
 
-These map onto `TracerConfig.spec.agent.metrics`. Editing the CR directly
+These map onto `TracerConfig.spec.agent.metrics`, whose toggles default to
+on in the CRD schema: a TracerConfig written without the chart, or the one the
+operator creates on an OLM install, runs the plane too. Editing the CR directly
 works but gets reverted on the next chart upgrade, so prefer
 `helm upgrade --reuse-values --set …`, same rule as every other
 TracerConfig field, see [crd-tracerconfig.md](crd-tracerconfig.md).
@@ -926,7 +928,7 @@ An exemplar needs a per-request trace id. Under
 from a BPF map and no per-request identity reaches userspace — so the L7,
 network and DNS families carry **no exemplars** in that mode.
 
-This is one of the reasons `kernelAggregation` defaults to off. It is also
+That is the trade `kernelAggregation`, on by default, makes. It is also
 less costly than it first appears: the bypass only arms while no `PodTrace`
 exists, so the moment anyone is actually diagnosing, events flow again and
 exemplars come back with them. The gap is real only when your traces come

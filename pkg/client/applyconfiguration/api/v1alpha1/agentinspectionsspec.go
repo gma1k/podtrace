@@ -27,6 +27,8 @@ import (
 // AgentInspectionsSpec configures continuous inspections: the half of the
 // plane that decides something is wrong, rather than only recording it.
 type AgentInspectionsSpecApplyConfiguration struct {
+	// Enabled runs the inspections. On unless set to false; they read the
+	// metrics plane, so they are also off whenever it is.
 	Enabled *bool `json:"enabled,omitempty"`
 	// Interval is how often rules are evaluated. It doubles as the rate
 	// window, so it has to be long enough for a counter delta to mean
