@@ -155,7 +155,9 @@ podtrace --app api -n my-app --diagnose 30s --filter dns,net
 ```
 
 Rule of thumb: `podtrace <targeting>` = look now (terminal);
-`podtrace watch <targeting>` = record continuously (exporter).
+`podtrace watch <targeting>` = record continuously (exporter);
+`podtrace status` = what the always-on agents see across the cluster: fleet
+health, active issues and the busiest workloads, with no metrics backend.
 
 Full reference: [docs/crd-podtrace.md](docs/crd-podtrace.md).
 

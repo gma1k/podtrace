@@ -80,7 +80,12 @@ func Take(g prometheus.Gatherer, now time.Time) (Snapshot, error) {
 			return Snapshot{}, err
 		}
 	}
+	return TakeFamilies(families, now), err
+}
 
+// TakeFamilies builds a snapshot from families already gathered, such as a
+// decoded /metrics scrape of another process.
+func TakeFamilies(families []*dto.MetricFamily, now time.Time) Snapshot {
 	snap := Snapshot{At: now, families: make(map[string][]Sample, len(families))}
 	for _, f := range families {
 		name := f.GetName()
@@ -90,7 +95,7 @@ func Take(g prometheus.Gatherer, now time.Time) (Snapshot, error) {
 		}
 		snap.families[name] = samples
 	}
-	return snap, err
+	return snap
 }
 
 // sampleOf reduces one gathered metric to a Sample.

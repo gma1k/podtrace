@@ -1,0 +1,171 @@
+package status
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"strings"
+	"text/tabwriter"
+	"time"
+
+	"github.com/gma1k/podtrace/internal/sanitize"
+)
+
+const messageWidth = 90
+
+// RenderJSON writes the report as JSON: indented for one-off output, one
+// compact object per line for --watch, so the stream stays line-delimited.
+func RenderJSON(w io.Writer, r Report, indent bool) error {
+	enc := json.NewEncoder(w)
+	if indent {
+		enc.SetIndent("", "  ")
+	}
+	return enc.Encode(r)
+}
+
+// RenderText writes the report as tables for a terminal.
+func RenderText(w io.Writer, r Report) error {
+	b := &strings.Builder{}
+	fmt.Fprintf(b, "podtrace status · %s", r.GeneratedAt.Local().Format("2006-01-02 15:04:05"))
+	if r.WindowSeconds > 0 {
+		fmt.Fprintf(b, " · rates over %s", formatDuration(time.Duration(r.WindowSeconds*float64(time.Second))))
+	}
+	fmt.Fprintf(b, "\n%s · %s\n", healthLine(r), r.Summary)
+	if len(r.Problems) > 0 {
+		b.WriteString("\nPROBLEMS\n")
+		for _, problem := range r.Problems {
+			fmt.Fprintf(b, "✗ %s\n", clean(problem, 160))
+		}
+	}
+
+	if len(r.Components) > 0 {
+		b.WriteString("\nCOMPONENTS\n")
+		components := [][]string{{"KIND", "NAME", "READY", "UPDATED", "STATE"}}
+		for _, c := range r.Components {
+			components = append(components, []string{c.Kind, c.Name,
+				fmt.Sprintf("%d/%d", c.Ready, c.Desired), fmt.Sprintf("%d/%d", c.Updated, c.Desired), c.State})
+		}
+		writeTable(b, components)
+	}
+
+	b.WriteString("\nAGENTS\n")
+	agents := [][]string{{"NODE", "POD", "STATE", "RESTARTS", "WORKLOADS"}}
+	for _, a := range r.Agents {
+		state := a.State
+		if a.Reason != "" {
+			state += " (" + clean(a.Reason, messageWidth) + ")"
+		}
+		agents = append(agents, []string{a.Node, a.Pod, state, fmt.Sprint(a.Restarts), fmt.Sprint(a.Workloads)})
+	}
+	writeTable(b, agents)
+
+	b.WriteString("\nISSUES\n")
+	if len(r.Issues) == 0 {
+		b.WriteString("No active issues.\n")
+	} else {
+		issues := [][]string{{"SEVERITY", "ISSUE", "WORKLOAD", "POD", "SINCE", "MESSAGE"}}
+		for _, is := range r.Issues {
+			since := "-"
+			if is.Since != nil {
+				since = formatDuration(r.GeneratedAt.Sub(*is.Since))
+			}
+			issues = append(issues, []string{is.Severity, is.ID, is.Namespace + "/" + is.Workload,
+				orDash(is.Pod), since, orDash(clean(is.Message, messageWidth))})
+		}
+		writeTable(b, issues)
+	}
+
+	b.WriteString("\nWORKLOADS\n")
+	if len(r.Workloads) == 0 {
+		b.WriteString("No application traffic observed in the window.\n")
+	} else {
+		workloads := [][]string{{"NAMESPACE", "WORKLOAD", "REQ/S", "ERRORS", "P95", "ISSUES"}}
+		for _, wl := range r.Workloads {
+			errs, p95 := "-", "-"
+			if wl.ErrorPercent != nil {
+				errs = fmt.Sprintf("%.1f%%", *wl.ErrorPercent)
+			}
+			if wl.P95Milliseconds != nil {
+				p95 = formatDuration(time.Duration(*wl.P95Milliseconds * float64(time.Millisecond)))
+			}
+			workloads = append(workloads, []string{wl.Namespace, wl.Workload,
+				fmt.Sprintf("%.1f", wl.RequestsPerSecond), errs, p95, fmt.Sprint(wl.Issues)})
+		}
+		writeTable(b, workloads)
+	}
+
+	if p := r.Profile; p != nil {
+		fmt.Fprintf(b, "\nPROFILE %s/%s · %d samples on %d node(s)", p.Namespace, p.Workload, p.Samples, p.Nodes)
+		if p.SchedulerFrames > 0 {
+			fmt.Fprintf(b, " · %d Go scheduler frame hits hidden", p.SchedulerFrames)
+		}
+		b.WriteString("\n")
+		if len(p.Frames) == 0 {
+			b.WriteString("No frames captured yet.\n")
+		}
+		for _, f := range p.Frames {
+			fmt.Fprintf(b, "%6.1f%%  %s\n", f.Percent, clean(f.Frame, 160))
+		}
+	}
+
+	if len(r.Warnings) > 0 {
+		b.WriteString("\nWARNINGS\n")
+		for _, warning := range r.Warnings {
+			fmt.Fprintf(b, "! %s\n", warning)
+		}
+	}
+	_, err := io.WriteString(w, b.String())
+	return err
+}
+
+func healthLine(r Report) string {
+	if r.Healthy {
+		return "podtrace is healthy"
+	}
+	return "podtrace is NOT healthy"
+}
+
+// writeTable aligns rows into columns. It writes into a strings.Builder,
+// which cannot fail, so the writer's errors carry nothing.
+func writeTable(b *strings.Builder, rows [][]string) {
+	tw := tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
+	for _, row := range rows {
+		_, _ = io.WriteString(tw, strings.Join(row, "\t")+"\n")
+	}
+	_ = tw.Flush()
+}
+
+// clean makes attacker-influenced text safe to print: an Event message or a
+// symbol name can carry terminal control sequences.
+func clean(s string, width int) string {
+	s = sanitize.Terminal(strings.Join(strings.Fields(s), " "))
+	if r := []rune(s); len(r) > width {
+		s = string(r[:width-1]) + "…"
+	}
+	return s
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+func formatDuration(d time.Duration) string {
+	switch {
+	case d < 0:
+		return "0s"
+	case d < time.Millisecond:
+		return fmt.Sprintf("%.2fms", float64(d)/float64(time.Millisecond))
+	case d < time.Second:
+		return fmt.Sprintf("%.0fms", float64(d)/float64(time.Millisecond))
+	case d < time.Minute:
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
+	}
+	return fmt.Sprintf("%dd", int(d.Hours()/24))
+}

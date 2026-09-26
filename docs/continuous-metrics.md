@@ -974,9 +974,21 @@ agent counts exactly the ones it did not, into the same series. A family whose
 emitters are mixed stays whole, and an event the kernel both counted and
 shipped (while a PodTrace keeps the ring buffer open) is counted once.
 
-The one observable difference is exemplars: they need a per-request trace id,
-which no longer reaches userspace once the bypass is armed. See
+Two differences are observable. The first is exemplars: they need a
+per-request trace id, which no longer reaches userspace once the bypass is
+armed. See
 [Interaction with kernel-side aggregation](#interaction-with-kernel-side-aggregation).
+
+The second is timing. The agent drains the kernel map every 10 seconds
+(`PODTRACE_WORKLOAD_METRICS_DRAIN_INTERVAL`), so the aggregated counters and
+histograms move in steps: flat between drains, then up by everything the drain
+brought. Query them with `rate()` or `increase()` over at least a minute. Over
+windows shorter than about two drain intervals, and with `irate()`, which only
+looks at the last two samples, a steady workload reads as zero followed by a
+spike. The totals are exact; only their timing is coarse. Shortening the drain
+interval makes the steps smaller, at the cost of draining more often.
+`podtrace status` times its reads to the drains, so its rates are
+exact over any window.
 
 Latency distributions are recorded as **Prometheus native-histogram schema-3
 buckets**, indexed in the kernel with integer arithmetic. Schema 3 is the

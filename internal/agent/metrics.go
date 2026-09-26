@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -23,6 +24,10 @@ type Metrics struct {
 	EventsDropped         *prometheus.CounterVec
 	KernelEventsDropped   *prometheus.CounterVec
 	KernelAggRows         *prometheus.CounterVec
+	KernelDrainedAt       prometheus.Gauge
+	KernelDrainInterval   prometheus.Gauge
+	KernelSinceDrain      prometheus.GaugeFunc
+	lastKernelDrain       atomic.Int64
 	IssuePodUnresolved    prometheus.Counter
 	IssueAlertUndelivered prometheus.Counter
 	ActiveCgroups         *prometheus.GaugeVec
@@ -106,6 +111,16 @@ func NewMetrics() *Metrics {
 			Name:      "kernel_agg_rows_total",
 			Help:      "Rows drained from the kernel metric aggregation map, by outcome. Collector internal, not part of the contractual surface.",
 		}, []string{"outcome"}),
+		KernelDrainedAt: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: "podtrace_agent",
+			Name:      "kernel_metrics_drained_timestamp_seconds",
+			Help:      "Unix time of the last completed drain of the kernel aggregation map. Kernel-aggregated workload counters only move at a drain, so a rate taken between two reads is exact only over the time between two drains. Collector internal.",
+		}),
+		KernelDrainInterval: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: "podtrace_agent",
+			Name:      "kernel_metrics_drain_interval_seconds",
+			Help:      "How often the kernel aggregation map is drained. Collector internal.",
+		}),
 		IssuePodUnresolved: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: "podtrace_agent",
 			Name:      "issue_pod_unresolved_total",
@@ -216,9 +231,15 @@ func NewMetrics() *Metrics {
 		lastDropped:        map[CRKey]int64{},
 		exporterInitLastOK: map[CRKey]bool{},
 	}
+	m.KernelSinceDrain = prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Namespace: "podtrace_agent",
+		Name:      "kernel_metrics_seconds_since_drain",
+		Help:      "Seconds since the last completed kernel drain, measured by the agent when scraped, or -1 before the first. A reader times its next read from this rather than from its own clock, which may be skewed from the node's. Collector internal.",
+	}, m.secondsSinceKernelDrain)
 	reg.MustRegister(
-		m.AgentInfo,
+		m.AgentInfo, m.KernelSinceDrain,
 		m.EventsExported, m.EventsDropped, m.KernelEventsDropped, m.KernelAggRows,
+		m.KernelDrainedAt, m.KernelDrainInterval,
 		m.IssuePodUnresolved, m.IssueAlertUndelivered,
 		m.ActiveCgroups, m.ActiveCRs,
 		m.ReconcileTotal, m.BackendDegraded, m.CgroupsAttached, m.CgroupsDetached,
@@ -575,6 +596,25 @@ func (m *Metrics) RecordKernelDrain(rows, applied int) {
 	if dropped := rows - applied; dropped > 0 {
 		m.KernelAggRows.WithLabelValues("unattributed").Add(float64(dropped))
 	}
+}
+
+// RecordKernelDrainTime publishes when a drain completed and how often they
+// run, so a reader of /metrics can time its reads to the drains.
+func (m *Metrics) RecordKernelDrainTime(at time.Time, interval time.Duration) {
+	if m == nil || m.KernelDrainedAt == nil {
+		return
+	}
+	m.KernelDrainedAt.Set(float64(at.UnixNano()) / 1e9)
+	m.KernelDrainInterval.Set(interval.Seconds())
+	m.lastKernelDrain.Store(at.UnixNano())
+}
+
+func (m *Metrics) secondsSinceKernelDrain() float64 {
+	last := m.lastKernelDrain.Load()
+	if last == 0 {
+		return -1
+	}
+	return time.Since(time.Unix(0, last)).Seconds()
 }
 
 // RecordKernelDrainFailure counts a drain that could not read the map, which

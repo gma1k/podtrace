@@ -18,6 +18,9 @@ const (
 	AnnotationAlertSource = "podtrace.io/alert-source"
 
 	AnnotationAlertSeverity = "podtrace.io/alert-severity"
+
+	AnnotationIssueID  = "podtrace.io/issue-id"
+	AnnotationWorkload = "podtrace.io/workload"
 )
 
 // Canonical alert Source tokens the trigger contract recognizes. Resource
@@ -39,14 +42,23 @@ func BuildAlertEvent(alert *Alert, now time.Time) *corev1.Event {
 		return nil
 	}
 	ts := metav1.NewTime(now)
+	annotations := map[string]string{
+		AnnotationAlertSource:   alert.Source,
+		AnnotationAlertSeverity: string(alert.Severity),
+	}
+	if alert.Source == AlertSourceIssue {
+		if alert.ErrorCode != "" {
+			annotations[AnnotationIssueID] = alert.ErrorCode
+		}
+		if workload, ok := alert.Context["workload"].(string); ok && workload != "" {
+			annotations[AnnotationWorkload] = workload
+		}
+	}
 	return &corev1.Event{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "podtrace-alert-",
 			Namespace:    alert.Namespace,
-			Annotations: map[string]string{
-				AnnotationAlertSource:   alert.Source,
-				AnnotationAlertSeverity: string(alert.Severity),
-			},
+			Annotations:  annotations,
 		},
 		InvolvedObject: corev1.ObjectReference{
 			Kind:      "Pod",

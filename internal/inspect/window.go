@@ -1,6 +1,7 @@
 package inspect
 
 import (
+	"math"
 	"sort"
 	"time"
 )
@@ -157,5 +158,58 @@ func sortedKeys(m map[string]string) []string {
 		out = append(out, k)
 	}
 	sort.Strings(out)
+	return out
+}
+
+// Quantile estimates the q-quantile (0 < q < 1) of this window's
+// observations the way histogram_quantile does: find the bucket the rank
+// falls in and interpolate linearly inside it.
+func (d Delta) Quantile(q float64) (float64, bool) {
+	if d.Reset || d.Count == 0 || len(d.Buckets) == 0 || q <= 0 || q >= 1 {
+		return 0, false
+	}
+	rank := q * float64(d.Count)
+	lower, below := 0.0, uint64(0)
+	for _, b := range d.Buckets {
+		if float64(b.Count) >= rank {
+			if math.IsInf(b.UpperBound, 1) {
+				return lower, true
+			}
+			return lower + (b.UpperBound-lower)*(rank-float64(below))/float64(b.Count-below), true
+		}
+		lower, below = b.UpperBound, b.Count
+	}
+	return lower, true
+}
+
+// MergeDeltas adds deltas of one histogram family into one, as if a single
+// series had observed them all: the counts and sums add, and so do the
+// buckets that share an upper bound.
+func MergeDeltas(deltas []Delta) Delta {
+	var out Delta
+	byBound := map[float64]uint64{}
+	for _, d := range deltas {
+		if d.Reset {
+			continue
+		}
+		out.Value += d.Value
+		out.Count += d.Count
+		out.Sum += d.Sum
+		var prev uint64
+		for _, b := range d.Buckets {
+			byBound[b.UpperBound] += b.Count - prev
+			prev = b.Count
+		}
+	}
+	bounds := make([]float64, 0, len(byBound))
+	for b := range byBound {
+		bounds = append(bounds, b)
+	}
+	sort.Float64s(bounds)
+	var cumulative uint64
+	for _, b := range bounds {
+		cumulative += byBound[b]
+		out.Buckets = append(out.Buckets, Bucket{UpperBound: b, Count: cumulative})
+	}
 	return out
 }
