@@ -448,6 +448,7 @@ func drainKernelMetrics(ctx context.Context, backend tracer.TracerBackend, sink 
 		}
 		applied := sink.IngestKernel(rows)
 		metrics.RecordKernelDrain(len(rows), applied)
+		metrics.RecordKernelDrainTime(time.Now(), config.WorkloadMetricsDrainInterval)
 		if len(rows) > 0 {
 			logger.V(1).Info("drained kernel metric rows", "rows", len(rows), "applied", applied)
 		}

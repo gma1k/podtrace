@@ -136,6 +136,16 @@ Operator and agent both expose Prometheus metrics:
   server after one interval, so a slow API server delays status reports
   rather than getting healthy agents restarted.
 
+  With kernel aggregation on, the workload counters only move when the agent
+  drains its BPF map, so the agent also publishes its drain clock:
+  `podtrace_agent_kernel_metrics_drained_timestamp_seconds` (when the last
+  drain completed), `podtrace_agent_kernel_metrics_drain_interval_seconds`,
+  and `podtrace_agent_kernel_metrics_seconds_since_drain` (measured by the
+  agent when scraped, `-1` before the first drain). A reader that takes rates
+  between two scrapes, such as `podtrace status`, times its reads
+  to the drains with these instead of its own clock. They are collector
+  internals, with no compatibility promise.
+
   Diagnostics granularity (per-program + per-CR failure surfaces):
 
   - `podtrace_agent_program_attach_failures_total{program,reason}` —

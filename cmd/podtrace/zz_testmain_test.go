@@ -7,20 +7,21 @@ import (
 
 	"github.com/gma1k/podtrace/internal/ebpf"
 	"github.com/gma1k/podtrace/internal/kubernetes"
+	"github.com/gma1k/podtrace/internal/status"
 )
 
-// TestMain installs fail-closed default factories so no test can ever
-// reach a real cluster or attach a real tracer. Tests that exercise the
-// resolve/trace paths override these explicitly; everything else (e.g.
-// input-validation tests) must fail fast rather than fall through to
-// kubernetes.NewPodResolver(), which would load the developer's kubeconfig
-// and hit whatever cluster it points at.
+var realStatusClusterFactory func(statusOptions) (status.Cluster, error)
+
 func TestMain(m *testing.M) {
 	resolverFactory = func() (kubernetes.PodResolverInterface, error) {
 		return nil, fmt.Errorf("test: resolverFactory not stubbed (refusing to contact a live cluster)")
 	}
 	tracerFactory = func() (ebpf.TracerInterface, error) {
 		return nil, fmt.Errorf("test: tracerFactory not stubbed")
+	}
+	realStatusClusterFactory = statusClusterFactory
+	statusClusterFactory = func(statusOptions) (status.Cluster, error) {
+		return nil, fmt.Errorf("test: statusClusterFactory not stubbed (refusing to contact a live cluster)")
 	}
 	os.Exit(m.Run())
 }

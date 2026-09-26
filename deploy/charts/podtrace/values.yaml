@@ -206,6 +206,12 @@ metrics:
 networkPolicy:
   enabled: false
   metricsFrom: []
+  # With metricsFrom set, `kubectl podtrace status` cannot reach the agents,
+  # because it reads them through the API server. On Cilium, true adds a
+  # CiliumNetworkPolicy that allows the API server to the metrics port. Off by
+  # default: it widens a restriction you chose. On other CNIs, add the
+  # control-plane node addresses to metricsFrom instead.
+  allowAPIServerProxy: false
 
 tracerConfig:
   create: true
