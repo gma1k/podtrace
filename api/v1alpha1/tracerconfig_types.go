@@ -88,12 +88,15 @@ type AgentSpec struct {
 	StatusReportInterval *metav1.Duration `json:"statusReportInterval,omitempty"`
 
 	// +optional
+	// +kubebuilder:default=true
 	DNSPacketCapture *bool `json:"dnsPacketCapture,omitempty"`
 
 	// +optional
+	// +kubebuilder:default=true
 	DNSFullAnswers *bool `json:"dnsFullAnswers,omitempty"`
 
 	// +optional
+	// +kubebuilder:default=true
 	USDT *bool `json:"usdt,omitempty"`
 
 	// ContinuousProfiling builds an always-on per-workload CPU profile from
@@ -102,6 +105,7 @@ type AgentSpec struct {
 	// works for any language, unlike the session profiler which needs a Go
 	// pprof endpoint.
 	// +optional
+	// +kubebuilder:default=true
 	ContinuousProfiling *bool `json:"continuousProfiling,omitempty"`
 
 	// SockOpsRTT attaches a sock_ops program that reads the kernel's own
@@ -111,12 +115,16 @@ type AgentSpec struct {
 	// redirect, no payload access. Needs kernel 5.10 or newer and cgroup v2;
 	// where it cannot attach the rule falls back to syscall latency.
 	// +optional
+	// +kubebuilder:default=true
 	SockOpsRTT *bool `json:"sockOpsRTT,omitempty"`
 
 	// +optional
 	Alerting *AgentAlertingSpec `json:"alerting,omitempty"`
 
+	// Metrics configures the continuous metrics plane, which runs unless
+	// metrics.enabled is set to false.
 	// +optional
+	// +kubebuilder:default={}
 	Metrics *AgentMetricsSpec `json:"metrics,omitempty"`
 
 	// RolloutMaxUnavailable is how many agents may be updated at once when
@@ -127,8 +135,10 @@ type AgentSpec struct {
 
 // AgentMetricsSpec configures the continuous metrics plane.
 type AgentMetricsSpec struct {
+	// Enabled runs the continuous metrics plane. On unless set to false.
 	// +optional
-	Enabled bool `json:"enabled,omitempty"`
+	// +kubebuilder:default=true
+	Enabled *bool `json:"enabled,omitempty"`
 
 	// +optional
 	// +kubebuilder:validation:MaxItems=64
@@ -145,6 +155,7 @@ type AgentMetricsSpec struct {
 	SeriesBudget *int32 `json:"seriesBudget,omitempty"`
 
 	// +optional
+	// +kubebuilder:default=true
 	NativeHistograms *bool `json:"nativeHistograms,omitempty"`
 
 	// +optional
@@ -154,7 +165,8 @@ type AgentMetricsSpec struct {
 	// one event per observation, so the plane costs O(series) rather than
 	// O(events).
 	// +optional
-	KernelAggregation bool `json:"kernelAggregation,omitempty"`
+	// +kubebuilder:default=true
+	KernelAggregation *bool `json:"kernelAggregation,omitempty"`
 
 	// +optional
 	// +kubebuilder:validation:Minimum=1
@@ -164,14 +176,18 @@ type AgentMetricsSpec struct {
 	// Inspections evaluate rules over this plane's own metrics and raise a
 	// typed issue when one holds.
 	// +optional
+	// +kubebuilder:default={}
 	Inspections *AgentInspectionsSpec `json:"inspections,omitempty"`
 }
 
 // AgentInspectionsSpec configures continuous inspections: the half of the
 // plane that decides something is wrong, rather than only recording it.
 type AgentInspectionsSpec struct {
+	// Enabled runs the inspections. On unless set to false; they read the
+	// metrics plane, so they are also off whenever it is.
 	// +optional
-	Enabled bool `json:"enabled,omitempty"`
+	// +kubebuilder:default=true
+	Enabled *bool `json:"enabled,omitempty"`
 
 	// Interval is how often rules are evaluated. It doubles as the rate
 	// window, so it has to be long enough for a counter delta to mean
@@ -184,6 +200,7 @@ type AgentInspectionsSpec struct {
 	// session from it. With this off, inspections only expose
 	// podtrace_issue_active.
 	// +optional
+	// +kubebuilder:default=true
 	Alerts *bool `json:"alerts,omitempty"`
 
 	// Budget bounds how many distinct issue instances an agent tracks.
@@ -347,6 +364,7 @@ type TracerConfigSpec struct {
 	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
 
 	// +optional
+	// +kubebuilder:default={}
 	Agent AgentSpec `json:"agent,omitempty"`
 
 	// +optional

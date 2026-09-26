@@ -35,21 +35,21 @@ func TestSockOpsRTTReachesTheAgentEnvironment(t *testing.T) {
 	}
 }
 
-func TestNeitherProfilingNorSockOpsIsOnByDefault(t *testing.T) {
+func TestProfilingAndSockOpsAreOnWhenLeftOut(t *testing.T) {
 	spec := buildAgentDaemonSetSpec(tc(func(x *podtracev1alpha1.TracerConfig) {}), "podtrace-system")
 
 	for _, name := range []string{
 		"PODTRACE_CONTINUOUS_PROFILING_ENABLED",
 		"PODTRACE_SOCKOPS_RTT_ENABLED",
 	} {
-		if v, ok := envValue(spec.Template.Spec.Containers[0].Env, name); ok {
-			t.Errorf("%s=%q was set without being asked for; both cost per-event work "+
-				"and must stay opt-in", name, v)
+		if v, ok := envValue(spec.Template.Spec.Containers[0].Env, name); !ok || v != "true" {
+			t.Errorf("%s=%q ok=%v, want true; a TracerConfig written without the chart "+
+				"must get the same APM a chart install gets", name, v, ok)
 		}
 	}
 }
 
-func TestExplicitlyDisablingThemSetsNothing(t *testing.T) {
+func TestExplicitlyDisablingThemSaysFalse(t *testing.T) {
 	off := false
 	spec := buildAgentDaemonSetSpec(tc(func(x *podtracev1alpha1.TracerConfig) {
 		x.Spec.Agent.ContinuousProfiling = &off
@@ -60,8 +60,8 @@ func TestExplicitlyDisablingThemSetsNothing(t *testing.T) {
 		"PODTRACE_CONTINUOUS_PROFILING_ENABLED",
 		"PODTRACE_SOCKOPS_RTT_ENABLED",
 	} {
-		if _, ok := envValue(spec.Template.Spec.Containers[0].Env, name); ok {
-			t.Errorf("%s was set while the field said false", name)
+		if v, ok := envValue(spec.Template.Spec.Containers[0].Env, name); !ok || v != "false" {
+			t.Errorf("%s=%q ok=%v, want false", name, v, ok)
 		}
 	}
 }
@@ -69,9 +69,9 @@ func TestExplicitlyDisablingThemSetsNothing(t *testing.T) {
 func TestTheNewInspectionThresholdsReachTheAgentEnvironment(t *testing.T) {
 	pct := int32(70)
 	env := metricsEnv(&podtracev1alpha1.AgentMetricsSpec{
-		Enabled: true,
+		Enabled: ptr(true),
 		Inspections: &podtracev1alpha1.AgentInspectionsSpec{
-			Enabled: true,
+			Enabled: ptr(true),
 			Thresholds: &podtracev1alpha1.AgentInspectionThresholdsSpec{
 				CPUBlockedMean:         &metav1.Duration{Duration: 250 * time.Millisecond},
 				PoolUtilizationPercent: &pct,
@@ -89,8 +89,8 @@ func TestTheNewInspectionThresholdsReachTheAgentEnvironment(t *testing.T) {
 
 func TestUnsetInspectionThresholdsLeaveTheAgentOnItsDefaults(t *testing.T) {
 	env := metricsEnv(&podtracev1alpha1.AgentMetricsSpec{
-		Enabled:     true,
-		Inspections: &podtracev1alpha1.AgentInspectionsSpec{Enabled: true},
+		Enabled:     ptr(true),
+		Inspections: &podtracev1alpha1.AgentInspectionsSpec{Enabled: ptr(true)},
 	})
 
 	for _, name := range []string{

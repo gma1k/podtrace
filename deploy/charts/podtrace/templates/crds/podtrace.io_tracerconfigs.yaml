@@ -982,6 +982,7 @@ spec:
                     type: object
                 type: object
               agent:
+                default: {}
                 description: AgentSpec tunes the per-node tracer DaemonSet.
                 properties:
                   alerting:
@@ -996,6 +997,7 @@ spec:
                         type: string
                     type: object
                   continuousProfiling:
+                    default: true
                     description: |-
                       ContinuousProfiling builds an always-on per-workload CPU profile from
                       the user stacks already captured on every sched_switch, served as JSON
@@ -1004,8 +1006,10 @@ spec:
                       pprof endpoint.
                     type: boolean
                   dnsFullAnswers:
+                    default: true
                     type: boolean
                   dnsPacketCapture:
+                    default: true
                     type: boolean
                   eventBufferSize:
                     format: int32
@@ -1019,8 +1023,10 @@ spec:
                     - error
                     type: string
                   metrics:
-                    description: AgentMetricsSpec configures the continuous metrics
-                      plane.
+                    default: {}
+                    description: |-
+                      Metrics configures the continuous metrics plane, which runs unless
+                      metrics.enabled is set to false.
                     properties:
                       attributeCardinality:
                         format: int32
@@ -1028,6 +1034,9 @@ spec:
                         minimum: 1
                         type: integer
                       enabled:
+                        default: true
+                        description: Enabled runs the continuous metrics plane. On
+                          unless set to false.
                         type: boolean
                       excludeNamespaces:
                         items:
@@ -1037,11 +1046,13 @@ spec:
                         maxItems: 64
                         type: array
                       inspections:
+                        default: {}
                         description: |-
                           Inspections evaluate rules over this plane's own metrics and raise a
                           typed issue when one holds.
                         properties:
                           alerts:
+                            default: true
                             description: |-
                               Alerts controls whether an activated issue is raised as an alert,
                               which is what lets a PodTraceSchedule with an Issue trigger start a
@@ -1056,6 +1067,10 @@ spec:
                             minimum: 1
                             type: integer
                           enabled:
+                            default: true
+                            description: |-
+                              Enabled runs the inspections. On unless set to false; they read the
+                              metrics plane, so they are also off whenever it is.
                             type: boolean
                           holdTime:
                             description: |-
@@ -1118,6 +1133,7 @@ spec:
                             type: object
                         type: object
                       kernelAggregation:
+                        default: true
                         description: |-
                           KernelAggregation folds observations in a BPF map instead of shipping
                           one event per observation, so the plane costs O(series) rather than
@@ -1134,6 +1150,7 @@ spec:
                             type: boolean
                         type: object
                       nativeHistograms:
+                        default: true
                         type: boolean
                       semanticConventions:
                         type: boolean
@@ -1214,6 +1231,7 @@ spec:
                       the DaemonSet's pod template changes, as a count or a percentage.
                     x-kubernetes-int-or-string: true
                   sockOpsRTT:
+                    default: true
                     description: |-
                       SockOpsRTT attaches a sock_ops program that reads the kernel's own
                       smoothed round-trip time, which no kprobe, uprobe, tracepoint or
@@ -1225,6 +1243,7 @@ spec:
                   statusReportInterval:
                     type: string
                   usdt:
+                    default: true
                     type: boolean
                 type: object
               btfMode:

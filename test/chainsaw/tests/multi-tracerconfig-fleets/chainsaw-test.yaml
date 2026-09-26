@@ -19,6 +19,9 @@ spec:
          and both report Conflict=True while both DaemonSets keep running.
       5. Deleting the extra config collects its objects and leaves the
          default fleet untouched.
+      6. The extra config says nothing about the agent, and its fleet still
+         runs the whole continuous plane, because the CRD defaults every
+         agent toggle to on.
   timeouts:
     apply: 30s
     assert: 120s
@@ -100,6 +103,28 @@ spec:
               kubectl -n podtrace-system get ds -o wide >&2 || true
               kubectl -n podtrace-system get pods -l podtrace.io/component=agent -o wide >&2 || true
               exit 1
+
+        - script:
+            timeout: 60s
+            content: |
+              set -eu
+              env=$(kubectl -n podtrace-system get ds podtrace-agent-secondary \
+                -o jsonpath='{range .spec.template.spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}')
+              fail=0
+              for want in \
+                  PODTRACE_WORKLOAD_METRICS=true \
+                  PODTRACE_WORKLOAD_METRICS_KERNEL_AGGREGATION=true \
+                  PODTRACE_INSPECTIONS=true \
+                  PODTRACE_CONTINUOUS_PROFILING_ENABLED=true \
+                  PODTRACE_SOCKOPS_RTT_ENABLED=true; do
+                if ! printf '%s\n' "${env}" | grep -qx "${want}"; then
+                  echo "FAIL: the secondary fleet's agents lack ${want}; a TracerConfig written" \
+                    "without the chart must run the same plane a chart install runs"
+                  fail=1
+                fi
+              done
+              [ "${fail}" = 0 ] && echo "ok: the hand-written fleet runs the whole plane"
+              exit "${fail}"
 
         - script:
             timeout: 120s

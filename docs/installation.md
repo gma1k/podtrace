@@ -155,6 +155,28 @@ What to expect after the upgrade:
 To keep podtrace an on-demand tracer only, upgrade with
 `--set agent.metrics.enabled=false --set agent.continuousProfiling=false --set agent.sockOpsRTT=false`.
 
+#### TracerConfigs not managed by the chart
+
+On OLM, and for any TracerConfig you wrote yourself, the agent toggles now
+default to **on in the CRD schema**, so a field you left out means on rather
+than off. After the upgrade, a TracerConfig that never mentioned
+`agent.metrics` runs the full plane. To keep one off, say so:
+
+```bash
+kubectl patch tracerconfig <name> --type=merge -p \
+  '{"spec":{"agent":{"continuousProfiling":false,"sockOpsRTT":false,"metrics":{"enabled":false}}}}'
+```
+
+On OLM, the TracerConfig the operator created itself is also kept current:
+each operator start brings its image, tolerations, resources and the
+namespaces the metrics plane skips up to that operator's defaults, so an
+operator upgrade moves the agents along with it and the control-plane node
+gains an agent. A field you have edited, or deleted, is left as you left it.
+
+Chart-managed TracerConfigs are unaffected: the chart writes every toggle
+explicitly, on or off. See
+[crd-tracerconfig.md](crd-tracerconfig.md#defaults-everything-on-unless-you-say-otherwise).
+
 ### Verifying signatures and provenance
 
 Every released image, chart, CLI tarball, and quickstart manifest is signed

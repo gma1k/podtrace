@@ -22,6 +22,7 @@ package v1alpha1
 //
 // AgentMetricsSpec configures the continuous metrics plane.
 type AgentMetricsSpecApplyConfiguration struct {
+	// Enabled runs the continuous metrics plane. On unless set to false.
 	Enabled             *bool                                     `json:"enabled,omitempty"`
 	ExcludeNamespaces   []string                                  `json:"excludeNamespaces,omitempty"`
 	Labels              *AgentMetricsLabelsSpecApplyConfiguration `json:"labels,omitempty"`

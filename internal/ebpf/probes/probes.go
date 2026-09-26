@@ -2443,24 +2443,17 @@ func AttachSockOpsProbes(coll *ebpf.Collection, cgroupPaths []string) []link.Lin
 				Program: a.prog,
 			})
 			if err != nil {
-				logger.Info("Smoothed-RTT hook unavailable for cgroup; RTT will be reported from syscall latency instead",
+				logger.Debug("Smoothed-RTT hook unavailable for cgroup",
 					zap.String("cgroup", path), zap.String("program", a.name), zap.Error(err))
 				continue
 			}
 			links = append(links, l)
 			attached++
 		}
-		// Only after something attached: logged unconditionally, this line
-		// claimed success for cgroups where every attach had failed.
 		if attached > 0 {
-			logger.Info("Smoothed-RTT sock_ops hook attached",
+			logger.Debug("Smoothed-RTT sock_ops hook attached to cgroup",
 				zap.String("cgroup", path), zap.Int("programs", attached))
 		}
-	}
-	if len(links) == 0 {
-		logger.Warn("Smoothed-RTT sock_ops hook attached to nothing",
-			zap.Int("cgroupsConsidered", len(targets)),
-			zap.String("kubepodsRoot", KubepodsRoot()))
 	}
 	return links
 }

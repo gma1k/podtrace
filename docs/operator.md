@@ -128,6 +128,14 @@ Operator and agent both expose Prometheus metrics:
   the reason in the body; `/healthz` keeps passing, so the pod is not
   restarted and its logs and metrics stay available for diagnosis.
 
+  The agent serves both endpoints only once its eBPF backend has loaded,
+  which on a busy node can take minutes. A **startup probe** allows five
+  minutes for that, and the liveness probe only starts counting after it
+  passes. `/healthz` fails when the agent's status loop has not ticked for
+  three `statusReportInterval`s (at least 90s); each tick gives up on the API
+  server after one interval, so a slow API server delays status reports
+  rather than getting healthy agents restarted.
+
   Diagnostics granularity (per-program + per-CR failure surfaces):
 
   - `podtrace_agent_program_attach_failures_total{program,reason}` —

@@ -70,25 +70,14 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 			Value: itoa(int(n)),
 		})
 	}
-	if dpc := tc.Spec.Agent.DNSPacketCapture; dpc != nil && !*dpc {
-		env = append(env, corev1.EnvVar{Name: "PODTRACE_DNS_PACKET_CAPTURE", Value: "false"})
-	}
-	usdtEnabled := true
-	if u := tc.Spec.Agent.USDT; u != nil {
-		usdtEnabled = *u
-	}
-	env = append(env, corev1.EnvVar{Name: "PODTRACE_USDT_ENABLED", Value: strconv.FormatBool(usdtEnabled)})
-	dnsFull := true
-	if d := tc.Spec.Agent.DNSFullAnswers; d != nil {
-		dnsFull = *d
-	}
-	env = append(env, corev1.EnvVar{Name: "PODTRACE_DNS_PAYLOAD_ENABLED", Value: strconv.FormatBool(dnsFull)})
-	if p := tc.Spec.Agent.ContinuousProfiling; p != nil && *p {
-		env = append(env, corev1.EnvVar{Name: "PODTRACE_CONTINUOUS_PROFILING_ENABLED", Value: "true"})
-	}
-	if s := tc.Spec.Agent.SockOpsRTT; s != nil && *s {
-		env = append(env, corev1.EnvVar{Name: "PODTRACE_SOCKOPS_RTT_ENABLED", Value: "true"})
-	}
+	agent := &tc.Spec.Agent
+	env = append(env,
+		boolEnv("PODTRACE_DNS_PACKET_CAPTURE", agent.DNSPacketCaptureEnabled()),
+		boolEnv("PODTRACE_USDT_ENABLED", agent.USDTEnabled()),
+		boolEnv("PODTRACE_DNS_PAYLOAD_ENABLED", agent.DNSFullAnswersEnabled()),
+		boolEnv("PODTRACE_CONTINUOUS_PROFILING_ENABLED", agent.ContinuousProfilingEnabled()),
+		boolEnv("PODTRACE_SOCKOPS_RTT_ENABLED", agent.SockOpsRTTEnabled()),
+	)
 	if a := tc.Spec.Agent.Alerting; a != nil && a.Enabled {
 		env = append(env, corev1.EnvVar{Name: "PODTRACE_ALERTING_ENABLED", Value: "true"})
 		if a.WebhookURL != "" {
@@ -153,20 +142,9 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 						{Name: "metrics", ContainerPort: 9090, Protocol: corev1.ProtocolTCP},
 						{Name: "health", ContainerPort: 9091, Protocol: corev1.ProtocolTCP},
 					},
-					LivenessProbe: &corev1.Probe{
-						ProbeHandler: corev1.ProbeHandler{
-							HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstrFromString("health")},
-						},
-						InitialDelaySeconds: 15,
-						PeriodSeconds:       20,
-					},
-					ReadinessProbe: &corev1.Probe{
-						ProbeHandler: corev1.ProbeHandler{
-							HTTPGet: &corev1.HTTPGetAction{Path: "/readyz", Port: intstrFromString("health")},
-						},
-						InitialDelaySeconds: 5,
-						PeriodSeconds:       10,
-					},
+					StartupProbe:   agentStartupProbe(),
+					LivenessProbe:  agentLivenessProbe(),
+					ReadinessProbe: agentReadinessProbe(),
 					VolumeMounts: append([]corev1.VolumeMount{
 						{Name: "bpf", MountPath: "/sys/fs/bpf", MountPropagation: mountPropagationHostToContainer()},
 						{Name: "btf", MountPath: "/sys/kernel/btf", ReadOnly: true},
@@ -297,5 +275,44 @@ func agentScrapeAnnotations() map[string]string {
 		"prometheus.io/scrape": "true",
 		"prometheus.io/port":   agentMetricsPort,
 		"prometheus.io/path":   "/metrics",
+	}
+}
+
+// The agent's health endpoints are served only once the eBPF backend has
+// loaded, which on a busy node, attaching hundreds of probes.
+const (
+	agentStartupPeriodSeconds    = 10
+	agentStartupFailureThreshold = 30
+	agentProbeTimeoutSeconds     = 5
+)
+
+func agentHealthGet(path string) corev1.ProbeHandler {
+	return corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: path, Port: intstrFromString("health")}}
+}
+
+func agentStartupProbe() *corev1.Probe {
+	return &corev1.Probe{
+		ProbeHandler:     agentHealthGet("/healthz"),
+		PeriodSeconds:    agentStartupPeriodSeconds,
+		FailureThreshold: agentStartupFailureThreshold,
+		TimeoutSeconds:   agentProbeTimeoutSeconds,
+	}
+}
+
+func agentLivenessProbe() *corev1.Probe {
+	return &corev1.Probe{
+		ProbeHandler:     agentHealthGet("/healthz"),
+		PeriodSeconds:    20,
+		FailureThreshold: 3,
+		TimeoutSeconds:   agentProbeTimeoutSeconds,
+	}
+}
+
+func agentReadinessProbe() *corev1.Probe {
+	return &corev1.Probe{
+		ProbeHandler:     agentHealthGet("/readyz"),
+		PeriodSeconds:    10,
+		FailureThreshold: 3,
+		TimeoutSeconds:   agentProbeTimeoutSeconds,
 	}
 }

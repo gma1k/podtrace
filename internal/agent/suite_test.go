@@ -41,6 +41,14 @@ import (
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 )
 
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if testEnv != nil {
+		_ = testEnv.Stop()
+	}
+	os.Exit(code)
+}
+
 var (
 	testEnvOnce sync.Once
 	testEnv     *envtest.Environment

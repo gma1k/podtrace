@@ -3,6 +3,7 @@ package operator
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -12,7 +13,8 @@ import (
 
 type chartValues struct {
 	Agent struct {
-		Resources corev1.ResourceRequirements `json:"resources"`
+		Resources   corev1.ResourceRequirements `json:"resources"`
+		Tolerations []corev1.Toleration         `json:"tolerations"`
 	} `json:"agent"`
 	Session struct {
 		Resources corev1.ResourceRequirements `json:"resources"`
@@ -63,4 +65,12 @@ func TestBootstrapAgentResourcesMatchChartDefaults(t *testing.T) {
 
 func TestBootstrapSessionResourcesMatchChartDefaults(t *testing.T) {
 	assertResourcesMatchChart(t, "session", defaultSessionResources(), loadChartValues(t).Session.Resources)
+}
+
+func TestBootstrapAgentTolerationsMatchChartDefaults(t *testing.T) {
+	want := loadChartValues(t).Agent.Tolerations
+	if got := defaultAgentTolerations(); !reflect.DeepEqual(got, want) {
+		t.Errorf("bootstrap tolerations = %+v, chart values.yaml says %+v; an OLM install would "+
+			"leave tainted nodes, the control plane first, without an agent", got, want)
+	}
 }

@@ -1,0 +1,80 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: tracerconfig-schema-defaults
+spec:
+  description: |
+    A TracerConfig written without the chart gets the same continuous APM a
+    chart install gets. Checked with server-side dry runs, so nothing is
+    created and the test can run alongside the others:
+      1. A TracerConfig with only an image comes back from the API server
+         with every agent toggle filled in as true.
+      2. An explicit false is kept, and turning the metrics plane off leaves
+         the inspections block defaulted but inert.
+  timeouts:
+    exec: 60s
+  steps:
+    - name: a-minimal-tracerconfig-is-defaulted-on
+      try:
+        - script:
+            content: |
+              set -eu
+              image=$(kubectl get tracerconfig default -o jsonpath='{.spec.image}')
+              paths='agent.metrics.enabled agent.metrics.kernelAggregation agent.metrics.nativeHistograms agent.metrics.inspections.enabled agent.metrics.inspections.alerts agent.continuousProfiling agent.sockOpsRTT agent.dnsPacketCapture agent.dnsFullAnswers agent.usdt'
+              template=""
+              for path in ${paths}; do
+                template="${template}{.spec.${path}}|"
+              done
+              got=$(cat <<YAML | kubectl create --dry-run=server -o jsonpath="${template}" -f -
+              apiVersion: podtrace.io/v1alpha1
+              kind: TracerConfig
+              metadata:
+                name: schema-defaults-probe
+              spec:
+                image: ${image}
+              YAML
+              )
+              IFS='|'
+              set -- ${got}
+              unset IFS
+              fail=0
+              for path in ${paths}; do
+                if [ "${1:-unset}" != "true" ]; then
+                  echo "FAIL: spec.${path} = ${1:-unset}, want true"
+                  fail=1
+                fi
+                shift || true
+              done
+              [ "${fail}" = 0 ] && echo "every agent toggle defaulted on"
+              exit "${fail}"
+
+    - name: an-explicit-false-is-kept
+      try:
+        - script:
+            content: |
+              set -eu
+              image=$(kubectl get tracerconfig default -o jsonpath='{.spec.image}')
+              got=$(cat <<YAML | kubectl create --dry-run=server -f - \
+                -o jsonpath='{.spec.agent.continuousProfiling}|{.spec.agent.metrics.enabled}|{.spec.agent.sockOpsRTT}'
+              apiVersion: podtrace.io/v1alpha1
+              kind: TracerConfig
+              metadata:
+                name: schema-defaults-opt-out
+              spec:
+                image: ${image}
+                agent:
+                  continuousProfiling: false
+                  metrics:
+                    enabled: false
+              YAML
+              )
+              IFS='|'
+              set -- ${got}
+              unset IFS
+              profiling="${1:-unset}" metrics="${2:-unset}" rtt="${3:-unset}"
+              if [ "${profiling}" != "false" ] || [ "${metrics}" != "false" ] || [ "${rtt}" != "true" ]; then
+                echo "FAIL: continuousProfiling=${profiling} metrics.enabled=${metrics} sockOpsRTT=${rtt}," \
+                  "want false, false and the untouched sockOpsRTT still true"
+                exit 1
+              fi
+              echo "opt-outs kept, the rest defaulted"
