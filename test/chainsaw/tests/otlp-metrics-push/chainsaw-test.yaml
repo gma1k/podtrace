@@ -53,6 +53,10 @@ spec:
                 sleep 2
               done
 
+              saved=$(kubectl get tracerconfig default -o jsonpath='{.spec.agent.metrics}')
+              kubectl -n "${NAMESPACE}" create configmap tracerconfig-before \
+                --from-literal=metrics="${saved}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
               kubectl patch tracerconfig default --type=merge -p '{
                 "spec": {
                   "agent": {
@@ -78,6 +82,23 @@ spec:
                 echo "FAIL: agents did not converge (updated=${updated:-?} ready=${ready:-?} desired=${desired:-?})"
                 exit 1
               fi
+      cleanup:
+        - script:
+            content: |
+              if ! kubectl -n "${NAMESPACE}" get configmap tracerconfig-before >/dev/null 2>&1; then
+                echo "no snapshot taken, so the tracerconfig was never changed"
+                exit 0
+              fi
+              saved=$(kubectl -n "${NAMESPACE}" get configmap tracerconfig-before \
+                -o jsonpath='{.data.metrics}')
+              if [ -n "${saved}" ]; then
+                kubectl patch tracerconfig default --type=json \
+                  -p "[{\"op\":\"replace\",\"path\":\"/spec/agent/metrics\",\"value\":${saved}}]"
+              else
+                kubectl patch tracerconfig default --type=json \
+                  -p '[{"op":"remove","path":"/spec/agent/metrics"}]' || true
+              fi
+              echo "spec.agent.metrics restored to what the test found"
 
     - name: run-sink-and-workload
       try:
@@ -342,8 +363,3 @@ spec:
               fi
 
               exit "${fail}"
-      finally:
-        - script:
-            content: |
-              kubectl patch tracerconfig default --type=merge \
-                -p '{"spec":{"agent":{"metrics":null}}}' || true

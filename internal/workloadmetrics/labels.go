@@ -57,8 +57,16 @@ func statusClass(e *events.Event) string {
 	}
 }
 
-// outcome collapses an L7 event to success or failure, so an error ratio
-// is one query rather than a sum over status classes.
+const outcomeUnreachable = "unreachable"
+
+// connectOutcome is outcome() for a connection attempt.
+func connectOutcome(e *events.Event) string {
+	if events.IsUnreachableConnect(e) {
+		return outcomeUnreachable
+	}
+	return outcome(e)
+}
+
 func outcome(e *events.Event) string {
 	if e.IsError() {
 		return "error"
@@ -114,13 +122,15 @@ func errorKind(t events.EventType) string {
 		return "dns"
 	case events.EventTCPSend, events.EventTCPRecv, events.EventUDPSend,
 		events.EventUDPRecv, events.EventConnect, events.EventTCPRetrans,
-		events.EventNetDevError:
+		events.EventNetDevError, events.EventConnectResult:
 		return "network"
 	case events.EventRead, events.EventWrite, events.EventFsync,
 		events.EventOpen, events.EventClose, events.EventUnlink, events.EventRename:
 		return "filesystem"
 	case events.EventTLSHandshake, events.EventTLSError:
 		return "tls"
+	case events.EventLockContention:
+		return "lock"
 	default:
 		return "other"
 	}

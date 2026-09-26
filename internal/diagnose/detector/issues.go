@@ -16,7 +16,7 @@ func DetectIssues(allEvents []*events.Event, errorRateThreshold, rttSpikeThresho
 		if e == nil {
 			continue
 		}
-		if e.Type == events.EventConnect {
+		if events.CountsAsConnectionAttempt(e.Type, e.Error != 0) && !events.IsUnreachableConnect(e) {
 			connectEvents = append(connectEvents, e)
 		}
 	}

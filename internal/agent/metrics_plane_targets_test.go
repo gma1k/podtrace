@@ -231,7 +231,7 @@ func TestFilesystemFamiliesStillPopulateWhenACRAsksForFS(t *testing.T) {
 }
 
 func TestStartupCategoriesMatchThePlaneWhenEnabled(t *testing.T) {
-	got := StartupCategories(true)
+	got := StartupCategories(NodeCoverage(true, false, nil))
 	want := metricsPlaneCategories()
 
 	if len(got) != len(want) {
@@ -245,7 +245,7 @@ func TestStartupCategoriesMatchThePlaneWhenEnabled(t *testing.T) {
 }
 
 func TestStartupCategoriesAreEmptyButNotNilWhenDisabled(t *testing.T) {
-	got := StartupCategories(false)
+	got := StartupCategories(NodeCoverage(false, false, nil))
 
 	if got == nil {
 		t.Fatal("a nil set tells the tracer not to gate at all, which leaves every " +
@@ -258,7 +258,7 @@ func TestStartupCategoriesAreEmptyButNotNilWhenDisabled(t *testing.T) {
 }
 
 func TestStartupCategoriesNeverRequestUngatedWork(t *testing.T) {
-	for _, c := range StartupCategories(true) {
+	for _, c := range StartupCategories(NodeCoverage(true, false, nil)) {
 		if c == "fs" {
 			t.Error("startup set includes fs, which the plane deliberately does not " +
 				"measure; gating it in at construction reinstates the cost the " +

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -30,9 +31,11 @@ import (
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 	"github.com/gma1k/podtrace/internal/alerting"
 	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/diagnose/stacktrace"
 	"github.com/gma1k/podtrace/internal/ebpf/kernelagg"
 	"github.com/gma1k/podtrace/internal/ebpf/probes"
 	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/profiling"
 	"github.com/gma1k/podtrace/internal/tracing"
 	"github.com/gma1k/podtrace/internal/workloadmetrics"
 	"github.com/gma1k/podtrace/pkg/tracer"
@@ -172,7 +175,7 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
-	exporters, metricsSink, expErr := buildExporters(router, metrics, enricher, peers, logger)
+	exporters, metricsSink, profiler, expErr := buildExporters(router, metrics, enricher, peers, logger)
 	if expErr != nil {
 		return expErr
 	}
@@ -194,10 +197,8 @@ func Run(ctx context.Context, opts Options) error {
 		Metrics:         metrics,
 		Enricher:        enricher,
 		CategoryGate:    makeCategoryGate(backend),
-		MetricsPlane: MetricsPlaneConfig{
-			Enabled:           config.WorkloadMetricsEnabled,
-			ExcludeNamespaces: config.WorkloadMetricsExcludedNamespaces,
-		},
+		MetricsPlane: NodeCoverage(config.WorkloadMetricsEnabled, config.ContinuousProfilingEnabled,
+			config.WorkloadMetricsExcludedNamespaces),
 		WorkloadMetrics: workloadMetricProducer(metricsSink),
 	}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
@@ -221,7 +222,7 @@ func Run(ctx context.Context, opts Options) error {
 	g.Go(func() error { return engine.Run(gctx, targetsCh) })
 	g.Go(func() error { return writer.Run(gctx) })
 	g.Go(func() error { return probeSrv.Run(gctx) })
-	g.Go(func() error { return serveMetrics(gctx, opts.MetricsAddr, metrics, logger) })
+	g.Go(func() error { return serveMetrics(gctx, opts.MetricsAddr, metrics, profiler, logger) })
 	g.Go(func() error { return reapWorkloadMetrics(gctx, metricsSink, logger) })
 	g.Go(func() error { return drainKernelMetrics(gctx, backend, metricsSink, router, metrics, logger) })
 
@@ -304,14 +305,17 @@ func newMetricsServer(handler http.Handler) *http.Server {
 // serveMetrics exposes the agent's Prometheus registry on the
 // metrics-addr port. Short-circuit when the address is empty — useful
 // in tests.
-func serveMetrics(ctx context.Context, addr string, metrics *Metrics, logger logr.Logger) error {
+func serveMetrics(ctx context.Context, addr string, metrics *Metrics, profiler *profiling.ContinuousProfiler, logger logr.Logger) error {
 	if addr == "" || addr == "0" {
 		return nil
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", metrics.Handler())
+	if profiler != nil {
+		mux.HandleFunc("/profile", profileHandler(profiler))
+	}
 
-	ln, err := net.Listen("tcp", addr)
+	ln, err := listenMetrics("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", addr, err)
 	}
@@ -346,11 +350,21 @@ func peerLookup(r *PeerResolver) func(string, uint16) (workloadmetrics.PeerIdent
 }
 
 // buildExporters assembles the engine's fan-out list.
-func buildExporters(router *Router, metrics *Metrics, enricher *PodEnricher, peers *PeerResolver, logger logr.Logger) ([]tracer.Exporter, *workloadmetrics.Sink, error) {
+func buildExporters(router *Router, metrics *Metrics, enricher *PodEnricher, peers *PeerResolver, logger logr.Logger) ([]tracer.Exporter, *workloadmetrics.Sink, *profiling.ContinuousProfiler, error) {
 	exporters := []tracer.Exporter{router}
 
+	var profiler *profiling.ContinuousProfiler
+	if config.ContinuousProfilingEnabled {
+		profiler = profiling.NewContinuousProfiler(func() profiling.FrameResolver { return stacktrace.NewResolver() },
+			enricherLookup(enricher))
+		exporters = append(exporters, profiler)
+		logger.Info("continuous profiling enabled",
+			"source", "sched_switch user stacks",
+			"endpoint", "/profile")
+	}
+
 	if !config.WorkloadMetricsEnabled {
-		return exporters, nil, nil
+		return exporters, nil, profiler, nil
 	}
 
 	sink, err := workloadmetrics.New(metrics.Registerer(), workloadmetrics.Options{
@@ -372,14 +386,14 @@ func buildExporters(router *Router, metrics *Metrics, enricher *PodEnricher, pee
 		},
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("build workload metrics plane: %w", err)
+		return nil, nil, nil, fmt.Errorf("build workload metrics plane: %w", err)
 	}
 
 	logger.Info("continuous workload metrics enabled",
 		"seriesBudget", config.WorkloadMetricsBudget,
 		"nativeHistograms", config.WorkloadMetricsNativeHistograms,
 		"kernelAggregation", config.WorkloadMetricsKernelAggregation)
-	return append(exporters, sink), sink, nil
+	return append(exporters, sink), sink, profiler, nil
 }
 
 // drainKernelMetrics folds the kernel's aggregation map into the sink on an
@@ -556,12 +570,36 @@ func (b *NoopBackend) Inject(ev *events.Event) bool {
 	return true
 }
 
+// listenMetrics and hostname are net.Listen and os.Hostname, replaceable so
+// the failure paths that depend on them can be exercised.
+var (
+	listenMetrics = net.Listen
+	hostname      = os.Hostname
+)
+
 func ResolveNodeName() string {
 	if n := strings.TrimSpace(os.Getenv("NODE_NAME")); n != "" {
 		return n
 	}
-	if h, err := os.Hostname(); err == nil && h != "" {
+	if h, err := hostname(); err == nil && h != "" {
 		return h
 	}
 	return ""
+}
+
+// profileHandler serves the continuous CPU profile as JSON.
+func profileHandler(profiler *profiling.ContinuousProfiler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), config.ProfileSnapshotTimeout)
+		defer cancel()
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(struct {
+			Profiles []profiling.WorkloadProfile `json:"profiles"`
+			Dropped  uint64                      `json:"droppedSamples"`
+		}{
+			Profiles: profiler.Snapshot(ctx),
+			Dropped:  profiler.Dropped(),
+		})
+	}
 }

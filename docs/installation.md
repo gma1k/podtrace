@@ -106,6 +106,55 @@ default `TracerConfig`. See [operator.md](operator.md) for what each
 piece does, and the [chart values reference](../deploy/charts/podtrace/values.yaml)
 for available overrides.
 
+### Upgrading an existing install
+
+The continuous APM plane is **on by default** from this release: workload
+metrics, inspections, continuous profiling, kernel-side aggregation and kernel
+smoothed RTT (`sock_ops`), plus the agents' `PodMonitor` and
+`prometheus.io/scrape` annotations. A fresh `helm install` gets all of it with
+no further values.
+
+An existing release does not pick the new defaults up on its own if you
+upgrade with `--reuse-values`, which reuses the values the release was
+installed with, where these were off. Either reset to the new defaults while
+keeping your own overrides:
+
+```bash
+helm upgrade podtrace ghcr.io/gma1k/charts/podtrace \
+  --namespace podtrace-system --reset-then-reuse-values
+```
+
+or set the flags explicitly:
+
+```bash
+helm upgrade podtrace ghcr.io/gma1k/charts/podtrace \
+  --namespace podtrace-system --reuse-values \
+  --set agent.metrics.enabled=true \
+  --set agent.metrics.inspections.enabled=true \
+  --set agent.metrics.kernelAggregation=true \
+  --set agent.continuousProfiling=true \
+  --set agent.sockOpsRTT=true \
+  --set metrics.podMonitor.enabled=true
+```
+
+What to expect after the upgrade:
+
+- **Agent CPU.** The plane costs roughly 0.12 cores per node with the default
+  event categories; see [continuous-metrics.md](continuous-metrics.md#cost-measured).
+  Keep an eye on the agent's CPU against `agent.resources.limits.cpu`.
+- **Kubernetes Events.** Inspections write an Event on the pod of a workload
+  that raises an issue. They start no session and send no webhook unless you
+  configure a `PodTraceSchedule` or `agent.alerting`.
+- **Exemplars.** With kernel aggregation on, histogram exemplars (the trace id
+  linking a bucket to a trace) appear only while a `PodTrace` keeps the ring
+  buffer open.
+- **`sock_ops` RTT** needs kernel 5.10+ and cgroup v2. Where it cannot attach,
+  `network_rtt_seconds` is absent and `net.rtt_spike_rate` falls back to
+  socket-call latency, and says so in its message.
+
+To keep podtrace an on-demand tracer only, upgrade with
+`--set agent.metrics.enabled=false --set agent.continuousProfiling=false --set agent.sockOpsRTT=false`.
+
 ### Verifying signatures and provenance
 
 Every released image, chart, CLI tarball, and quickstart manifest is signed

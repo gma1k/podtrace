@@ -318,7 +318,7 @@ func TestEveryConnectionFamilyIsEvictable(t *testing.T) {
 		if !ok {
 			t.Fatalf("connectionCounter(%v) resolved nothing", typ)
 		}
-		if _, ok := sink.c.deleterFor(family); !ok {
+		if _, ok := sink.vecFor(family); !ok && !sink.kernelHist.owns(family) {
 			t.Errorf("family %q is admitted but the reaper cannot resolve it", family)
 		}
 	}

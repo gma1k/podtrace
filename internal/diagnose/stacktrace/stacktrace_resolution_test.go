@@ -24,7 +24,7 @@ func TestTranslateAddr_MappedButOutsideSegments(t *testing.T) {
 		segments: map[string][]loadSegment{"/bin/app": {{off: 0x10000, vaddr: 0x10000, filesz: 0x1000}}},
 		mappings: map[string][]exeMapping{"9|/bin/app": {{start: 0x1000, end: 0x2000, pgoff: 0}}},
 	}
-	if _, ok := r.translateAddr(9, "/bin/app", 0x1500); ok {
+	if _, ok := r.translateAddr(9, "/bin/app", "/bin/app", 0x1500); ok {
 		t.Fatal("an address inside a mapping but outside every load segment must return ok=false")
 	}
 }

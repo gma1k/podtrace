@@ -19,19 +19,18 @@ separate on purpose and neither replaces the other:
 
 ## Enabling it
 
-Off by default. One Helm value turns it on:
+On by default: a plain install serves workload metrics on every agent's
+`/metrics` and is scraped without further setup. Where the Prometheus Operator
+is installed the chart's `PodMonitor` selects the agents; everywhere else the
+agent pods carry `prometheus.io/scrape`, `prometheus.io/port` and
+`prometheus.io/path` annotations, which the community Prometheus chart, the
+OpenTelemetry Collector and Datadog discover on their own. Nothing has to be
+installed for either.
 
-```bash
-helm upgrade --install podtrace deploy/charts/podtrace \
-  --set agent.metrics.enabled=true \
-  --set metrics.podMonitor.enabled=true
-```
+To run podtrace as an on-demand tracer only, turn the plane off with
+`--set agent.metrics.enabled=false`; the cost table below is what that saves.
 
-The first flag enables the plane; the second tells Prometheus to scrape it.
-Series appear on the endpoint the agent already serves, so the `PodMonitor`
-shipped with the chart needs no further configuration.
-
-Once enabled the agent observes **every pod on the node**, not only those a
+The agent observes **every pod on the node**, not only those a
 `PodTrace` or `ApplicationTrace` targets. Coverage does not require
 authoring an object, that is the difference between this plane and
 on-demand diagnostics.
@@ -41,7 +40,8 @@ on-demand diagnostics.
 ```yaml
 agent:
   metrics:
-    enabled: false
+    enabled: true
+    kernelAggregation: true    # on by default; see "Kernel-side aggregation"
     excludeNamespaces: []      # skipped by the plane; diagnostics unaffected
     seriesBudget: 0            # 0 uses the built-in default of 40000
     nativeHistograms: true
@@ -429,17 +429,94 @@ duplicating what Prometheus already does correctly.
 |---|---|---|
 | `podtrace_workload_network_latency_seconds` | Histogram | `direction`, `transport` |
 | `podtrace_workload_network_bytes_total` | Counter | `direction`, `transport` |
+| `podtrace_workload_network_connections_total` | Counter | `transport`, `outcome` |
+| `podtrace_workload_network_retransmits_total` | Counter | — |
+| `podtrace_workload_network_device_errors_total` | Counter | — |
+| `podtrace_workload_network_rtt_seconds` | Histogram | — |
 | `podtrace_workload_dns_latency_seconds` | Histogram | — |
 | `podtrace_workload_filesystem_latency_seconds` | Histogram | `operation` |
 | `podtrace_workload_filesystem_bytes_total` | Counter | `operation` |
 | `podtrace_workload_cpu_blocked_seconds` | Histogram | — |
+| `podtrace_workload_cpu_runqueue_latency_seconds` | Histogram | — |
+| `podtrace_workload_lock_contention_seconds` | Histogram | — |
 | `podtrace_workload_tls_handshake_duration_seconds` | Histogram | — |
 | `podtrace_workload_errors_total` | Counter | `kind` |
 
 `direction` is `ingress` or `egress`; `transport` is `tcp` or `udp`.
 `operation` is `read`, `write`, `fsync`, `open`, `close`, `unlink` or
 `rename`. `kind` groups failures as `l7`, `dns`, `network`, `filesystem`,
-`tls` or `other`.
+`tls`, `lock` or `other`. `outcome` is `ok` or `error`, and for
+`network_connections_total` also `unreachable` (see below).
+
+`network_connections_total` is the denominator `errors_total` never had. A
+connection failure count on its own cannot say whether ten failures in a
+minute is a broken dependency or a rounding error against ten thousand
+successes, which is why `net.connection_failure_rate` could not be evaluated
+continuously before this family existed.
+
+Each attempt is counted once, when its outcome is known. `connect()` returns 0
+as soon as the SYN is queued, so the family takes the outcome from the
+handshake instead: `ok` when the socket reaches `ESTABLISHED`, `error` when it
+closes from `SYN_SENT` with an error set, which is how a peer refusing the
+connection (`ECONNREFUSED`) or never answering it (`ETIMEDOUT`) shows up. A
+`connect()` that fails before any SYN is sent, such as `EHOSTUNREACH`, is
+counted as an `error` from its return value. An attempt the application
+abandons itself, as a dialer racing IPv4 against IPv6 does with the losing
+socket, closes without an error and is counted as neither.
+
+One synchronous failure is counted as `unreachable` instead: `ENETUNREACH` or
+`EAFNOSUPPORT`, meaning the pod has no route for the destination's address
+family at all. A client resolving a dual-stack name from an IPv4-only pod
+tries every IPv6 address first and gets this from the kernel without sending
+a packet, then succeeds over IPv4. Counted as errors, a healthy pod doing that
+read as an 89% failure rate. `net.connection_failure_rate` leaves `unreachable`
+out of both sides of its ratio, and `errors_total` still records the failed
+syscalls. `EADDRNOTAVAIL` stays an `error`, because it is also what
+ephemeral-port exhaustion looks like.
+
+`network_retransmits_total` and `network_device_errors_total` separate two
+things that both land in `errors_total{kind="network"}`: a segment the kernel
+had to send again, and a transmit the device refused outright. Retransmits
+climbing while the workload's own request duration stays flat is the clearest
+signal podtrace has that a problem is on the wire rather than in the
+application.
+
+`cpu_runqueue_latency_seconds` is the one that means contention.
+`cpu_blocked_seconds` counts every departure from the CPU, voluntary sleeps
+included, so a pod parked in `epoll_wait` scores enormously on it while doing
+nothing at all: on an idle node an nginx serving no traffic measured a 2825ms
+mean there, against 102ms for a pod actually serving requests. The run-queue
+family counts only intervals that began with a preemption, where `prev_state`
+at `sched_switch` said the task was still runnable. That is the workload
+wanting a CPU and not getting one. Alert on that one.
+
+`lock_contention_seconds` is the companion to `cpu_blocked_seconds`. Both mean
+the workload is not running, and they need opposite fixes: one is waiting for
+a CPU, the other for a lock another thread holds. `cpu.contention` reports
+which.
+
+### `network_rtt_seconds` is the only real round-trip time here
+
+`network_latency_seconds` is measured around a syscall: enter a kprobe on
+`tcp_sendmsg`, leave on its kretprobe, subtract. That is a real number, but on
+a receive it is mostly the time the peer took to answer and on a send it is
+mostly how long the socket buffer was full. It is not the wire.
+
+`network_rtt_seconds` is `srtt_us` from the kernel's own `tcp_sock`, the value
+congestion control actually uses. Reading it needs a `sock_ops` program, which
+no kprobe, uprobe, tracepoint or `cgroup_skb` hook can substitute for.
+
+Enable it with `agent.sockOpsRTT: true` in the chart, or `spec.agent.sockOpsRTT`
+on the TracerConfig. Setting the env var on the DaemonSet by hand does not
+survive: the operator reconciles the agent's environment. It is on by default.
+`BPF_SOCK_OPS_RTT_CB` fires on roughly every ACK, which is affordable only
+because `agent.metrics.kernelAggregation`, also on by default, folds those into
+histogram buckets so the cost stays O(series). If you turn kernel aggregation
+off, turn this off with it, or each ACK becomes a ring-buffer event. It needs kernel 5.10 or newer
+and cgroup v2, attaches only to the cgroups podtrace already targets, and
+observes only — no sockmap, no redirect, no payload access. Where it cannot
+attach the family is simply absent, and `net.rtt_spike_rate` falls back to
+`network_latency_seconds` and says so in its message.
 
 ### Saturation
 
@@ -865,8 +942,8 @@ kernel-to-userspace crossings a second, sampled or not — `samplePercent` is
 applied after the crossing, so sampling reduces export cost while leaving the
 expensive part intact.
 
-Turn on kernel aggregation and the probes fold each observation into a BPF map
-instead:
+With kernel aggregation, on by default, the probes fold each observation into
+a BPF map instead. To turn it off, set it on the TracerConfig:
 
 ```yaml
 apiVersion: podtrace.io/v1alpha1
@@ -877,10 +954,11 @@ spec:
   agent:
     metrics:
       enabled: true
-      kernelAggregation: true
+      kernelAggregation: false
 ```
 
-or `--set agent.metrics.kernelAggregation=true` at install.
+or `--set agent.metrics.kernelAggregation=false` at install. Turn
+`agent.sockOpsRTT` off with it, for the reason given under network RTT.
 
 ### What changes, and what does not
 
@@ -888,16 +966,29 @@ Nothing about the exported surface. The same metric names carry the same label
 keys, and a dashboard cannot tell which path served it, a test asserts both
 paths produce identical series identities.
 
+Not every probe aggregates in the kernel: some still ship each event through
+the ring buffer. Each event records whether the kernel counted it, and the
+agent counts exactly the ones it did not, into the same series. A family whose
+emitters are mixed stays whole, and an event the kernel both counted and
+shipped (while a PodTrace keeps the ring buffer open) is counted once.
+
 The one observable difference is exemplars: they need a per-request trace id,
 which no longer reaches userspace once the bypass is armed. See
 [Interaction with kernel-side aggregation](#interaction-with-kernel-side-aggregation).
 
 Latency distributions are recorded as **Prometheus native-histogram schema-3
-bucket indices**, computed in the kernel with integer arithmetic. Schema 3 is
-the schema a bucket factor of 1.1 resolves to, so the buckets are exactly the
-ones the event path would have produced. That indexing is verified against
-Prometheus's own formula across every power-of-two boundary rather than
-assumed.
+buckets**, indexed in the kernel with integer arithmetic. Schema 3 is the
+schema a bucket factor of 1.1 resolves to, so the buckets are the ones the
+event path would have produced.
+
+The kernel indexes durations in units of 2^-30 seconds rather than
+nanoseconds. One second is 10^9 ns, which is not a power of two, so no whole
+number of buckets separates a nanosecond index from a seconds one; in 2^-30 s
+units a second is exactly 2^30 and the two scales are 30 octaves apart, which
+the agent removes on export. A test checks, across durations from 100ns to an
+hour, that each one is exported in the bucket that actually contains it in
+seconds. Below about 100ns integer rounding can place a duration one bucket
+low; no probe measures anything that short.
 
 Counters are simpler: a drained delta is an `Add` into the counter the event
 path already owns.

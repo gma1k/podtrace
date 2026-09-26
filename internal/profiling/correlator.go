@@ -59,6 +59,8 @@ type CorrelatedResult struct {
 
 	HotFrames []FrameCount
 
+	SchedulerFrames int
+
 	CPUHotProcesses []ProcessCPU
 
 	PageFaultCounts map[uint32]int // PID → fault count
@@ -76,9 +78,6 @@ type CorrelatedResult struct {
 
 // Correlate analyses allEvents and the optional profiling results, producing a
 // CorrelatedResult that links slow I/O / CPU events with stack-level context.
-//
-// cpuTriggerMS is the latency threshold in milliseconds above which an event is
-// considered "slow" and included in SlowEvents.
 func Correlate(
 	ctx context.Context,
 	allEvents []*events.Event,
@@ -193,7 +192,7 @@ func Correlate(
 		result.CPUHotProcesses = result.CPUHotProcesses[:10]
 	}
 
-	result.HotFrames = symbolizeHotFrames(ctx, frameAgg, resolver)
+	result.HotFrames, result.SchedulerFrames = symbolizeHotFramesHidingScheduler(ctx, frameAgg, resolver)
 
 	if len(allEvents) > 0 {
 		result.StartTime = clock.BPFTimestampToWall(allEvents[0].Timestamp)
@@ -215,8 +214,16 @@ type frameAddr struct {
 // symbolizeHotFrames turns raw addresses into named frames, keeping only the
 // ones worth printing.
 func symbolizeHotFrames(ctx context.Context, counts map[frameAddr]int, resolver FrameResolver) []FrameCount {
+	frames, _ := symbolizeHotFramesHidingScheduler(ctx, counts, resolver)
+	return frames
+}
+
+// symbolizeHotFramesHidingScheduler is symbolizeHotFrames that also reports how
+// many frame hits it hid as Go scheduler machinery, so a profile that is all
+// scheduler can say so instead of looking empty.
+func symbolizeHotFramesHidingScheduler(ctx context.Context, counts map[frameAddr]int, resolver FrameResolver) ([]FrameCount, int) {
 	if len(counts) == 0 {
-		return nil
+		return nil, 0
 	}
 
 	ranked := make([]struct {
@@ -239,18 +246,41 @@ func symbolizeHotFrames(ctx context.Context, counts map[frameAddr]int, resolver 
 		return ranked[i].frame.addr < ranked[j].frame.addr
 	})
 
+	top := ranked
+	if len(top) > maxSymbolizedFrames {
+		top = top[:maxSymbolizedFrames]
+	}
+
+	byProcess := make([]int, len(top))
+	for i := range byProcess {
+		byProcess[i] = i
+	}
+	sort.SliceStable(byProcess, func(a, b int) bool {
+		fa, fb := top[byProcess[a]].frame, top[byProcess[b]].frame
+		if fa.pid != fb.pid {
+			return fa.pid < fb.pid
+		}
+		return fa.addr < fb.addr
+	})
+	names := make([]string, len(top))
+	for _, idx := range byProcess {
+		f := top[idx].frame
+		if resolver != nil {
+			names[idx] = resolver.Resolve(ctx, f.pid, f.addr)
+		}
+		if names[idx] == "" {
+			names[idx] = fmt.Sprintf("0x%x", f.addr)
+		}
+	}
+
 	merged := map[string]int{}
 	order := []string{}
-	for i, r := range ranked {
-		if i >= maxSymbolizedFrames {
-			break
-		}
-		name := ""
-		if resolver != nil {
-			name = resolver.Resolve(ctx, r.frame.pid, r.frame.addr)
-		}
-		if name == "" {
-			name = fmt.Sprintf("0x%x", r.frame.addr)
+	hidden := 0
+	for i, r := range top {
+		name := names[i]
+		if isSchedulerFrame(name) {
+			hidden += r.count
+			continue
 		}
 		if _, seen := merged[name]; !seen {
 			order = append(order, name)
@@ -266,7 +296,7 @@ func symbolizeHotFrames(ctx context.Context, counts map[frameAddr]int, resolver 
 	if len(out) > maxReportedFrames {
 		out = out[:maxReportedFrames]
 	}
-	return out
+	return out, hidden
 }
 
 // isSlowEventType returns true for event types where LatencyNS reflects a real
@@ -348,7 +378,14 @@ func GenerateSection(cr *CorrelatedResult, duration time.Duration) string {
 			fmt.Fprintf(&sb, "    %-5d  %s\n", f.Count, f.Frame)
 		}
 		sb.WriteString("  Frames are resolved where the process was still running; any that\n")
-		sb.WriteString("  remain as raw addresses belong to a process that had already exited.\n\n")
+		sb.WriteString("  remain as raw addresses belong to a process that had already exited.\n")
+	}
+	if cr.SchedulerFrames > 0 {
+		fmt.Fprintf(&sb, "  %d Go scheduler frame hits (runtime.schedule, runtime.park_m, ...) hidden.\n",
+			cr.SchedulerFrames)
+	}
+	if len(cr.HotFrames) > 0 || cr.SchedulerFrames > 0 {
+		sb.WriteString("\n")
 	}
 
 	if cr.GoroutineProfile != nil && cr.GoroutineProfile.Available {

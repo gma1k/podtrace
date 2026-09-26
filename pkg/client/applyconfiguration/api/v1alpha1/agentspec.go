@@ -28,16 +28,29 @@ import (
 //
 // AgentSpec tunes the per-node tracer DaemonSet.
 type AgentSpecApplyConfiguration struct {
-	Resources            *v1.ResourceRequirements             `json:"resources,omitempty"`
-	PriorityClassName    *string                              `json:"priorityClassName,omitempty"`
-	LogLevel             *string                              `json:"logLevel,omitempty"`
-	EventBufferSize      *int32                               `json:"eventBufferSize,omitempty"`
-	StatusReportInterval *metav1.Duration                     `json:"statusReportInterval,omitempty"`
-	DNSPacketCapture     *bool                                `json:"dnsPacketCapture,omitempty"`
-	DNSFullAnswers       *bool                                `json:"dnsFullAnswers,omitempty"`
-	USDT                 *bool                                `json:"usdt,omitempty"`
-	Alerting             *AgentAlertingSpecApplyConfiguration `json:"alerting,omitempty"`
-	Metrics              *AgentMetricsSpecApplyConfiguration  `json:"metrics,omitempty"`
+	Resources            *v1.ResourceRequirements `json:"resources,omitempty"`
+	PriorityClassName    *string                  `json:"priorityClassName,omitempty"`
+	LogLevel             *string                  `json:"logLevel,omitempty"`
+	EventBufferSize      *int32                   `json:"eventBufferSize,omitempty"`
+	StatusReportInterval *metav1.Duration         `json:"statusReportInterval,omitempty"`
+	DNSPacketCapture     *bool                    `json:"dnsPacketCapture,omitempty"`
+	DNSFullAnswers       *bool                    `json:"dnsFullAnswers,omitempty"`
+	USDT                 *bool                    `json:"usdt,omitempty"`
+	// ContinuousProfiling builds an always-on per-workload CPU profile from
+	// the user stacks already captured on every sched_switch, served as JSON
+	// on the agent's /profile. It needs nothing exposed by the workload and
+	// works for any language, unlike the session profiler which needs a Go
+	// pprof endpoint.
+	ContinuousProfiling *bool `json:"continuousProfiling,omitempty"`
+	// SockOpsRTT attaches a sock_ops program that reads the kernel's own
+	// smoothed round-trip time, which no kprobe, uprobe, tracepoint or
+	// cgroup_skb hook can reach. It makes net.rtt_spike_rate measure the
+	// wire rather than syscall duration. Observation only: no sockmap, no
+	// redirect, no payload access. Needs kernel 5.10 or newer and cgroup v2;
+	// where it cannot attach the rule falls back to syscall latency.
+	SockOpsRTT *bool                                `json:"sockOpsRTT,omitempty"`
+	Alerting   *AgentAlertingSpecApplyConfiguration `json:"alerting,omitempty"`
+	Metrics    *AgentMetricsSpecApplyConfiguration  `json:"metrics,omitempty"`
 	// RolloutMaxUnavailable is how many agents may be updated at once when
 	// the DaemonSet's pod template changes, as a count or a percentage.
 	RolloutMaxUnavailable *intstr.IntOrString `json:"rolloutMaxUnavailable,omitempty"`
@@ -110,6 +123,22 @@ func (b *AgentSpecApplyConfiguration) WithDNSFullAnswers(value bool) *AgentSpecA
 // If called multiple times, the USDT field is set to the value of the last call.
 func (b *AgentSpecApplyConfiguration) WithUSDT(value bool) *AgentSpecApplyConfiguration {
 	b.USDT = &value
+	return b
+}
+
+// WithContinuousProfiling sets the ContinuousProfiling field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ContinuousProfiling field is set to the value of the last call.
+func (b *AgentSpecApplyConfiguration) WithContinuousProfiling(value bool) *AgentSpecApplyConfiguration {
+	b.ContinuousProfiling = &value
+	return b
+}
+
+// WithSockOpsRTT sets the SockOpsRTT field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the SockOpsRTT field is set to the value of the last call.
+func (b *AgentSpecApplyConfiguration) WithSockOpsRTT(value bool) *AgentSpecApplyConfiguration {
+	b.SockOpsRTT = &value
 	return b
 }
 

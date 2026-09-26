@@ -14,9 +14,12 @@
 # By default this chart installs everything required for a working
 # Podtrace setup: CRDs, the podtrace-system namespace, the operator
 # Deployment, and a default TracerConfig that brings up the agent
-# DaemonSet. The webhook and ServiceMonitors stay off by default — flip
-# `webhook.enabled` / `metrics.*.enabled` once cert-manager and your
-# Prometheus stack are wired up.
+# DaemonSet with the continuous APM plane on: workload metrics, inspections,
+# continuous profiling and kernel RTT, aggregated in the kernel. The agents'
+# PodMonitor is on too and renders only where the Prometheus Operator is
+# installed. The webhook and the operator's ServiceMonitor stay off by
+# default, flip `webhook.enabled` / `metrics.serviceMonitor.enabled` once
+# cert-manager and your Prometheus stack are wired up.
 
 crds:
   install: true
@@ -95,6 +98,18 @@ agent:
 
   usdt: true
 
+  # Always-on per-workload CPU profile built from the user stacks already
+  # captured on every sched_switch, served as JSON on the agent's /profile.
+  # Needs nothing exposed by the workload and works for any language.
+  # On by default; set false to stop building profiles.
+  continuousProfiling: true
+
+  # Attach a sock_ops program to read the kernel's own smoothed RTT, so
+  # net.rtt_spike_rate measures the wire rather than syscall duration.
+  # Observation only. Needs kernel 5.10+ and cgroup v2; where it cannot
+  # attach the family is absent and the rule falls back to syscall latency.
+  sockOpsRTT: true
+
   rolloutMaxUnavailable: ""
 
   alerting:
@@ -102,8 +117,13 @@ agent:
     webhookURL: ""
     allowInsecureWebhook: false
 
+  # The continuous APM plane: per-workload golden-signal metrics on the
+  # agent's /metrics, and the inspections that raise issues from them. On by
+  # default, so an install shows workload health without further setup; the
+  # series budget below bounds it at 40k series per node when left at 0.
+  # Set enabled: false to run podtrace as an on-demand tracer only.
   metrics:
-    enabled: false
+    enabled: true
 
     excludeNamespaces:
       - podtrace-system
@@ -114,7 +134,12 @@ agent:
 
     semanticConventions: false
 
-    kernelAggregation: false
+    # Fold observations into a BPF map instead of shipping each one through
+    # the ring buffer, so the plane costs O(series) rather than O(events).
+    # On by default. The one thing it gives up is exemplars, the trace id
+    # linking a histogram bucket to a trace: those need the event, which only
+    # reaches userspace while a PodTrace keeps the ring buffer open.
+    kernelAggregation: true
 
     attributeCardinality: 0
 
@@ -123,7 +148,7 @@ agent:
       process: false
 
     inspections:
-      enabled: false
+      enabled: true
 
       interval: 30s
 
@@ -168,8 +193,12 @@ metrics:
     labels: {}
     interval: 30s
     path: /metrics
+  # On by default. Rendered only where the Prometheus Operator's
+  # monitoring.coreos.com/v1 API exists, so it is safe on clusters without
+  # it; the agent pods also carry prometheus.io/scrape annotations for
+  # annotation-based scrapers.
   podMonitor:
-    enabled: false
+    enabled: true
     labels: {}
     interval: 30s
     path: /metrics

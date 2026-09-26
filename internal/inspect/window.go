@@ -31,7 +31,50 @@ type Delta struct {
 	Count uint64
 	Sum   float64
 
+	Buckets []Bucket
+
 	Reset bool
+}
+
+// FractionAbove returns the share of this window's observations that exceeded
+// bound, as a percentage, reporting false when the window cannot answer:
+// nothing observed, a counter reset, no buckets, or no bucket boundary at
+// bound.
+func (d Delta) FractionAbove(bound float64) (float64, bool) {
+	if d.Reset || d.Count == 0 || len(d.Buckets) == 0 {
+		return 0, false
+	}
+	if d.Sample.NativeBuckets {
+		return d.nativeFractionAbove(bound)
+	}
+	for _, b := range d.Buckets {
+		if b.UpperBound != bound {
+			continue
+		}
+		if b.Count > d.Count {
+			return 0, false
+		}
+		return float64(d.Count-b.Count) / float64(d.Count) * 100, true
+	}
+	return 0, false
+}
+
+func (d Delta) nativeFractionAbove(bound float64) (float64, bool) {
+	if bound <= 0 {
+		return 0, false
+	}
+	edge := nativeBoundaryAtOrAbove(bound, d.Sample.NativeSchema)
+	var atOrBelow uint64
+	for _, b := range d.Buckets {
+		if b.UpperBound > edge*(1+1e-9) {
+			break
+		}
+		atOrBelow = b.Count
+	}
+	if atOrBelow > d.Count {
+		return 0, false
+	}
+	return float64(d.Count-atOrBelow) / float64(d.Count) * 100, true
 }
 
 // Mean returns the mean observation over the window, reporting false when
@@ -64,7 +107,7 @@ func (w Window) Deltas(family string) []Delta {
 
 	out := make([]Delta, 0, len(cur))
 	for _, s := range cur {
-		d := Delta{Sample: s, Value: s.Value, Count: s.Count, Sum: s.Sum}
+		d := Delta{Sample: s, Value: s.Value, Count: s.Count, Sum: s.Sum, Buckets: s.Buckets}
 		if before, ok := previous[seriesKey(s)]; ok {
 			if s.Value < before.Value || s.Count < before.Count {
 				d.Reset = true
@@ -72,9 +115,31 @@ func (w Window) Deltas(family string) []Delta {
 				d.Value = s.Value - before.Value
 				d.Count = s.Count - before.Count
 				d.Sum = s.Sum - before.Sum
+				d.Buckets = bucketDelta(before.Buckets, s.Buckets)
 			}
 		}
 		out = append(out, d)
+	}
+	return out
+}
+
+// bucketDelta subtracts one gather's cumulative buckets from the next.
+func bucketDelta(before, cur []Bucket) []Bucket {
+	if len(cur) == 0 {
+		return nil
+	}
+	out := make([]Bucket, 0, len(cur))
+	j := 0
+	var was uint64
+	for _, b := range cur {
+		for j < len(before) && before[j].UpperBound <= b.UpperBound {
+			was = before[j].Count
+			j++
+		}
+		if b.Count < was {
+			return nil
+		}
+		out = append(out, Bucket{UpperBound: b.UpperBound, Count: b.Count - was})
 	}
 	return out
 }

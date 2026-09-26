@@ -142,6 +142,12 @@ var (
 	ProfilingMaxConcurrent   = getIntEnvOrDefault("PODTRACE_PROFILING_MAX_CONCURRENT", DefaultProfilingMaxConcurrent)
 	ProfilingMaxDuration     = getDurationEnvOrDefault("PODTRACE_PROFILING_MAX_DURATION", DefaultProfilingMaxDuration)
 
+	ContinuousProfilingEnabled = getBoolEnvOrDefault("PODTRACE_CONTINUOUS_PROFILING_ENABLED", false)
+
+	SockOpsRTTEnabled = getBoolEnvOrDefault("PODTRACE_SOCKOPS_RTT_ENABLED", false)
+
+	ProfileSnapshotTimeout = getDurationEnvOrDefault("PODTRACE_PROFILE_SNAPSHOT_TIMEOUT", 20*time.Second)
+
 	ReportGenerationTimeout = getDurationEnvOrDefault("PODTRACE_REPORT_GENERATION_TIMEOUT", DefaultReportGenerationTimeout)
 )
 
@@ -178,6 +184,9 @@ var (
 	InspectionMinRequestsPerSecond = getFloatEnvOrDefault("PODTRACE_INSPECTIONS_MIN_REQUEST_RATE", 0.1)
 	InspectionMeanLatency          = getDurationEnvOrDefault("PODTRACE_INSPECTIONS_MEAN_LATENCY", time.Second)
 	InspectionAcquireMean          = getDurationEnvOrDefault("PODTRACE_INSPECTIONS_ACQUIRE_MEAN", 100*time.Millisecond)
+	InspectionCPUBlockedMean       = getDurationEnvOrDefault("PODTRACE_INSPECTIONS_CPU_BLOCKED_MEAN", 50*time.Millisecond)
+	InspectionPoolUtilizationPct   = getIntEnvOrDefault("PODTRACE_INSPECTIONS_POOL_UTILIZATION_PCT", 80)
+	InspectionMinPreemptions       = getIntEnvOrDefault("PODTRACE_INSPECTIONS_MIN_PREEMPTIONS", 100)
 
 	InspectionsHoldTime = getDurationEnvOrDefault("PODTRACE_INSPECTIONS_HOLD_TIME", 0)
 )
@@ -624,8 +633,11 @@ func AllowedAgentImageRepos() []string {
 }
 
 var readVCSRevision = func() string {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
+	return revisionFrom(debug.ReadBuildInfo())
+}
+
+func revisionFrom(info *debug.BuildInfo, ok bool) string {
+	if !ok || info == nil {
 		return ""
 	}
 	for _, s := range info.Settings {

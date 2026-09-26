@@ -17,7 +17,7 @@ func exporterNames(t *testing.T) []string {
 	t.Helper()
 
 	metrics := NewMetrics()
-	exporters, _, err := buildExporters(NewRouter(nil), metrics, nil, nil, logr.Discard())
+	exporters, _, _, err := buildExporters(NewRouter(nil), metrics, nil, nil, logr.Discard())
 	if err != nil {
 		t.Fatalf("buildExporters: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestWorkloadMetricsRegistersOnTheAgentEndpoint(t *testing.T) {
 	t.Cleanup(func() { config.WorkloadMetricsEnabled = originalEnabled })
 
 	metrics := NewMetrics()
-	if _, _, err := buildExporters(NewRouter(nil), metrics, nil, nil, logr.Discard()); err != nil {
+	if _, _, _, err := buildExporters(NewRouter(nil), metrics, nil, nil, logr.Discard()); err != nil {
 		t.Fatalf("buildExporters: %v", err)
 	}
 
@@ -97,10 +97,10 @@ func TestBuildExportersRejectsDoubleRegistration(t *testing.T) {
 	t.Cleanup(func() { config.WorkloadMetricsEnabled = originalEnabled })
 
 	metrics := NewMetrics()
-	if _, _, err := buildExporters(NewRouter(nil), metrics, nil, nil, logr.Discard()); err != nil {
+	if _, _, _, err := buildExporters(NewRouter(nil), metrics, nil, nil, logr.Discard()); err != nil {
 		t.Fatalf("first call: %v", err)
 	}
-	if _, _, err := buildExporters(NewRouter(nil), metrics, nil, nil, logr.Discard()); err == nil {
+	if _, _, _, err := buildExporters(NewRouter(nil), metrics, nil, nil, logr.Discard()); err == nil {
 		t.Error("registering the plane twice on one registry must fail rather than " +
 			"silently serving one of two copies")
 	}
@@ -144,7 +144,7 @@ func TestBudgetExhaustionLogCallbackIsInstalled(t *testing.T) {
 		config.WorkloadMetricsBudget = originalBudget
 	})
 
-	exporters, _, err := buildExporters(NewRouter(nil), NewMetrics(), nil, nil, logr.Discard())
+	exporters, _, _, err := buildExporters(NewRouter(nil), NewMetrics(), nil, nil, logr.Discard())
 	if err != nil {
 		t.Fatalf("buildExporters: %v", err)
 	}
@@ -162,21 +162,12 @@ func TestBudgetExhaustionLogCallbackIsInstalled(t *testing.T) {
 		})
 	}
 
-	// Drives the sink past its budget so the exhaustion callback the agent
-	// installs actually runs. Without this the callback is dead wiring: it
-	// would only ever fire in production, which is the worst place to
-	// discover a nil-pointer or a bad format string.
 	if err := sink.Export(context.Background(), batch); err != nil {
 		t.Fatalf("Export: %v", err)
 	}
 }
 
 func TestAgentEndpointExposesItsOwnResourceUse(t *testing.T) {
-	// The continuous metrics plane can drive the agent to its CPU limit,
-	// where it is throttled and the workload metrics silently
-	// under-report. Diagnosing that without these collectors meant
-	// shelling into a node and running crictl, so their absence is an
-	// operability defect rather than a missing nicety.
 	families, err := NewMetrics().registry.Gather()
 	if err != nil {
 		t.Fatalf("Gather: %v", err)

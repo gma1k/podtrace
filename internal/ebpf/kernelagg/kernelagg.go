@@ -177,14 +177,38 @@ var schemaBounds = func() []float64 {
 	return out
 }()
 
-// BucketIndex returns the schema-3 bucket a nanosecond duration falls in,
-// mirroring agg_bucket() in bpf/agg.h.
+// BucketIndex returns the kernel's bucket for a nanosecond duration,
+// mirroring agg_bucket(agg_scale(ns)) in bpf/agg.h.
 func BucketIndex(ns uint64) uint16 {
-	if ns == 0 {
+	v := ScaledUnits(ns)
+	if v == 0 {
 		return 0
 	}
-	frac, exp := math.Frexp(float64(ns))
+	frac, exp := math.Frexp(float64(v))
 	return clampBucket(sort.SearchFloat64s(schemaBounds, frac) + (exp-1)*(1<<Schema))
+}
+
+const scaleUnitLog2 = 30
+
+// ScaledUnits converts nanoseconds to 2^-30-second units, exactly
+// floor(ns * 2^30 / 10^9), in the same integer steps as agg_scale() in
+// bpf/agg.h so both sides bucket identically.
+func ScaledUnits(ns uint64) uint64 {
+	const (
+		correction  = 73741824 // 2^30 - 10^9
+		nsPerSecond = 1000000000
+	)
+	whole := ns / nsPerSecond
+	rest := ns - whole*nsPerSecond
+	return ns + whole*correction + rest*correction/nsPerSecond
+}
+
+const nativeIndexOffset = scaleUnitLog2*(1<<Schema) - 1
+
+// NativeIndex returns the Prometheus native-histogram bucket, in seconds, that
+// a kernel bucket corresponds to.
+func NativeIndex(bucket uint16) int {
+	return int(bucket) - nativeIndexOffset
 }
 
 // clampBucket narrows a computed index to the width the kernel key uses.

@@ -175,7 +175,7 @@ jobs:
             --set agent.rolloutMaxUnavailable=100% \
             --wait --timeout 180s
 
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             if kubectl -n podtrace-system get ds podtrace-agent >/dev/null 2>&1; then
               break
             fi
@@ -199,6 +199,13 @@ jobs:
           kubectl -n podtrace-system get pods,ds,deploy,cm,secret 2>&1 || true
           kubectl -n podtrace-system describe pods 2>&1 | tail -200 || true
           kubectl -n podtrace-system logs deploy/podtrace-operator --tail=200 || true
+
+      - name: Stop the agents before the cluster is deleted
+        if: always()
+        run: |
+          kubectl -n podtrace-system scale deploy/podtrace-operator --replicas=0 || true
+          kubectl -n podtrace-system delete ds -l podtrace.io/component=agent --wait=false || true
+          kubectl -n podtrace-system wait --for=delete pod -l podtrace.io/component=agent --timeout=180s || true
 
   quickstart-smoke:
     if: ${{ !startsWith(github.head_ref, 'release-please--') }}
@@ -257,3 +264,10 @@ jobs:
           kubectl -n podtrace-system describe deploy/podtrace-operator || true
           kubectl -n podtrace-system logs deploy/podtrace-operator --tail=100 || true
           kubectl -n podtrace-demo get podtracesession -o yaml || true
+
+      - name: Stop the agents before the cluster is deleted
+        if: always()
+        run: |
+          kubectl -n podtrace-system scale deploy/podtrace-operator --replicas=0 || true
+          kubectl -n podtrace-system delete ds -l podtrace.io/component=agent --wait=false || true
+          kubectl -n podtrace-system wait --for=delete pod -l podtrace.io/component=agent --timeout=180s || true

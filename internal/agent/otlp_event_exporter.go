@@ -16,6 +16,8 @@ import (
 	"github.com/gma1k/podtrace/pkg/tracer"
 )
 
+var newTraceExporter = otlptrace.New
+
 // newOTLPEventExporter builds a tracer.Exporter that ships per-event
 // spans over OTLP HTTP.
 func newOTLPEventExporter(cr CRKey, b *BundlePayload, opts ...sdkOption) (tracer.Exporter, error) {
@@ -32,11 +34,6 @@ func newOTLPEventExporter(cr CRKey, b *BundlePayload, opts ...sdkOption) (tracer
 
 // attachMetricPusher turns on the second signal when the bundle asks for
 // it, binding the pusher's lifetime to the exporter's.
-//
-// A failure to start the metric push does not fail the exporter: spans
-// are the primary signal and an unreachable metrics receiver must not
-// take tracing down with it. The error is returned so the caller can
-// classify and report it.
 func attachMetricPusher(exporter tracer.Exporter, b *BundlePayload, opts ...sdkOption) (tracer.Exporter, error) {
 	dest, wanted := destinationFromBundle(b)
 	if !wanted {
@@ -103,7 +100,7 @@ func newOTLPSpanExporter(b *BundlePayload) (*otlptrace.Exporter, error) {
 	defer cancel()
 
 	client := otlptracehttp.NewClient(opts...)
-	spanExporter, err := otlptrace.New(ctx, client)
+	spanExporter, err := newTraceExporter(ctx, client)
 	if err != nil {
 		return nil, fmt.Errorf("create OTLP span exporter: %w", err)
 	}
@@ -165,6 +162,7 @@ func eventTypeString(t events.EventType) string {
 var eventTypeNames = map[events.EventType]string{
 	events.EventDNS:            "dns",
 	events.EventConnect:        "net.connect",
+	events.EventConnectResult:  "net.connect.result",
 	events.EventTCPSend:        "net.tcp.send",
 	events.EventTCPRecv:        "net.tcp.recv",
 	events.EventUDPSend:        "net.udp.send",

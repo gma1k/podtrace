@@ -155,3 +155,76 @@ func TestEveryIdSharedByBothPlanesIsRegisteredOnce(t *testing.T) {
 			"and the differential guarantee above is vacuous.")
 	}
 }
+
+func detectorConnectionFailures(t *testing.T, total, failed int) (detector.Issue, bool) {
+	t.Helper()
+	var evts []*events.Event
+	for i := 0; i < total; i++ {
+		result := &events.Event{Type: events.EventConnectResult}
+		if i < failed {
+			result.Error = -111
+		}
+		evts = append(evts, &events.Event{Type: events.EventConnect}, result)
+	}
+	for _, issue := range detector.DetectIssues(evts, DefaultThresholds().ErrorRatePercent, 100) {
+		if issue.ID == detector.IDConnectionFailureRate {
+			return issue, true
+		}
+	}
+	return detector.Issue{}, false
+}
+
+func inspectConnectionFailures(t *testing.T, total, failed int) (detector.Issue, bool) {
+	t.Helper()
+	cur := connections(float64(total), float64(failed))
+	for _, issue := range evalOnce(t, connectionFailureRateRule(), nil, cur, time.Minute) {
+		if issue.ID == detector.IDConnectionFailureRate {
+			return issue, true
+		}
+	}
+	return detector.Issue{}, false
+}
+
+func TestBothPlanesAgreeOnConnectionFailuresAboveTheTrafficFloor(t *testing.T) {
+	for _, tc := range []struct{ total, failed int }{
+		{100, 0}, {100, 1}, {100, 5}, {100, 6}, {100, 20}, {100, 50}, {100, 100},
+		{60, 3}, {60, 4}, {600, 30}, {600, 31},
+	} {
+		diagIssue, diagFired := detectorConnectionFailures(t, tc.total, tc.failed)
+		contIssue, contFired := inspectConnectionFailures(t, tc.total, tc.failed)
+
+		if diagFired != contFired {
+			t.Errorf("at %d/%d failures the diagnostic plane fired=%v but the continuous "+
+				"plane fired=%v.\n\nAbove the traffic floor the same reading must mean the "+
+				"same thing on both planes, or an operator gets a different answer depending "+
+				"on which one they asked.", tc.failed, tc.total, diagFired, contFired)
+			continue
+		}
+		if !diagFired {
+			continue
+		}
+		if diagIssue.Severity != contIssue.Severity {
+			t.Errorf("at %d/%d the planes disagree on severity: diagnostic=%q continuous=%q",
+				tc.failed, tc.total, diagIssue.Severity, contIssue.Severity)
+		}
+		if diagIssue.ID != contIssue.ID {
+			t.Errorf("at %d/%d the planes emit different ids: %q vs %q",
+				tc.failed, tc.total, diagIssue.ID, contIssue.ID)
+		}
+	}
+}
+
+func TestTheContinuousPlaneAloneAppliesTheConnectionTrafficFloor(t *testing.T) {
+	_, diagFired := detectorConnectionFailures(t, 4, 4)
+	_, contFired := inspectConnectionFailures(t, 4, 4)
+
+	if !diagFired {
+		t.Error("the diagnostic plane did not fire on four failed connections out of four; " +
+			"it has no traffic floor, so this documents the difference and must hold")
+	}
+	if contFired {
+		t.Error("the continuous plane fired below its traffic floor. Without the floor a " +
+			"single failed connect in an idle interval reads as a 100% failure rate and " +
+			"pages someone for every idle workload in the cluster.")
+	}
+}

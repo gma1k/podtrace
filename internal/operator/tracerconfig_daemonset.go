@@ -83,6 +83,12 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 		dnsFull = *d
 	}
 	env = append(env, corev1.EnvVar{Name: "PODTRACE_DNS_PAYLOAD_ENABLED", Value: strconv.FormatBool(dnsFull)})
+	if p := tc.Spec.Agent.ContinuousProfiling; p != nil && *p {
+		env = append(env, corev1.EnvVar{Name: "PODTRACE_CONTINUOUS_PROFILING_ENABLED", Value: "true"})
+	}
+	if s := tc.Spec.Agent.SockOpsRTT; s != nil && *s {
+		env = append(env, corev1.EnvVar{Name: "PODTRACE_SOCKOPS_RTT_ENABLED", Value: "true"})
+	}
 	if a := tc.Spec.Agent.Alerting; a != nil && a.Enabled {
 		env = append(env, corev1.EnvVar{Name: "PODTRACE_ALERTING_ENABLED", Value: "true"})
 		if a.WebhookURL != "" {
@@ -113,7 +119,8 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 		UpdateStrategy: agentUpdateStrategy(tc),
 		Template: corev1.PodTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{
-				Labels: podLabels,
+				Labels:      podLabels,
+				Annotations: agentScrapeAnnotations(),
 			},
 			Spec: corev1.PodSpec{
 				ServiceAccountName:            AgentServiceAccountName(tc.Name),
@@ -277,4 +284,18 @@ func btfFileWiring(tc *podtracev1alpha1.TracerConfig) ([]corev1.EnvVar, []corev1
 	volumes := []corev1.Volume{{Name: "btf-file", VolumeSource: volumeSource}}
 	mounts := []corev1.VolumeMount{{Name: "btf-file", MountPath: mountPath, ReadOnly: true}}
 	return env, volumes, mounts
+}
+
+// agentMetricsPort is the agent container's "metrics" port.
+const agentMetricsPort = "9090"
+
+// agentScrapeAnnotations advertises the agent's metrics endpoint to
+// annotation-based scrapers: the community Prometheus chart, the OpenTelemetry
+// Collector's Kubernetes discovery, and Datadog all read these.
+func agentScrapeAnnotations() map[string]string {
+	return map[string]string{
+		"prometheus.io/scrape": "true",
+		"prometheus.io/port":   agentMetricsPort,
+		"prometheus.io/path":   "/metrics",
+	}
 }

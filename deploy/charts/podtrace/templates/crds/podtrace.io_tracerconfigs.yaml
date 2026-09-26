@@ -995,6 +995,14 @@ spec:
                       webhookURL:
                         type: string
                     type: object
+                  continuousProfiling:
+                    description: |-
+                      ContinuousProfiling builds an always-on per-workload CPU profile from
+                      the user stacks already captured on every sched_switch, served as JSON
+                      on the agent's /profile. It needs nothing exposed by the workload and
+                      works for any language, unlike the session profiler which needs a Go
+                      pprof endpoint.
+                    type: boolean
                   dnsFullAnswers:
                     type: boolean
                   dnsPacketCapture:
@@ -1070,6 +1078,11 @@ spec:
                                   AcquireMean is the mean time callers spend queued for a free database
                                   connection above which db.connection_acquire_slow fires. Go database/sql only.
                                 type: string
+                              cpuBlockedMean:
+                                description: |-
+                                  CPUBlockedMean is the mean time a workload spends off-CPU waiting to
+                                  be scheduled above which cpu.contention fires.
+                                type: string
                               errorRatePercent:
                                 description: |-
                                   ErrorRatePercent is the application-layer error ratio above which
@@ -1091,6 +1104,16 @@ spec:
                                   because the useful values are fractions of a request per second.
                                 format: int32
                                 minimum: 0
+                                type: integer
+                              poolUtilizationPercent:
+                                description: |-
+                                  PoolUtilizationPercent is the share of SetMaxOpenConns at which
+                                  db.pool_saturated fires as a warning; it escalates to critical ten
+                                  points higher. This fires before db.connection_acquire_slow, which
+                                  only notices once callers are already queueing.
+                                format: int32
+                                maximum: 100
+                                minimum: 1
                                 type: integer
                             type: object
                         type: object
@@ -1190,6 +1213,15 @@ spec:
                       RolloutMaxUnavailable is how many agents may be updated at once when
                       the DaemonSet's pod template changes, as a count or a percentage.
                     x-kubernetes-int-or-string: true
+                  sockOpsRTT:
+                    description: |-
+                      SockOpsRTT attaches a sock_ops program that reads the kernel's own
+                      smoothed round-trip time, which no kprobe, uprobe, tracepoint or
+                      cgroup_skb hook can reach. It makes net.rtt_spike_rate measure the
+                      wire rather than syscall duration. Observation only: no sockmap, no
+                      redirect, no payload access. Needs kernel 5.10 or newer and cgroup v2;
+                      where it cannot attach the rule falls back to syscall latency.
+                    type: boolean
                   statusReportInterval:
                     type: string
                   usdt:

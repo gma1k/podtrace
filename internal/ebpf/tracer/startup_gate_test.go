@@ -2,6 +2,7 @@ package tracer
 
 import (
 	"sort"
+	"sync/atomic"
 	"testing"
 
 	"github.com/cilium/ebpf/link"
@@ -11,12 +12,12 @@ import (
 
 type countingLink struct {
 	link.Link
-	closed *int
+	closed *atomic.Int64
 }
 
-func (c *countingLink) Close() error { *c.closed++; return nil }
+func (c *countingLink) Close() error { c.closed.Add(1); return nil }
 
-func newCountingLink(closed *int) link.Link { return &countingLink{closed: closed} }
+func newCountingLink(closed *atomic.Int64) link.Link { return &countingLink{closed: closed} }
 
 func groupsOf(m map[probes.ProbeGroup][]link.Link) []string {
 	out := make([]string, 0, len(m))
@@ -27,7 +28,7 @@ func groupsOf(m map[probes.ProbeGroup][]link.Link) []string {
 	return out
 }
 
-func fixtureGroups(closed *int) map[probes.ProbeGroup][]link.Link {
+func fixtureGroups(closed *atomic.Int64) map[probes.ProbeGroup][]link.Link {
 	return map[probes.ProbeGroup][]link.Link{
 		probes.GroupNetwork:    {newCountingLink(closed), newCountingLink(closed)},
 		probes.GroupFileSystem: {newCountingLink(closed)},
@@ -41,7 +42,7 @@ func fixtureGroups(closed *int) map[probes.ProbeGroup][]link.Link {
 }
 
 func TestStartupGateKeepsOnlyWantedGroups(t *testing.T) {
-	closed := 0
+	var closed atomic.Int64
 	groups := fixtureGroups(&closed)
 
 	disabled := gateInitialProbeGroups(groups, []string{"dns", "net", "cpu"})
@@ -69,13 +70,13 @@ func TestStartupGateKeepsOnlyWantedGroups(t *testing.T) {
 		}
 	}
 
-	if closed == 0 {
+	if closed.Load() == 0 {
 		t.Error("no links were closed; the gate must actually detach, not just forget")
 	}
 }
 
 func TestStartupGateWithEmptySetClosesEveryGateableGroup(t *testing.T) {
-	closed := 0
+	var closed atomic.Int64
 	groups := fixtureGroups(&closed)
 	total := 0
 	for _, ls := range groups {
@@ -87,8 +88,8 @@ func TestStartupGateWithEmptySetClosesEveryGateableGroup(t *testing.T) {
 	if len(groups) != 0 {
 		t.Errorf("groups survived an empty category set: %v", groupsOf(groups))
 	}
-	if closed != total {
-		t.Errorf("closed %d of %d links", closed, total)
+	if got := closed.Load(); got != int64(total) {
+		t.Errorf("closed %d of %d links", got, total)
 	}
 	if len(disabled) == 0 {
 		t.Error("nothing reported as disabled, so no group could ever be re-attached")
@@ -96,16 +97,11 @@ func TestStartupGateWithEmptySetClosesEveryGateableGroup(t *testing.T) {
 }
 
 func TestStartupGateReportsEveryDisabledGroupForLaterReEnable(t *testing.T) {
-	closed := 0
+	var closed atomic.Int64
 	groups := fixtureGroups(&closed)
 
 	disabled := gateInitialProbeGroups(groups, []string{"net"})
 
-	// Every group the gate removed must be reported, because
-	// SetEnabledCategories only re-attaches groups it finds in
-	// intentionallyDisabled. A group closed but unreported is gone for the
-	// lifetime of the agent, and a PodTrace asking for it would silently
-	// collect nothing.
 	for g := range disabled {
 		if _, still := groups[g]; still {
 			t.Errorf("group %q reported disabled but still present", g)
@@ -124,7 +120,7 @@ func TestStartupGateReportsEveryDisabledGroupForLaterReEnable(t *testing.T) {
 }
 
 func TestStartupGateLeavesUngateableGroupsAlone(t *testing.T) {
-	closed := 0
+	var closed atomic.Int64
 	groups := fixtureGroups(&closed)
 	groups[probes.GroupDatabase] = []link.Link{newCountingLink(&closed)}
 	groups[probes.GroupPool] = []link.Link{newCountingLink(&closed)}

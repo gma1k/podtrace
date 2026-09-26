@@ -2399,3 +2399,151 @@ func kernelVersionString() string {
 	}
 	return "unknown"
 }
+
+func SockOpsEnabled() bool {
+	return config.SockOpsRTTEnabled
+}
+
+var attachCgroupLink = link.AttachCgroup
+
+// AttachSockOpsProbes attaches the sock_ops RTT observer to each cgroup.
+func AttachSockOpsProbes(coll *ebpf.Collection, cgroupPaths []string) []link.Link {
+	if !SockOpsEnabled() {
+		return nil
+	}
+	prog := coll.Programs["sockops_rtt"]
+	if prog == nil {
+		logger.Warn("Smoothed-RTT sock_ops hook requested but the program is not in the " +
+			"loaded collection; network_rtt_seconds will stay empty and " +
+			"net.rtt_spike_rate will fall back to syscall latency")
+		return nil
+	}
+
+	attach := []struct {
+		prog *ebpf.Program
+		typ  ebpf.AttachType
+		name string
+	}{
+		{coll.Programs["cgroup_skb_stamp_egress"], ebpf.AttachCGroupInetEgress, "stamp-egress"},
+		{coll.Programs["cgroup_skb_stamp_ingress"], ebpf.AttachCGroupInetIngress, "stamp-ingress"},
+		{prog, ebpf.AttachCGroupSockOps, "sockops"},
+	}
+
+	targets := sockOpsCgroups(cgroupPaths)
+	var links []link.Link
+	for _, path := range targets {
+		attached := 0
+		for _, a := range attach {
+			if a.prog == nil {
+				continue
+			}
+			l, err := attachCgroupLink(link.CgroupOptions{
+				Path:    path,
+				Attach:  a.typ,
+				Program: a.prog,
+			})
+			if err != nil {
+				logger.Info("Smoothed-RTT hook unavailable for cgroup; RTT will be reported from syscall latency instead",
+					zap.String("cgroup", path), zap.String("program", a.name), zap.Error(err))
+				continue
+			}
+			links = append(links, l)
+			attached++
+		}
+		// Only after something attached: logged unconditionally, this line
+		// claimed success for cgroups where every attach had failed.
+		if attached > 0 {
+			logger.Info("Smoothed-RTT sock_ops hook attached",
+				zap.String("cgroup", path), zap.Int("programs", attached))
+		}
+	}
+	if len(links) == 0 {
+		logger.Warn("Smoothed-RTT sock_ops hook attached to nothing",
+			zap.Int("cgroupsConsidered", len(targets)),
+			zap.String("kubepodsRoot", KubepodsRoot()))
+	}
+	return links
+}
+
+// sockOpsCgroups decides which cgroups the hook attaches to: the caller's
+// targets with blanks and duplicates removed, or the kubepods root when there
+// are none.
+func sockOpsCgroups(cgroupPaths []string) []string {
+	return sockOpsCgroupsWith(cgroupPaths, KubepodsRoot())
+}
+
+// sockOpsCgroupsWith is sockOpsCgroups with the fallback root injected, so
+// both outcomes can be tested on a host that has no kubelet.
+func sockOpsCgroupsWith(cgroupPaths []string, root string) []string {
+	kept := make([]string, 0, len(cgroupPaths))
+	seen := make(map[string]struct{}, len(cgroupPaths))
+	for _, path := range cgroupPaths {
+		if path == "" {
+			continue
+		}
+		if _, dup := seen[path]; dup {
+			continue
+		}
+		seen[path] = struct{}{}
+		kept = append(kept, path)
+	}
+
+	out := make([]string, 0, len(kept))
+	for _, path := range kept {
+		nested := false
+		for _, other := range kept {
+			if other != path && isCgroupDescendant(path, other) {
+				nested = true
+				break
+			}
+		}
+		if !nested {
+			out = append(out, path)
+		}
+	}
+	if len(out) == 0 {
+		if root != "" {
+			return []string{root}
+		}
+		return nil
+	}
+	return out
+}
+
+// kubepodsRootCandidates lists the well-known cgroup directories kubelet
+// publishes per-pod slices under, relative to the cgroup mount.
+var kubepodsRootCandidates = []string{
+	"kubepods.slice",
+	"kubepods",
+	"kubelet.slice/kubelet-kubepods.slice",
+	"system.slice/kubelet.service/kubepods",
+}
+
+// KubepodsRoot returns the first kubepods cgroup root present on this node,
+// or empty when none is, which is the case outside Kubernetes.
+func KubepodsRoot() string { return kubepodsRootUnder(config.CgroupBasePath) }
+
+// kubepodsRootUnder is KubepodsRoot with the mount point injected, so the
+// candidate order can be tested without a kubelet.
+func kubepodsRootUnder(base string) string {
+	if base == "" {
+		return ""
+	}
+	for _, c := range kubepodsRootCandidates {
+		candidate := filepath.Join(base, c)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return ""
+}
+
+// isCgroupDescendant reports whether child sits under ancestor in the cgroup
+// tree. Both are absolute filesystem paths, so this is a path-prefix test on
+// whole segments: "/a/bc" is not inside "/a/b".
+func isCgroupDescendant(child, ancestor string) bool {
+	if ancestor == "" || child == ancestor {
+		return false
+	}
+	return strings.HasPrefix(child, strings.TrimSuffix(ancestor, "/")+"/")
+}

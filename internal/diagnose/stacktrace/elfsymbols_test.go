@@ -79,7 +79,7 @@ func TestAFunctionAddressResolvesToItsName(t *testing.T) {
 		t.Fatal("no symbol table read from a binary built with symbols")
 	}
 
-	fn := table.goTable.LookupFunc("main.TargetFunction")
+	fn := gosymTable(t, bin).LookupFunc("main.TargetFunction")
 	if fn == nil {
 		t.Fatal("fixture does not contain main.TargetFunction")
 	}
@@ -142,16 +142,40 @@ func TestTheSymbolTableIsParsedOncePerBinary(t *testing.T) {
 	}
 }
 
-func TestAMissingBinaryCachesItsAbsence(t *testing.T) {
+func TestAMissingBinaryResolvesToNothingWithoutBeingCached(t *testing.T) {
 	var c symbolTableCache
 	missing := filepath.Join(t.TempDir(), "not-here")
 
 	if got := c.get(missing); got != nil {
 		t.Errorf("get = %v, want nil for a path that does not exist", got)
 	}
-	if _, ok := c.tables[missing]; !ok {
-		t.Error("the failure was not cached; a stripped or absent binary would be " +
-			"re-parsed for every frame")
+	if got := c.len(); got != 0 {
+		t.Errorf("cached %d entries for a path with no identity; there is nothing to "+
+			"key it on, and retrying costs one failed open", got)
+	}
+}
+
+func TestAnUnparseableBinaryCachesItsAbsence(t *testing.T) {
+	var c symbolTableCache
+	junk := filepath.Join(t.TempDir(), "stripped")
+	if err := os.WriteFile(junk, []byte("not an elf at all"), 0o755); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	loads := 0
+	c.load = func(path string) *symbolTable {
+		loads++
+		return loadSymbolTable(path)
+	}
+
+	for i := 0; i < 3; i++ {
+		if got := c.get(junk); got != nil {
+			t.Fatalf("get = %v, want nil for a file with no symbols", got)
+		}
+	}
+	if loads != 1 {
+		t.Errorf("opened and scanned an unparseable binary %d times, want 1; a stripped "+
+			"binary would be re-scanned for every frame", loads)
 	}
 }
 
@@ -263,7 +287,7 @@ func TestARealCBinaryResolvesThroughELFSymbols(t *testing.T) {
 	if table == nil {
 		t.Fatal("no symbol table from an unstripped C binary")
 	}
-	if table.goTable != nil {
+	if table.goTable != nil || table.pcln != nil {
 		t.Error("a C binary produced a Go symbol table")
 	}
 

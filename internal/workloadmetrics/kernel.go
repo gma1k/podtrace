@@ -64,8 +64,7 @@ type kernelHistogram struct {
 	labelValues []string
 	count       uint64
 	sum         float64
-	buckets     map[int]int64
-	lastSeen    time.Time
+	buckets     map[uint16]int64
 }
 
 // kernelHistograms collects the histogram families fed from the kernel.
@@ -73,14 +72,12 @@ type kernelHistograms struct {
 	mu     sync.Mutex
 	descs  map[string]*prometheus.Desc
 	series map[string]map[string]*kernelHistogram
-	now    func() time.Time
 }
 
 func newKernelHistograms(base []string, withEdges bool) *kernelHistograms {
 	k := &kernelHistograms{
 		descs:  map[string]*prometheus.Desc{},
 		series: map[string]map[string]*kernelHistogram{},
-		now:    time.Now,
 	}
 	add := func(family string, labels []string) {
 		k.descs[family] = prometheus.NewDesc(metricPrefix+family, kernelHelp[family], labels, nil)
@@ -113,6 +110,9 @@ var kernelHistogramLabels = map[string][]string{
 	"l7_request_duration_seconds":    {"protocol"},
 	"filesystem_latency_seconds":     {"operation"},
 	"cpu_blocked_seconds":            {},
+	"cpu_runqueue_latency_seconds":   {},
+	"lock_contention_seconds":        {},
+	"network_rtt_seconds":            {},
 	"tls_handshake_duration_seconds": {},
 	"db_connection_acquire_seconds":  {},
 }
@@ -124,6 +124,9 @@ var kernelHelp = map[string]string{
 	"l7_request_duration_seconds":    "Duration of decoded application-protocol requests.",
 	"filesystem_latency_seconds":     "Latency of filesystem operations.",
 	"cpu_blocked_seconds":            "Time a workload spent blocked off-CPU.",
+	"cpu_runqueue_latency_seconds":   "Time a workload spent runnable but not running.",
+	"lock_contention_seconds":        "Time a workload spent waiting on a futex or pthread mutex.",
+	"network_rtt_seconds":            "Smoothed round-trip time as the kernel measures it.",
 	"tls_handshake_duration_seconds": "Duration of TLS handshakes.",
 	"db_connection_acquire_seconds":  "Time callers spent obtaining a pooled database connection, queueing or reconnecting.",
 }
@@ -146,14 +149,13 @@ func (k *kernelHistograms) observeBucket(family string, labelValues []string, bu
 	if entry == nil {
 		entry = &kernelHistogram{
 			labelValues: append([]string(nil), labelValues...),
-			buckets:     map[int]int64{},
+			buckets:     map[uint16]int64{},
 		}
 		byLabels[id] = entry
 	}
 	entry.count += count
 	entry.sum += sumSeconds
-	entry.buckets[int(bucket)] += safeconv.Uint64ToInt64(count)
-	entry.lastSeen = k.now()
+	entry.buckets[bucket] += safeconv.Uint64ToInt64(count)
 }
 
 // Describe implements prometheus.Collector.
@@ -186,7 +188,7 @@ func (k *kernelHistograms) collectFamilyLocked(family string, ch chan<- promethe
 		}
 		buckets := make(map[int]int64, len(entry.buckets))
 		for idx, n := range entry.buckets {
-			buckets[idx] = n
+			buckets[kernelagg.NativeIndex(idx)] += n
 		}
 		metric, err := prometheus.NewConstNativeHistogram(
 			desc, entry.count, entry.sum, buckets, nil, 0,
@@ -220,23 +222,21 @@ func (c kernelFamilyCollector) Collect(ch chan<- prometheus.Metric) {
 
 const kernelZeroThreshold = 1e-12
 
-// reap drops series whose workload has gone away, matching the event path's
-// retirement rule so a departed pod does not report forever.
-func (k *kernelHistograms) reap(maxIdle time.Duration) int {
+// delete drops one series. Idleness is tracked once, by the Sink's admit
+// bookkeeping, which is what decides when to call this.
+func (k *kernelHistograms) delete(family string, labelValues []string) bool {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-
-	cutoff := k.now().Add(-maxIdle)
-	removed := 0
-	for _, byLabels := range k.series {
-		for id, entry := range byLabels {
-			if entry.lastSeen.Before(cutoff) {
-				delete(byLabels, id)
-				removed++
-			}
-		}
+	byLabels, ok := k.series[family]
+	if !ok {
+		return false
 	}
-	return removed
+	id := kernelSeriesKey(family, labelValues)
+	if _, ok := byLabels[id]; !ok {
+		return false
+	}
+	delete(byLabels, id)
+	return true
 }
 
 // IngestKernel folds drained rows into the metric families, returning how
@@ -286,8 +286,34 @@ func (s *Sink) ingestKernelRow(row *kernelagg.Row) bool {
 		}
 		s.kernelObserve("filesystem_latency_seconds", appendLabels(base, operation), row, seconds)
 
+	case events.EventConnect, events.EventConnectResult:
+		variant := kernelagg.DecodeVariant(row.Key.Variant)
+		if events.CountsAsConnectionAttempt(e.Type, variant.IsError) {
+			result := kernelOutcome(variant)
+			if e.Type == events.EventConnect && variant.IsError && variant.Transport == connectVariantUnreachable {
+				result = outcomeUnreachable
+			}
+			s.add(s.c.networkConnections, "network_connections_total",
+				appendLabels(base, "tcp", result), count)
+		}
+
+	case events.EventTCPRetrans:
+		s.add(s.c.networkRetransmits, "network_retransmits_total", base, count)
+
+	case events.EventNetDevError:
+		s.add(s.c.networkDeviceErrors, "network_device_errors_total", base, count)
+
 	case events.EventSchedSwitch:
 		s.kernelObserve("cpu_blocked_seconds", base, row, seconds)
+		if e.TCPState == schedPreempted {
+			s.kernelObserve("cpu_runqueue_latency_seconds", base, row, seconds)
+		}
+
+	case events.EventTCPRTT:
+		s.kernelObserve("network_rtt_seconds", base, row, seconds)
+
+	case events.EventLockContention:
+		s.kernelObserve("lock_contention_seconds", base, row, seconds)
 
 	case events.EventTLSHandshake:
 		s.kernelObserve("tls_handshake_duration_seconds", base, row, seconds)
@@ -343,6 +369,10 @@ func kernelStatusClass(v kernelagg.Variant) string {
 		return "unknown"
 	}
 }
+
+// connectVariantUnreachable is the value bpf/agg.h puts in a connect row's
+// protocol slot when connect() had no route for the address family.
+const connectVariantUnreachable = 1
 
 func kernelOutcome(v kernelagg.Variant) string {
 	if v.IsError {

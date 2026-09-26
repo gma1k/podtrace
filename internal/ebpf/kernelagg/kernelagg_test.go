@@ -25,7 +25,7 @@ func TestBucketIndexMatchesTheDocumentedSchema(t *testing.T) {
 		ns   uint64
 		want uint16
 	}{
-		{1000, 79}, {1_000_000, 159}, {30_000_000_000, 278},
+		{1000, 80}, {1_000_000, 160}, {30_000_000_000, 279},
 	} {
 		if got := BucketIndex(tc.ns); got != tc.want {
 			t.Errorf("BucketIndex(%d) = %d, want %d; the Go and BPF indices must agree or the "+
@@ -194,9 +194,9 @@ func TestBucketIndexIsMonotonicAndCannotWrap(t *testing.T) {
 		prev = got
 	}
 
-	// The whole u64 range still lands inside a uint16.
-	if got := BucketIndex(^uint64(0)); got != 512 {
-		t.Errorf("BucketIndex(max uint64) = %d, want 512 (64 octaves x 8)", got)
+	if prev == 0xFFFF {
+		t.Errorf("BucketIndex(1<<63) = %d hit the uint16 clamp; every duration a probe can "+
+			"measure must land in a real bucket", prev)
 	}
 }
 

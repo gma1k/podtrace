@@ -12,6 +12,7 @@ var eventTypeSamplingRates = map[events.EventType]int{
 	events.EventTCPRetrans:     5,
 	events.EventDNS:            10,
 	events.EventConnect:        20,
+	events.EventConnectResult:  20,
 	events.EventHTTPReq:        30,
 	events.EventHTTPResp:       30,
 	events.EventTCPSend:        50,
@@ -45,7 +46,7 @@ func getEventPriority(event *events.Event) int {
 		return config.PriorityCritical
 	case events.EventTCPRetrans, events.EventLockContention:
 		return config.PriorityHigh
-	case events.EventDNS, events.EventConnect, events.EventHTTPReq, events.EventHTTPResp:
+	case events.EventDNS, events.EventConnect, events.EventConnectResult, events.EventHTTPReq, events.EventHTTPResp:
 		return config.PriorityNormal
 	default:
 		return config.PriorityLow

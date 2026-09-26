@@ -233,7 +233,7 @@ jobs:
           helm lint ${{ env.CHART_PATH }}
           mkdir -p dist
           helm package ${{ env.CHART_PATH }} -d dist/
-          tgz=$(ls dist/podtrace-*.tgz | head -n1)
+          tgz=$(find dist -maxdepth 1 -name 'podtrace-*.tgz' | sort | head -n1)
           version=$(helm show chart ${{ env.CHART_PATH }} | awk '/^version:/{print $2}')
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           helm push "$tgz" oci://${{ env.CHART_REPO }} 2>&1 | tee push.log

@@ -42,6 +42,14 @@ type AgentInspectionThresholdsSpecApplyConfiguration struct {
 	// AcquireMean is the mean time callers spend queued for a free database
 	// connection above which db.connection_acquire_slow fires. Go database/sql only.
 	AcquireMean *v1.Duration `json:"acquireMean,omitempty"`
+	// CPUBlockedMean is the mean time a workload spends off-CPU waiting to
+	// be scheduled above which cpu.contention fires.
+	CPUBlockedMean *v1.Duration `json:"cpuBlockedMean,omitempty"`
+	// PoolUtilizationPercent is the share of SetMaxOpenConns at which
+	// db.pool_saturated fires as a warning; it escalates to critical ten
+	// points higher. This fires before db.connection_acquire_slow, which
+	// only notices once callers are already queueing.
+	PoolUtilizationPercent *int32 `json:"poolUtilizationPercent,omitempty"`
 }
 
 // AgentInspectionThresholdsSpecApplyConfiguration constructs a declarative configuration of the AgentInspectionThresholdsSpec type for use with
@@ -79,5 +87,21 @@ func (b *AgentInspectionThresholdsSpecApplyConfiguration) WithMeanLatency(value 
 // If called multiple times, the AcquireMean field is set to the value of the last call.
 func (b *AgentInspectionThresholdsSpecApplyConfiguration) WithAcquireMean(value v1.Duration) *AgentInspectionThresholdsSpecApplyConfiguration {
 	b.AcquireMean = &value
+	return b
+}
+
+// WithCPUBlockedMean sets the CPUBlockedMean field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the CPUBlockedMean field is set to the value of the last call.
+func (b *AgentInspectionThresholdsSpecApplyConfiguration) WithCPUBlockedMean(value v1.Duration) *AgentInspectionThresholdsSpecApplyConfiguration {
+	b.CPUBlockedMean = &value
+	return b
+}
+
+// WithPoolUtilizationPercent sets the PoolUtilizationPercent field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the PoolUtilizationPercent field is set to the value of the last call.
+func (b *AgentInspectionThresholdsSpecApplyConfiguration) WithPoolUtilizationPercent(value int32) *AgentInspectionThresholdsSpecApplyConfiguration {
+	b.PoolUtilizationPercent = &value
 	return b
 }

@@ -49,7 +49,8 @@ func (r *Resolver) Resolve(ctx context.Context, pid uint32, addr uint64) string 
 }
 
 type stackResolver struct {
-	symbols  symbolTableCache
+	// symbols is nil in production, meaning sharedSymbolTables.
+	symbols  *symbolTableCache
 	cache    map[string]string
 	segments map[string][]loadSegment
 	mappings map[string][]exeMapping
@@ -94,6 +95,7 @@ func (r *stackResolver) resolve(ctx context.Context, pid uint32, addr uint64) st
 	if err != nil || exePath == "" {
 		return fmt.Sprintf("0x%x", addr)
 	}
+	mapsPath := exePath
 	exePath, err = exeInTargetRoot(pid, exePath)
 	if err != nil {
 		return fmt.Sprintf("0x%x", addr)
@@ -103,10 +105,10 @@ func (r *stackResolver) resolve(ctx context.Context, pid uint32, addr uint64) st
 		return v
 	}
 	symAddrForTable := addr
-	if v, ok := r.translateAddr(pid, exePath, addr); ok {
+	if v, ok := r.translateAddr(pid, mapsPath, exePath, addr); ok {
 		symAddrForTable = v
 	}
-	if name := r.symbols.get(exePath).lookup(symAddrForTable); name != "" {
+	if name := r.symbolTables().get(exePath).lookupAt(exePath, symAddrForTable); name != "" {
 		r.cache[key] = name
 		return name
 	}
@@ -119,11 +121,7 @@ func (r *stackResolver) resolve(ctx context.Context, pid uint32, addr uint64) st
 		r.cache[key] = v
 		return v
 	}
-	symAddr := addr
-	if v, ok := r.translateAddr(pid, exePath, addr); ok {
-		symAddr = v
-	}
-	cmd := exec.CommandContext(timeoutCtx, addr2lineBin, "-e", exePath, fmt.Sprintf("%#x", symAddr)) // #nosec G204 -- LookPath-resolved binary; exePath validated via hostfs.Stat; address is %#x-formatted
+	cmd := exec.CommandContext(timeoutCtx, addr2lineBin, "-e", exePath, fmt.Sprintf("%#x", symAddrForTable)) // #nosec G204 -- LookPath-resolved binary; exePath validated via hostfs.Stat; address is %#x-formatted
 	out, err := cmd.Output()
 	if err != nil {
 		v := fmt.Sprintf("%s@0x%x", filepath.Base(exePath), addr)
@@ -138,6 +136,13 @@ func (r *stackResolver) resolve(ctx context.Context, pid uint32, addr uint64) st
 	}
 	r.cache[key] = line
 	return line
+}
+
+func (r *stackResolver) symbolTables() *symbolTableCache {
+	if r.symbols != nil {
+		return r.symbols
+	}
+	return sharedSymbolTables
 }
 
 // exeInTargetRoot turns the exe path /proc/<pid>/exe reports into one this
@@ -158,8 +163,8 @@ func exeInTargetRoot(pid uint32, exePath string) (string, error) {
 
 // translateAddr converts a runtime instruction pointer into the ELF virtual
 // address addr2line expects.
-func (r *stackResolver) translateAddr(pid uint32, exePath string, addr uint64) (uint64, bool) {
-	mappings := r.exeMappings(pid, exePath)
+func (r *stackResolver) translateAddr(pid uint32, mapsPath, filePath string, addr uint64) (uint64, bool) {
+	mappings := r.exeMappings(pid, mapsPath)
 	var fileOffset uint64
 	found := false
 	for _, m := range mappings {
@@ -173,7 +178,7 @@ func (r *stackResolver) translateAddr(pid uint32, exePath string, addr uint64) (
 		return 0, false
 	}
 
-	for _, s := range r.loadSegments(exePath) {
+	for _, s := range r.loadSegments(filePath) {
 		if fileOffset >= s.off && fileOffset < s.off+s.filesz {
 			return fileOffset - s.off + s.vaddr, true
 		}
@@ -294,9 +299,6 @@ func GenerateStackTraceSectionWithContext(d Diagnostician, ctx context.Context) 
 	for i := 0; i < limit; i++ {
 		s := summaries[i]
 		e := s.Sample
-		if e == nil {
-			continue
-		}
 		if e.Target != "" {
 			report += fmt.Sprintf("  Hot stack %d: %d events, type=%s, target=%s, avg latency=%.2fms\n", i+1, s.Count, e.TypeString(), sanitize.Terminal(e.Target), float64(e.LatencyNS)/float64(config.NSPerMS))
 		} else {
