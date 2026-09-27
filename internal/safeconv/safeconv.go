@@ -141,3 +141,11 @@ func IntToUint32(v int) uint32 {
 	}
 	return uint32(v)
 }
+
+// IntToUint64 maps int to uint64, clamping negatives to 0.
+func IntToUint64(v int) uint64 {
+	if v < 0 {
+		return 0
+	}
+	return uint64(v)
+}

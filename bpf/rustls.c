@@ -46,11 +46,12 @@ static __always_inline void rustls_dispatch(void *ctx, void *base, u64 len,
 	if (bpf_probe_read_user(peek, plen, base) != 0)
 		return;
 
+	u8 transport = HTTP_TRANSPORT_TLS | (dir == H2_DIR_EGRESS ? 0 : HTTP_INBOUND);
 	if (peek[0] == 'H' && peek[1] == 'T' && peek[2] == 'T' && peek[3] == 'P' &&
 	    peek[4] == '/' && peek[5] == '1' && peek[6] == '.')
-		http_emit_response(ctx, base, len, HTTP_TRANSPORT_TLS, conn);
+		http_emit_response(ctx, base, len, transport, conn);
 	else if (http_method_len(peek) > 0)
-		http_emit_request(ctx, base, len, HTTP_TRANSPORT_TLS, conn);
+		http_emit_request(ctx, base, len, transport, conn);
 	else
 		h2_emit_frames(base, len, conn, dir, HTTP_TRANSPORT_H2_TLS);
 }

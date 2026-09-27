@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/gma1k/podtrace/internal/profiling"
 	"github.com/gma1k/podtrace/internal/status"
 )
 
@@ -22,6 +24,13 @@ const clearScreen = "\033[H\033[2J"
 // statusPollInterval is how often --wait checks again; tests shorten it.
 var statusPollInterval = 2 * time.Second
 
+// statusNow and statusSleep are the collector's clock; nil means the real one.
+// Tests set a fake so a rate over the window does not depend on scheduling.
+var (
+	statusNow   func() time.Time
+	statusSleep func(context.Context, time.Duration) error
+)
+
 type statusOptions struct {
 	Kubeconfig      string
 	Context         string
@@ -29,6 +38,7 @@ type statusOptions struct {
 	Namespace       string
 	Workload        string
 	Profile         string
+	SlowRequests    bool
 	Output          string
 	Top             int
 	Window          time.Duration
@@ -76,7 +86,9 @@ func newStatusCmd() *cobra.Command {
   - the issues the continuous inspections have raised,
   - the workloads with the most trouble or traffic: requests per second,
     error rate and p95 latency over the last window,
-  - with --profile, the hot functions of one workload.
+  - with --profile, the hot functions of one workload, and where its slowest
+    requests spent their CPU. With -o folded or -o pprof it prints the
+    workload's whole stacks instead, for a flame graph.
 
 It needs no metrics backend and no port-forward: only get on pods/proxy in the
 podtrace system namespace, list on events for issue messages, and list on
@@ -93,6 +105,10 @@ on it. Active workload issues do not change it.`,
 
   # Where one workload spends its CPU:
   kubectl podtrace status --profile shop/checkout
+
+  # A flame graph of it, or of only its slowest 1% of requests:
+  kubectl podtrace status --profile shop/checkout -o folded | flamegraph.pl > checkout.svg
+  kubectl podtrace status --profile shop/checkout --slow-requests -o pprof > slow.pb.gz
 
   # After an install or upgrade, block until podtrace is healthy:
   kubectl podtrace status --wait
@@ -114,7 +130,8 @@ on it. Active workload issues do not change it.`,
 	f.StringVarP(&opts.Namespace, "namespace", "n", "", "Show only this namespace's workloads and issues (default: all namespaces)")
 	f.StringVar(&opts.Workload, "workload", "", "Show only this workload")
 	f.StringVar(&opts.Profile, "profile", "", "Also show the hot functions of one workload, as namespace/workload (or workload with -n)")
-	f.StringVarP(&opts.Output, "output", "o", "table", "Output format: table or json")
+	f.BoolVar(&opts.SlowRequests, "slow-requests", false, "With --profile and -o folded or pprof, keep only the stacks of the slowest 1% of requests")
+	f.StringVarP(&opts.Output, "output", "o", "table", "Output format: table or json, or with --profile, folded or pprof for a flame graph")
 	f.IntVar(&opts.Top, "top", 10, "How many workloads, and profile frames, to show")
 	f.DurationVar(&opts.Window, "window", 10*time.Second, "How long to measure rates over before the first report")
 	f.BoolVarP(&opts.Watch, "watch", "w", false, "Keep refreshing until interrupted")
@@ -128,8 +145,18 @@ on it. Active workload issues do not change it.`,
 func (o statusOptions) validate() (profileNamespace, profileWorkload string, err error) {
 	switch o.Output {
 	case "table", "json":
+		if o.SlowRequests {
+			return "", "", fmt.Errorf("--slow-requests needs -o folded or -o pprof; the table and JSON already show the slowest requests")
+		}
+	case "folded", "pprof":
+		if o.Profile == "" {
+			return "", "", fmt.Errorf("-o %s prints a workload's stacks and needs --profile", o.Output)
+		}
+		if o.Watch || o.Wait {
+			return "", "", fmt.Errorf("-o %s writes one set of stacks and cannot be combined with --watch or --wait", o.Output)
+		}
 	default:
-		return "", "", fmt.Errorf("--output must be table or json, not %q", o.Output)
+		return "", "", fmt.Errorf("--output must be table, json, folded or pprof, not %q", o.Output)
 	}
 	if o.Top < 1 {
 		return "", "", fmt.Errorf("--top must be at least 1")
@@ -231,6 +258,20 @@ func runStatus(ctx context.Context, opts statusOptions, out, progress io.Writer)
 		Cluster: cluster,
 		Options: status.Options{Namespace: opts.Namespace, Workload: opts.Workload, Top: opts.Top},
 		Window:  opts.Window,
+		Now:     statusNow,
+		Sleep:   statusSleep,
+	}
+	if opts.Output == "folded" || opts.Output == "pprof" {
+		failed, err := collector.WriteStacks(ctx, out, status.StackFormat(opts.Output), profiling.StackSelection{
+			Namespace: profileNamespace, Workload: profileWorkload, SlowRequests: opts.SlowRequests,
+		})
+		for _, warning := range failed {
+			_, _ = fmt.Fprintf(progress, "! %s\n", warning)
+		}
+		if errors.Is(err, status.ErrNoStacks) {
+			return fmt.Errorf("no agent has stacks for %s/%s yet; they appear once the workload has run on CPU with continuous profiling on", profileNamespace, profileWorkload)
+		}
+		return err
 	}
 	redraw := opts.Watch && opts.Output == "table" && stdoutIsTerminal()
 

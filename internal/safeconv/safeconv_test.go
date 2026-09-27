@@ -173,3 +173,21 @@ func TestIntToUint32(t *testing.T) {
 		}
 	}
 }
+
+func TestIntToUint64(t *testing.T) {
+	cases := []struct {
+		in   int
+		want uint64
+	}{
+		{0, 0},
+		{42, 42},
+		{-1, 0},
+		{math.MinInt, 0},
+		{math.MaxInt, math.MaxInt},
+	}
+	for _, c := range cases {
+		if got := IntToUint64(c.in); got != c.want {
+			t.Errorf("IntToUint64(%d) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}

@@ -72,6 +72,61 @@
    - `X-Request-ID`: Trace ID
    - `X-Span-ID`: Span ID
 
+### Podtrace observes trace context
+
+Podtrace reads the headers above. It does not add, rewrite or forward
+them. When a service receives a request with a `traceparent` and makes its
+own call downstream, the application is what carries that context forward.
+If the application does not carry it, each hop is recorded as a separate
+trace, and podtrace cannot join them.
+
+This is deliberate. An eBPF program that is allowed to see plaintext
+(`SSL_write`, `tcp_sendmsg`) cannot grow the payload. The layers that can grow
+a packet (tc, XDP) see only ciphertext on a TLS connection, and on plaintext
+they would have to rewrite TCP sequence numbers under the stack. A prototype
+that inserted a header this way corrupted a plain `GET` (the server answered
+`400`).
+
+To get connected traces across services, let the application propagate the
+context. The least-effort way is
+[OpenTelemetry auto-instrumentation](https://opentelemetry.io/docs/kubernetes/operator/automatic/),
+which the OpenTelemetry Operator injects per pod with an annotation and no
+code change. From then on, podtrace joins its events to the traces the SDK
+starts: every L7 event that carries a `traceparent` gets that trace id, and
+the response is joined to its request on the same connection.
+
+### Span synthesis for traffic with no trace context
+
+Traffic that carries no trace context produces no spans by default. Set
+`synthesizeSpans: true` on the ExporterConfig (the agent reads it as
+`PODTRACE_TRACING_SYNTHESIZE_SPANS`) and podtrace mints a span for each
+request it sees that has no context. The trace id and span id are derived
+from the request's correlation key, so the request event and its response
+event land on the same span:
+
+```yaml
+apiVersion: podtrace.io/v1alpha1
+kind: ExporterConfig
+spec:
+  synthesizeSpans: true
+```
+
+A synthesized span is always a root span. It records that one request, its
+duration and its status, but it has no parent and no children. Two services
+talking to each other still produce two unrelated traces. It is off by default
+because a backend would otherwise fill with one-span traces for every request.
+
+### Exemplars and kernel aggregation
+
+The workload latency histograms attach the trace id of a sampled request as an
+exemplar, which is how a dashboard jumps from a slow bucket to the trace behind
+it. An exemplar needs a per-request event. With
+`agent.metrics.kernelAggregation` on (the default), the agent folds requests
+into a BPF map and skips the ring buffer while no `PodTrace` exists, so no
+request identity reaches userspace and the histograms carry no exemplars.
+Exemplars come back while a `PodTrace` keeps the ring buffer open. See
+[Continuous Metrics](continuous-metrics.md#interaction-with-kernel-side-aggregation).
+
 ### Event Correlation
 
 Events are correlated by:

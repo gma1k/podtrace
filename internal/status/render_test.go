@@ -28,8 +28,10 @@ func fullReport() Report {
 			{Namespace: "shop", Workload: "checkout", RequestsPerSecond: 12.34, ErrorPercent: &errPct, P95Milliseconds: &p95, Issues: 1},
 			{Namespace: "shop", Workload: "cart"},
 		},
-		Profile: &WorkloadHotFrames{Namespace: "shop", Workload: "checkout", Samples: 200, Nodes: 2, SchedulerFrames: 40,
-			Frames: []HotFrame{{Frame: "main.price", Count: 80, Percent: 40}}},
+		Profile: &WorkloadHotFrames{Namespace: "shop", Workload: "checkout", Source: "on-cpu", Samples: 200, Nodes: 2, SchedulerFrames: 40,
+			Frames: []HotFrame{{Frame: "main.price", Count: 80, Percent: 40}},
+			SlowRequests: &SlowRequestFrames{Quantile: 0.99, ThresholdMinMilliseconds: 180, ThresholdMaxMilliseconds: 240,
+				Requests: 1400, SampledRequests: 12, Samples: 34, Frames: []HotFrame{{Frame: "main.tax", Count: 17, Percent: 50}}}},
 		Warnings: []string{"something to fix"},
 	}
 }
@@ -46,8 +48,10 @@ func TestTheTableViewShowsEverySection(t *testing.T) {
 		"degraded (btf_unavailable)",
 		"l7.error_rate", "shop/checkout", "4m", "High error rate\uFFFD[31m red\uFFFD[0m",
 		"12.3", "12.5%", "180ms",
-		"PROFILE shop/checkout · 200 samples on 2 node(s) · 40 Go scheduler frame hits hidden",
+		"PROFILE shop/checkout · on-cpu · 200 samples on 2 node(s) · 40 samples ended in the Go scheduler",
 		"40.0%  main.price",
+		"SLOWEST 1% OF REQUESTS · ≥180ms–240ms · 12 of 1400 requests caught on CPU · 34 samples",
+		"50.0%  main.tax",
 		"! something to fix",
 	} {
 		if !strings.Contains(out, want) {
@@ -178,5 +182,48 @@ func TestProfilesAreMergedRankedAndCut(t *testing.T) {
 		Frames: []profiling.FrameCount{{Frame: "f", Count: 1}}}}}}, "a", "b", 0)
 	if empty.Frames[0].Percent != 0 {
 		t.Errorf("a profile with no samples produced a share: %+v", empty.Frames)
+	}
+}
+
+func TestASlowRequestSectionWithNoSamplesSaysTheyWereWaiting(t *testing.T) {
+	var buf bytes.Buffer
+	_ = RenderText(&buf, Report{GeneratedAt: t0, Profile: &WorkloadHotFrames{Namespace: "shop", Workload: "checkout",
+		SlowRequests: &SlowRequestFrames{Quantile: 0.995, ThresholdMinMilliseconds: 50, ThresholdMaxMilliseconds: 50, Requests: 10}}})
+	out := buf.String()
+	for _, want := range []string{"SLOWEST 0.5% OF REQUESTS · ≥50ms · 0 of 10", "spent their time waiting"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "–") {
+		t.Errorf("one node's threshold was printed as a range:\n%s", out)
+	}
+}
+
+func TestSlowRequestsAndSourcesAreMergedAcrossNodes(t *testing.T) {
+	p := []Profile{
+		{Profiles: []profiling.WorkloadProfile{{Namespace: "shop", Workload: "checkout", Source: profiling.SourceOnCPU, Samples: 10,
+			SlowRequests: &profiling.RequestProfile{Quantile: 0.99, ThresholdMilliseconds: 200, Requests: 100, SampledRequests: 1, Samples: 4,
+				Frames: []profiling.FrameCount{{Frame: "tax", Count: 4}}}}}},
+		{Profiles: []profiling.WorkloadProfile{{Namespace: "shop", Workload: "checkout", Source: profiling.SourceSchedSwitch, Samples: 10,
+			SlowRequests: &profiling.RequestProfile{Quantile: 0.99, ThresholdMilliseconds: 150, Requests: 50, SampledRequests: 2, Samples: 4,
+				Frames: []profiling.FrameCount{{Frame: "tax", Count: 2}, {Frame: "ship", Count: 2}}}}}},
+		{Profiles: []profiling.WorkloadProfile{{Namespace: "shop", Workload: "checkout", Source: profiling.SourceOnCPU, Samples: 1,
+			SlowRequests: &profiling.RequestProfile{Quantile: 0.99, ThresholdMilliseconds: 300, Requests: 1}}}},
+	}
+	got := MergeProfiles(p, "shop", "checkout", 5)
+	if got.Source != "on-cpu, sched-switch" {
+		t.Errorf("source = %q", got.Source)
+	}
+	s := got.SlowRequests
+	if s == nil || s.ThresholdMinMilliseconds != 150 || s.ThresholdMaxMilliseconds != 300 || s.Requests != 151 ||
+		s.SampledRequests != 3 || s.Samples != 8 {
+		t.Fatalf("slow = %+v", s)
+	}
+	if len(s.Frames) != 2 || s.Frames[0].Frame != "tax" || s.Frames[0].Percent != 75 {
+		t.Errorf("slow frames = %+v", s.Frames)
+	}
+	if MergeProfiles([]Profile{{Profiles: []profiling.WorkloadProfile{{Namespace: "a", Workload: "b"}}}}, "a", "b", 1).SlowRequests != nil {
+		t.Error("a profile with no slow requests grew a section")
 	}
 }

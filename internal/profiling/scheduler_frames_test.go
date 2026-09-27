@@ -90,22 +90,22 @@ func TestAWorkloadProfileReportsTheSchedulerHitsItHid(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("got %d workloads, want 1", len(got))
 	}
-	if got[0].SchedulerFrames != 4 {
-		t.Errorf("SchedulerFrames = %d, want 4", got[0].SchedulerFrames)
+	if got[0].SchedulerFrames != 2 {
+		t.Errorf("SchedulerFrames = %d, want both samples counted as ending in the scheduler", got[0].SchedulerFrames)
 	}
 	if len(got[0].Frames) != 1 || got[0].Frames[0].Frame != "main.(*Checkout).price" {
 		t.Errorf("frames = %+v, want only the application frame", got[0].Frames)
 	}
-	if got[0].Samples != 6 {
-		t.Errorf("Samples = %d, want 6: hiding frames from the list must not change the "+
-			"sample count the profile is weighted by", got[0].Samples)
+	if got[0].Samples != 2 || got[0].Frames[0].Count != 2 {
+		t.Errorf("Samples = %d, frame count = %d, want 2 and 2: a sample that ended in the "+
+			"scheduler is charged to its caller, not lost", got[0].Samples, got[0].Frames[0].Count)
 	}
 
 	raw, err := json.Marshal(got[0])
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if !strings.Contains(string(raw), `"schedulerFrames":4`) {
+	if !strings.Contains(string(raw), `"schedulerFrames":2`) {
 		t.Errorf("the /profile JSON does not carry the hidden count: %s", raw)
 	}
 }

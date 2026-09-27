@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -95,16 +97,21 @@ func RenderText(w io.Writer, r Report) error {
 	}
 
 	if p := r.Profile; p != nil {
-		fmt.Fprintf(b, "\nPROFILE %s/%s · %d samples on %d node(s)", p.Namespace, p.Workload, p.Samples, p.Nodes)
+		fmt.Fprintf(b, "\nPROFILE %s/%s", p.Namespace, p.Workload)
+		if p.Source != "" {
+			fmt.Fprintf(b, " · %s", p.Source)
+		}
+		fmt.Fprintf(b, " · %d samples on %d node(s)", p.Samples, p.Nodes)
 		if p.SchedulerFrames > 0 {
-			fmt.Fprintf(b, " · %d Go scheduler frame hits hidden", p.SchedulerFrames)
+			fmt.Fprintf(b, " · %d samples ended in the Go scheduler and are charged to its caller", p.SchedulerFrames)
 		}
 		b.WriteString("\n")
 		if len(p.Frames) == 0 {
 			b.WriteString("No frames captured yet.\n")
 		}
-		for _, f := range p.Frames {
-			fmt.Fprintf(b, "%6.1f%%  %s\n", f.Percent, clean(f.Frame, 160))
+		writeHotFrames(b, p.Frames)
+		if s := p.SlowRequests; s != nil {
+			renderSlowRequests(b, s)
 		}
 	}
 
@@ -168,4 +175,30 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
 	}
 	return fmt.Sprintf("%dd", int(d.Hours()/24))
+}
+
+func writeHotFrames(b *strings.Builder, frames []HotFrame) {
+	for _, f := range frames {
+		fmt.Fprintf(b, "%6.1f%%  %s\n", f.Percent, clean(f.Frame, 160))
+	}
+}
+
+// renderSlowRequests prints where the slowest requests spent their CPU.
+func renderSlowRequests(b *strings.Builder, s *SlowRequestFrames) {
+	threshold := formatDuration(time.Duration(s.ThresholdMinMilliseconds * float64(time.Millisecond)))
+	if s.ThresholdMaxMilliseconds > s.ThresholdMinMilliseconds {
+		threshold += "–" + formatDuration(time.Duration(s.ThresholdMaxMilliseconds*float64(time.Millisecond)))
+	}
+	fmt.Fprintf(b, "\nSLOWEST %s OF REQUESTS · ≥%s · %d of %d requests caught on CPU · %d samples\n",
+		formatQuantileShare(s.Quantile), threshold, s.SampledRequests, s.Requests, s.Samples)
+	if s.Samples == 0 {
+		b.WriteString("No slow request was caught running: they spent their time waiting, not on a CPU.\n")
+		return
+	}
+	writeHotFrames(b, s.Frames)
+}
+
+// formatQuantileShare turns 0.99 into "1%", the share of requests above it.
+func formatQuantileShare(q float64) string {
+	return strconv.FormatFloat(math.Round((1-q)*1000)/10, 'f', -1, 64) + "%"
 }
