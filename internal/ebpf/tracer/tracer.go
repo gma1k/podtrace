@@ -43,6 +43,7 @@ import (
 	"github.com/gma1k/podtrace/internal/ebpf/h3stream"
 	"github.com/gma1k/podtrace/internal/ebpf/kernelagg"
 	"github.com/gma1k/podtrace/internal/ebpf/loader"
+	"github.com/gma1k/podtrace/internal/ebpf/oncpu"
 	"github.com/gma1k/podtrace/internal/ebpf/parser"
 	"github.com/gma1k/podtrace/internal/ebpf/probes"
 	"github.com/gma1k/podtrace/internal/ebpf/quicinitial"
@@ -86,6 +87,9 @@ type Tracer struct {
 	http3Links      map[string][]link.Link
 	sockOpsLinks    map[string][]link.Link
 	sockOpsCoverage sockOpsCoverage
+
+	onCPUMu      sync.Mutex
+	onCPUSampler *oncpu.Sampler
 
 	probesClosed bool
 
@@ -2513,6 +2517,7 @@ func (t *Tracer) Stop() error {
 	t.containerUprobes = nil
 	t.probeGroupsMu.Unlock()
 	closeLinks(closing)
+	t.stopOnCPUSampler()
 
 	t.readerWG.Wait()
 

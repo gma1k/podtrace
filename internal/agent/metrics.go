@@ -11,6 +11,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
+	"github.com/gma1k/podtrace/internal/ebpf/oncpu"
 	"github.com/gma1k/podtrace/internal/logger"
 )
 
@@ -28,6 +29,10 @@ type Metrics struct {
 	KernelDrainInterval   prometheus.Gauge
 	KernelSinceDrain      prometheus.GaugeFunc
 	lastKernelDrain       atomic.Int64
+	OnCPUSamplerCPUs      prometheus.Gauge
+	OnCPUSamples          prometheus.Counter
+	OnCPUSamplesLost      *prometheus.CounterVec
+	OnCPUDrainFailures    prometheus.Counter
 	IssuePodUnresolved    prometheus.Counter
 	IssueAlertUndelivered prometheus.Counter
 	ActiveCgroups         *prometheus.GaugeVec
@@ -120,6 +125,26 @@ func NewMetrics() *Metrics {
 			Namespace: "podtrace_agent",
 			Name:      "kernel_metrics_drain_interval_seconds",
 			Help:      "How often the kernel aggregation map is drained. Collector internal.",
+		}),
+		OnCPUSamplerCPUs: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: "podtrace_agent",
+			Name:      "oncpu_sampler_cpus",
+			Help:      "CPUs the fixed-rate on-CPU profiling sampler runs on; 0 while the continuous profiler falls back to sched_switch stacks.",
+		}),
+		OnCPUSamples: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "podtrace_agent",
+			Name:      "oncpu_samples_total",
+			Help:      "On-CPU profiling samples of target workloads drained from the kernel.",
+		}),
+		OnCPUSamplesLost: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "podtrace_agent",
+			Name:      "oncpu_samples_lost_total",
+			Help:      "On-CPU profiling samples that could not be recorded or read, by reason: stack_unavailable (no user stack or a stack-map collision), count_map_full, stack_evicted (the stack was gone before it was read).",
+		}, []string{"reason"}),
+		OnCPUDrainFailures: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "podtrace_agent",
+			Name:      "oncpu_drain_failures_total",
+			Help:      "Drains of the on-CPU sampler maps that failed, losing that interval's samples.",
 		}),
 		IssuePodUnresolved: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: "podtrace_agent",
@@ -240,6 +265,7 @@ func NewMetrics() *Metrics {
 		m.AgentInfo, m.KernelSinceDrain,
 		m.EventsExported, m.EventsDropped, m.KernelEventsDropped, m.KernelAggRows,
 		m.KernelDrainedAt, m.KernelDrainInterval,
+		m.OnCPUSamplerCPUs, m.OnCPUSamples, m.OnCPUSamplesLost, m.OnCPUDrainFailures,
 		m.IssuePodUnresolved, m.IssueAlertUndelivered,
 		m.ActiveCgroups, m.ActiveCRs,
 		m.ReconcileTotal, m.BackendDegraded, m.CgroupsAttached, m.CgroupsDetached,
@@ -624,4 +650,40 @@ func (m *Metrics) RecordKernelDrainFailure() {
 		return
 	}
 	m.KernelAggRows.WithLabelValues("drain_failed").Inc()
+}
+
+// RecordOnCPUSampler publishes how many CPUs the on-CPU sampler runs on.
+func (m *Metrics) RecordOnCPUSampler(cpus int) {
+	if m == nil || m.OnCPUSamplerCPUs == nil {
+		return
+	}
+	m.OnCPUSamplerCPUs.Set(float64(cpus))
+}
+
+// RecordOnCPUDrain counts what one drain of the on-CPU sampler returned.
+func (m *Metrics) RecordOnCPUDrain(d oncpu.Drained) {
+	if m == nil || m.OnCPUSamples == nil {
+		return
+	}
+	var samples uint64
+	for _, s := range d.Samples {
+		samples += s.Count
+	}
+	m.OnCPUSamples.Add(float64(samples))
+	for reason, n := range d.Lost {
+		if n > 0 {
+			m.OnCPUSamplesLost.WithLabelValues(oncpu.LostReason(uint32(reason))).Add(float64(n))
+		}
+	}
+	if d.Unresolved > 0 {
+		m.OnCPUSamplesLost.WithLabelValues("stack_evicted").Add(float64(d.Unresolved))
+	}
+}
+
+// RecordOnCPUDrainFailure counts a drain of the on-CPU sampler that failed.
+func (m *Metrics) RecordOnCPUDrainFailure() {
+	if m == nil || m.OnCPUDrainFailures == nil {
+		return
+	}
+	m.OnCPUDrainFailures.Inc()
 }

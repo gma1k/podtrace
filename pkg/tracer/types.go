@@ -7,6 +7,7 @@ import (
 	"context"
 
 	"github.com/gma1k/podtrace/internal/ebpf/kernelagg"
+	"github.com/gma1k/podtrace/internal/ebpf/oncpu"
 	"github.com/gma1k/podtrace/internal/events"
 )
 
@@ -106,4 +107,11 @@ type ContainerUprobeReconciler interface {
 type KernelAggregator interface {
 	SetKernelAggregationMode(mode kernelagg.Mode) error
 	DrainKernelMetrics() ([]kernelagg.Row, error)
+}
+
+// OnCPUSampler is an optional capability a TracerBackend exposes when it can
+// run the fixed-rate on-CPU sampler the continuous profiler reads.
+type OnCPUSampler interface {
+	StartOnCPUSampler() (int, error)
+	DrainOnCPUSamples() (oncpu.Drained, error)
 }

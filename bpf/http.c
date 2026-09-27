@@ -5,6 +5,7 @@
 #include "events.h"
 #include "helpers.h"
 #include "protocols.h"
+#include "oncpu.h"
 
 #define HTTP_METHOD_UNKNOWN 0
 #define HTTP_METHOD_GET     1
@@ -14,6 +15,8 @@
 #define HTTP_METHOD_PATCH   5
 #define HTTP_METHOD_DELETE  6
 #define HTTP_METHOD_OPTIONS 7
+
+#define HTTP_INBOUND 0x80
 
 static __always_inline int http_method_probe(const u8 *b)
 {
@@ -125,6 +128,8 @@ static __noinline void http_capture_traceparent(void *base, u64 avail, char *out
 static __noinline void http_emit_request(void *ctx, void *base, u64 avail,
 					 u8 transport, u64 conn)
 {
+	u8 inbound = transport & HTTP_INBOUND;
+	transport &= ~HTTP_INBOUND;
 	if (!base || avail < HTTP_MIN_REQUEST_LEN)
 		return;
 
@@ -165,6 +170,8 @@ static __noinline void http_emit_request(void *ctx, void *base, u64 avail,
 	u64 now = req.start_ns;
 
 	bpf_map_update_elem(&http_reqs, &conn, &req, BPF_ANY);
+	if (inbound)
+		oncpu_begin_request(conn, now);
 
 	struct event *e = get_event_buf();
 	if (e) {
@@ -189,6 +196,8 @@ static __noinline void http_emit_request(void *ctx, void *base, u64 avail,
 static __noinline void http_emit_response(void *ctx, void *base, u64 len,
 					  u8 transport, u64 conn)
 {
+	u8 inbound = transport & HTTP_INBOUND;
+	transport &= ~HTTP_INBOUND;
 	if (!base || len == 0 || len >= MAX_BYTES_THRESHOLD)
 		return;
 
@@ -235,6 +244,8 @@ static __noinline void http_emit_response(void *ctx, void *base, u64 len,
 
 	u64 latency_ns = calc_latency(req->start_ns);
 	s32 status_num = http_parse_status3(status);
+	if (!inbound)
+		oncpu_finish_request(req->start_ns, latency_ns);
 
 	struct event *e = get_event_buf();
 	if (e) {
@@ -309,8 +320,8 @@ int kretprobe_http_tcp_recvmsg(struct pt_regs *ctx)
 	s32 ret = (s32)PT_REGS_RC(ctx);
 	if (ret <= 0)
 		return 0;
-	http_emit_response(ctx, base, (u64)ret, HTTP_TRANSPORT_PLAINTEXT, sk);
-	http_emit_request(ctx, base, (u64)ret, HTTP_TRANSPORT_PLAINTEXT, sk);
+	http_emit_response(ctx, base, (u64)ret, HTTP_TRANSPORT_PLAINTEXT | HTTP_INBOUND, sk);
+	http_emit_request(ctx, base, (u64)ret, HTTP_TRANSPORT_PLAINTEXT | HTTP_INBOUND, sk);
 	return 0;
 }
 
@@ -385,9 +396,9 @@ int uretprobe_SSL_read(struct pt_regs *ctx)
 
 	if (peek[0] == 'H' && peek[1] == 'T' && peek[2] == 'T' && peek[3] == 'P' &&
 	    peek[4] == '/' && peek[5] == '1' && peek[6] == '.')
-		http_emit_response(ctx, base, (u64)ret, HTTP_TRANSPORT_TLS, conn);
+		http_emit_response(ctx, base, (u64)ret, HTTP_TRANSPORT_TLS | HTTP_INBOUND, conn);
 	else if (http_method_len(peek) > 0)
-		http_emit_request(ctx, base, (u64)ret, HTTP_TRANSPORT_TLS, conn);
+		http_emit_request(ctx, base, (u64)ret, HTTP_TRANSPORT_TLS | HTTP_INBOUND, conn);
 	else
 		h2_emit_frames(base, (u64)ret, conn, H2_DIR_INGRESS,
 			       HTTP_TRANSPORT_H2_TLS);
@@ -438,7 +449,7 @@ int uretprobe_gnutls_record_recv(struct pt_regs *ctx)
 	s64 ret = PT_REGS_RC(ctx);
 	if (ret <= 0)
 		return 0;
-	http_emit_response(ctx, base, (u64)ret, HTTP_TRANSPORT_TLS, conn);
-	http_emit_request(ctx, base, (u64)ret, HTTP_TRANSPORT_TLS, conn);
+	http_emit_response(ctx, base, (u64)ret, HTTP_TRANSPORT_TLS | HTTP_INBOUND, conn);
+	http_emit_request(ctx, base, (u64)ret, HTTP_TRANSPORT_TLS | HTTP_INBOUND, conn);
 	return 0;
 }

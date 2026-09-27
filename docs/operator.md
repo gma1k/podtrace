@@ -146,6 +146,14 @@ Operator and agent both expose Prometheus metrics:
   to the drains with these instead of its own clock. They are collector
   internals, with no compatibility promise.
 
+  The continuous profiler's on-CPU sampler reports
+  `podtrace_agent_oncpu_sampler_cpus` (the CPUs it runs on; `0` means the node
+  fell back to `sched_switch` stacks), `podtrace_agent_oncpu_samples_total`,
+  `podtrace_agent_oncpu_samples_lost_total{reason}` (`stack_unavailable`,
+  `count_map_full`, `stack_evicted`) and
+  `podtrace_agent_oncpu_drain_failures_total`. See
+  [profiling.md](profiling.md#where-the-samples-come-from).
+
   Diagnostics granularity (per-program + per-CR failure surfaces):
 
   - `podtrace_agent_program_attach_failures_total{program,reason}` —

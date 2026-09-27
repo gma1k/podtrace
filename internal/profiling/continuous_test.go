@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/events"
 )
 
@@ -57,11 +58,11 @@ func TestContinuousProfilerCountsSchedSwitchStacksPerWorkload(t *testing.T) {
 	if got[0].Workload != "checkout" {
 		t.Errorf("expected the busiest workload first, got %q", got[0].Workload)
 	}
-	if got[0].Samples != 4 {
-		t.Errorf("expected 4 samples for checkout, got %d", got[0].Samples)
+	if got[0].Samples != 2 || got[0].Source != SourceSchedSwitch {
+		t.Errorf("checkout = %d samples from %q, want 2 from sched-switch", got[0].Samples, got[0].Source)
 	}
-	if got[0].Frames[0].Frame != "fn_100" {
-		t.Errorf("expected the repeated frame to rank first, got %q", got[0].Frames[0].Frame)
+	if len(got[0].Frames) != 1 || got[0].Frames[0].Frame != "fn_100" || got[0].Frames[0].Count != 2 {
+		t.Errorf("frames = %+v, want both samples charged to their innermost frame fn_100", got[0].Frames)
 	}
 }
 
@@ -106,19 +107,18 @@ func TestContinuousProfilerSkipsNullFramesAndNilEvents(t *testing.T) {
 func TestContinuousProfilerStopsAtTheStackDepthCap(t *testing.T) {
 	p := NewContinuousProfiler(namingFactory(&namingResolver{}), nil)
 
-	deep := make([]uint64, maxCorrelatedStackDepth*2)
+	deep := make([]uint64, config.MaxStackDepth*2)
 	for i := range deep {
 		deep[i] = uint64(0x1000 + i)
 	}
 	_ = p.Export(context.Background(), []*events.Event{schedSample("shop", "checkout", 1, deep...)})
 
-	got := p.Snapshot(context.Background())
-	if len(got) != 1 {
-		t.Fatalf("expected one workload, got %d", len(got))
+	got := p.Stacks(context.Background(), StackSelection{})
+	if len(got) != 1 || len(got[0].Stacks) != 1 {
+		t.Fatalf("expected one workload with one stack, got %+v", got)
 	}
-	if got[0].Samples != maxCorrelatedStackDepth {
-		t.Errorf("expected the stack truncated to %d frames, got %d samples",
-			maxCorrelatedStackDepth, got[0].Samples)
+	if n := len(got[0].Stacks[0].Frames); n != config.MaxStackDepth {
+		t.Errorf("stack kept %d frames, want it cut to %d", n, config.MaxStackDepth)
 	}
 }
 
@@ -139,20 +139,23 @@ func TestContinuousProfilerBoundsTheNumberOfWorkloads(t *testing.T) {
 	}
 }
 
-func TestContinuousProfilerBoundsFramesPerWorkload(t *testing.T) {
+func TestContinuousProfilerBoundsStacksPerWorkload(t *testing.T) {
 	p := NewContinuousProfiler(namingFactory(&namingResolver{}), nil)
 
 	var batch []*events.Event
-	for i := 0; i < maxFramesPerWorkload+100; i++ {
+	for i := 0; i < maxStacksPerWorkload+100; i++ {
 		batch = append(batch, schedSample("shop", "checkout", 1, uint64(0x10000+i)))
 	}
 	_ = p.Export(context.Background(), batch)
 
-	if p.Dropped() == 0 {
-		t.Error("distinct frames grew past the per-workload cap without being counted")
+	if p.Dropped() != 100 {
+		t.Errorf("dropped = %d, want the 100 stacks past the cap", p.Dropped())
 	}
-	if got := p.Snapshot(context.Background())[0].Samples; got > maxFramesPerWorkload {
-		t.Errorf("held %d samples against a %d cap", got, maxFramesPerWorkload)
+	if got := p.Snapshot(context.Background())[0].Samples; got != maxStacksPerWorkload+100 {
+		t.Errorf("samples = %d; a stack refused by the cap still happened and must count", got)
+	}
+	if got := len(p.Stacks(context.Background(), StackSelection{})[0].Stacks); got != maxStacksPerWorkload {
+		t.Errorf("held %d stacks against a %d cap", got, maxStacksPerWorkload)
 	}
 }
 
@@ -204,8 +207,8 @@ func TestContinuousProfilerSymbolisesOnlyAtSnapshot(t *testing.T) {
 	if r.calls == 0 {
 		t.Error("the resolver was never called at snapshot time")
 	}
-	if r.calls > maxSymbolizedFrames {
-		t.Errorf("symbolised %d frames against a %d cap", r.calls, maxSymbolizedFrames)
+	if r.calls != 1 {
+		t.Errorf("symbolised one address %d times; a snapshot must remember each answer", r.calls)
 	}
 }
 

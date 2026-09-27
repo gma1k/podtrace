@@ -169,6 +169,7 @@ kubectl get crd tracerconfigs.podtrace.io -o yaml | grep -c holdTime
 - **network.c**: Network probes (TCP, UDP, DNS, HTTP, connections, retransmissions, errors)
 - **filesystem.c**: Filesystem probes (read, write, fsync)
 - **cpu.c**: CPU/scheduling probes (sched_switch) and lock contention (futex, pthread)
+- **oncpu.c** / **oncpu.h**: the 99 Hz on-CPU sampler (perf_event) and the hooks that tie its samples to HTTP requests
 - **memory.c**: Memory probes (page_fault, oom_kill)
 - **syscalls.c**: System call probes (execve, fork, open, close)
 

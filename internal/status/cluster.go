@@ -75,6 +75,7 @@ type Cluster interface {
 	Agents(ctx context.Context) ([]Agent, error)
 	Scrape(ctx context.Context, agent Agent) ([]*dto.MetricFamily, error)
 	Profile(ctx context.Context, agent Agent) (Profile, error)
+	ProfileStacks(ctx context.Context, agent Agent, format StackFormat, sel profiling.StackSelection) ([]byte, error)
 	IssueEvents(ctx context.Context, namespace string) ([]corev1.Event, error)
 	Components(ctx context.Context) ([]Component, error)
 }
@@ -131,7 +132,7 @@ func agentOf(p *corev1.Pod) Agent {
 
 // proxyGet fetches path from an agent's metrics port through the API
 // server's pod proxy.
-func (k *KubeCluster) proxyGet(ctx context.Context, agent Agent, path, accept string) ([]byte, string, error) {
+func (k *KubeCluster) proxyGet(ctx context.Context, agent Agent, path, accept string, params ...[2]string) ([]byte, string, error) {
 	var contentType string
 	req := k.Client.CoreV1().RESTClient().Get().
 		Namespace(k.SystemNamespace).
@@ -139,6 +140,9 @@ func (k *KubeCluster) proxyGet(ctx context.Context, agent Agent, path, accept st
 		Name(agent.Name + ":" + strconv.Itoa(int(agent.Port))).
 		SubResource("proxy").
 		Suffix(path)
+	for _, p := range params {
+		req = req.Param(p[0], p[1])
+	}
 	if accept != "" {
 		req = req.SetHeader("Accept", accept)
 	}
@@ -195,6 +199,17 @@ func (k *KubeCluster) Profile(ctx context.Context, agent Agent) (Profile, error)
 		return Profile{}, fmt.Errorf("decode profile: %w", err)
 	}
 	return p, nil
+}
+
+// ProfileStacks reads one workload's whole stacks from one agent's /profile,
+// as folded text or a gzipped pprof profile.
+func (k *KubeCluster) ProfileStacks(ctx context.Context, agent Agent, format StackFormat, sel profiling.StackSelection) ([]byte, error) {
+	params := [][2]string{{"format", string(format)}, {"namespace", sel.Namespace}, {"workload", sel.Workload}}
+	if sel.SlowRequests {
+		params = append(params, [2]string{"requests", "slow"})
+	}
+	raw, _, err := k.proxyGet(ctx, agent, "profile", "", params...)
+	return raw, err
 }
 
 // IssueEvents lists the Events the agents wrote for issues.

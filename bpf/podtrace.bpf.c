@@ -21,6 +21,7 @@
 #include "fastcgi.c"
 #include "grpc.c"
 #include "http.c"
+#include "oncpu.c"
 #include "h2.c"
 #include "gotls.c"
 #include "goacquire.c"

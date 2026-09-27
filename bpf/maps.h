@@ -940,4 +940,73 @@ struct {
 	__type(value, struct stack_trace_t);
 } stack_buf SEC(".maps");
 
+#ifndef BPF_MAP_TYPE_STACK_TRACE
+#define BPF_MAP_TYPE_STACK_TRACE 7
+#endif
+
+#define ONCPU_STACK_ENTRIES 8192
+#define ONCPU_COUNT_ENTRIES 32768
+#define ONCPU_LOST_STACK 0
+#define ONCPU_LOST_FULL 1
+#define ONCPU_LOST_REASONS 2
+
+struct oncpu_key {
+	u64 cgroup_id;
+	u64 correlation_id;
+	u32 pid;
+	u32 stack_id;
+};
+
+struct oncpu_thread_request {
+	u64 correlation_id;
+	u64 conn;
+};
+
+struct oncpu_request_done {
+	u64 latency_ns;
+	u64 cgroup_id;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_STACK_TRACE);
+	__uint(max_entries, ONCPU_STACK_ENTRIES);
+	__uint(key_size, sizeof(u32));
+	__uint(value_size, MAX_STACK_DEPTH * sizeof(u64));
+} oncpu_stacks SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, ONCPU_COUNT_ENTRIES);
+	__type(key, struct oncpu_key);
+	__type(value, u64);
+} oncpu_counts SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, u32);
+	__type(value, u32);
+} oncpu_enabled SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 8192);
+	__type(key, u32);
+	__type(value, struct oncpu_thread_request);
+} oncpu_thread_requests SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 16384);
+	__type(key, u64);
+	__type(value, struct oncpu_request_done);
+} oncpu_requests_done SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, ONCPU_LOST_REASONS);
+	__type(key, u32);
+	__type(value, u64);
+} oncpu_lost SEC(".maps");
+
 #endif

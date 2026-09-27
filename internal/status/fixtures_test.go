@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/gma1k/podtrace/internal/inspect"
+	"github.com/gma1k/podtrace/internal/profiling"
 )
 
 var baseLabels = []string{"namespace", "workload", "workload_kind", "container"}
@@ -81,6 +82,8 @@ type fakeCluster struct {
 	scrape    func(agent Agent, call int) ([]*dto.MetricFamily, error)
 	profiles  map[string]Profile
 	profErr   map[string]error
+	stacks    map[string][]byte
+	stackErr  map[string]error
 	events    []corev1.Event
 	eventsErr error
 
@@ -122,6 +125,13 @@ func (f *fakeCluster) Profile(_ context.Context, a Agent) (Profile, error) {
 		return Profile{}, err
 	}
 	return f.profiles[a.Name], nil
+}
+
+func (f *fakeCluster) ProfileStacks(_ context.Context, a Agent, _ StackFormat, _ profiling.StackSelection) ([]byte, error) {
+	if err := f.stackErr[a.Name]; err != nil {
+		return nil, err
+	}
+	return f.stacks[a.Name], nil
 }
 
 func (f *fakeCluster) IssueEvents(context.Context, string) ([]corev1.Event, error) {

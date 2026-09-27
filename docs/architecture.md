@@ -87,6 +87,9 @@ The eBPF programs run in the kernel and trace system calls and kernel events. Th
   - `tcp_retransmit_skb` - TCP retransmissions
   - `net_dev_xmit` - Network device transmission errors
 
+- **Perf events**: Timer-driven sampling
+  - cpu-clock at 99 Hz per CPU - on-CPU user stacks for the continuous profiler
+
 ### 2. Event Collection (`internal/ebpf/`)
 
 - **Tracer**: Main struct managing eBPF program lifecycle

@@ -33,6 +33,7 @@ import (
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/diagnose/stacktrace"
 	"github.com/gma1k/podtrace/internal/ebpf/kernelagg"
+	"github.com/gma1k/podtrace/internal/ebpf/oncpu"
 	"github.com/gma1k/podtrace/internal/ebpf/probes"
 	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/internal/profiling"
@@ -225,6 +226,7 @@ func Run(ctx context.Context, opts Options) error {
 	g.Go(func() error { return serveMetrics(gctx, opts.MetricsAddr, metrics, profiler, logger) })
 	g.Go(func() error { return reapWorkloadMetrics(gctx, metricsSink, logger) })
 	g.Go(func() error { return drainKernelMetrics(gctx, backend, metricsSink, router, metrics, logger) })
+	g.Go(func() error { return drainOnCPUSamples(gctx, backend, profiler, metrics, logger) })
 
 	inspections, inspErr := buildInspectionEngine(metrics, metricsSink,
 		enricherPodResolver(enricher), newAlertEventSender(mgr.GetClient()), logger)
@@ -359,7 +361,7 @@ func buildExporters(router *Router, metrics *Metrics, enricher *PodEnricher, pee
 			enricherLookup(enricher))
 		exporters = append(exporters, profiler)
 		logger.Info("continuous profiling enabled",
-			"source", "sched_switch user stacks",
+			"source", "sched_switch user stacks until the on-CPU sampler starts",
 			"endpoint", "/profile")
 	}
 
@@ -458,6 +460,53 @@ func drainKernelMetrics(ctx context.Context, backend tracer.TracerBackend, sink 
 		case <-ctx.Done():
 			drain()
 			_ = aggregator.SetKernelAggregationMode(kernelagg.ModeOff)
+			return nil
+		case <-ticker.C:
+			drain()
+		}
+	}
+}
+
+var onCPUDrainInterval = 5 * time.Second
+
+// drainOnCPUSamples starts the fixed-rate on-CPU sampler and feeds what it
+// counts to the continuous profiler. Where it cannot start, the profiler keeps
+// the sched_switch stacks it already reads, and says so in its profile.
+func drainOnCPUSamples(ctx context.Context, backend tracer.TracerBackend, profiler *profiling.ContinuousProfiler, metrics *Metrics, logger logr.Logger) error {
+	if profiler == nil {
+		return nil
+	}
+	sampler, ok := backend.(tracer.OnCPUSampler)
+	if !ok {
+		logger.Info("the backend cannot run the on-CPU sampler; continuous profiling stays on sched_switch stacks")
+		return nil
+	}
+	cpus, err := sampler.StartOnCPUSampler()
+	if err != nil {
+		logger.Info("on-CPU sampler unavailable; continuous profiling stays on sched_switch stacks",
+			"reason", err.Error())
+		metrics.RecordOnCPUSampler(0)
+		return nil
+	}
+	metrics.RecordOnCPUSampler(cpus)
+	logger.Info("on-CPU sampler started", "cpus", cpus, "hz", oncpu.SampleHz,
+		"drainInterval", onCPUDrainInterval)
+
+	ticker := time.NewTicker(onCPUDrainInterval)
+	defer ticker.Stop()
+	drain := func() {
+		d, err := sampler.DrainOnCPUSamples()
+		if err != nil {
+			logger.Error(err, "draining the on-CPU sampler failed")
+			metrics.RecordOnCPUDrainFailure()
+			return
+		}
+		profiler.IngestOnCPU(d)
+		metrics.RecordOnCPUDrain(d)
+	}
+	for {
+		select {
+		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
 			drain()
@@ -588,19 +637,59 @@ func ResolveNodeName() string {
 	return ""
 }
 
-// profileHandler serves the continuous CPU profile as JSON.
+// profileHandler serves the continuous CPU profile: hot functions as JSON by
+// default, or whole stacks for a flame graph with ?format=folded or
+// ?format=pprof. ?namespace= and ?workload= keep one workload, and
+// ?requests=slow keeps only the stacks of the slowest requests.
 func profileHandler(profiler *profiling.ContinuousProfiler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), config.ProfileSnapshotTimeout)
 		defer cancel()
 
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(struct {
-			Profiles []profiling.WorkloadProfile `json:"profiles"`
-			Dropped  uint64                      `json:"droppedSamples"`
-		}{
-			Profiles: profiler.Snapshot(ctx),
-			Dropped:  profiler.Dropped(),
-		})
+		q := r.URL.Query()
+		sel := profiling.StackSelection{Namespace: q.Get("namespace"), Workload: q.Get("workload")}
+		switch q.Get("requests") {
+		case "", "all":
+		case "slow":
+			sel.SlowRequests = true
+		default:
+			http.Error(w, "requests must be all or slow", http.StatusBadRequest)
+			return
+		}
+
+		switch q.Get("format") {
+		case "", "json":
+			if sel.SlowRequests {
+				http.Error(w, "requests=slow needs format=folded or format=pprof; the JSON already carries slowRequests", http.StatusBadRequest)
+				return
+			}
+			var profiles []profiling.WorkloadProfile
+			for _, wp := range profiler.Snapshot(ctx) {
+				if (sel.Namespace == "" || sel.Namespace == wp.Namespace) && (sel.Workload == "" || sel.Workload == wp.Workload) {
+					profiles = append(profiles, wp)
+				}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(struct {
+				Source   profiling.ProfileSource     `json:"source"`
+				Profiles []profiling.WorkloadProfile `json:"profiles"`
+				Dropped  uint64                      `json:"droppedSamples"`
+				Unjoined uint64                      `json:"unjoinedRequestSamples"`
+			}{
+				Source:   profiler.Source(),
+				Profiles: profiles,
+				Dropped:  profiler.Dropped(),
+				Unjoined: profiler.Unjoined(),
+			})
+		case "folded":
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			_ = profiling.WriteFolded(w, profiler.Stacks(ctx, sel))
+		case "pprof":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Disposition", `attachment; filename="profile.pb.gz"`)
+			_ = profiling.WritePprof(w, profiler.Stacks(ctx, sel), profiler.Source() == profiling.SourceOnCPU)
+		default:
+			http.Error(w, "format must be json, folded or pprof", http.StatusBadRequest)
+		}
 	}
 }

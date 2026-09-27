@@ -31,6 +31,9 @@ type statusFake struct {
 	agentsErr  error
 	profile    status.Profile
 	profErr    error
+	stacks     []byte
+	stacksErr  error
+	stacksSel  profiling.StackSelection
 	scrapes    int
 }
 
@@ -56,6 +59,13 @@ func (f *statusFake) Scrape(context.Context, status.Agent) ([]*dto.MetricFamily,
 
 func (f *statusFake) Profile(context.Context, status.Agent) (status.Profile, error) {
 	return f.profile, f.profErr
+}
+
+func (f *statusFake) ProfileStacks(_ context.Context, _ status.Agent, _ status.StackFormat, sel profiling.StackSelection) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stacksSel = sel
+	return f.stacks, f.stacksErr
 }
 
 func (f *statusFake) IssueEvents(context.Context, string) ([]corev1.Event, error) { return nil, nil }
@@ -97,6 +107,10 @@ func TestStatusFlagsAreChecked(t *testing.T) {
 		"profile shape":    {func(o *statusOptions) { o.Profile = "a/b/c" }, "namespace/workload"},
 		"profile empty ns": {func(o *statusOptions) { o.Profile = "/checkout" }, "namespace/workload"},
 		"profile needs ns": {func(o *statusOptions) { o.Profile = "checkout" }, "-n"},
+		"slow table":       {func(o *statusOptions) { o.SlowRequests = true }, "--slow-requests"},
+		"folded no target": {func(o *statusOptions) { o.Output = "folded" }, "--profile"},
+		"pprof and watch":  {func(o *statusOptions) { o.Output, o.Profile, o.Watch = "pprof", "a/b", true }, "--watch"},
+		"folded and wait":  {func(o *statusOptions) { o.Output, o.Profile, o.Wait = "folded", "a/b", true }, "--wait"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			o := defaultStatusOptions()
@@ -120,9 +134,29 @@ func TestTheProfileTargetIsResolved(t *testing.T) {
 	}
 }
 
+func useFakeStatusClock(t *testing.T) {
+	t.Helper()
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	var mu sync.Mutex
+	origNow, origSleep := statusNow, statusSleep
+	statusNow = func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		return now
+	}
+	statusSleep = func(_ context.Context, d time.Duration) error {
+		mu.Lock()
+		defer mu.Unlock()
+		now = now.Add(d)
+		return nil
+	}
+	t.Cleanup(func() { statusNow, statusSleep = origNow, origSleep })
+}
+
 func TestStatusPrintsTheTableOnce(t *testing.T) {
 	f := newStatusFake()
 	useStatusFake(t, f)
+	useFakeStatusClock(t)
 	var out bytes.Buffer
 	if err := runStatus(context.Background(), defaultStatusOptions(), &out, io.Discard); err != nil {
 		t.Fatal(err)

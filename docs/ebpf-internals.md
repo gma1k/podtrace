@@ -183,6 +183,12 @@ Tracepoints are kernel instrumentation points:
   - Records thread blocking time
   - Tracks CPU scheduling events
 
+**On-CPU sampling:**
+- `perf_event_oncpu_sample`: a `perf_event` program on a cpu-clock event at 99 Hz per CPU
+  - Records the running task's user stack with `bpf_get_stackid` into the `oncpu_stacks` STACK_TRACE map
+  - Counts samples per (cgroup, pid, stack, request) in `oncpu_counts`, drained by the agent every 5 s
+  - Tags a sample with the HTTP/1.x request its thread is serving (`oncpu_thread_requests`); replies record latency in `oncpu_requests_done`
+
 ## Stack Traces
 
 Podtrace captures user-space stack traces for slow operations to help identify exact code paths causing performance issues.

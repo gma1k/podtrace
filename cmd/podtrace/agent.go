@@ -13,6 +13,7 @@ import (
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/ebpf"
 	"github.com/gma1k/podtrace/internal/ebpf/kernelagg"
+	"github.com/gma1k/podtrace/internal/ebpf/oncpu"
 	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/pkg/tracer"
 )
@@ -218,4 +219,30 @@ func (a *ebpfBackendAdapter) DrainKernelMetrics() ([]kernelagg.Row, error) {
 		return nil, ErrNoKernelAggregation
 	}
 	return agg.DrainKernelMetrics()
+}
+
+// onCPUCapable is the slice of the eBPF tracer the continuous profiler's
+// on-CPU source needs.
+type onCPUCapable interface {
+	StartOnCPUSampler() (int, error)
+	DrainOnCPUSamples() (oncpu.Drained, error)
+}
+
+// ErrNoOnCPUSampler reports a backend that cannot run the on-CPU sampler.
+var ErrNoOnCPUSampler = errors.New("backend does not support the on-CPU sampler")
+
+func (a *ebpfBackendAdapter) StartOnCPUSampler() (int, error) {
+	s, ok := a.tr.(onCPUCapable)
+	if !ok {
+		return 0, ErrNoOnCPUSampler
+	}
+	return s.StartOnCPUSampler()
+}
+
+func (a *ebpfBackendAdapter) DrainOnCPUSamples() (oncpu.Drained, error) {
+	s, ok := a.tr.(onCPUCapable)
+	if !ok {
+		return oncpu.Drained{}, ErrNoOnCPUSampler
+	}
+	return s.DrainOnCPUSamples()
 }

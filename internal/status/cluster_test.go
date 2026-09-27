@@ -123,11 +123,13 @@ type apiServer struct {
 	status  int
 	accept  string
 	paths   []string
+	queries []string
 }
 
 func (s *apiServer) start() kubernetes.Interface {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.paths = append(s.paths, r.URL.Path)
+		s.queries = append(s.queries, r.URL.RawQuery)
 		if s.status != 0 {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(s.status)
