@@ -247,7 +247,15 @@ _Static_assert(sizeof(struct bpf_sock) == 80, "bpf_sock must match linux/bpf.h")
 #define BPF_SK_STORAGE_GET_F_CREATE         1
 #define BPF_F_NO_PREALLOC                   (1U << 0)
 #define BPF_MAP_TYPE_SK_STORAGE             24
+
+struct bpf_raw_tracepoint_args {
+	__u64 args[0];
+};
 #endif
+
+#define PT_REGS_RC_INT(x) ((s64)(s32)PT_REGS_RC(x))
+
+#define SOCKET_ERROR(ret) (((ret) < 0 && (ret) != -EAGAIN) ? (s32)(ret) : 0)
 
 #define MAX_STRING_LEN 128
 #define MAX_STACK_DEPTH 64

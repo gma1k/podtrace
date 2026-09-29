@@ -180,21 +180,25 @@ type tracepointSpec struct {
 	category string
 	event    string
 	failMsg  string
+	// raw attaches the program as a raw tracepoint, which is handed the
+	// tracepoint's arguments rather than its record, whose layout changes
+	// between kernels.
+	raw bool
 }
 
 // tracepointProbes is the single source of truth for every tracepoint
 // program, shared by AttachProbesByGroup (startup) and AttachProbeGroup
 // (hot re-attach) so the two paths can never drift.
 var tracepointProbes = []tracepointSpec{
-	{"tracepoint_sched_switch", "sched", "sched_switch", "CPU/scheduling tracking unavailable"},
-	{"tracepoint_inet_sock_set_state", "sock", "inet_sock_set_state", "TCP state-change tracking unavailable"},
-	{"tracepoint_tcp_retransmit_skb", "tcp", "tcp_retransmit_skb", "TCP retransmission tracking unavailable"},
-	{"tracepoint_net_dev_xmit", "net", "net_dev_xmit", "Network device error tracking unavailable"},
-	{"tracepoint_page_fault_user", "exceptions", "page_fault_user", "Page fault tracking unavailable"},
-	{"tracepoint_oom_mark_victim", "oom", "mark_victim", "OOM kill tracking unavailable"},
-	{"tracepoint_sched_process_fork", "sched", "sched_process_fork", "Process fork tracking unavailable"},
-	{"tracepoint_sched_process_exec", "sched", "sched_process_exec", "Process exec tracking unavailable"},
-	{"tracepoint_sys_enter_bind", "syscalls", "sys_enter_bind", "AF_ALG crypto-socket detection unavailable"},
+	{"tracepoint_sched_switch", "sched", "sched_switch", "CPU/scheduling tracking unavailable", false},
+	{"tracepoint_inet_sock_set_state", "sock", "inet_sock_set_state", "TCP state-change tracking unavailable", false},
+	{"tracepoint_tcp_retransmit_skb", "tcp", "tcp_retransmit_skb", "TCP retransmission tracking unavailable", false},
+	{"tracepoint_net_dev_xmit", "net", "net_dev_xmit", "Network device error tracking unavailable", false},
+	{"tracepoint_page_fault_user", "exceptions", "page_fault_user", "Page fault tracking unavailable", false},
+	{"tracepoint_oom_mark_victim", "oom", "mark_victim", "OOM kill tracking unavailable", false},
+	{"raw_tracepoint_sched_process_fork", "sched", "sched_process_fork", "Process fork tracking unavailable", true},
+	{"tracepoint_sched_process_exec", "sched", "sched_process_exec", "Process exec tracking unavailable", false},
+	{"tracepoint_sys_enter_bind", "syscalls", "sys_enter_bind", "AF_ALG crypto-socket detection unavailable", false},
 }
 
 // attachTracepointSpec attaches one tracepoint, returning (link, true) on
@@ -205,7 +209,13 @@ func attachTracepointSpec(coll *ebpf.Collection, tp tracepointSpec) (link.Link, 
 	if prog == nil {
 		return nil, false
 	}
-	l, err := link.Tracepoint(tp.category, tp.event, prog, nil)
+	var l link.Link
+	var err error
+	if tp.raw {
+		l, err = link.AttachRawTracepoint(link.RawTracepointOptions{Name: tp.event, Program: prog})
+	} else {
+		l, err = link.Tracepoint(tp.category, tp.event, prog, nil)
+	}
 	if err != nil {
 		sym := tp.category + ":" + tp.event
 		reportAttachFailure(tp.prog, sym, false, err)
@@ -399,7 +409,7 @@ func AttachDNSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint3
 		return links
 	}
 	if libcPath != "" {
-		uprobe, err := link.OpenExecutable(libcPath)
+		uprobe, err := openExecutable(libcPath)
 		if err == nil {
 			if uprobeProg := coll.Programs["uprobe_getaddrinfo"]; uprobeProg != nil {
 				l, err := uprobe.Uprobe("getaddrinfo", uprobeProg, nil)
@@ -440,7 +450,7 @@ func AttachSyncProbesWithPID(coll *ebpf.Collection, containerID string, pid uint
 	if libcPath == "" || !af.Claim("sync", libcPath) {
 		return links
 	}
-	uprobe, err := link.OpenExecutable(libcPath)
+	uprobe, err := openExecutable(libcPath)
 	if err != nil {
 		logger.Info("Lock tracking unavailable", zap.Error(err))
 		return links
@@ -480,7 +490,7 @@ func AttachDBProbesWithPID(coll *ebpf.Collection, containerID string, pid uint32
 		if !af.Claim("db", path) {
 			continue
 		}
-		exe, err := link.OpenExecutable(path)
+		exe, err := openExecutable(path)
 		if err != nil {
 			continue
 		}
@@ -507,7 +517,7 @@ func AttachDBProbesWithPID(coll *ebpf.Collection, containerID string, pid uint32
 		if !af.Claim("db", path) {
 			continue
 		}
-		exe, err := link.OpenExecutable(path)
+		exe, err := openExecutable(path)
 		if err != nil {
 			continue
 		}
@@ -640,7 +650,7 @@ func AttachPoolProbesWithPID(coll *ebpf.Collection, containerID string, pid uint
 			if !af.Claim("pool/"+dbConfig.name, path) {
 				continue
 			}
-			exe, err := link.OpenExecutable(path)
+			exe, err := openExecutable(path)
 			if err != nil {
 				logger.Debug("Failed to open executable for pool probes", zap.String("database", dbConfig.name), zap.String("path", path), zap.Error(err))
 				continue
@@ -1834,6 +1844,7 @@ func AttachTLSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint3
 		"SSL_connect":           {"uprobe_SSL_connect", "uretprobe_SSL_connect"},
 		"SSL_accept":            {"uprobe_SSL_accept", "uretprobe_SSL_accept"},
 		"SSL_do_handshake":      {"uprobe_SSL_do_handshake", "uretprobe_SSL_do_handshake"},
+		"SSL_get_error":         {"uprobe_SSL_get_error", "uretprobe_SSL_get_error"},
 		"gnutls_handshake":      {"uprobe_gnutls_handshake", "uretprobe_gnutls_handshake"},
 		"mbedtls_ssl_handshake": {"uprobe_mbedtls_ssl_handshake", "uretprobe_mbedtls_ssl_handshake"},
 		"SSL_write":             {"uprobe_SSL_write", ""},
@@ -1853,7 +1864,7 @@ func AttachTLSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint3
 		if !af.Claim("tls", libPath) {
 			continue
 		}
-		exe, err := link.OpenExecutable(libPath)
+		exe, err := openExecutable(libPath)
 		if err != nil {
 			logger.Debug("TLS probe: cannot open library", zap.String("lib", libPath), zap.Error(err))
 			continue
@@ -1915,7 +1926,7 @@ func AttachGoTLSProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 		return links
 	}
 	exePath := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "exe")
-	exe, err := link.OpenExecutable(exePath)
+	exe, err := openExecutable(exePath)
 	if err != nil {
 		logger.Debug("Go TLS probe: cannot open executable",
 			zap.String("path", exePath), zap.Error(err))
@@ -1953,7 +1964,7 @@ func AttachGoGRPCProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 		return links
 	}
 	exePath := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "exe")
-	exe, err := link.OpenExecutable(exePath)
+	exe, err := openExecutable(exePath)
 	if err != nil {
 		return links
 	}
@@ -1987,7 +1998,7 @@ func AttachGoGRPCProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 // attachGoTLSReadProbes attaches the entry + return-address uprobes on
 // crypto/tls.(*Conn).Read so the decrypted response/inbound plaintext is
 // captured on return.
-func attachGoTLSReadProbes(coll *ebpf.Collection, exe *link.Executable, exePath string, pid uint32) []link.Link {
+func attachGoTLSReadProbes(coll *ebpf.Collection, exe *executable, exePath string, pid uint32) []link.Link {
 	var links []link.Link
 	entryProg := coll.Programs["uprobe_go_tls_read"]
 	retProg := coll.Programs["uprobe_go_tls_read_ret"]
@@ -2064,7 +2075,7 @@ func attachGoAcquireProbes(coll *ebpf.Collection, exePath string, pid uint32) []
 		return links
 	}
 
-	exe, err := link.OpenExecutable(exePath)
+	exe, err := openExecutable(exePath)
 	if err != nil {
 		logger.Debug("Go pool wait probe: cannot open executable",
 			zap.String("path", exePath), zap.Error(err))
@@ -2116,7 +2127,7 @@ func AttachGoHTTP3Probes(coll *ebpf.Collection, pid uint32) []link.Link {
 		return links
 	}
 	exePath := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "exe")
-	exe, err := link.OpenExecutable(exePath)
+	exe, err := openExecutable(exePath)
 	if err != nil {
 		logger.Debug("Go HTTP/3 probe: cannot open executable",
 			zap.String("path", exePath), zap.Error(err))
@@ -2278,7 +2289,7 @@ func attachCLibraryH3Probes(coll *ebpf.Collection, pid uint32, af *AttachedFiles
 		if !af.Claim(adapter, libPath) {
 			continue
 		}
-		exe, err := link.OpenExecutable(libPath)
+		exe, err := openExecutable(libPath)
 		if err != nil {
 			logger.Debug("HTTP/3 adapter: cannot open library",
 				zap.String("adapter", adapter), zap.String("lib", libPath), zap.Error(err))
@@ -2313,7 +2324,7 @@ func attachCLibraryH3Probes(coll *ebpf.Collection, pid uint32, af *AttachedFiles
 
 // attachGoUprobeBySymbol attaches an entry uprobe, falling back to a gopclntab
 // file-offset attach when the symbol is absent from the dynamic symbol table.
-func attachGoUprobeBySymbol(exe *link.Executable, exePath, sym string, prog *ebpf.Program) (link.Link, bool) {
+func attachGoUprobeBySymbol(exe *executable, exePath, sym string, prog *ebpf.Program) (link.Link, bool) {
 	l, err := exe.Uprobe(sym, prog, nil)
 	if err != nil {
 		off, ok := goSymbolFileOffset(exePath, sym)
@@ -2328,9 +2339,9 @@ func attachGoUprobeBySymbol(exe *link.Executable, exePath, sym string, prog *ebp
 	return l, true
 }
 
-// attachGoHTTP3ParseProbes attaches the http3.parseHeaders entry uprobe plus a
-// uprobe at each return site.
-func attachGoEntryReturnProbes(coll *ebpf.Collection, exe *link.Executable, exePath string, pid uint32,
+// attachGoEntryReturnProbes attaches an entry uprobe on a Go function plus a
+// uprobe at each of its return sites.
+func attachGoEntryReturnProbes(coll *ebpf.Collection, exe *executable, exePath string, pid uint32,
 	sym, entryProgName, retProgName string) []link.Link {
 	var links []link.Link
 	entryProg := coll.Programs[entryProgName]
@@ -2340,13 +2351,13 @@ func attachGoEntryReturnProbes(coll *ebpf.Collection, exe *link.Executable, exeP
 	}
 	entryOff, retOffs, ok := goFuncReturnOffsets(exePath, sym)
 	if !ok {
-		logger.Debug("Go HTTP/3: no return sites resolved (non-quic-go, unsupported arch, or symbol missing)",
+		logger.Debug("Go entry+return probes: no return sites resolved (symbol missing or unsupported arch)",
 			zap.String("symbol", sym), zap.Uint32("pid", pid))
 		return links
 	}
 	el, err := exe.Uprobe("", entryProg, &link.UprobeOptions{Address: entryOff})
 	if err != nil {
-		logger.Debug("Go HTTP/3 entry uprobe not attached", zap.String("symbol", sym), zap.Error(err))
+		logger.Debug("Go entry uprobe not attached", zap.String("symbol", sym), zap.Error(err))
 		return links
 	}
 	links = append(links, el)
@@ -2355,14 +2366,14 @@ func attachGoEntryReturnProbes(coll *ebpf.Collection, exe *link.Executable, exeP
 			links = append(links, rl)
 		}
 	}
-	logger.Debug("Go HTTP/3 entry+return uprobes attached",
+	logger.Debug("Go entry+return uprobes attached",
 		zap.String("symbol", sym), zap.Uint32("pid", pid), zap.Int("ret_sites", len(links)-1))
 	return links
 }
 
 // attachGoReturnProbes attaches a uprobe at each return site of a Go function
 // (no entry probe). Used when only the function's result is needed.
-func attachGoReturnProbes(coll *ebpf.Collection, exe *link.Executable, exePath string, pid uint32,
+func attachGoReturnProbes(coll *ebpf.Collection, exe *executable, exePath string, pid uint32,
 	sym, retProgName string) []link.Link {
 	var links []link.Link
 	retProg := coll.Programs[retProgName]

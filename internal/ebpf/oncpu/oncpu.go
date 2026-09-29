@@ -22,12 +22,13 @@ const SampleHz = 99
 // Map and program names this package binds to, as declared in bpf/maps.h and
 // bpf/oncpu.c.
 const (
-	ProgramName     = "perf_event_oncpu_sample"
-	CountsMapName   = "oncpu_counts"
-	StacksMapName   = "oncpu_stacks"
-	EnabledMapName  = "oncpu_enabled"
-	RequestsMapName = "oncpu_requests_done"
-	LostMapName     = "oncpu_lost"
+	ProgramName         = "perf_event_oncpu_sample"
+	TaskRegsProgramName = "perf_event_oncpu_sample_task_regs"
+	CountsMapName       = "oncpu_counts"
+	StacksMapName       = "oncpu_stacks"
+	EnabledMapName      = "oncpu_enabled"
+	RequestsMapName     = "oncpu_requests_done"
+	LostMapName         = "oncpu_lost"
 )
 
 // Lost-sample reasons, the indexes of the oncpu_lost array.
@@ -172,6 +173,10 @@ type drainIO struct {
 	resetLost     func(uint32, []uint64) error
 }
 
+func outpaced(err error) bool {
+	return errors.Is(err, ebpf.ErrIterationAborted)
+}
+
 func drain(io drainIO) (Drained, error) {
 	var (
 		out   Drained
@@ -184,7 +189,7 @@ func drain(io drainIO) (Drained, error) {
 		keys = append(keys, key)
 		rows = append(rows, count)
 	}
-	if err := io.countErr(); err != nil {
+	if err := io.countErr(); err != nil && !outpaced(err) {
 		return Drained{}, fmt.Errorf("oncpu: iterate counts: %w", err)
 	}
 	for i := range keys {
@@ -234,7 +239,7 @@ func drain(io drainIO) (Drained, error) {
 			LatencyNS:     done.LatencyNS,
 		})
 	}
-	if err := io.requestErr(); err != nil {
+	if err := io.requestErr(); err != nil && !outpaced(err) {
 		return Drained{}, fmt.Errorf("oncpu: iterate requests: %w", err)
 	}
 	for i := range ids {

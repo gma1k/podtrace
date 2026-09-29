@@ -171,7 +171,7 @@ static __noinline void http_emit_request(void *ctx, void *base, u64 avail,
 
 	bpf_map_update_elem(&http_reqs, &conn, &req, BPF_ANY);
 	if (inbound)
-		oncpu_begin_request(conn, now);
+		oncpu_begin_thread_request(ONCPU_KIND_HTTP1, conn, 0, now);
 
 	struct event *e = get_event_buf();
 	if (e) {
@@ -245,7 +245,7 @@ static __noinline void http_emit_response(void *ctx, void *base, u64 len,
 	u64 latency_ns = calc_latency(req->start_ns);
 	s32 status_num = http_parse_status3(status);
 	if (!inbound)
-		oncpu_finish_request(req->start_ns, latency_ns);
+		oncpu_finish_thread_request(req->start_ns, latency_ns);
 
 	struct event *e = get_event_buf();
 	if (e) {
@@ -385,12 +385,12 @@ int uretprobe_SSL_read(struct pt_regs *ctx)
 	void *base = (void *)st->buf;
 	u64 conn = st->conn;
 	bpf_map_delete_elem(&ssl_read_args, &key);
-	s64 ret = PT_REGS_RC(ctx);
+	s64 ret = PT_REGS_RC_INT(ctx);
 	if (ret <= 0)
 		return 0;
 
 	u8 peek[SSL_TLS_PEEK] = {};
-	u32 plen = (u64)ret < sizeof(peek) ? (u32)ret : sizeof(peek);
+	u32 plen = (u64)ret < sizeof(peek) ? ((u32)ret & (SSL_TLS_PEEK - 1)) : sizeof(peek);
 	if (bpf_probe_read_user(peek, plen, base) != 0)
 		return 0;
 

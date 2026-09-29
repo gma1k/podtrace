@@ -663,7 +663,7 @@ func profileHandler(profiler *profiling.ContinuousProfiler) http.HandlerFunc {
 				http.Error(w, "requests=slow needs format=folded or format=pprof; the JSON already carries slowRequests", http.StatusBadRequest)
 				return
 			}
-			var profiles []profiling.WorkloadProfile
+			profiles := []profiling.WorkloadProfile{}
 			for _, wp := range profiler.Snapshot(ctx) {
 				if (sel.Namespace == "" || sel.Namespace == wp.Namespace) && (sel.Workload == "" || sel.Workload == wp.Workload) {
 					profiles = append(profiles, wp)

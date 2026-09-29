@@ -143,6 +143,13 @@ type pendingReq struct {
 	transport uint8
 	startTS   uint64
 	lastSeen  time.Time
+	grpc      bool
+	held      *events.Event
+}
+
+// isGRPCContentType reports whether a content-type header names gRPC.
+func isGRPCContentType(v string) bool {
+	return strings.HasPrefix(strings.ToLower(v), "application/grpc")
 }
 
 // Decoder owns all per-connection decode state.
@@ -294,7 +301,11 @@ func (d *Decoder) decodeBlockLocked(st *dirState, rec *RawRecord, block []byte) 
 
 	var method, path, status, traceparent, grpcStatus string
 	var extra []string
+	grpc := false
 	for _, f := range fields {
+		if strings.EqualFold(f.Name, "content-type") && isGRPCContentType(f.Value) {
+			grpc = true
+		}
 		switch {
 		case f.Name == ":method":
 			method = f.Value
@@ -319,10 +330,18 @@ func (d *Decoder) decodeBlockLocked(st *dirState, rec *RawRecord, block []byte) 
 	switch {
 	case path != "":
 		st.role = roleRequest
-		return d.buildRequestLocked(rec, method, path, traceparent, extra)
+		ev := d.buildRequestLocked(rec, method, path, traceparent, extra)
+		if req := d.streams[streamKey{conn: rec.ConnID, stream: rec.StreamID}]; req != nil && grpc {
+			req.grpc = true
+		}
+		return ev
 	case status != "":
 		st.role = roleResponse
 		if len(status) == 3 && status[0] == '1' {
+			return nil
+		}
+		if grpcStatus == "" && d.isGRPCStreamLocked(rec, grpc) {
+			d.holdGRPCResponseLocked(rec, status, traceparent, extra)
 			return nil
 		}
 		if grpcStatus != "" {
@@ -337,6 +356,9 @@ func (d *Decoder) decodeBlockLocked(st *dirState, rec *RawRecord, block []byte) 
 		return ev
 	case grpcStatus != "":
 		st.role = roleResponse
+		if ev := d.finishHeldGRPCLocked(rec, grpcStatus); ev != nil {
+			return ev
+		}
 		return d.buildGrpcTrailerLocked(rec, grpcStatus)
 	case !complete:
 		return d.buildAnonymousRequestLocked(st, rec, method, traceparent, extra)
@@ -446,6 +468,80 @@ func (d *Decoder) buildResponseLocked(rec *RawRecord, status, traceparent string
 	return ev
 }
 
+// isGRPCStreamLocked reports whether a response belongs to a gRPC call: its
+// request said so, or the response itself does.
+func (d *Decoder) isGRPCStreamLocked(rec *RawRecord, responseSaysGRPC bool) bool {
+	if responseSaysGRPC {
+		return true
+	}
+	req := d.streams[streamKey{conn: rec.ConnID, stream: rec.StreamID}]
+	return req != nil && req.grpc
+}
+
+// holdGRPCResponseLocked keeps a gRPC call's response HEADERS instead of
+// emitting it.
+func (d *Decoder) holdGRPCResponseLocked(rec *RawRecord, status, traceparent string, extra []string) {
+	sk := streamKey{conn: rec.ConnID, stream: rec.StreamID}
+	req, ok := d.streams[sk]
+	if !ok {
+		if len(d.streams) >= d.maxStreams {
+			d.evictOldestStreamLocked()
+		}
+		req = &pendingReq{transport: rec.Transport}
+		d.streams[sk] = req
+	}
+	req.grpc = true
+	req.lastSeen = d.now()
+	ev := &events.Event{}
+	ev.Timestamp = rec.Timestamp
+	ev.PID = rec.PID
+	ev.CgroupID = rec.CgroupID
+	ev.Type = events.EventHTTPResp
+	ev.TCPState = uint32(rec.Transport)
+	ev.Details = status
+	if code, err := strconv.Atoi(status); err == nil && code >= 500 && code <= 599 {
+		ev.Error = safeconv.IntToInt32(code)
+	}
+	if req.path != "" {
+		ev.Target = req.method + " " + req.path
+		ev.HTTPMethod = events.NormalizeHTTPMethod(req.method)
+		ev.CorrelationID = req.startTS
+	} else {
+		ev.Target = status
+	}
+	if traceparent != "" {
+		ev.Details = status + "\ntraceparent: " + traceparent
+	}
+	if len(extra) > 0 {
+		ev.Details = strings.Join(append([]string{ev.Details}, extra...), "\n")
+	}
+	setEventPeer(ev, rec)
+	req.held = ev
+}
+
+// finishHeldGRPCLocked completes a held gRPC response with its trailers and
+// returns the one event the call counts as, or nil when nothing was held.
+func (d *Decoder) finishHeldGRPCLocked(rec *RawRecord, grpcStatus string) *events.Event {
+	sk := streamKey{conn: rec.ConnID, stream: rec.StreamID}
+	req, ok := d.streams[sk]
+	if !ok || req.held == nil {
+		return nil
+	}
+	delete(d.streams, sk)
+	ev := req.held
+	ev.Timestamp = rec.Timestamp
+	if req.startTS > 0 && rec.Timestamp > req.startTS {
+		ev.LatencyNS = rec.Timestamp - req.startTS
+	}
+	ev.Details += "\ngrpc-status: " + grpcStatus
+	if ev.Error == 0 {
+		if code, err := strconv.Atoi(grpcStatus); err == nil && code > 0 && code <= maxGrpcStatusCode {
+			ev.Error = safeconv.IntToInt32(code)
+		}
+	}
+	return ev
+}
+
 // buildGrpcTrailerLocked turns a trailers-only / trailing HEADERS block carrying
 // grpc-status into a response event, so gRPC outcomes from non-Go servers are
 // visible even though the response HEADERS block held no :status.
@@ -531,6 +627,9 @@ func (d *Decoder) Sweep() []*events.Event {
 	}
 	for sk, req := range d.streams {
 		if now.Sub(req.lastSeen) > d.ttl {
+			if req.held != nil {
+				out = append(out, req.held)
+			}
 			delete(d.streams, sk)
 		}
 	}
@@ -539,16 +638,24 @@ func (d *Decoder) Sweep() []*events.Event {
 
 // Evict drops all decode state for a connection (both directions) and its
 // outstanding stream correlations.
-func (d *Decoder) Evict(connID uint64) {
+// Evict drops a closed connection's state, returning the gRPC responses it
+// held for calls whose trailers never came: a call reset or cut off with its
+// connection still happened, and counts once, without an outcome.
+func (d *Decoder) Evict(connID uint64) []*events.Event {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	delete(d.dirs, connKey{conn: connID, dir: DirEgress})
 	delete(d.dirs, connKey{conn: connID, dir: DirIngress})
-	for sk := range d.streams {
+	var out []*events.Event
+	for sk, req := range d.streams {
 		if sk.conn == connID {
+			if req.held != nil {
+				out = append(out, req.held)
+			}
 			delete(d.streams, sk)
 		}
 	}
+	return out
 }
 
 func (d *Decoder) evictIfFullLocked() {
@@ -628,4 +735,18 @@ func lowestSeq(m map[uint32]*RawRecord) (uint32, bool) {
 		}
 	}
 	return lowest, found
+}
+
+// IsGRPCResponse reports whether an event is a gRPC call's response as this
+// decoder builds it: one carrying the call's grpc-status.
+func IsGRPCResponse(ev *events.Event) bool {
+	if ev == nil || ev.Type != events.EventHTTPResp {
+		return false
+	}
+	for _, line := range strings.Split(ev.Details, "\n") {
+		if strings.HasPrefix(line, "grpc-status: ") {
+			return true
+		}
+	}
+	return false
 }

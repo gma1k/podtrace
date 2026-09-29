@@ -332,3 +332,20 @@ func TestEffectiveSessionDuration(t *testing.T) {
 		t.Errorf("unset maxDuration means no cap, got %v", got)
 	}
 }
+
+func TestASessionJobWithoutAConfiguredOffsetGetsTheDefaultAndItsDeadline(t *testing.T) {
+	orig := sessionClock
+	defer func() { sessionClock = orig }()
+	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	sessionClock = func() time.Time { return now }
+
+	spec := buildSessionJobSpec(newSession(nil), &podtracev1alpha1.TracerConfig{}, "node-a", sessionTargets{})
+
+	if spec.ActiveDeadlineSeconds == nil || *spec.ActiveDeadlineSeconds != 390 {
+		t.Errorf("activeDeadlineSeconds = %v, want the 300s duration plus the 90s default", spec.ActiveDeadlineSeconds)
+	}
+	args := strings.Join(spec.Template.Spec.Containers[0].Args, " ")
+	if !strings.Contains(args, "--session-deadline 2026-09-29T12:06:30Z") {
+		t.Errorf("args %q do not carry the deadline the Job is killed at", args)
+	}
+}

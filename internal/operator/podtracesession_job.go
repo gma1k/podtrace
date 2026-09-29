@@ -14,13 +14,18 @@ import (
 	"github.com/gma1k/podtrace/internal/config"
 )
 
+const defaultSessionDeadlineOffset = 90 * time.Second
+
+// sessionClock is the operator's clock, replaceable in tests.
+var sessionClock = time.Now
+
 func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alpha1.TracerConfig, node string, targets sessionTargets) batchv1.JobSpec {
 	completions := int32(1)
 	parallelism := int32(1)
 
 	backoffLimit := int32(0)
 	ttlSeconds := int32(300)
-	deadlineOffset := int32(30)
+	deadlineOffset := int32(defaultSessionDeadlineOffset / time.Second)
 	sidecarUploader := false
 	if tc != nil {
 		if tc.Spec.Session.BackoffLimit != nil {
@@ -37,6 +42,7 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 
 	effectiveDuration := effectiveSessionDuration(s, tc)
 	activeDeadline := int64(effectiveDuration.Seconds()) + int64(deadlineOffset)
+	killAt := sessionClock().Add(time.Duration(activeDeadline) * time.Second)
 
 	imagePullPolicy := corev1.PullIfNotPresent
 	image := ""
@@ -110,6 +116,7 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 	sessionArgs = append(sessionArgs,
 		"--summary-file", "/var/run/podtrace/summary.json",
 		"--termination-message-path", "/dev/termination-log",
+		"--session-deadline", killAt.UTC().Format(time.RFC3339),
 	)
 	if reportTo != "" {
 		sessionArgs = append(sessionArgs, "--report-to", reportTo)

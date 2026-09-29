@@ -436,13 +436,13 @@ func TestAttachProbes_AllProbeTypes(t *testing.T) {
 func TestAttachProbes_WithTracepoints(t *testing.T) {
 	coll := &ebpf.Collection{
 		Programs: map[string]*ebpf.Program{
-			"tracepoint_sched_switch":        {},
-			"tracepoint_inet_sock_set_state": {},
-			"tracepoint_tcp_retransmit_skb":  {},
-			"tracepoint_net_dev_xmit":        {},
-			"tracepoint_page_fault_user":     {},
-			"tracepoint_oom_mark_victim":     {},
-			"tracepoint_sched_process_fork":  {},
+			"tracepoint_sched_switch":           {},
+			"tracepoint_inet_sock_set_state":    {},
+			"tracepoint_tcp_retransmit_skb":     {},
+			"tracepoint_net_dev_xmit":           {},
+			"tracepoint_page_fault_user":        {},
+			"tracepoint_oom_mark_victim":        {},
+			"raw_tracepoint_sched_process_fork": {},
 		},
 	}
 

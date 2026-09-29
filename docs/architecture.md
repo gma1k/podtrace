@@ -83,7 +83,7 @@ The eBPF programs run in the kernel and trace system calls and kernel events. Th
 
 - **Tracepoints**: Kernel events
   - `sched_switch` - CPU scheduling events
-  - `sched_process_fork` - Process/thread creation
+  - `sched_process_fork` - Process/thread creation, attached as a raw tracepoint so it reads the new task itself rather than a record whose layout differs between kernels
   - `tcp_retransmit_skb` - TCP retransmissions
   - `net_dev_xmit` - Network device transmission errors
 

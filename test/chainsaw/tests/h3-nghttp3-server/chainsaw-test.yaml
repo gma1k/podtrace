@@ -1,0 +1,93 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: h3-nghttp3-server
+spec:
+  description: |
+    Verifies the server side of the HTTP/3 C-library adapter: an HTTP/3
+    server that serves through libnghttp3 (ngtcp2's GnuTLS example server,
+    built against Debian's shared libnghttp3) with a curl client looping
+    requests at it.
+      1. The agent on the server's node counts the server's HTTP/3
+         responses, paired from nghttp3_conn_read_stream (the request
+         stream's first data) to nghttp3_conn_submit_response.
+      2. The continuous profiler joins the server's requests: its profile
+         carries a slowRequests section whose request count is above zero,
+         which needs the on-CPU sampler's request hooks on the same pair.
+    No PodTrace is created: this is the always-on agent path. BTF-only, like
+    every HTTP/3 adapter probe.
+  timeouts:
+    apply: 30s
+    assert: 300s
+    delete: 60s
+    cleanup: 120s
+  steps:
+    - name: setup-workloads
+      try:
+        - apply:
+            file: ./resources.yaml
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: h3server
+              status:
+                readyReplicas: 1
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: h3client
+              status:
+                readyReplicas: 1
+        - script:
+            timeout: 200s
+            content: |
+              set -eu
+              for attempt in $(seq 1 36); do
+                seen=$(kubectl -n "$NAMESPACE" logs -l app=h3client --tail=-1 2>/dev/null \
+                  | grep -c "status=200" || true)
+                if [ "${seen:-0}" -ge 3 ]; then
+                  echo "h3 client completed ${seen} requests"
+                  exit 0
+                fi
+                sleep 5
+              done
+              echo "h3 client never completed 3 requests" >&2
+              kubectl -n "$NAMESPACE" logs -l app=h3client --tail=20 >&2 || true
+              kubectl -n "$NAMESPACE" logs -l app=h3server --tail=20 >&2 || true
+              exit 1
+    - name: server-side-capture-and-attribution
+      try:
+        - script:
+            timeout: 280s
+            content: |
+              set -eu
+              node=$(kubectl -n "$NAMESPACE" get pod -l app=h3server -o jsonpath='{.items[0].spec.nodeName}')
+              agent=$(kubectl -n podtrace-system get pod -l podtrace.io/component=agent \
+                --field-selector "spec.nodeName=${node}" -o jsonpath='{.items[0].metadata.name}')
+              echo "server on ${node}, agent ${agent}"
+
+              served=0
+              joined=0
+              for attempt in $(seq 1 50); do
+                served=$(kubectl get --raw "/api/v1/namespaces/podtrace-system/pods/${agent}:9090/proxy/metrics" 2>/dev/null \
+                  | grep '^podtrace_workload_l7_requests_total' \
+                  | grep "namespace=\"${NAMESPACE}\"" | grep 'workload="h3server"' \
+                  | grep 'protocol="http3"' | grep 'status_class="2xx"' \
+                  | awk '{ s += $2 } END { print s + 0 }')
+                joined=$(kubectl get --raw "/api/v1/namespaces/podtrace-system/pods/${agent}:9090/proxy/profile?namespace=${NAMESPACE}&workload=h3server" 2>/dev/null \
+                  | grep -o '"slowRequests":{[^}]*"requests":[0-9]*' \
+                  | grep -o '"requests":[0-9]*$' | cut -d: -f2 || true)
+                if [ "${served:-0}" -gt 0 ] && [ "${joined:-0}" -gt 0 ]; then
+                  echo "server responses counted: ${served}; requests joined by the profiler: ${joined}"
+                  exit 0
+                fi
+                sleep 5
+              done
+              echo "FAIL: server responses counted=${served:-0}, requests joined=${joined:-0}" >&2
+              kubectl get --raw "/api/v1/namespaces/podtrace-system/pods/${agent}:9090/proxy/profile?namespace=${NAMESPACE}" >&2 || true
+              kubectl -n podtrace-system logs "${agent}" --tail=60 >&2 || true
+              exit 1

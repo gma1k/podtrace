@@ -8,15 +8,14 @@
 
 #define PIDNS_MAX_LEVELS 8
 
-static __noinline u32 agent_ns_tgid(void)
+static __noinline u32 task_ns_tgid(struct task_struct *task, u32 fallback)
 {
-	u32 init_tgid = bpf_get_current_pid_tgid() >> 32;
+	u32 init_tgid = fallback;
 	u32 zero = 0;
 	struct pidns_info *want = bpf_map_lookup_elem(&pidns_ref, &zero);
 	if (!want || !want->ino)
 		return init_tgid;
 
-	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
 	if (!task)
 		return init_tgid;
 	struct pid *tpid = BPF_CORE_READ(task, group_leader, thread_pid);
@@ -35,6 +34,12 @@ static __noinline u32 agent_ns_tgid(void)
 			return (u32)up.nr;
 	}
 	return init_tgid;
+}
+
+static __always_inline u32 agent_ns_tgid(void)
+{
+	return task_ns_tgid((struct task_struct *)bpf_get_current_task(),
+			    bpf_get_current_pid_tgid() >> 32);
 }
 
 static inline u64 get_key(u32 pid, u32 tid) {

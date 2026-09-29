@@ -80,7 +80,7 @@ func AttachQuicheRustProbes(coll *ebpf.Collection, pid uint32) (links []link.Lin
 		return links
 	}
 
-	exe, err := link.OpenExecutable(exePath)
+	exe, err := openExecutable(exePath)
 	if err != nil {
 		return links
 	}

@@ -63,6 +63,38 @@ struct {
 	__type(value, u64);
 } start_times SEC(".maps");
 
+struct ssl_hs_pending {
+	u64 ssl;
+	u64 latency_ns;
+};
+
+struct ssl_hs_call {
+	u64 ssl;
+	u32 depth;
+	u32 _pad;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 4096);
+	__type(key, u64);
+	__type(value, struct ssl_hs_call);
+} ssl_hs_ssl SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 4096);
+	__type(key, u64);
+	__type(value, struct ssl_hs_pending);
+} ssl_hs_pending SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 4096);
+	__type(key, u64);
+	__type(value, u64);
+} ssl_get_error_args SEC(".maps");
+
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 1024);
@@ -596,6 +628,9 @@ struct {
 struct h2_recv_info {
 	u64 base;
 	u64 conn_id;
+	u64 iov;
+	u32 nr_segs;
+	u32 _pad;
 };
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
@@ -957,9 +992,35 @@ struct oncpu_key {
 	u32 stack_id;
 };
 
+#define ONCPU_KIND_HTTP1 0
+#define ONCPU_KIND_H2    1
+#define ONCPU_KIND_H3    2
+
 struct oncpu_thread_request {
 	u64 correlation_id;
 	u64 conn;
+	u64 stream;
+	u32 kind;
+	u32 _pad;
+};
+
+#define ONCPU_GO_NETHTTP 1
+#define ONCPU_GO_H2      2
+#define ONCPU_GO_GRPC    3
+#define ONCPU_GO_H3      4
+
+#define ONCPU_REQUEST_MAX_NS (60ULL * 1000ULL * 1000ULL * 1000ULL)
+
+struct oncpu_goroutine_key {
+	u32 tgid;
+	u32 _pad;
+	u64 goroutine;
+};
+
+struct oncpu_goroutine_request {
+	u64 correlation_id;
+	u32 kind;
+	u32 _pad;
 };
 
 struct oncpu_request_done {
@@ -1001,6 +1062,44 @@ struct {
 	__type(key, u64);
 	__type(value, struct oncpu_request_done);
 } oncpu_requests_done SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 16384);
+	__type(key, struct oncpu_goroutine_key);
+	__type(value, struct oncpu_goroutine_request);
+} oncpu_goroutine_requests SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 4096);
+	__type(key, u32);
+	__type(value, u8);
+} oncpu_go_procs SEC(".maps");
+
+struct h2_stream_key {
+	u64 conn;
+	u32 stream;
+	u32 _pad;
+};
+
+struct h2_stream_state {
+	u64 start_ns;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 16384);
+	__type(key, u64);
+	__type(value, u8);
+} h2_server_conns SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 16384);
+	__type(key, struct h2_stream_key);
+	__type(value, struct h2_stream_state);
+} h2_streams SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);

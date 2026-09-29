@@ -24,7 +24,7 @@ spec:
 
   session:
     ttlSecondsAfterFinished: 300
-    activeDeadlineOffset: 30s
+    activeDeadlineOffset: 90s
     backoffLimit: 0
     # Optional cluster-wide ceiling on PodTraceSession.spec.duration.
     # Uncomment to enforce a 1-hour cap on diagnose runs.

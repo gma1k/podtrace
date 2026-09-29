@@ -70,7 +70,7 @@ func AttachUSDTProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 		return links
 	}
 
-	exe, err := link.OpenExecutable(exePath)
+	exe, err := openExecutable(exePath)
 	if err != nil {
 		return links
 	}

@@ -78,6 +78,8 @@ struct css_set {
 
 struct task_struct {
 	int pid;
+	int tgid;
+	char comm[16];
 	struct task_struct *group_leader;
 	struct pid *thread_pid;
 	struct nsproxy *nsproxy;
@@ -137,6 +139,7 @@ struct iov_iter {
 			unsigned long count;
 		};
 	};
+	unsigned long nr_segs;
 };
 
 struct msghdr {

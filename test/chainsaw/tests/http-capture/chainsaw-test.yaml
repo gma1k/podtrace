@@ -47,6 +47,26 @@ spec:
             file: ./session.yaml
         - assert:
             file: ./assert-completed.yaml
+      catch:
+        - events: {}
+        - script:
+            timeout: 120s
+            content: |
+              echo "== session"
+              kubectl -n "${NAMESPACE}" get podtracesession http-session -o yaml || true
+              echo "== workload pods"
+              kubectl -n "${NAMESPACE}" get pods -o wide || true
+              for p in $(kubectl -n podtrace-system get pods -o name | grep pts-); do
+                echo "== ${p} (session job log)"
+                kubectl -n podtrace-system logs "${p}" --all-containers 2>&1 | tail -150 || true
+              done
+              for a in $(kubectl -n podtrace-system get pods -l podtrace.io/component=agent -o name); do
+                echo "== ${a} (warnings and errors)"
+                kubectl -n podtrace-system logs "${a}" 2>&1 | grep -E '"level":"(warn|error)"' | tail -40 || true
+                echo "== ${a} (series for this test's workloads)"
+                kubectl get --raw "/api/v1/namespaces/podtrace-system/pods/${a#pod/}:9090/proxy/metrics" 2>/dev/null \
+                  | grep "namespace=\"${NAMESPACE}\"" | grep -v '_bucket' | head -60 || true
+              done
     - name: report-artifact
       try:
         - assert:

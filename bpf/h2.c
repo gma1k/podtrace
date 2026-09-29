@@ -5,6 +5,7 @@
 #include "events.h"
 #include "helpers.h"
 #include "protocols.h"
+#include "oncpu.h"
 
 
 static __always_inline struct h2_hdr_scratch *h2_hdr_scratch_lookup(void)
@@ -75,6 +76,35 @@ static __always_inline int h2_start_looks_h2(void *base, u64 avail)
 	if (fh[0] >= 0x14 && fh[0] <= 0x17 && fh[1] == 0x03 && fh[2] <= 0x04)
 		return 0;
 	return fh[3] <= HTTP2_CONTINUATION;
+}
+
+static __always_inline void h2_oncpu_frame(u64 conn, u32 dir, u8 type, u8 flags, u32 sid)
+{
+	if (sid == 0 || !oncpu_is_enabled() || oncpu_is_go_proc())
+		return;
+	if (!bpf_map_lookup_elem(&h2_server_conns, &conn))
+		return;
+	struct h2_stream_key k = {.conn = conn, .stream = sid};
+	struct h2_stream_state *st = bpf_map_lookup_elem(&h2_streams, &k);
+	if (!st) {
+		if (type != HTTP2_HEADERS || dir != H2_DIR_INGRESS)
+			return;
+		struct h2_stream_state fresh = {.start_ns = bpf_ktime_get_ns()};
+		bpf_map_update_elem(&h2_streams, &k, &fresh, BPF_NOEXIST);
+		oncpu_begin_thread_request(ONCPU_KIND_H2, conn, sid, fresh.start_ns);
+		return;
+	}
+	if (type == HTTP2_RST_STREAM) {
+		bpf_map_delete_elem(&h2_streams, &k);
+		return;
+	}
+	if (dir != H2_DIR_EGRESS || !(flags & HTTP2_FLAG_END_STREAM) ||
+	    (type != HTTP2_HEADERS && type != HTTP2_DATA))
+		return;
+	u64 start = st->start_ns;
+	u64 now = bpf_ktime_get_ns();
+	oncpu_finish_thread_request(start, now > start ? now - start : 0);
+	bpf_map_delete_elem(&h2_streams, &k);
 }
 
 static long h2_frames_cb(u32 idx, void *vctx)
@@ -182,6 +212,7 @@ static long h2_frames_cb(u32 idx, void *vctx)
 	u8 flags = fh[4];
 	u32 sid = (((u32)fh[5] << 24) | ((u32)fh[6] << 16) |
 		   ((u32)fh[7] << 8) | (u32)fh[8]) & 0x7fffffff;
+	h2_oncpu_frame(c->conn_id, c->dir, type, flags, sid);
 
 	u8 pad_bytes = 0;
 	if (type == HTTP2_HEADERS) {
@@ -242,6 +273,10 @@ static __always_inline void h2_emit_frames(void *base, u64 avail, u64 conn,
 	u32 start = 0;
 	int pfx = h2_preface_signal(base, avail);
 	if (pfx == 2 || (pfx == 1 && fs->remaining == 0)) {
+		if (dir == H2_DIR_INGRESS) {
+			u8 one = 1;
+			bpf_map_update_elem(&h2_server_conns, &conn, &one, BPF_ANY);
+		}
 		struct h2_seq_key ke = { .conn_id = conn, .dir = H2_DIR_EGRESS };
 		struct h2_seq_key ki = { .conn_id = conn, .dir = H2_DIR_INGRESS };
 		bpf_map_delete_elem(&h2_seq, &ke);
@@ -285,17 +320,49 @@ static __always_inline void h2_emit_frames(void *base, u64 avail, u64 conn,
 	bpf_loop(H2_MAX_FRAME_STEPS, h2_frames_cb, &c, 0);
 }
 
-SEC("kprobe/tcp_sendmsg")
-int kprobe_h2_tcp_sendmsg(struct pt_regs *ctx)
-{
-	if (!http_should_trace())
-		return 0;
+#define H2_MAX_SEGS 8
 
+static __noinline void h2_emit_segment(void *base, u64 len, u64 conn, u32 dir, u8 transport)
+{
+	h2_emit_frames(base, len, conn, dir, transport);
+}
+
+static __always_inline void h2_emit_message(struct h2_recv_info *info, u64 moved,
+					    u32 dir, u8 transport)
+{
+	u64 conn = info->conn_id;
+	u32 nr_segs = info->nr_segs;
+	const struct iovec *iov = (const struct iovec *)info->iov;
+	if (nr_segs < 2 || !iov) {
+		h2_emit_frames((void *)info->base, moved, conn, dir, transport);
+		return;
+	}
+	u64 left = moved;
+#pragma unroll
+	for (u32 i = 0; i < H2_MAX_SEGS; i++) {
+		if (i >= nr_segs || left == 0)
+			return;
+		struct iovec v;
+		if (bpf_probe_read_kernel(&v, sizeof(v), &iov[i]) != 0)
+			break;
+		u64 take = v.iov_len < left ? v.iov_len : left;
+		if (take > 0)
+			h2_emit_segment(v.iov_base, take, conn, dir, transport);
+		left -= take;
+	}
+	if (left > 0) {
+		struct h2_seq_key fk = { .conn_id = conn, .dir = dir };
+		bpf_map_delete_elem(&h2_frame_state, &fk);
+	}
+}
+
+static __always_inline void h2_stash_message(struct pt_regs *ctx, void *map)
+{
 	struct msghdr *msg = (struct msghdr *)PT_REGS_PARM2(ctx);
 	u64 avail = 0;
 	void *base = msghdr_user_base(msg, &avail);
 	if (!base)
-		return 0;
+		return;
 
 	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
@@ -305,29 +372,48 @@ int kprobe_h2_tcp_sendmsg(struct pt_regs *ctx)
 		.base = (u64)base,
 		.conn_id = (u64)PT_REGS_PARM1(ctx),
 	};
-	bpf_map_update_elem(&h2_send_base, &key, &info, BPF_ANY);
+	u32 nr_segs = 0;
+	const struct iovec *iov = msghdr_iovec(msg, &nr_segs);
+	if (iov) {
+		info.iov = (u64)iov;
+		info.nr_segs = nr_segs;
+	}
+	bpf_map_update_elem(map, &key, &info, BPF_ANY);
+}
+
+static __always_inline int h2_take_message(void *map, struct h2_recv_info *out)
+{
+	u32 pid = agent_ns_tgid();
+	u32 tid = (u32)bpf_get_current_pid_tgid();
+	u64 key = get_key(pid, tid);
+
+	struct h2_recv_info *info = bpf_map_lookup_elem(map, &key);
+	if (!info)
+		return 0;
+	*out = *info;
+	bpf_map_delete_elem(map, &key);
+	return 1;
+}
+
+SEC("kprobe/tcp_sendmsg")
+int kprobe_h2_tcp_sendmsg(struct pt_regs *ctx)
+{
+	if (!http_should_trace())
+		return 0;
+	h2_stash_message(ctx, &h2_send_base);
 	return 0;
 }
 
 SEC("kretprobe/tcp_sendmsg")
 int kretprobe_h2_tcp_sendmsg(struct pt_regs *ctx)
 {
-	u32 pid = agent_ns_tgid();
-	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
-
-	struct h2_recv_info *info = bpf_map_lookup_elem(&h2_send_base, &key);
-	if (!info)
+	struct h2_recv_info info;
+	if (!h2_take_message(&h2_send_base, &info))
 		return 0;
-	void *base = (void *)info->base;
-	u64 conn = info->conn_id;
-	bpf_map_delete_elem(&h2_send_base, &key);
-
-	s64 ret = PT_REGS_RC(ctx);
+	s64 ret = PT_REGS_RC_INT(ctx);
 	if (ret <= 0)
 		return 0;
-
-	h2_emit_frames(base, (u64)ret, conn, H2_DIR_EGRESS, HTTP_TRANSPORT_H2C);
+	h2_emit_message(&info, (u64)ret, H2_DIR_EGRESS, HTTP_TRANSPORT_H2C);
 	return 0;
 }
 
@@ -336,44 +422,20 @@ int kprobe_h2_tcp_recvmsg(struct pt_regs *ctx)
 {
 	if (!http_should_trace())
 		return 0;
-
-	struct msghdr *msg = (struct msghdr *)PT_REGS_PARM2(ctx);
-	u64 avail = 0;
-	void *base = msghdr_user_base(msg, &avail);
-	if (!base)
-		return 0;
-
-	u32 pid = agent_ns_tgid();
-	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
-
-	struct h2_recv_info info = {
-		.base = (u64)base,
-		.conn_id = (u64)PT_REGS_PARM1(ctx),
-	};
-	bpf_map_update_elem(&h2_recv_base, &key, &info, BPF_ANY);
+	h2_stash_message(ctx, &h2_recv_base);
 	return 0;
 }
 
 SEC("kretprobe/tcp_recvmsg")
 int kretprobe_h2_tcp_recvmsg(struct pt_regs *ctx)
 {
-	u32 pid = agent_ns_tgid();
-	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
-
-	struct h2_recv_info *info = bpf_map_lookup_elem(&h2_recv_base, &key);
-	if (!info)
+	struct h2_recv_info info;
+	if (!h2_take_message(&h2_recv_base, &info))
 		return 0;
-	void *base = (void *)info->base;
-	u64 conn = info->conn_id;
-	bpf_map_delete_elem(&h2_recv_base, &key);
-
-	s64 ret = PT_REGS_RC(ctx);
+	s64 ret = PT_REGS_RC_INT(ctx);
 	if (ret <= 0)
 		return 0;
-
-	h2_emit_frames(base, (u64)ret, conn, H2_DIR_INGRESS, HTTP_TRANSPORT_H2C);
+	h2_emit_message(&info, (u64)ret, H2_DIR_INGRESS, HTTP_TRANSPORT_H2C);
 	return 0;
 }
 
@@ -392,6 +454,7 @@ int kprobe_h2_tcp_close(struct pt_regs *ctx)
 	bpf_map_delete_elem(&h2_frame_state, &ke);
 	bpf_map_delete_elem(&h2_frame_state, &ki);
 	bpf_map_delete_elem(&h2_conns, &conn);
+	bpf_map_delete_elem(&h2_server_conns, &conn);
 
 	struct h2_hdr_scratch *s = h2_hdr_scratch_lookup();
 	if (!s)

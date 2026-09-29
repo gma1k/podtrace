@@ -14,7 +14,7 @@ import (
 
 // attachUprobeSymbols attaches uprobe+uretprobe pairs for the given symbols
 // on the given executable path. Failures are logged but not fatal.
-func attachUprobeSymbols(exe *link.Executable, coll *ebpf.Collection, libPath string,
+func attachUprobeSymbols(exe *executable, coll *ebpf.Collection, libPath string,
 	pairs []struct{ uprobe, uretprobe, symbol string }) []link.Link {
 	var links []link.Link
 	for _, p := range pairs {
@@ -58,7 +58,7 @@ func AttachRedisProbesWithPID(coll *ebpf.Collection, containerID string, pid uin
 		if !af.Claim("redis", path) {
 			continue
 		}
-		exe, err := link.OpenExecutable(path)
+		exe, err := openExecutable(path)
 		if err != nil {
 			continue
 		}
@@ -97,7 +97,7 @@ func AttachMemcachedProbesWithPID(coll *ebpf.Collection, containerID string, pid
 		if !af.Claim("memcached", path) {
 			continue
 		}
-		exe, err := link.OpenExecutable(path)
+		exe, err := openExecutable(path)
 		if err != nil {
 			continue
 		}
@@ -137,7 +137,7 @@ func AttachKafkaProbesWithPID(coll *ebpf.Collection, containerID string, pid uin
 		if !af.Claim("kafka", path) {
 			continue
 		}
-		exe, err := link.OpenExecutable(path)
+		exe, err := openExecutable(path)
 		if err != nil {
 			continue
 		}

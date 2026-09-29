@@ -5,7 +5,7 @@ go 1.27.1
 require (
 	cloud.google.com/go/auth v0.24.0
 	cloud.google.com/go/storage v1.68.0
-	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.1
+	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.2
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.14.1
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.8.1
 	github.com/aws/aws-sdk-go-v2 v1.47.1
@@ -17,7 +17,7 @@ require (
 	github.com/google/pprof v0.0.0-20260926063103-aaccee046517
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.3
-	github.com/prometheus/common v0.71.0
+	github.com/prometheus/common v0.72.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10

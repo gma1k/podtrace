@@ -26,6 +26,12 @@
 
 #define GO_PEEK_LEN 16
 
+static __always_inline int go_tls_is_http1_response(const u8 *peek)
+{
+	return peek[0] == 'H' && peek[1] == 'T' && peek[2] == 'T' && peek[3] == 'P' &&
+	       peek[4] == '/' && peek[5] == '1' && peek[6] == '.';
+}
+
 SEC("uprobe/go_tls_write")
 int uprobe_go_tls_write(struct pt_regs *ctx)
 {
@@ -34,6 +40,7 @@ int uprobe_go_tls_write(struct pt_regs *ctx)
 
 	void *base = GO_ARG_PTR(ctx);
 	u64 avail = GO_ARG_LEN(ctx);
+	u64 conn = GO_ARG_RECV(ctx);
 	if (!base || avail < HTTP2_FRAME_HDR)
 		return 0;
 
@@ -43,9 +50,11 @@ int uprobe_go_tls_write(struct pt_regs *ctx)
 		return 0;
 
 	if (http_method_len(peek) > 0) {
-		http_emit_request(ctx, base, avail, HTTP_TRANSPORT_TLS, GO_ARG_RECV(ctx));
+		http_emit_request(ctx, base, avail, HTTP_TRANSPORT_TLS, conn);
+	} else if (go_tls_is_http1_response(peek)) {
+		http_emit_response(ctx, base, avail, HTTP_TRANSPORT_TLS, conn);
 	} else {
-		h2_emit_frames(base, avail, GO_ARG_RECV(ctx), H2_DIR_EGRESS,
+		h2_emit_frames(base, avail, conn, H2_DIR_EGRESS,
 			       HTTP_TRANSPORT_H2_TLS);
 	}
 	return 0;
@@ -85,7 +94,17 @@ int uprobe_go_tls_read_ret(struct pt_regs *ctx)
 	if (n <= 0)
 		return 0;
 
-	h2_emit_frames(buf, (u64)n, conn, H2_DIR_INGRESS, HTTP_TRANSPORT_H2_TLS);
+	u8 peek[GO_PEEK_LEN] = {};
+	u32 plen = (u64)n < GO_PEEK_LEN ? (u32)n : GO_PEEK_LEN;
+	if (bpf_probe_read_user(peek, plen, buf) != 0)
+		return 0;
+
+	if (go_tls_is_http1_response(peek))
+		http_emit_response(ctx, buf, (u64)n, HTTP_TRANSPORT_TLS | HTTP_INBOUND, conn);
+	else if (http_method_len(peek) > 0)
+		http_emit_request(ctx, buf, (u64)n, HTTP_TRANSPORT_TLS | HTTP_INBOUND, conn);
+	else
+		h2_emit_frames(buf, (u64)n, conn, H2_DIR_INGRESS, HTTP_TRANSPORT_H2_TLS);
 	return 0;
 }
 

@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: h3server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: h3server
+  template:
+    metadata:
+      labels:
+        app: h3server
+    spec:
+      containers:
+        - name: server
+          image: podtrace-h3server:ci
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 4433
+              protocol: UDP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: h3server
+spec:
+  selector:
+    app: h3server
+  ports:
+    - port: 4433
+      protocol: UDP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: h3client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: h3client
+  template:
+    metadata:
+      labels:
+        app: h3client
+    spec:
+      containers:
+        - name: curl
+          image: podtrace-h3curl:ci
+          imagePullPolicy: Never
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              while true; do
+                curl -s -k --http3-only --max-time 2 -o /dev/null \
+                  -w 'status=%{http_code}\n' https://h3server:4433/index.html
+                sleep 0.2
+              done

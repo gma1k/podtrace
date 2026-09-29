@@ -3,7 +3,12 @@ package tracer
 import (
 	"errors"
 
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
+	"github.com/cilium/ebpf/features"
+
 	"github.com/gma1k/podtrace/internal/ebpf/oncpu"
+	"github.com/gma1k/podtrace/internal/logger"
 )
 
 var attachOnCPU = oncpu.Attach
@@ -24,7 +29,11 @@ func (t *Tracer) StartOnCPUSampler() (int, error) {
 	if enabled == nil {
 		return 0, errors.New("on-CPU sampler: the BPF object has no " + oncpu.EnabledMapName + " map")
 	}
-	sampler, err := attachOnCPU(t.collection.Programs[oncpu.ProgramName])
+	prog := t.collection.Programs[oncpu.TaskRegsProgramName]
+	if prog == nil {
+		prog = t.collection.Programs[oncpu.ProgramName]
+	}
+	sampler, err := attachOnCPU(prog)
 	if err != nil {
 		return 0, err
 	}
@@ -63,4 +72,21 @@ func (t *Tracer) stopOnCPUSampler() {
 	}
 	_ = t.onCPUSampler.Close()
 	t.onCPUSampler = nil
+}
+
+var taskPtRegsAvailable = func() bool {
+	return features.HaveProgramHelper(ebpf.PerfEvent, asm.FnTaskPtRegs) == nil
+}
+
+// pruneOnCPUTaskRegsIfUnsupported drops the task-regs sampler build on a
+// kernel without bpf_task_pt_regs, which would otherwise fail the whole
+// collection. The plain build then runs, and a Go sample taken inside the
+// kernel is not charged to its request.
+func pruneOnCPUTaskRegsIfUnsupported(spec *ebpf.CollectionSpec) {
+	if _, ok := spec.Programs[oncpu.TaskRegsProgramName]; !ok || taskPtRegsAvailable() {
+		return
+	}
+	delete(spec.Programs, oncpu.TaskRegsProgramName)
+	logger.Info("Kernel lacks bpf_task_pt_regs (needs 5.15+); the on-CPU sampler will not charge " +
+		"a Go request for CPU it spends inside the kernel")
 }

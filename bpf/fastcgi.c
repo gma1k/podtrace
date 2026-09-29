@@ -46,7 +46,7 @@ int kretprobe_unix_stream_recvmsg(struct pt_regs *ctx)
 	u64 user_ptr = *user_ptr_stored;
 	bpf_map_delete_elem(&recvmsg_args, &key);
 
-	long rc_bytes = (long)PT_REGS_RC(ctx);
+	long rc_bytes = PT_REGS_RC_INT(ctx);
 	if (rc_bytes <= 0 || !user_ptr) return 0;
 
 	u16 request_id;
