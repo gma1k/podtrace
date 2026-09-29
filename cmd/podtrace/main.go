@@ -77,6 +77,7 @@ var (
 	exporterFromFile       string
 	summaryFile            string
 	terminationMessagePath string
+	sessionDeadline        string
 	reportTo               string
 
 	resolverFactory func() (kubernetes.PodResolverInterface, error)
@@ -168,6 +169,8 @@ func main() {
 	_ = rootCmd.Flags().MarkHidden("exporter-from-file")
 	rootCmd.Flags().StringVar(&summaryFile, "summary-file", "", "Write a JSON summary of diagnose results to this path when diagnose completes")
 	rootCmd.Flags().StringVar(&terminationMessagePath, "termination-message-path", "", "Write a compact summary JSON to this path so Kubernetes surfaces it in pod status")
+	rootCmd.Flags().StringVar(&sessionDeadline, "session-deadline", "", "When the session Job running this diagnose is killed (RFC 3339); collection stops early enough to write the report before it")
+	_ = rootCmd.Flags().MarkHidden("session-deadline")
 	rootCmd.Flags().StringVar(&reportTo, "report-to", "", "Upload the full diagnose report to a sink: kind/namespace/name (kind is configmap|secret)")
 
 	registerTargetFlags(rootCmd.Flags())
@@ -815,6 +818,17 @@ func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Eve
 		return err
 	}
 
+	deadline, err := parseSessionDeadline(sessionDeadline)
+	if err != nil {
+		return err
+	}
+	requested := duration
+	duration, shortened := collectionWindow(requested, deadline, time.Now())
+	if shortened {
+		logger.Warn("Collecting for less than the requested duration: the session's deadline leaves no more time",
+			zap.Duration("requested", requested), zap.Duration("collecting", duration))
+	}
+
 	logger.Info("Running diagnose mode", zap.Duration("duration", duration))
 
 	var diagnostician *diagnose.Diagnostician
@@ -866,6 +880,9 @@ func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Eve
 			flushBatch()
 			diagnostician.Finish()
 			report := generateDiagnoseReport(diagnostician)
+			if shortened {
+				report = shortenedCollectionNote(requested, duration) + report
+			}
 			if profilingReporter != nil {
 				report += profilingReporter.GenerateSection(diagnostician.GetEvents(), duration)
 			}

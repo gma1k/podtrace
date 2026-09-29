@@ -18,8 +18,6 @@ func protocolLabel(e *events.Event) string {
 		default:
 			return "http"
 		}
-	case events.EventHTTP3:
-		return "http3"
 	case events.EventGRPCMethod:
 		return "grpc"
 	case events.EventFastCGIReq, events.EventFastCGIResp:
@@ -114,7 +112,7 @@ func filesystemOperation(t events.EventType) string {
 // broke" without duplicating the per-family label sets.
 func errorKind(t events.EventType) string {
 	switch t {
-	case events.EventHTTPResp, events.EventHTTP3, events.EventGRPCMethod,
+	case events.EventHTTPResp, events.EventGRPCMethod,
 		events.EventFastCGIResp, events.EventRedisCmd, events.EventMemcachedCmd,
 		events.EventKafkaProduce, events.EventKafkaFetch, events.EventDBQuery:
 		return "l7"

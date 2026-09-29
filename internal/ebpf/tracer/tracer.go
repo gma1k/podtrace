@@ -102,6 +102,7 @@ type Tracer struct {
 	reader                        *ringbuf.Reader
 	h2Reader                      *ringbuf.Reader
 	h2Decoder                     *h2decode.Decoder
+	grpcCoverage                  *grpcDecodeCoverage
 	h3Reader                      *ringbuf.Reader
 	h3Decoder                     *h3decode.Decoder
 	h3ChunkReader                 *ringbuf.Reader
@@ -258,6 +259,7 @@ func (t *Tracer) attachContainerGroupUprobes(g probes.ProbeGroup, id string, pid
 			ls = append(ls, probes.AttachGoGRPCProbes(coll, pid)...)
 			ls = append(ls, probes.AttachRustlsProbes(coll, pid)...)
 			ls = append(ls, probes.AttachGoHTTP3Probes(coll, pid)...)
+			ls = append(ls, probes.AttachGoRequestProbes(coll, pid)...)
 			ls = append(ls, probes.AttachNghttp3Probes(coll, pid, af)...)
 			ls = append(ls, probes.AttachQuicheProbes(coll, pid, af)...)
 			ls = append(ls, probes.AttachQuicheRustProbes(coll, pid)...)
@@ -715,6 +717,7 @@ func NewTracer(tracerOpts ...Option) (*Tracer, error) {
 	applyVerifierLogOptions(&opts)
 
 	pruneL7ProbesIfNoBPFLoop(spec)
+	pruneOnCPUTaskRegsIfUnsupported(spec)
 
 	HaveSkStorageCrossContext()
 
@@ -846,6 +849,7 @@ func NewTracer(tracerOpts ...Option) (*Tracer, error) {
 		reader:                        rd,
 		h2Reader:                      h2rd,
 		h2Decoder:                     h2dec,
+		grpcCoverage:                  newGRPCDecodeCoverage(),
 		h3Reader:                      h3rd,
 		h3Decoder:                     h3decode.NewDecoder(captureHeaders),
 		h3ChunkReader:                 h3chunkrd,
@@ -1653,7 +1657,7 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 			func() {
 				defer recoverReaderPanic("event reader")
 				event := parser.ParseEvent(record.RawSample)
-				if event != nil {
+				if event != nil && !t.grpcCoverage.suppresses(event, processingStart) {
 					t.processAndDispatch(ctx, event, eventChan, stackMap, ec, processingStart)
 				}
 			}()
@@ -1862,9 +1866,7 @@ func (t *Tracer) runH2DecodeReader(ctx context.Context, eventChan chan<- *events
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				for _, ev := range t.h2Decoder.Sweep() {
-					t.processAndDispatch(ctx, ev, eventChan, stackMap, ec, time.Now())
-				}
+				t.dispatchDecoded(ctx, t.h2Decoder.Sweep(), eventChan, stackMap, ec)
 			}
 		}
 	}()
@@ -1887,18 +1889,34 @@ func (t *Tracer) runH2DecodeReader(ctx context.Context, eventChan chan<- *events
 
 		func() {
 			defer recoverReaderPanic("http/2 decode")
-			rec, ok := h2decode.ParseRecord(record.RawSample)
-			if !ok {
-				return
-			}
-			if rec.IsClose() {
-				t.h2Decoder.Evict(rec.ConnID)
-				return
-			}
-			for _, ev := range t.h2Decoder.Ingest(rec) {
-				t.processAndDispatch(ctx, ev, eventChan, stackMap, ec, time.Now())
-			}
+			t.handleH2Record(ctx, record.RawSample, eventChan, stackMap, ec)
 		}()
+	}
+}
+
+// handleH2Record decodes one record from the HTTP/2 header ring buffer: a
+// connection's close evicts its state, anything else is decoded.
+func (t *Tracer) handleH2Record(ctx context.Context, raw []byte, eventChan chan<- *events.Event,
+	stackMap *ebpf.Map, ec *eventCounters) {
+	rec, ok := h2decode.ParseRecord(raw)
+	if !ok {
+		return
+	}
+	if rec.IsClose() {
+		t.dispatchDecoded(ctx, t.h2Decoder.Evict(rec.ConnID), eventChan, stackMap, ec)
+		return
+	}
+	t.dispatchDecoded(ctx, t.h2Decoder.Ingest(rec), eventChan, stackMap, ec)
+}
+
+// dispatchDecoded sends the HTTP/2 decoder's events on, noting which
+// processes it is seeing gRPC calls for.
+func (t *Tracer) dispatchDecoded(ctx context.Context, evs []*events.Event, eventChan chan<- *events.Event,
+	stackMap *ebpf.Map, ec *eventCounters) {
+	for _, ev := range evs {
+		now := time.Now()
+		t.grpcCoverage.noteDecoded(ev, now)
+		t.processAndDispatch(ctx, ev, eventChan, stackMap, ec, now)
 	}
 }
 

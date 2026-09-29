@@ -67,8 +67,8 @@ var probeGroupMap = map[string]ProbeGroup{
 	"tracepoint_oom_mark_victim": GroupMemory,
 
 	// Process (grouped under CPU for simplicity)
-	"tracepoint_sched_process_fork": GroupCPU,
-	"tracepoint_sched_process_exec": GroupCPU,
+	"raw_tracepoint_sched_process_fork": GroupCPU,
+	"tracepoint_sched_process_exec":     GroupCPU,
 
 	// TLS (uprobes attached separately via SetContainerID)
 	"uprobe_getaddrinfo":           GroupTLS,

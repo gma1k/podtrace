@@ -109,14 +109,12 @@ different things. Use `-o folded` in that case.
 
 ### Where the slowest requests spent their CPU
 
-The HTTP/1.x hooks already give every request and its response the same
-`correlation_id`: the request's start time in the kernel. When a server reads
-a request, over plain TCP or through OpenSSL, GnuTLS or rustls, the hook
-records that the reading thread is now serving that request. Every on-CPU sample on that thread
-carries the request's correlation id until the response is written. The reply
-records how long the request took under the same id. The agent joins the two,
-finds each workload's 99th-percentile latency over the window, and profiles
-only the samples charged to requests at or above it.
+Each served request gets a correlation id when it starts: the kernel
+timestamp of its start. Every on-CPU sample taken while the request is being
+served carries that id, and when the request ends its latency is recorded
+under the same id. The agent joins the two, finds each workload's
+99th-percentile latency over the window, and profiles only the samples
+charged to requests at or above it.
 
 That is the `SLOWEST 1% OF REQUESTS` section, `slowRequests` in the JSON, and
 `--slow-requests` for a flame graph. It answers "the p99 requests were slow
@@ -125,28 +123,67 @@ on a lock, a downstream call or the disk, they have no samples. The section
 then says how many were caught on a CPU, and "0 of N" means they were waiting,
 not computing.
 
-How exact the join is depends on how the runtime maps requests to threads:
+How a sample is tied to its request depends on the server:
 
-| Runtime | Attribution |
-|---|---|
-| One thread per request (Java servlet containers, Python and Ruby workers, PHP-FPM, most C++ servers) | Exact |
-| Go | Approximate. A handler's goroutine can move to another thread; samples after the move are not charged to the request |
-| One event loop serving many requests (Node.js, nginx, Envoy) | Not meaningful. A sample is charged to whichever request that thread read last |
+| Server | Request start → end | A sample is charged by | Attribution |
+|---|---|---|---|
+| Go `net/http`: HTTP/1, HTTPS, HTTP/2 over TLS | `serverHandler.ServeHTTP` entry → return | goroutine | Exact |
+| Go HTTP/2 and h2c (`net/http`'s internal server, `x/net/http2`) | `(*serverConn).runHandler` entry → return | goroutine | Exact |
+| gRPC-Go | `(*Server).handleStream` entry → return | goroutine | Exact |
+| quic-go HTTP/3 | `requestFromHeaders` → `handleRequestStream` return | goroutine | Exact |
+| HTTP/1.x over plain TCP, OpenSSL, GnuTLS, rustls | request read → response written | thread | Exact for one thread per request, not meaningful for an event loop |
+| HTTP/2 over plain TCP, OpenSSL, rustls (non-Go) | request HEADERS → response END_STREAM | thread | Same |
+| HTTP/3 through nghttp3 or quiche | request stream's first data → response submitted | thread | Same |
 
-A thread entry is trusted only while its request is still open. Once the
-response is written, from whatever thread, the next sample on the old thread
-drops the entry instead of charging unrelated work to a finished request.
+**Go servers are timed by their handler**, not by their bytes on the wire. A
+Go server reads the request, runs the handler and writes the response on
+different goroutines for HTTP/2 and gRPC, and any goroutine moves between
+threads, so a thread says nothing about which request a Go sample belongs to.
+podtrace puts a uprobe on the handler's entry and on each of its return
+sites, keys the request by the goroutine running it, and the sampler reads
+the interrupted goroutine from the register Go keeps it in. That is exact
+however often the goroutine moves. The time is the handler's: for gRPC it
+covers the whole RPC, and for a streaming response it covers the whole
+stream. A sample taken while the goroutine was inside the kernel, in a
+system call or a page fault, is charged through the user registers the kernel
+saved when it entered; that needs kernel 5.15 or newer, and on older kernels
+only the handler's user-mode CPU is charged. When an HTTP/2 server's
+`ServeConn` runs inside a handler, as
+`h2c.NewHandler` makes it, that handler is serving a connection rather than a
+request and is not timed; each request on the connection is timed on its own.
 
-Only HTTP/1.x server-side requests are attributed today, and not those a Go
-server reads through `crypto/tls`, whose read path is not hooked for HTTP/1.x.
-HTTP/2 and gRPC requests are profiled like any other CPU, but are not joined to
-a request.
+**Other servers are timed by thread.** The thread that reads a request is
+marked as serving it until its response is written. This is exact for servers
+that give each request a thread: Java servlet containers, Python and Ruby
+workers, PHP-FPM, most C++ servers. An event loop serving many requests on
+one thread, such as Node.js, nginx or Envoy, is charged to whichever request
+that thread read last, which is not meaningful. A thread entry is trusted only
+while its request is still open, so once the response is written, from
+whatever thread, the next sample on the old thread drops it instead of
+charging unrelated work to a finished request. An HTTP/2 connection is
+tracked only when the client connection preface was seen arriving on it,
+which is what marks this process as its server.
+
+What the time covers differs by protocol: a Go handler's run, an HTTP/1.x
+response's headers, a non-Go HTTP/2 response's last frame, an nghttp3 or
+quiche response's submission. A workload serving more than one protocol has
+one threshold across all of them.
+
+The correlation id matches the request's own `Event.CorrelationID` for
+non-Go HTTP/1.x, and for HTTP/3 through quic-go, nghttp3 and quiche. For the
+other Go servers and non-Go HTTP/2 it is the start timestamp the probe took,
+since those requests' events are timed at a different point.
 
 Each node finds its own threshold, so the merged view shows a range when the
-nodes disagree. Samples charged to a request whose reply was never seen, for
+nodes disagree. Samples charged to a request whose end was never seen, for
 example because the connection closed, are given up after a minute. They are
 counted in `unjoinedRequestSamples` and still count towards the workload's
-profile.
+profile. A request entry older than a minute is dropped in the kernel too, so
+a handler that panicked past its return probe or a stream whose end was
+missed cannot keep charging its goroutine or thread.
+
+The Go handler probes are attached only while continuous profiling is on,
+since each request costs two uprobe hits.
 
 ### The agent's /profile endpoint
 

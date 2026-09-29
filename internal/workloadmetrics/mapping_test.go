@@ -72,6 +72,7 @@ var ignoredEventTypes = map[events.EventType]string{
 	events.EventAFALG:         "crypto detection is a security signal, not a golden one",
 	events.EventUSDT:          "user-defined probes have no fixed shape to aggregate",
 	events.EventPoolExhausted: "fires on any query >10ms after connect and reports connection age, not pool wait",
+	events.EventHTTP3:         "a QUIC connection, not a request; HTTP/3 requests are EventHTTPResp with the HTTP/3 transport",
 }
 
 func recordOne(t *testing.T, e *events.Event) (map[string][]*dto.Metric, bool) {
@@ -194,7 +195,6 @@ func TestEventTypeMapsToExpectedFamilyAndLabels(t *testing.T) {
 		{events.EventKafkaProduce, "podtrace_workload_l7_requests_total", map[string]string{"protocol": "kafka"}},
 		{events.EventKafkaFetch, "podtrace_workload_l7_requests_total", map[string]string{"protocol": "kafka"}},
 		{events.EventDBQuery, "podtrace_workload_l7_requests_total", map[string]string{"protocol": "database"}},
-		{events.EventHTTP3, "podtrace_workload_l7_requests_total", map[string]string{"protocol": "http3"}},
 	} {
 		t.Run(allEventTypes[tc.typ], func(t *testing.T) {
 			families, _ := recordOne(t, &events.Event{
@@ -403,6 +403,19 @@ func TestFamilyLookupsDoNotClaimUnknownNames(t *testing.T) {
 		}
 		if _, ok := sink.c.counterFor(bogus); ok {
 			t.Errorf("counterFor(%q) claimed a collector", bogus)
+		}
+	}
+}
+
+func TestAQUICConnectionIsNotCountedAsARequest(t *testing.T) {
+	families, _ := recordOne(t, &events.Event{Type: events.EventHTTP3, LatencyNS: 2_700_000_000, K8s: enriched()})
+	for _, name := range []string{
+		"podtrace_workload_l7_requests_total",
+		"podtrace_workload_l7_request_duration_seconds",
+		"podtrace_workload_errors_total",
+	} {
+		if _, ok := families[name]; ok {
+			t.Errorf("a QUIC connection was recorded in %s; a connection carries any number of requests, or none", name)
 		}
 	}
 }

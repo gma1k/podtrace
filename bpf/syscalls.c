@@ -45,42 +45,30 @@ int tracepoint_sched_process_exec(void *ctx) {
 	return 0;
 }
 
-SEC("tp/sched/sched_process_fork")
-int tracepoint_sched_process_fork(void *ctx) {
-	struct {
-		unsigned short common_type;
-		unsigned char common_flags;
-		unsigned char common_preempt_count;
-		int common_pid;
-		char parent_comm[16];
-		s32 parent_pid;
-		char child_comm[16];
-		s32 child_pid;
-		int child_prio;
-	} args_local = {};
-	bpf_probe_read_kernel(&args_local, sizeof(args_local), ctx);
-
-	u32 child_pid = args_local.child_pid;
-	if (child_pid == 0) {
+SEC("raw_tracepoint/sched_process_fork")
+int raw_tracepoint_sched_process_fork(struct bpf_raw_tracepoint_args *ctx) {
+	struct task_struct *child = (struct task_struct *)ctx->args[1];
+	if (!child)
 		return 0;
-	}
+	u32 pid = task_ns_tgid(child, (u32)BPF_CORE_READ(child, tgid));
+	if (pid == 0)
+		return 0;
 
 	struct event *e = get_event_buf();
 	if (!e) {
 		return 0;
 	}
 	e->timestamp = bpf_ktime_get_ns();
-	e->pid = child_pid;
+	e->pid = pid;
 	e->type = EVENT_FORK;
 	e->latency_ns = 0;
 	e->error = 0;
 	e->bytes = 0;
 	e->tcp_state = 0;
-	__builtin_memcpy(e->comm, args_local.child_comm, sizeof(e->comm));
+	BPF_CORE_READ_STR_INTO(&e->comm, child, comm);
+	BPF_CORE_READ_STR_INTO(&e->target, child, comm);
 
-	bpf_probe_read_kernel_str(e->target, sizeof(e->target), args_local.child_comm);
-
-	capture_user_stack(ctx, child_pid, 0, e);
+	capture_user_stack(ctx, pid, 0, e);
 	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	return 0;
 }
@@ -174,7 +162,7 @@ int kretprobe_vfs_unlink(struct pt_regs *ctx) {
 		return 0;
 
 	u64 latency = calc_latency(*start_ts);
-	s64 ret = PT_REGS_RC(ctx);
+	s64 ret = PT_REGS_RC_INT(ctx);
 
 	struct event *e = get_event_buf();
 	if (!e) {
@@ -249,7 +237,7 @@ int kretprobe_vfs_rename(struct pt_regs *ctx) {
 		return 0;
 
 	u64 latency = calc_latency(*start_ts);
-	s64 ret = PT_REGS_RC(ctx);
+	s64 ret = PT_REGS_RC_INT(ctx);
 
 	struct event *e = get_event_buf();
 	if (!e) {

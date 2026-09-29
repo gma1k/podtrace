@@ -4,6 +4,7 @@
 #include "maps.h"
 #include "events.h"
 #include "helpers.h"
+#include "oncpu.h"
 
 
 #define NGHTTP3_NV_STRIDE 40
@@ -172,6 +173,8 @@ static __always_inline void h3_adapter_first_inbound(u64 conn, u64 stream_id)
 	struct h3_adapter_stream_key k = h3_adapter_key(conn, stream_id);
 	struct h3_txn_record *st = bpf_map_lookup_elem(&h3_adapter_streams, &k);
 	if (!st) {
+		if ((stream_id & 3) != 0)
+			return;
 		u32 zero = 0;
 		struct h3_txn_scratch *s = bpf_map_lookup_elem(&h3_txn_scratch_map, &zero);
 		if (!s)
@@ -183,6 +186,7 @@ static __always_inline void h3_adapter_first_inbound(u64 conn, u64 stream_id)
 		rec->adapter_conn = conn;
 		rec->adapter_stream = stream_id;
 		bpf_map_update_elem(&h3_adapter_streams, &k, rec, BPF_ANY);
+		oncpu_begin_thread_request(ONCPU_KIND_H3, conn, stream_id, rec->timestamp);
 		return;
 	}
 	if (st->flags != H3_ADAPTER_KIND_REQUEST)
@@ -217,6 +221,7 @@ static __always_inline void h3_adapter_respond(struct h3_txn_record *rec,
 	if (st && st->flags == H3_ADAPTER_KIND_ARRIVAL) {
 		rec->timestamp = st->timestamp;
 		rec->latency_ns = now > st->timestamp ? now - st->timestamp : 0;
+		oncpu_finish_thread_request(rec->timestamp, rec->latency_ns);
 		bpf_map_delete_elem(&h3_adapter_streams, &k);
 	}
 	h3_adapter_emit(rec, 0, H3_TXN_F_RESP_ONLY);

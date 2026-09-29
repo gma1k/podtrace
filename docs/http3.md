@@ -92,10 +92,18 @@ spec:
   HTTP/1.x, HTTP/2, and HTTP/3 and do not consume the pending request; the
   final status is reported. Interim responses themselves are not emitted as
   events.
-- **gRPC trailers over HTTP/2**: trailer blocks carrying `grpc-status` are
-  emitted as response events (and gRPC Trailers-Only responses surface
-  `grpc-status` alongside the HTTP status). A non-zero gRPC status marks the
-  event as an error.
+- **gRPC over HTTP/2** is one response event per call. A gRPC call's response
+  is its HEADERS and then its trailers, and the outcome is in the trailers'
+  `grpc-status`, so the HEADERS are held until the trailers arrive and the
+  call is emitted once: the HTTP status from the HEADERS, the `grpc-status`
+  from the trailers, and the latency up to the trailers. A non-zero
+  `grpc-status` marks the call as an error, as it does for a Trailers-Only
+  response. A call whose trailers never come, because it was reset or its
+  connection closed, is still emitted once, without an outcome. For gRPC-Go,
+  the grpc-go uprobes also see each call; while the HTTP/2 decoder is seeing a
+  process's gRPC calls, the uprobe events for that process are dropped so the
+  call is not counted twice, and they are kept for a process whose
+  connections the decoder cannot read.
 - **Server push** is not supported and will not be: Chrome removed support,
   and quic-go never implemented HTTP/3 push.
 - **0-RTT** needs no special handling: the Initial packet (and so SNI/ALPN

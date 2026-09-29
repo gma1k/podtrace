@@ -260,6 +260,22 @@ spec:
                 scrape | grep '^podtrace_issue_active' | head -10 || true
                 echo "--- inspection internals ---"
                 scrape | grep '^podtrace_inspections_' | head -20 || true
+                echo "--- every series for broken-api ---"
+                scrape | grep 'workload="broken-api"' | grep -v '_bucket' | head -60 || true
+                echo "--- inspect-app pods ---"
+                kubectl -n inspect-app get pods -o wide || true
+                for a in $(kubectl -n podtrace-system get pods -l podtrace.io/component=agent -o name); do
+                  n=$(kubectl -n podtrace-system get "${a}" -o jsonpath='{.spec.nodeName}')
+                  m=$(kubectl get --raw "/api/v1/namespaces/podtrace-system/pods/${a#pod/}:9090/proxy/metrics" 2>/dev/null || true)
+                  echo "--- ${a} on ${n}: inspect-app series ---"
+                  printf '%s\n' "${m}" | grep 'namespace="inspect-app"' | grep -v '_bucket' | head -60 || true
+                  echo "--- ${a} on ${n}: agent counters ---"
+                  printf '%s\n' "${m}" | grep '^podtrace_agent_' | head -40 || true
+                done
+                for a in $(kubectl -n podtrace-system get pods -l podtrace.io/component=agent -o name); do
+                  echo "--- ${a} warnings and errors ---"
+                  kubectl -n podtrace-system logs "${a}" 2>&1 | grep -E '"level":"(warn|error)"' | tail -40 || true
+                done
                 kubectl -n podtrace-system logs -l podtrace.io/component=agent --tail=80 || true
                 exit 1
               fi

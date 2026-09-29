@@ -138,7 +138,7 @@ func debugLink(f *elf.File) string {
 // uretprobe) to the target executable at resolved file offsets, used when no
 // symbol is available for the linker to bind against.
 func attachSSLByOffset(coll *ebpf.Collection, exePath string, off sslOffsets) []link.Link {
-	exe, err := link.OpenExecutable(exePath)
+	exe, err := openExecutable(exePath)
 	if err != nil {
 		return nil
 	}

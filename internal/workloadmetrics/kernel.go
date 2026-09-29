@@ -321,7 +321,7 @@ func (s *Sink) ingestKernelRow(row *kernelagg.Row) bool {
 	case events.EventDBAcquire:
 		s.kernelObserve("db_connection_acquire_seconds", base, row, seconds)
 
-	case events.EventHTTPResp, events.EventHTTP3, events.EventGRPCMethod,
+	case events.EventHTTPResp, events.EventGRPCMethod,
 		events.EventFastCGIResp, events.EventRedisCmd, events.EventMemcachedCmd,
 		events.EventKafkaProduce, events.EventKafkaFetch, events.EventDBQuery:
 		variant := kernelagg.DecodeVariant(row.Key.Variant)

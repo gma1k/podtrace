@@ -114,6 +114,9 @@ jobs:
           docker build --provenance=false \
             -t podtrace-h3curl:ci \
             test/chainsaw/tests/h3-adapter-capture/workload-curl
+          docker build --provenance=false \
+            -t podtrace-h3server:ci \
+            test/chainsaw/tests/h3-nghttp3-server/workload-server
 
       - name: Pull upstream workload images
         run: |
@@ -146,6 +149,7 @@ jobs:
             podtrace-h2demo:ci \
             podtrace-otlp-sink:ci \
             podtrace-h3curl:ci \
+            podtrace-h3server:ci \
             nginx:1.29 \
             alpine/k8s:1.30.4 \
             polinux/stress:1.0.4

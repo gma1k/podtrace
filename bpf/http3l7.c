@@ -5,6 +5,7 @@
 #include "events.h"
 #include "helpers.h"
 #include "protocols.h"
+#include "oncpu.h"
 
 
 #if defined(__TARGET_ARCH_x86) || defined(__x86_64__)
@@ -217,11 +218,11 @@ static __always_inline u64 h3_stash_key(u64 goroutine, u8 is_client)
 	return goroutine | (is_client ? (1ULL << 63) : 0);
 }
 
-static __always_inline void h3_stash_request(u64 goroutine, u64 req, u64 recv,
-					     u8 is_client)
+static __always_inline u64 h3_stash_request(u64 goroutine, u64 req, u64 recv,
+					    u8 is_client)
 {
 	if (!req)
-		return;
+		return 0;
 	struct h3_field_offsets off = h3_field_offs();
 	struct h3_req_inflight in = {};
 	in.start_ts = bpf_ktime_get_ns();
@@ -245,6 +246,7 @@ static __always_inline void h3_stash_request(u64 goroutine, u64 req, u64 recv,
 
 	u64 key = h3_stash_key(goroutine, is_client);
 	bpf_map_update_elem(&h3_req_stash, &key, &in, BPF_ANY);
+	return in.start_ts;
 }
 
 static __always_inline void h3_emit_txn(u64 goroutine, u16 status, u8 is_client,
@@ -334,7 +336,10 @@ int uprobe_h3_req_from_headers_ret(struct pt_regs *ctx)
 {
 	if (!http_should_trace())
 		return 0;
-	h3_stash_request(GO_GOROUTINE(ctx), GO_REG0(ctx), 0, 0);
+	u64 goroutine = GO_GOROUTINE(ctx);
+	u64 start = h3_stash_request(goroutine, GO_REG0(ctx), 0, 0);
+	if (start)
+		oncpu_begin_goroutine(goroutine, ONCPU_GO_H3, start);
 	return 0;
 }
 
@@ -356,7 +361,9 @@ int uprobe_h3_write_header(struct pt_regs *ctx)
 SEC("uprobe/h3_handle_request_ret")
 int uprobe_h3_handle_request_ret(struct pt_regs *ctx)
 {
-	h3_emit_txn(GO_GOROUTINE(ctx), 0, 0, NULL, H3_TXN_F_ABORTED);
+	u64 goroutine = GO_GOROUTINE(ctx);
+	h3_emit_txn(goroutine, 0, 0, NULL, H3_TXN_F_ABORTED);
+	oncpu_finish_goroutine(goroutine, ONCPU_GO_H3);
 	return 0;
 }
 

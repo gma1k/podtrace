@@ -86,3 +86,10 @@ func TestTheProfileRejectsWhatItCannotServe(t *testing.T) {
 		}
 	}
 }
+
+func TestAFilterThatMatchesNothingReturnsAnEmptyList(t *testing.T) {
+	rec := getProfile(t, formatsProfiler(), "?workload=does-not-exist")
+	if !strings.Contains(rec.Body.String(), `"profiles":[]`) {
+		t.Errorf("body = %s; a script iterating profiles would break on null", rec.Body.String())
+	}
+}

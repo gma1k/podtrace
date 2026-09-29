@@ -159,6 +159,27 @@ func TestADeleteOfARowAlreadyGoneIsNotAnError(t *testing.T) {
 	}
 }
 
+func TestAWalkTheKernelOutpacedKeepsWhatItRead(t *testing.T) {
+	f := &fakeMaps{
+		counts:     []Key{{CgroupID: 7, StackID: 1, CorrelationID: 5}},
+		values:     []uint64{4},
+		stacks:     map[uint32][]uint64{1: {0x10}},
+		requests:   map[uint64]Done{5: {LatencyNS: 900, CgroupID: 7}},
+		countErr:   ebpf.ErrIterationAborted,
+		requestErr: ebpf.ErrIterationAborted,
+	}
+	d, err := drain(f.io())
+	if err != nil {
+		t.Fatalf("drain = %v; an aborted walk is not a failed drain", err)
+	}
+	if len(d.Samples) != 1 || len(d.Completions) != 1 {
+		t.Errorf("drained %d samples and %d completions, want the 1 of each that were read", len(d.Samples), len(d.Completions))
+	}
+	if f.deletedCounts != 1 || f.deletedRequests != 1 {
+		t.Errorf("deleted %d counts and %d requests; rows read must still be removed", f.deletedCounts, f.deletedRequests)
+	}
+}
+
 func TestEveryMapFailureStopsTheDrain(t *testing.T) {
 	boom := errors.New("boom")
 	for name, f := range map[string]*fakeMaps{

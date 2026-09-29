@@ -94,6 +94,20 @@ static __always_inline void *msghdr_user_base(struct msghdr *msg, u64 *avail)
 	return NULL;
 }
 
+static __always_inline const struct iovec *msghdr_iovec(struct msghdr *msg, u32 *nr_segs)
+{
+	if (!msg)
+		return NULL;
+	u8 it = BPF_CORE_READ(msg, msg_iter.iter_type);
+	if (it != (u8)bpf_core_enum_value(enum iter_type, ITER_IOVEC))
+		return NULL;
+	unsigned long n = BPF_CORE_READ(msg, msg_iter.nr_segs);
+	if (n < 2)
+		return NULL;
+	*nr_segs = n > 0xffffffffUL ? 0xffffffffU : (u32)n;
+	return BPF_CORE_READ(msg, msg_iter.__iov);
+}
+
 static __always_inline int read_msghdr_data(struct msghdr *msg, void *buf, u32 buf_size)
 {
 	if (!buf || buf_size == 0)

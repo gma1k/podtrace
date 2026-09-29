@@ -121,6 +121,16 @@ operating podtrace, but do not build a product surface on them.
 | `podtrace_tls_handshake_latency_seconds` | Distribution of TLS handshake durations |
 | `podtrace_tls_handshake_latency_latest_seconds` | Most recent TLS handshake duration |
 
+A handshake is counted once, when it ends. A non-blocking server calls the
+handshake function several times per connection, and a call that only asks
+to be called again (OpenSSL's `SSL_ERROR_WANT_READ`, GnuTLS's `GNUTLS_E_AGAIN`,
+mbedTLS's `MBEDTLS_ERR_SSL_WANT_READ`, and the like) is neither a handshake nor
+a failure. An OpenSSL handshake that fails with `-1` is told apart from a retry
+by the `SSL_get_error` call that follows it, and carries that function's
+result, negated, as its error. This is verified against OpenSSL 3.5, LibreSSL
+4.1, GnuTLS 3.8 and mbedTLS 3.6 with non-blocking clients; OpenSSL 1.0 is not
+verified.
+
 ### Profiling metrics
 
 Emitted only when profiling is enabled; see [profiling.md](profiling.md).

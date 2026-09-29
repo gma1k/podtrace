@@ -45,6 +45,12 @@ To change a setting, prefer `helm upgrade --reuse-values --set …`
 rather than editing the CR directly — direct edits get reverted on the
 next chart upgrade.
 
+`--reuse-values` also keeps the defaults of the chart version you installed
+from, so a default a newer chart changes is not applied by an upgrade that
+reuses values. `session.activeDeadlineOffset`, for one, went from `30s` to
+`90s`; to pick up a new default, set it with `--set`, or upgrade with your own
+values file instead of `--reuse-values`.
+
 ## Spec reference
 
 ```yaml
@@ -72,7 +78,7 @@ spec:
 
   session:
     ttlSecondsAfterFinished: 300
-    activeDeadlineOffset: 30s
+    activeDeadlineOffset: 90s
     backoffLimit: 0
     sidecarUploader: false
     resources:
@@ -104,6 +110,13 @@ spec:
 - **`fleetPriority`** — orders fleets that target the same node. Advisory:
   it decides what the `Conflict` condition reports, not which agent
   runs. See [Multiple TracerConfigs](#multiple-tracerconfigs).
+- **`session.activeDeadlineOffset`** (default `90s`) — how long a session
+  Job may run past its `duration` before Kubernetes kills it. The offset pays
+  for pulling the image, loading the eBPF programs and writing the report;
+  loading alone takes over ten seconds on an idle node and longer on a busy
+  one. When starting the trace took so long that collecting for the whole
+  `duration` would run past the deadline, the session collects for less and
+  its report says so, rather than being killed with no report.
 - **`session.sidecarUploader`** — opt-in native sidecar that re-uploads
   the report to `spec.reportRef`. Acts as a backup if the CLI crashes
   before its own self-upload completes. Requires Kubernetes 1.29+.

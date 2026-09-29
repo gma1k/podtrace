@@ -417,7 +417,7 @@ func appendLabels(base []string, extra ...string) []string {
 // the event types that feed the L7 and semantic-convention families.
 func isL7Response(t events.EventType) bool {
 	switch t {
-	case events.EventHTTPResp, events.EventHTTP3, events.EventGRPCMethod,
+	case events.EventHTTPResp, events.EventGRPCMethod,
 		events.EventFastCGIResp, events.EventRedisCmd, events.EventMemcachedCmd,
 		events.EventKafkaProduce, events.EventKafkaFetch, events.EventDBQuery:
 		return true
@@ -432,13 +432,6 @@ func isL7Response(t events.EventType) bool {
 func (s *Sink) record(e *events.Event, base []string) bool {
 	seconds := e.Latency().Seconds()
 
-	// The kernel already turned this event into its counters, histograms,
-	// errors and service-map edges, and IngestKernel exports them from the
-	// drained row. Recording them again here counted every observation twice
-	// whenever a PodTrace kept the ring buffer open alongside the map: one
-	// 1500-byte send read as 3000 bytes. Only the semantic-convention
-	// histograms need fields the map does not carry, so they are the one
-	// thing left to do.
 	if e.KernelAggregated && s.kernelHist != nil {
 		if isL7Response(e.Type) {
 			s.recordSemconv(e, seconds)
@@ -456,7 +449,7 @@ func (s *Sink) record(e *events.Event, base []string) bool {
 	case events.EventHTTPReq, events.EventFastCGIReq:
 		return true
 
-	case events.EventHTTPResp, events.EventHTTP3, events.EventGRPCMethod,
+	case events.EventHTTPResp, events.EventGRPCMethod,
 		events.EventFastCGIResp, events.EventRedisCmd, events.EventMemcachedCmd,
 		events.EventKafkaProduce, events.EventKafkaFetch, events.EventDBQuery:
 		protocol := protocolLabel(e)
@@ -558,7 +551,7 @@ func (s *Sink) recordSemconv(e *events.Event, seconds float64) {
 	id := semconvIdentity(meta)
 
 	switch e.Type {
-	case events.EventHTTPResp, events.EventHTTP3:
+	case events.EventHTTPResp:
 		s.observe(e, s.sc.httpDuration, semconvHTTPDuration,
 			appendLabels(id, httpRequestMethod(e), statusCodeLabel(e), networkProtocolName(e)), seconds)
 
