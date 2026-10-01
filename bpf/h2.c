@@ -103,7 +103,7 @@ static __always_inline void h2_oncpu_frame(u64 conn, u32 dir, u8 type, u8 flags,
 		return;
 	u64 start = st->start_ns;
 	u64 now = bpf_ktime_get_ns();
-	oncpu_finish_thread_request(start, now > start ? now - start : 0);
+	oncpu_finish_thread_request(conn, start, now > start ? now - start : 0);
 	bpf_map_delete_elem(&h2_streams, &k);
 }
 

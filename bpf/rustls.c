@@ -41,6 +41,8 @@ static __always_inline void rustls_dispatch(void *ctx, void *base, u64 len,
 {
 	if (!base || len == 0 || conn == 0)
 		return;
+	if (oncpu_is_enabled())
+		oncpu_note_thread_conn(conn);
 	u8 peek[RUSTLS_PEEK] = {};
 	u32 plen = len < sizeof(peek) ? (u32)len : sizeof(peek);
 	if (bpf_probe_read_user(peek, plen, base) != 0)

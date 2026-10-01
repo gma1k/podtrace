@@ -83,7 +83,7 @@ spec:
     sidecarUploader: false
     resources:
       requests: { cpu: 100m, memory: 128Mi }
-      limits:   { cpu: 1,    memory: 512Mi }
+      limits:   { cpu: 1,    memory: 1Gi }
 ```
 
 ### Notable fields

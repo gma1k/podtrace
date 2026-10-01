@@ -1066,6 +1066,34 @@ struct {
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 16384);
+	__type(key, u64);
+	__type(value, struct oncpu_thread_request);
+} oncpu_conn_requests SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 8192);
+	__type(key, u32);
+	__type(value, u8);
+} oncpu_event_loop_threads SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 8192);
+	__type(key, u32);
+	__type(value, u64);
+} oncpu_thread_conns SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 16384);
+	__type(key, u64);
+	__type(value, u64);
+} oncpu_conn_aliases SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 16384);
 	__type(key, struct oncpu_goroutine_key);
 	__type(value, struct oncpu_goroutine_request);
 } oncpu_goroutine_requests SEC(".maps");

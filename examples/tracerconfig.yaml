@@ -31,7 +31,7 @@ spec:
     # maxDuration: 1h
     resources:
       requests: { cpu: 100m, memory: 128Mi }
-      limits:   { cpu: 1,    memory: 512Mi }
+      limits:   { cpu: 1,    memory: 1Gi }
 
   # Schedule the DaemonSet and Session pods only on nodes that can run eBPF.
   # Typical clusters do not need this; override when you have a mixed-OS

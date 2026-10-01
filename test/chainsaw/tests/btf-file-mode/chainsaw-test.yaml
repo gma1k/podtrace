@@ -192,7 +192,9 @@ spec:
         The chart ships webhook.enabled=false, so admission rejects nothing
         on a default install and the CR's own status is the only place a
         missing blob surfaces. Rendering the mount is not the same as the
-        ConfigMap existing.
+        ConfigMap existing. The condition is judged only once it was written
+        for the patched spec: until the operator reconciles, it still
+        describes the host path set by the step before.
       try:
         - script:
             timeout: 180s
@@ -201,8 +203,15 @@ spec:
               kubectl patch tracerconfig default --type=merge -p '{
                 "spec": {"btfSource": {"hostPath": null, "configMap": {"name": "btf-file-mode-absent"}}}
               }'
+              gen=$(kubectl get tracerconfig default -o jsonpath='{.metadata.generation}')
 
+              msg=""
               for _ in $(seq 1 60); do
+                seen=$(kubectl get tracerconfig default -o jsonpath='{.status.conditions[?(@.type=="Reconciled")].observedGeneration}')
+                if [ "${seen:-0}" -lt "${gen}" ]; then
+                  sleep 3
+                  continue
+                fi
                 msg=$(kubectl get tracerconfig default -o jsonpath='{range .status.conditions[?(@.type=="Reconciled")]}{.message}{end}')
                 case "${msg}" in
                   *"cannot be loaded"*"does not exist"*)
