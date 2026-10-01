@@ -131,9 +131,9 @@ How a sample is tied to its request depends on the server:
 | Go HTTP/2 and h2c (`net/http`'s internal server, `x/net/http2`) | `(*serverConn).runHandler` entry → return | goroutine | Exact |
 | gRPC-Go | `(*Server).handleStream` entry → return | goroutine | Exact |
 | quic-go HTTP/3 | `requestFromHeaders` → `handleRequestStream` return | goroutine | Exact |
-| HTTP/1.x over plain TCP, OpenSSL, GnuTLS, rustls | request read → response written | thread | Exact for one thread per request, not meaningful for an event loop |
-| HTTP/2 over plain TCP, OpenSSL, rustls (non-Go) | request HEADERS → response END_STREAM | thread | Same |
-| HTTP/3 through nghttp3 or quiche | request stream's first data → response submitted | thread | Same |
+| HTTP/1.x over plain TCP, OpenSSL, GnuTLS, rustls | request read → response written | thread, or on an event loop the connection | Exact for one thread per request; on an event loop, work between a connection's reads and writes |
+| HTTP/2 over plain TCP, OpenSSL, rustls (non-Go) | request HEADERS → response END_STREAM | thread, or on an event loop the connection | Same; on an event loop a connection with several open streams is charged to the newest |
+| HTTP/3 through nghttp3 or quiche | request stream's first data → response submitted | thread, or on an event loop the connection | Same; over UDP an event loop's connection is followed only at request starts and ends |
 
 **Go servers are timed by their handler**, not by their bytes on the wire. A
 Go server reads the request, runs the handler and writes the response on
@@ -155,12 +155,34 @@ request and is not timed; each request on the connection is timed on its own.
 **Other servers are timed by thread.** The thread that reads a request is
 marked as serving it until its response is written. This is exact for servers
 that give each request a thread: Java servlet containers, Python and Ruby
-workers, PHP-FPM, most C++ servers. An event loop serving many requests on
-one thread, such as Node.js, nginx or Envoy, is charged to whichever request
-that thread read last, which is not meaningful. A thread entry is trusted only
-while its request is still open, so once the response is written, from
-whatever thread, the next sample on the old thread drops it instead of
-charging unrelated work to a finished request. An HTTP/2 connection is
+workers, PHP-FPM, most C++ servers. A thread entry is trusted only while its
+request is still open, so once the response is written, from whatever thread,
+the next sample on the old thread drops it instead of charging unrelated work
+to a finished request.
+
+**Event loops are timed by connection.** A thread that begins a request while
+the one it began before, on another connection, is still open serves many
+requests at once, as nginx, Envoy, Node.js and tokio do. The request it read
+last says nothing about the one it is running, so such a thread is charged
+instead by the connection it did I/O on last: a sample goes to that
+connection's open request. An event loop handles one ready connection at a
+time, reading, working and writing, so the work between a connection's reads
+and writes is charged to its request. A TLS connection is followed through
+its socket, which podtrace ties to the TLS connection the first time the
+socket is read inside `SSL_read` or `gnutls_record_recv`.
+
+A sample is left unjoined, not charged to anyone, when the connection last
+touched has no open request: a loop waiting in `epoll_wait`, or working on a
+proxy's upstream connection. Work a Node.js handler does after a database or
+backend call returns is left unjoined for the same reason, since the last
+socket was the backend's. Work resumed without any socket I/O, by a timer or
+a promise settled off the event loop's sockets, is charged to the connection
+the loop touched before it, which is another request's if that one is still
+open. That is the same guess a thread makes, not a better one: linking such
+work to its request needs the runtime's own async context, which is not
+visible from the kernel. A thread that never
+serves two requests at once keeps being timed by thread, so a
+thread-per-request server's backend calls stay charged to its request. An HTTP/2 connection is
 tracked only when the client connection preface was seen arriving on it,
 which is what marks this process as its server.
 

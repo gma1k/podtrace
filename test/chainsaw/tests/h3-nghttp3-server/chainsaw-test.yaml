@@ -60,19 +60,25 @@ spec:
               kubectl -n "$NAMESPACE" logs -l app=h3server --tail=20 >&2 || true
               exit 1
     - name: server-side-capture-and-attribution
+      description: |
+        The agent is looked up again on every attempt: tests running alongside
+        roll the agent DaemonSet, and a replaced agent counts from zero.
       try:
         - script:
             timeout: 280s
             content: |
               set -eu
               node=$(kubectl -n "$NAMESPACE" get pod -l app=h3server -o jsonpath='{.items[0].spec.nodeName}')
-              agent=$(kubectl -n podtrace-system get pod -l podtrace.io/component=agent \
-                --field-selector "spec.nodeName=${node}" -o jsonpath='{.items[0].metadata.name}')
-              echo "server on ${node}, agent ${agent}"
+              echo "server on ${node}"
 
               served=0
               joined=0
+              agent=""
               for attempt in $(seq 1 50); do
+                agent=$(kubectl -n podtrace-system get pod -l podtrace.io/component=agent \
+                  --field-selector "spec.nodeName=${node},status.phase=Running" \
+                  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+                [ -n "${agent}" ] || { sleep 5; continue; }
                 served=$(kubectl get --raw "/api/v1/namespaces/podtrace-system/pods/${agent}:9090/proxy/metrics" 2>/dev/null \
                   | grep '^podtrace_workload_l7_requests_total' \
                   | grep "namespace=\"${NAMESPACE}\"" | grep 'workload="h3server"' \
@@ -87,7 +93,7 @@ spec:
                 fi
                 sleep 5
               done
-              echo "FAIL: server responses counted=${served:-0}, requests joined=${joined:-0}" >&2
+              echo "FAIL: server responses counted=${served:-0}, requests joined=${joined:-0} (agent ${agent:-none})" >&2
               kubectl get --raw "/api/v1/namespaces/podtrace-system/pods/${agent}:9090/proxy/profile?namespace=${NAMESPACE}" >&2 || true
               kubectl -n podtrace-system logs "${agent}" --tail=60 >&2 || true
               exit 1

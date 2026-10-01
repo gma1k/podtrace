@@ -90,6 +90,22 @@ static __always_inline u64 oncpu_thread_active(u32 tid)
 	return r->correlation_id;
 }
 
+static __always_inline u64 oncpu_event_loop_active(u32 tid)
+{
+	u64 *cur = bpf_map_lookup_elem(&oncpu_thread_conns, &tid);
+	if (!cur)
+		return 0;
+	u64 conn = *cur;
+	struct oncpu_thread_request *r = bpf_map_lookup_elem(&oncpu_conn_requests, &conn);
+	if (!r)
+		return 0;
+	if (!oncpu_thread_live(r)) {
+		bpf_map_delete_elem(&oncpu_conn_requests, &conn);
+		return 0;
+	}
+	return r->correlation_id;
+}
+
 static __always_inline int oncpu_sample(struct pt_regs *ctx, int task_regs)
 {
 	if (!oncpu_is_enabled())
@@ -99,6 +115,7 @@ static __always_inline int oncpu_sample(struct pt_regs *ctx, int task_regs)
 	u32 tgid = pid_tgid >> 32;
 	if (tgid == 0)
 		return 0;
+	u32 tid = (u32)pid_tgid;
 
 	u64 cgid = bpf_get_current_cgroup_id();
 	if (!bpf_map_lookup_elem(&target_cgroup_ids, &cgid))
@@ -114,8 +131,10 @@ static __always_inline int oncpu_sample(struct pt_regs *ctx, int task_regs)
 	key.cgroup_id = cgid;
 	if (bpf_map_lookup_elem(&oncpu_go_procs, &tgid))
 		key.correlation_id = oncpu_goroutine_active(ctx, tgid, task_regs);
+	else if (bpf_map_lookup_elem(&oncpu_event_loop_threads, &tid))
+		key.correlation_id = oncpu_event_loop_active(tid);
 	else
-		key.correlation_id = oncpu_thread_active((u32)pid_tgid);
+		key.correlation_id = oncpu_thread_active(tid);
 	key.pid = agent_ns_tgid();
 	key.stack_id = (u32)stack_id;
 

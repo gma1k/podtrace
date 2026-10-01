@@ -103,6 +103,7 @@ spec:
                 echo "no snapshot taken, so the tracerconfig was never changed"
                 exit 0
               fi
+              before=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.metadata.generation}' 2>/dev/null || true)
               saved=$(kubectl -n "${NAMESPACE}" get configmap tracerconfig-before \
                 -o jsonpath='{.data.metrics}')
               if [ -n "${saved}" ]; then
@@ -113,6 +114,12 @@ spec:
                   -p '[{"op":"remove","path":"/spec/agent/metrics"}]' || true
               fi
               echo "spec.agent.metrics restored to what the test found"
+              for i in $(seq 1 30); do
+                now=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.metadata.generation}' 2>/dev/null || true)
+                [ "${now}" != "${before}" ] && break
+                sleep 2
+              done
+              kubectl -n podtrace-system rollout status ds/podtrace-agent --timeout=110s || true
 
     - name: agent-carries-the-env
       description: |

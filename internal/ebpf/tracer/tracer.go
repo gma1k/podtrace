@@ -682,6 +682,7 @@ func NewTracer(tracerOpts ...Option) (*Tracer, error) {
 		}
 	}
 
+	defer tightGCForLoad()()
 	spec, err := loader.LoadPodtrace()
 	if err != nil {
 		return nil, err
