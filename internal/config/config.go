@@ -126,14 +126,15 @@ var (
 
 	ManagementPort = getIntEnvOrDefault("PODTRACE_MANAGEMENT_PORT", 0)
 
-	GRPCPort             = getIntEnvOrDefault("PODTRACE_GRPC_PORT", 50051)
-	USDTEnabled          = getBoolEnvOrDefault("PODTRACE_USDT_ENABLED", true)
-	DNSPayloadEnabled    = getBoolEnvOrDefault("PODTRACE_DNS_PAYLOAD_ENABLED", true)
-	RedactPII            = getBoolEnvOrDefault("PODTRACE_REDACT_PII", false)
-	RedactCustomRules    = getEnvOrDefault("PODTRACE_REDACT_CUSTOM_RULES", "")
-	CaptureHeaders       = getEnvOrDefault("PODTRACE_CAPTURE_HEADERS", "")
-	CriticalPathEnabled  = getBoolEnvOrDefault("PODTRACE_CRITICAL_PATH", true)
-	CriticalPathWindowMS = getIntEnvOrDefault("PODTRACE_CRITICAL_PATH_WINDOW_MS", 500)
+	GRPCPort            = getIntEnvOrDefault("PODTRACE_GRPC_PORT", 50051)
+	USDTEnabled         = getBoolEnvOrDefault("PODTRACE_USDT_ENABLED", true)
+	DNSPayloadEnabled   = getBoolEnvOrDefault("PODTRACE_DNS_PAYLOAD_ENABLED", true)
+	RedactPII           = getBoolEnvOrDefault("PODTRACE_REDACT_PII", false)
+	RedactCustomRules   = getEnvOrDefault("PODTRACE_REDACT_CUSTOM_RULES", "")
+	CaptureHeaders      = getEnvOrDefault("PODTRACE_CAPTURE_HEADERS", "")
+	CriticalPathEnabled = getBoolEnvOrDefault("PODTRACE_CRITICAL_PATH", true)
+
+	RequestStamping bool
 
 	ProfilingEnabled         = getBoolEnvOrDefault("PODTRACE_PROFILING_ENABLED", false)
 	ProfilingPprofPorts      = getEnvOrDefault("PODTRACE_PROFILING_PPROF_PORTS", "6060,8080,8081,9090,2345")
@@ -187,6 +188,7 @@ var (
 	InspectionCPUBlockedMean       = getDurationEnvOrDefault("PODTRACE_INSPECTIONS_CPU_BLOCKED_MEAN", 50*time.Millisecond)
 	InspectionPoolUtilizationPct   = getIntEnvOrDefault("PODTRACE_INSPECTIONS_POOL_UTILIZATION_PCT", 80)
 	InspectionMinPreemptions       = getIntEnvOrDefault("PODTRACE_INSPECTIONS_MIN_PREEMPTIONS", 100)
+	InspectionDNSSlowLookupPct     = getFloatEnvOrDefault("PODTRACE_INSPECTIONS_DNS_SLOW_LOOKUP_PCT", 5)
 
 	InspectionsHoldTime = getDurationEnvOrDefault("PODTRACE_INSPECTIONS_HOLD_TIME", 0)
 )

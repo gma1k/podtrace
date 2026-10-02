@@ -1009,6 +1009,8 @@ struct oncpu_thread_request {
 #define ONCPU_GO_GRPC    3
 #define ONCPU_GO_H3      4
 
+#define REQUEST_DONE_GO 0x100
+
 #define ONCPU_REQUEST_MAX_NS (60ULL * 1000ULL * 1000ULL * 1000ULL)
 
 struct oncpu_goroutine_key {

@@ -17,7 +17,7 @@
 
 static __always_inline int go_request_begin(struct pt_regs *ctx, u32 kind)
 {
-	oncpu_begin_goroutine(GO_REQUEST_GOROUTINE(ctx), kind, bpf_ktime_get_ns());
+	oncpu_begin_goroutine(GO_REQUEST_GOROUTINE(ctx), kind, request_id_now());
 	return 0;
 }
 

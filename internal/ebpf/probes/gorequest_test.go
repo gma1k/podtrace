@@ -54,7 +54,7 @@ func TestEveryGoRequestSymbolNamesAHandlerAndItsPrograms(t *testing.T) {
 		}
 	}
 	for _, c := range goConnectionServers {
-		if !strings.HasSuffix(c.symbol, ".ServeConn") || c.prog == "" {
+		if !strings.HasSuffix(strings.ToLower(c.symbol), ".serveconn") || c.prog == "" {
 			t.Errorf("connection server %+v", c)
 		}
 	}
@@ -64,5 +64,22 @@ func TestEveryGoRequestSymbolNamesAHandlerAndItsPrograms(t *testing.T) {
 			t.Errorf("%s is listed twice", h.symbol)
 		}
 		seen[h.symbol] = true
+	}
+}
+
+func TestGoRequestProbesAreWantedByTheProfilerOrByRequestStamping(t *testing.T) {
+	origStamping := config.RequestStamping
+	t.Cleanup(func() { config.RequestStamping = origStamping })
+	for _, c := range []struct{ profiling, stamping, want bool }{
+		{false, false, false},
+		{true, false, true},
+		{false, true, true},
+		{true, true, true},
+	} {
+		withContinuousProfiling(t, c.profiling)
+		config.RequestStamping = c.stamping
+		if got := goRequestProbesWanted(); got != c.want {
+			t.Errorf("profiling=%v stamping=%v: wanted=%v", c.profiling, c.stamping, got)
+		}
 	}
 }

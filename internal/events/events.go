@@ -111,6 +111,7 @@ const (
 	EventDBPoolStats
 	EventTCPRTT
 	EventConnectResult
+	EventRequestDone
 )
 
 type Event struct {
@@ -309,6 +310,8 @@ func (e *Event) TypeString() string {
 		return "HTTP/3"
 	case EventUSDT:
 		return "USDT"
+	case EventRequestDone:
+		return "REQUEST"
 	default:
 		return "UNKNOWN"
 	}

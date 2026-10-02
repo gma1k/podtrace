@@ -32,7 +32,6 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sys/unix"
 
-	"github.com/gma1k/podtrace/internal/analysis/criticalpath"
 	"github.com/gma1k/podtrace/internal/attribution"
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/dns"
@@ -131,7 +130,7 @@ type Tracer struct {
 	targetCgroupIDs               atomic.Pointer[map[uint64]struct{}]
 	cgroupCapacityWarned          atomic.Int64
 	cgroupWriteMu                 sync.Mutex
-	cpAnalyzer                    *criticalpath.Analyzer
+	onCPUFlags                    uint32
 	piiRedactor                   *redactor.Redactor
 	profilingCtrl                 ProfilingController
 
@@ -870,17 +869,6 @@ func NewTracer(tracerOpts ...Option) (*Tracer, error) {
 	t.useUserspaceCgroupFilter.Store(true)
 	t.storeCgroupIDs(map[uint64]struct{}{})
 
-	if config.CriticalPathEnabled {
-		window := time.Duration(config.CriticalPathWindowMS) * time.Millisecond
-		t.cpAnalyzer = criticalpath.New(window, func(cp criticalpath.CriticalPath) {
-			logger.Debug("Critical path",
-				zap.Uint32("pid", cp.PID),
-				zap.Duration("total", cp.TotalLatency),
-				zap.String("breakdown", cp.Breakdown(5)),
-			)
-		})
-	}
-
 	if config.RedactPII {
 		r, err := redactor.DefaultWithCustomRules(config.RedactCustomRules)
 		if err != nil {
@@ -1489,9 +1477,6 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 				if t.pathCache != nil {
 					t.pathCache.CleanupExpired()
 				}
-				if t.cpAnalyzer != nil {
-					t.cpAnalyzer.Evict()
-				}
 				t.pollBPFMapUtilization()
 			}
 		}
@@ -1760,9 +1745,6 @@ func (t *Tracer) processAndDispatch(ctx context.Context, event *events.Event,
 
 	if t.piiRedactor != nil {
 		t.piiRedactor.Redact(event)
-	}
-	if t.cpAnalyzer != nil {
-		t.cpAnalyzer.Feed(event)
 	}
 
 	// IsError, not Error != 0: a couple of event types carry a utilization

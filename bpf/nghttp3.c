@@ -181,7 +181,7 @@ static __always_inline void h3_adapter_first_inbound(u64 conn, u64 stream_id)
 			return;
 		struct h3_txn_record *rec = &s->rec;
 		__builtin_memset(rec, 0, sizeof(*rec));
-		rec->timestamp = bpf_ktime_get_ns();
+		rec->timestamp = request_id_now();
 		rec->flags = H3_ADAPTER_KIND_ARRIVAL;
 		rec->adapter_conn = conn;
 		rec->adapter_stream = stream_id;
@@ -221,7 +221,7 @@ static __always_inline void h3_adapter_respond(struct h3_txn_record *rec,
 	if (st && st->flags == H3_ADAPTER_KIND_ARRIVAL) {
 		rec->timestamp = st->timestamp;
 		rec->latency_ns = now > st->timestamp ? now - st->timestamp : 0;
-		oncpu_finish_thread_request(conn, rec->timestamp, rec->latency_ns);
+		oncpu_finish_thread_request(ONCPU_KIND_H3, conn, rec->timestamp, rec->latency_ns);
 		bpf_map_delete_elem(&h3_adapter_streams, &k);
 	}
 	h3_adapter_emit(rec, 0, H3_TXN_F_RESP_ONLY);

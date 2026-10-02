@@ -117,6 +117,10 @@ struct iovec {
 	unsigned long iov_len;
 };
 
+enum bpf_func_id {
+	BPF_FUNC_task_pt_regs = 175,
+};
+
 enum iter_type {
 	ITER_UBUF,
 	ITER_IOVEC,

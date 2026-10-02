@@ -220,8 +220,8 @@ func TestMapsFromNeedsEverySamplerMap(t *testing.T) {
 	}
 }
 
-func TestSetEnabledRefusesAMissingMap(t *testing.T) {
-	if err := SetEnabled(nil, true); err == nil {
+func TestSetFlagsRefusesAMissingMap(t *testing.T) {
+	if err := SetFlags(nil, FlagSampler); err == nil {
 		t.Error("no error for a nil map")
 	}
 }

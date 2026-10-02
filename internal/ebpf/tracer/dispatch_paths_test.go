@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gma1k/podtrace/internal/analysis/criticalpath"
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/internal/procfs"
@@ -74,10 +73,9 @@ func TestAnUnresolvableTransientCommIsLabelledAsBootstrap(t *testing.T) {
 	}
 }
 
-func TestRedactionAndCriticalPathSeeEveryDispatchedEvent(t *testing.T) {
+func TestRedactionSeesEveryDispatchedEvent(t *testing.T) {
 	tr := newDispatchTestTracer()
 	tr.piiRedactor = redactor.New([]redactor.Rule{{Name: "secret", Pattern: regexp.MustCompile(`s3cr3t`), Replace: "[redacted]"}})
-	tr.cpAnalyzer = criticalpath.New(time.Minute, func(criticalpath.CriticalPath) {})
 	ch := make(chan *events.Event, 1)
 
 	dispatchInto(context.Background(), tr, &events.Event{Type: events.EventHTTPResp, PID: 7, Target: "/login?pw=s3cr3t", Error: 500}, ch)

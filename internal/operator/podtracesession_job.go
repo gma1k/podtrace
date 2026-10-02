@@ -135,7 +135,6 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 			Name:  "PODTRACE_EXPORTER_CREDENTIAL_FILE",
 			Value: "/etc/podtrace/exporter-credential/credential",
 		},
-		{Name: "PODTRACE_CRITICAL_PATH", Value: "false"},
 		{Name: "PODTRACE_OTLP_INSECURE", Value: "1"},
 		{Name: config.EnvArtifactBaseDir, Value: "/var/run/podtrace"},
 	}

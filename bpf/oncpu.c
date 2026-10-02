@@ -106,9 +106,54 @@ static __always_inline u64 oncpu_event_loop_active(u32 tid)
 	return r->correlation_id;
 }
 
+__noinline u64 podtrace_current_request(void)
+{
+	if (!(oncpu_flags() & ONCPU_FLAG_REQUESTS))
+		return 0;
+	u64 pid_tgid = bpf_get_current_pid_tgid();
+	u32 tgid = pid_tgid >> 32;
+	u32 tid = (u32)pid_tgid;
+	if (tgid == 0)
+		return 0;
+
+	if (bpf_map_lookup_elem(&oncpu_go_procs, &tgid)) {
+		if (!bpf_core_enum_value_exists(enum bpf_func_id, BPF_FUNC_task_pt_regs))
+			return 0;
+		struct oncpu_goroutine_key k = {.tgid = tgid, .goroutine = oncpu_task_goroutine()};
+		if (!k.goroutine)
+			return 0;
+		struct oncpu_goroutine_request *r = bpf_map_lookup_elem(&oncpu_goroutine_requests, &k);
+		if (!r)
+			return 0;
+		u64 correlation_id = r->correlation_id;
+		if (bpf_ktime_get_ns() - correlation_id > ONCPU_REQUEST_MAX_NS)
+			return 0;
+		return correlation_id;
+	}
+	if (bpf_map_lookup_elem(&oncpu_event_loop_threads, &tid))
+		return oncpu_event_loop_active(tid);
+	return oncpu_thread_active(tid);
+}
+
+__noinline int podtrace_emit_request_done(u64 correlation_id, u64 latency_ns, u32 kind)
+{
+	struct event *e = get_event_buf_unfiltered();
+	if (!e)
+		return 0;
+	if (!cgroup_allows(e->cgroup_id))
+		return 0;
+	e->timestamp = bpf_ktime_get_ns();
+	e->pid = agent_ns_tgid();
+	e->type = EVENT_REQUEST_DONE;
+	e->latency_ns = latency_ns;
+	e->tcp_state = kind;
+	e->correlation_id = correlation_id;
+	return bpf_ringbuf_output(&events, e, sizeof(*e), 0) == 0;
+}
+
 static __always_inline int oncpu_sample(struct pt_regs *ctx, int task_regs)
 {
-	if (!oncpu_is_enabled())
+	if (!(oncpu_flags() & ONCPU_FLAG_SAMPLER))
 		return 0;
 
 	u64 pid_tgid = bpf_get_current_pid_tgid();

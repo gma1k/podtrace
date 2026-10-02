@@ -39,15 +39,24 @@ var goRequestHandlers = []goRequestHandler{
 // handler, turn it into the server of a whole connection.
 var goConnectionServers = []struct{ symbol, prog string }{
 	{"golang.org/x/net/http2.(*Server).ServeConn", "uprobe_go_h2_serve_conn"},
+	{"golang.org/x/net/http2.(*Server).serveConn", "uprobe_go_h2_serve_conn"},
 	{"net/http/internal/http2.(*Server).ServeConn", "uprobe_go_h2_serve_conn"},
+	{"net/http/internal/http2.(*Server).serveConn", "uprobe_go_h2_serve_conn"},
 	{"net/http.(*http2Server).ServeConn", "uprobe_go_h2_serve_conn"},
+	{"net/http.(*http2Server).serveConn", "uprobe_go_h2_serve_conn"},
+}
+
+// goRequestProbesWanted reports whether anything reads a Go request's id:
+// the continuous profiler in the agent, or a diagnose run stamping requests.
+func goRequestProbesWanted() bool {
+	return config.ContinuousProfilingEnabled || config.RequestStamping
 }
 
 // AttachGoRequestProbes brackets every request handler a Go binary contains,
-// so the on-CPU sampler can charge a sample to the request its goroutine is
-// serving.
+// so the on-CPU sampler can charge a sample, and request stamping an event,
+// to the request its goroutine is serving.
 func AttachGoRequestProbes(coll *ebpf.Collection, pid uint32) []link.Link {
-	if pid == 0 || coll == nil || !config.ContinuousProfilingEnabled {
+	if pid == 0 || coll == nil || !goRequestProbesWanted() {
 		return nil
 	}
 	exePath := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "exe")

@@ -156,6 +156,9 @@ func inspectionThresholds() inspect.Thresholds {
 		CPUBlockedMean: config.InspectionCPUBlockedMean,
 		MinPreemptions: uint64(max(config.InspectionMinPreemptions, 0)),
 
+		DNSSlowBound:       inspect.DefaultThresholds().DNSSlowBound,
+		DNSSlowRatePercent: config.InspectionDNSSlowLookupPct,
+
 		HoldTime: config.InspectionsHoldTime,
 	}
 }

@@ -47,18 +47,18 @@ func perfEventProgram(t *testing.T) *ebpf.Program {
 	return prog
 }
 
-func TestKernelSetEnabledWritesTheSwitch(t *testing.T) {
+func TestKernelSetFlagsWritesTheSwitch(t *testing.T) {
 	_, enabled := kernelMaps(t)
-	for _, on := range []bool{true, false} {
-		if err := SetEnabled(enabled, on); err != nil {
-			t.Fatalf("SetEnabled(%v): %v", on, err)
+	for _, flags := range []uint32{FlagSampler, FlagSampler | FlagRequests, FlagRequests, 0} {
+		if err := SetFlags(enabled, flags); err != nil {
+			t.Fatalf("SetFlags(%d): %v", flags, err)
 		}
 		var got uint32
 		if err := enabled.Lookup(uint32(0), &got); err != nil {
 			t.Fatal(err)
 		}
-		if (got == 1) != on {
-			t.Errorf("the map holds %d after SetEnabled(%v)", got, on)
+		if got != flags {
+			t.Errorf("the map holds %d after SetFlags(%d)", got, flags)
 		}
 	}
 }
@@ -123,14 +123,14 @@ func TestKernelTheSamplerAttachesToEveryOnlineCPU(t *testing.T) {
 	}
 }
 
-func TestKernelSetEnabledReportsAWriteTheMapRefuses(t *testing.T) {
+func TestKernelSetFlagsReportsAWriteTheMapRefuses(t *testing.T) {
 	kernelMaps(t)
 	wide, err := ebpf.NewMap(&ebpf.MapSpec{Type: ebpf.Array, KeySize: 4, ValueSize: 8, MaxEntries: 1})
 	if err != nil {
 		t.Skipf("cannot create a map: %v", err)
 	}
 	t.Cleanup(func() { _ = wide.Close() })
-	if err := SetEnabled(wide, true); err == nil {
+	if err := SetFlags(wide, FlagSampler); err == nil {
 		t.Error("a switch the map could not store was reported as set")
 	}
 }

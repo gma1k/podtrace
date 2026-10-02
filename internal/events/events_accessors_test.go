@@ -77,6 +77,7 @@ func TestTypeString_RemainingTypes(t *testing.T) {
 		{EventDNSQuery, "DNS"},
 		{EventHTTP3, "HTTP/3"},
 		{EventUSDT, "USDT"},
+		{EventRequestDone, "REQUEST"},
 	}
 	for _, c := range cases {
 		e := &Event{Type: c.et}

@@ -37,12 +37,33 @@ func (t *Tracer) StartOnCPUSampler() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	if err := oncpu.SetEnabled(enabled, true); err != nil {
+	if err := oncpu.SetFlags(enabled, t.onCPUFlags|oncpu.FlagSampler); err != nil {
 		_ = sampler.Close()
 		return 0, err
 	}
+	t.onCPUFlags |= oncpu.FlagSampler
 	t.onCPUSampler = sampler
 	return sampler.CPUs(), nil
+}
+
+// StampRequests switches on stamping every event with the correlation id of
+// the request its thread, goroutine or connection is serving, which is what
+// the critical path groups events by.
+func (t *Tracer) StampRequests() error {
+	if t == nil || t.collection == nil {
+		return errors.New("request stamping: no BPF collection loaded")
+	}
+	t.onCPUMu.Lock()
+	defer t.onCPUMu.Unlock()
+	enabled := t.collection.Maps[oncpu.EnabledMapName]
+	if enabled == nil {
+		return errors.New("request stamping: the BPF object has no " + oncpu.EnabledMapName + " map")
+	}
+	if err := oncpu.SetFlags(enabled, t.onCPUFlags|oncpu.FlagRequests); err != nil {
+		return err
+	}
+	t.onCPUFlags |= oncpu.FlagRequests
+	return nil
 }
 
 // DrainOnCPUSamples reads and clears what the sampler counted since the
@@ -58,16 +79,18 @@ func (t *Tracer) DrainOnCPUSamples() (oncpu.Drained, error) {
 	return oncpu.Drain(maps)
 }
 
-// stopOnCPUSampler detaches the sampler, leaving the hooks switched off.
+// stopOnCPUSampler detaches the sampler. The request hooks stay on while
+// request stamping still needs them.
 func (t *Tracer) stopOnCPUSampler() {
 	t.onCPUMu.Lock()
 	defer t.onCPUMu.Unlock()
 	if t.onCPUSampler == nil {
 		return
 	}
+	t.onCPUFlags &^= oncpu.FlagSampler
 	if t.collection != nil {
 		if enabled := t.collection.Maps[oncpu.EnabledMapName]; enabled != nil {
-			_ = oncpu.SetEnabled(enabled, false)
+			_ = oncpu.SetFlags(enabled, t.onCPUFlags)
 		}
 	}
 	_ = t.onCPUSampler.Close()

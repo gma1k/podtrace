@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/gma1k/podtrace/internal/analysis/criticalpath"
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/diagnose/correlator"
 	"github.com/gma1k/podtrace/internal/diagnose/export"
@@ -46,6 +47,7 @@ type Diagnostician struct {
 	wrapped            bool
 	podCommTracker     *tracker.PodCommunicationTracker
 	errorCorrelator    *correlator.ErrorCorrelator
+	criticalPath       *criticalpath.Collector
 	sourcePod          string
 	sourceNamespace    string
 }
@@ -60,6 +62,7 @@ func NewDiagnostician() *Diagnostician {
 		fsSlowThreshold:    config.DefaultFSSlowThreshold,
 		maxEvents:          config.MaxEvents,
 		errorCorrelator:    correlator.NewErrorCorrelator(30 * time.Second),
+		criticalPath:       criticalpath.New(),
 	}
 }
 
@@ -73,6 +76,7 @@ func NewDiagnosticianWithThresholds(errorRate, rttSpike, fsSlow float64) *Diagno
 		fsSlowThreshold:    fsSlow,
 		maxEvents:          config.MaxEvents,
 		errorCorrelator:    correlator.NewErrorCorrelator(30 * time.Second),
+		criticalPath:       criticalpath.New(),
 	}
 }
 
@@ -112,6 +116,7 @@ func (d *Diagnostician) AddEventWithContext(event *events.Event, k8sContext map[
 	if d.errorCorrelator != nil {
 		d.errorCorrelator.AddEvent(event, k8sContext)
 	}
+	d.criticalPath.Feed(event)
 
 	if len(d.events) < d.maxEvents {
 		d.events = append(d.events, event)
@@ -146,6 +151,12 @@ func (d *Diagnostician) GetEvents() []*events.Event {
 		copy(result[n:], d.events[:d.evHead])
 	}
 	return result
+}
+
+// CriticalPath returns where the requests served during collection spent
+// their time.
+func (d *Diagnostician) CriticalPath() criticalpath.Summary {
+	return d.criticalPath.Summary()
 }
 
 func (d *Diagnostician) Finish() {

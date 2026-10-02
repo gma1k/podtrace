@@ -78,3 +78,13 @@ func TestBuildSessionJobSpec_AgentEnvDefaultsWhenUnset(t *testing.T) {
 		t.Error("PODTRACE_LOG_LEVEL must be absent when LogLevel is unset")
 	}
 }
+
+func TestASessionJobLeavesTheCriticalPathOn(t *testing.T) {
+	tc := &podtracev1alpha1.TracerConfig{Spec: podtracev1alpha1.TracerConfigSpec{Image: "ghcr.io/gma1k/podtrace:test"}}
+	spec := buildSessionJobSpec(minimalSession(), tc, "node-a", sessionTargets{})
+	for _, e := range spec.Template.Spec.Containers[0].Env {
+		if e.Name == "PODTRACE_CRITICAL_PATH" {
+			t.Errorf("the session Job sets PODTRACE_CRITICAL_PATH=%q; its report is where the request breakdown is shown", e.Value)
+		}
+	}
+}

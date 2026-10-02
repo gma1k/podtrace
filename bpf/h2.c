@@ -89,7 +89,7 @@ static __always_inline void h2_oncpu_frame(u64 conn, u32 dir, u8 type, u8 flags,
 	if (!st) {
 		if (type != HTTP2_HEADERS || dir != H2_DIR_INGRESS)
 			return;
-		struct h2_stream_state fresh = {.start_ns = bpf_ktime_get_ns()};
+		struct h2_stream_state fresh = {.start_ns = request_id_now()};
 		bpf_map_update_elem(&h2_streams, &k, &fresh, BPF_NOEXIST);
 		oncpu_begin_thread_request(ONCPU_KIND_H2, conn, sid, fresh.start_ns);
 		return;
@@ -103,7 +103,7 @@ static __always_inline void h2_oncpu_frame(u64 conn, u32 dir, u8 type, u8 flags,
 		return;
 	u64 start = st->start_ns;
 	u64 now = bpf_ktime_get_ns();
-	oncpu_finish_thread_request(conn, start, now > start ? now - start : 0);
+	oncpu_finish_thread_request(ONCPU_KIND_H2, conn, start, now > start ? now - start : 0);
 	bpf_map_delete_elem(&h2_streams, &k);
 }
 

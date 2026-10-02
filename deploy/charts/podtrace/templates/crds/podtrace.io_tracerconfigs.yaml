@@ -1098,6 +1098,14 @@ spec:
                                   CPUBlockedMean is the mean time a workload spends off-CPU waiting to
                                   be scheduled above which cpu.contention fires.
                                 type: string
+                              dnsSlowLookupPercent:
+                                description: |-
+                                  DNSSlowLookupPercent is the share of a workload's DNS lookups slower
+                                  than 100ms above which dns.slow_lookup_rate fires.
+                                format: int32
+                                maximum: 100
+                                minimum: 1
+                                type: integer
                               errorRatePercent:
                                 description: |-
                                   ErrorRatePercent is the application-layer error ratio above which

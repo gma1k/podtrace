@@ -52,6 +52,7 @@ enum event_type {
 	EVENT_DB_POOL_STATS,
 	EVENT_TCP_RTT,
 	EVENT_CONNECT_RESULT,
+	EVENT_REQUEST_DONE,
 };
 
 struct event {

@@ -573,6 +573,7 @@ spec:
                           - db.connection_acquire_slow
                           - db.pool_saturated
                           - cpu.contention
+                          - dns.slow_lookup_rate
                           type: string
                         kind:
                           description: |-
