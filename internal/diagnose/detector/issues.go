@@ -7,6 +7,8 @@ import (
 	"github.com/gma1k/podtrace/internal/events"
 )
 
+var SessionIDs = []ID{IDConnectionFailureRate, IDRTTSpikeRate, IDResourceSaturation}
+
 // DetectIssues returns the typed issues present in a batch of events.
 func DetectIssues(allEvents []*events.Event, errorRateThreshold, rttSpikeThreshold float64) []Issue {
 	var issues []Issue

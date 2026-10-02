@@ -25,12 +25,23 @@ const (
 	LabelSessionNS      = "podtrace.io/session-namespace"
 	LabelExporterConfig = "podtrace.io/exporter-config"
 	LabelNodeName       = "podtrace.io/node"
+	LabelSchedule       = "podtrace.io/schedule"
 
 	ManagedByValue = "podtrace-operator"
 
 	ComponentAgent   = "agent"
 	ComponentSession = "session"
 	ComponentBundle  = "exporter-bundle"
+)
+
+// Annotations a triggered session carries for the Job to read back.
+const (
+	AnnotationTriggeredBy     = "podtrace.io/triggered-by"
+	AnnotationTriggerSeverity = "podtrace.io/trigger-severity"
+	AnnotationTriggerPod      = "podtrace.io/trigger-pod"
+	AnnotationTriggeredAt     = "podtrace.io/triggered-at"
+
+	AnnotationTriggerReason = "podtrace.io/trigger-reason"
 )
 
 // Condition types reported on CR .status.conditions.

@@ -27,6 +27,7 @@ import (
 	"github.com/gma1k/podtrace/internal/alerting"
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/diagnose"
+	diagnosereport "github.com/gma1k/podtrace/internal/diagnose/report"
 	"github.com/gma1k/podtrace/internal/ebpf"
 	tracerpkg "github.com/gma1k/podtrace/internal/ebpf/tracer"
 	"github.com/gma1k/podtrace/internal/events"
@@ -78,6 +79,7 @@ var (
 	summaryFile            string
 	terminationMessagePath string
 	sessionDeadline        string
+	sessionTrigger         diagnosereport.Trigger
 	reportTo               string
 
 	resolverFactory func() (kubernetes.PodResolverInterface, error)
@@ -171,6 +173,14 @@ func main() {
 	rootCmd.Flags().StringVar(&terminationMessagePath, "termination-message-path", "", "Write a compact summary JSON to this path so Kubernetes surfaces it in pod status")
 	rootCmd.Flags().StringVar(&sessionDeadline, "session-deadline", "", "When the session Job running this diagnose is killed (RFC 3339); collection stops early enough to write the report before it")
 	_ = rootCmd.Flags().MarkHidden("session-deadline")
+	rootCmd.Flags().StringVar(&sessionTrigger.IssueID, "trigger-issue", "", "internal: id of the issue that started this session; the report opens with it")
+	rootCmd.Flags().StringVar(&sessionTrigger.Severity, "trigger-severity", "", "internal: severity of the issue that started this session")
+	rootCmd.Flags().StringVar(&sessionTrigger.Pod, "trigger-pod", "", "internal: pod the issue that started this session was raised on")
+	rootCmd.Flags().StringVar(&sessionTrigger.At, "trigger-at", "", "internal: when the issue that started this session fired")
+	rootCmd.Flags().StringVar(&sessionTrigger.Reason, "trigger-reason", "", "internal: what the agent measured when the issue fired")
+	for _, name := range []string{"trigger-issue", "trigger-severity", "trigger-pod", "trigger-at", "trigger-reason"} {
+		_ = rootCmd.Flags().MarkHidden(name)
+	}
 	rootCmd.Flags().StringVar(&reportTo, "report-to", "", "Upload the full diagnose report to a sink: kind/namespace/name (kind is configmap|secret)")
 
 	registerTargetFlags(rootCmd.Flags())
@@ -1129,6 +1139,10 @@ func attachSourcePod(e *events.Event, resolve func(*events.Event) *kubernetes.Po
 
 // generateDiagnoseReport renders the diagnostic report.
 func generateDiagnoseReport(agg *diagnose.Diagnostician) string {
+	return diagnosereport.GenerateTriggerSection(sessionTrigger, agg) + diagnosisByPod(agg)
+}
+
+func diagnosisByPod(agg *diagnose.Diagnostician) string {
 	allEvents := agg.GetEvents()
 	contexts := agg.EventContexts()
 

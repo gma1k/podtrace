@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -21,6 +22,7 @@ import (
 
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 	"github.com/gma1k/podtrace/internal/alerting"
+	"github.com/gma1k/podtrace/internal/diagnose/detector"
 )
 
 // +kubebuilder:rbac:groups="",resources=events,verbs=get;list;watch
@@ -118,6 +120,9 @@ type alertEvent struct {
 	Kind      podtracev1alpha1.TriggerSourceKind
 	Severity  string
 	At        time.Time
+
+	IssueID string
+	Reason  string
 }
 
 // parseAlertEvent extracts the trigger view from a raw Event, or false when
@@ -137,13 +142,44 @@ func parseAlertEvent(ev *corev1.Event) (alertEvent, bool) {
 	if ns == "" {
 		ns = ev.Namespace
 	}
-	return alertEvent{
+	out := alertEvent{
 		Namespace: ns,
 		PodName:   ev.InvolvedObject.Name,
 		Kind:      kind,
 		Severity:  ev.Annotations[alerting.AnnotationAlertSeverity],
 		At:        eventTime(ev),
-	}, true
+	}
+	if kind == podtracev1alpha1.TriggerSourceIssue {
+		out.IssueID = knownIssueID(ev.Annotations[alerting.AnnotationIssueID])
+		out.Reason = truncateReason(ev.Message)
+	}
+	return out, true
+}
+
+// knownIssueID returns id when it is in the issue registry, and "" otherwise,
+// so an Event cannot put an arbitrary string on a session.
+func knownIssueID(id string) string {
+	for _, known := range detector.Registry {
+		if string(known) == id {
+			return id
+		}
+	}
+	return ""
+}
+
+// maxTriggerReasonBytes bounds the reason copied onto a session's annotations.
+const maxTriggerReasonBytes = 512
+
+func truncateReason(reason string) string {
+	reason = strings.TrimSpace(reason)
+	if len(reason) <= maxTriggerReasonBytes {
+		return reason
+	}
+	cut := maxTriggerReasonBytes
+	for cut > 0 && !utf8.RuneStart(reason[cut]) {
+		cut--
+	}
+	return reason[:cut]
 }
 
 // eventTime returns the most recent observation time recorded on the Event.
@@ -163,6 +199,9 @@ func matchesTriggerSources(ev alertEvent, sources []podtracev1alpha1.TriggerSour
 	got := severityRank(ev.Severity)
 	for _, src := range sources {
 		if src.Kind != ev.Kind {
+			continue
+		}
+		if src.IssueID != "" && src.IssueID != ev.IssueID {
 			continue
 		}
 		if got >= severityRank(effectiveMinSeverity(src.MinSeverity)) {
@@ -467,17 +506,23 @@ func (r *PodTraceScheduleReconciler) ensureTriggeredSession(ctx context.Context,
 		}
 		labelsMap[LabelManagedBy] = ManagedByValue
 		labelsMap[LabelComponent] = ComponentSession
-		labelsMap["podtrace.io/schedule"] = sch.Name
+		labelsMap[LabelSchedule] = sch.Name
 		session.Labels = mergeLabels(session.Labels, labelsMap)
 
 		anns := map[string]string{}
 		for k, v := range sch.Spec.SessionTemplate.Metadata.Annotations {
 			anns[k] = v
 		}
-		anns["podtrace.io/triggered-by"] = string(ev.Kind)
-		anns["podtrace.io/trigger-severity"] = ev.Severity
-		anns["podtrace.io/trigger-pod"] = ev.Namespace + "/" + ev.PodName
-		anns["podtrace.io/triggered-at"] = ev.At.UTC().Format(time.RFC3339)
+		anns[AnnotationTriggeredBy] = string(ev.Kind)
+		anns[AnnotationTriggerSeverity] = ev.Severity
+		anns[AnnotationTriggerPod] = ev.Namespace + "/" + ev.PodName
+		anns[AnnotationTriggeredAt] = ev.At.UTC().Format(time.RFC3339)
+		if ev.IssueID != "" {
+			anns[alerting.AnnotationIssueID] = ev.IssueID
+		}
+		if ev.Reason != "" {
+			anns[AnnotationTriggerReason] = ev.Reason
+		}
 		session.Annotations = mergeLabels(session.Annotations, anns)
 
 		return controllerutil.SetControllerReference(sch, session, r.Scheme)

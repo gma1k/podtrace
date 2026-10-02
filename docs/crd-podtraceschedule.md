@@ -105,9 +105,12 @@ metadata:
 spec:
   trigger:
     sources:
-      - kind: ResourceAlert       # ResourceAlert | OOMKill | ErrorRate
+      - kind: ResourceAlert       # ResourceAlert | OOMKill | ErrorRate | Issue
         minSeverity: critical     # warning | critical | fatal (default critical)
       - kind: OOMKill
+      - kind: Issue
+        issueID: l7.error_rate    # optional; only with kind Issue
+        minSeverity: warning
     selector:                     # optional; empty = every pod in scope
       matchLabels:
         app: checkout
@@ -116,6 +119,9 @@ spec:
     concurrencyPolicy: Forbid     # default; the safe choice for privileged Jobs
   sessionTemplate:
     spec:
+      selector:                   # required; a fired session targets the alerting pod instead
+        matchLabels:
+          app: checkout
       duration: 60s
       filters: [net, fs, cpu]
       exporterRef:
@@ -126,7 +132,7 @@ spec:
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `trigger.sources` | list | yes | One or more `{kind, minSeverity}`. A session fires when an observed alert matches ANY source. `kind` is `ResourceAlert`, `OOMKill`, or `ErrorRate`. `minSeverity` (`warning`/`critical`/`fatal`) defaults to `critical`, so noisy warnings do not spawn Jobs unless opted in. |
+| `trigger.sources` | list | yes | One or more `{kind, minSeverity, issueID}`. A session fires when an observed alert matches ANY source. `kind` is `ResourceAlert`, `OOMKill`, `ErrorRate`, or `Issue`. `minSeverity` (`warning`/`critical`/`fatal`) defaults to `critical`, so noisy warnings do not spawn Jobs unless opted in. `issueID` narrows an `Issue` source to one issue id, such as `l7.error_rate`; unset, every issue matches. It is rejected on any other kind. The ids are listed in [Continuous Inspections](continuous-inspections.md#the-rules). |
 | `trigger.selector` | LabelSelector | no | Narrows which pods' alerts arm the trigger. Empty selects every pod in scope. |
 | `trigger.namespaceSelector` | LabelSelector | no | Widens matching across namespaces, subject to the same `podtrace.io/allow-tracing-from` consent model as `PodTrace`. |
 | `trigger.cooldown` | duration | no | Minimum time after a session fires for a pod before another may fire for that same pod. Bounds a flapping alert to one session per window. Default 10m. |
@@ -142,10 +148,21 @@ dropped watch delivery is still caught while the Event lives in etcd).
 Because resource alerts recur each interval, a briefly-missed Event
 self-heals on the next tick.
 
+A schedule acts on every matching alert Event the API server still holds,
+including ones written before the schedule existed, so a schedule created
+during an incident captures it. Each pod fires at most once per cooldown,
+and `maxSessionsPerHour` caps the total.
+
 Each fired session is annotated with `podtrace.io/triggered-by`,
-`podtrace.io/trigger-severity`, and `podtrace.io/trigger-pod` so the
-reader sees why it ran, and targets the alerting pod via `podRefs`
-(overriding any selector in the template).
+`podtrace.io/trigger-severity`, `podtrace.io/trigger-pod` and
+`podtrace.io/triggered-at` so the reader sees why it ran, and targets the
+alerting pod via `podRefs` (overriding any selector in the template). The
+template still needs a `selector`, and an `exporterRef` or `reportRef`:
+admission validates it as a session spec, and rejects a schedule without
+them. A
+session an issue started also carries `podtrace.io/issue-id` and
+`podtrace.io/trigger-reason`, the agent's account of what it measured, and
+its report opens with that issue.
 
 ### Requirements
 
@@ -233,6 +250,13 @@ sessionTemplate:
 Then `kubectl get cm nightly-report -o go-template='{{range $k,$v := .data}}{{$v}}{{end}}'`
 for the latest run, or `aws s3 ls s3://my-bucket/podtrace/` for the
 archived history.
+
+Every run shares the template's report name, so each run takes over the
+ConfigMap or Secret the previous run of the same schedule wrote. A
+ConfigMap or Secret of that name that no session of this schedule created
+is never overwritten: the run fails with `ReportObjectConflict` instead.
+The session objects themselves are deleted `ttlSecondsAfterFinished`
+(default 300s) after they finish; the report outlives them.
 
 For all four surfaces (live CLI, ConfigMap, ObjectStore, OTLP/Jaeger)
 and the gotchas behind each, see [viewing-events.md](viewing-events.md).

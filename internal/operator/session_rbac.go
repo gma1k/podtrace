@@ -10,6 +10,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -295,6 +296,10 @@ func ensureSessionReportObject(ctx context.Context, c client.Client, s *podtrace
 	labels := sessionRBACLabels(s)
 	labels[reportManagedBy] = reportManagedVal
 	labels[labelReportKind] = reportKindValue
+	schedule := controllingSchedule(s)
+	if schedule != "" {
+		labels[LabelSchedule] = schedule
+	}
 	var obj client.Object
 	switch resource {
 	case "configmaps":
@@ -316,10 +321,43 @@ func ensureSessionReportObject(ctx context.Context, c client.Client, s *podtrace
 	if getErr := c.Get(ctx, client.ObjectKey{Namespace: s.Namespace, Name: name}, existing); getErr != nil {
 		return fmt.Errorf("inspect existing session report %s/%s: %w", s.Namespace, name, getErr)
 	}
-	if !reportObjectOwnedBySession(existing.GetLabels(), s) {
+	if reportObjectOwnedBySession(existing.GetLabels(), s) {
+		return nil
+	}
+	if !reportObjectOfSchedule(existing.GetLabels(), schedule) {
 		return &reportObjectConflictError{namespace: s.Namespace, name: name, resource: resource}
 	}
+	merged := existing.GetLabels()
+	for k, v := range labels {
+		merged[k] = v
+	}
+	existing.SetLabels(merged)
+	if err := c.Update(ctx, existing); err != nil {
+		return fmt.Errorf("take over session report %s/%s from an earlier run: %w", s.Namespace, name, err)
+	}
 	return nil
+}
+
+// controllingSchedule returns the name of the PodTraceSchedule that controls
+// the session, or "" for a session no schedule owns.
+func controllingSchedule(s *podtracev1alpha1.PodTraceSession) string {
+	ref := metav1.GetControllerOf(s)
+	if ref == nil || ref.Kind != "PodTraceSchedule" {
+		return ""
+	}
+	if gv, err := schema.ParseGroupVersion(ref.APIVersion); err != nil || gv.Group != podtracev1alpha1.GroupVersion.Group {
+		return ""
+	}
+	return ref.Name
+}
+
+// reportObjectOfSchedule reports whether a pre-existing report object was
+// created by a session of the named schedule.
+func reportObjectOfSchedule(labels map[string]string, schedule string) bool {
+	return schedule != "" &&
+		labels[labelReportKind] == reportKindValue &&
+		labels[reportManagedBy] == reportManagedVal &&
+		labels[LabelSchedule] == schedule
 }
 
 // reportObjectOwnedBySession reports whether a pre-existing report object

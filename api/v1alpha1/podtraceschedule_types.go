@@ -107,6 +107,7 @@ const (
 
 // TriggerSource selects one alert category and the minimum severity that
 // arms the trigger.
+// +kubebuilder:validation:XValidation:rule="!has(self.issueID) || self.kind == 'Issue'",message="issueID applies only to kind Issue"
 type TriggerSource struct {
 	// TriggerSourceKind names an agent-detected alert category that can fire a
 	// triggered session.
@@ -119,6 +120,13 @@ type TriggerSource struct {
 	// +kubebuilder:validation:Enum=warning;critical;fatal
 	// +optional
 	MinSeverity string `json:"minSeverity,omitempty"`
+
+	// IssueID narrows an Issue source to one issue, such as l7.error_rate.
+	// Leave it unset to fire on every issue. The ids are listed in
+	// docs/continuous-inspections.md.
+	// +kubebuilder:validation:Enum=net.connection_failure_rate;net.rtt_spike_rate;resource.saturation;l7.error_rate;l7.latency_degraded;db.connection_acquire_slow;db.pool_saturated;cpu.contention
+	// +optional
+	IssueID string `json:"issueID,omitempty"`
 }
 
 // TriggerSpec configures event-driven ("flight recorder") session creation.

@@ -1,0 +1,26 @@
+apiVersion: podtrace.io/v1alpha1
+kind: PodTraceSchedule
+metadata:
+  name: on-error-rate
+  namespace: inspect-app
+spec:
+  trigger:
+    sources:
+      - kind: Issue
+        issueID: l7.error_rate
+        minSeverity: warning
+    selector:
+      matchLabels:
+        app: broken-api
+    cooldown: 10m
+    maxSessionsPerHour: 2
+  sessionTemplate:
+    spec:
+      selector:
+        matchLabels:
+          app: broken-api
+      duration: 15s
+      filters: [net]
+      reportRef:
+        configMap:
+          name: on-error-rate-report

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/gma1k/podtrace/internal/diagnose"
+	diagnosereport "github.com/gma1k/podtrace/internal/diagnose/report"
 	"github.com/gma1k/podtrace/internal/events"
 )
 
@@ -39,5 +40,20 @@ func TestGenerateDiagnoseReport_SinglePodUnchanged(t *testing.T) {
 	report := generateDiagnoseReport(d)
 	if strings.Contains(report, "Diagnosis: ns/only-pod") {
 		t.Errorf("single-pod report should not add per-pod section headers:\n%s", report)
+	}
+}
+
+func TestATriggeredSessionReportOpensWithItsIssue(t *testing.T) {
+	saved := sessionTrigger
+	t.Cleanup(func() { sessionTrigger = saved })
+	sessionTrigger = diagnosereport.Trigger{IssueID: "l7.error_rate", Pod: "ns/only-pod"}
+
+	d := diagnose.NewDiagnosticianWithThresholds(errorRateThreshold, rttSpikeThreshold, fsSlowThreshold)
+	d.AddEvent(eventForPod("ns", "only-pod"))
+	d.Finish()
+
+	report := generateDiagnoseReport(d)
+	if !strings.HasPrefix(report, "=== Started by issue l7.error_rate ===") {
+		t.Errorf("report does not open with the triggering issue:\n%s", report)
 	}
 }

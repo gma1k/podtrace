@@ -34,6 +34,10 @@ type TriggerSourceApplyConfiguration struct {
 	// warning < critical < fatal. Defaults to critical so noisy warnings
 	// do not spawn privileged Jobs unless explicitly opted into.
 	MinSeverity *string `json:"minSeverity,omitempty"`
+	// IssueID narrows an Issue source to one issue, such as l7.error_rate.
+	// Leave it unset to fire on every issue. The ids are listed in
+	// docs/continuous-inspections.md.
+	IssueID *string `json:"issueID,omitempty"`
 }
 
 // TriggerSourceApplyConfiguration constructs a declarative configuration of the TriggerSource type for use with
@@ -55,5 +59,13 @@ func (b *TriggerSourceApplyConfiguration) WithKind(value apiv1alpha1.TriggerSour
 // If called multiple times, the MinSeverity field is set to the value of the last call.
 func (b *TriggerSourceApplyConfiguration) WithMinSeverity(value string) *TriggerSourceApplyConfiguration {
 	b.MinSeverity = &value
+	return b
+}
+
+// WithIssueID sets the IssueID field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the IssueID field is set to the value of the last call.
+func (b *TriggerSourceApplyConfiguration) WithIssueID(value string) *TriggerSourceApplyConfiguration {
+	b.IssueID = &value
 	return b
 }
