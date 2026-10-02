@@ -24,7 +24,9 @@ spec:
       4. Assert the inspection loop is running at all.
       5. Assert podtrace_issue_active fires for l7.error_rate on it.
       6. Assert the Kubernetes Event the trigger contract needs was written.
-      7. Stop the errors and assert the issue clears and its series is gone.
+      7. Assert a PodTraceSchedule selecting l7.error_rate started a session
+         that knows which issue started it.
+      8. Stop the errors and assert the issue clears and its series is gone.
   timeouts:
     apply: 60s
     assert: 120s
@@ -166,6 +168,8 @@ spec:
       try:
         - apply:
             file: workload.yaml
+        - apply:
+            file: schedule.yaml
         - assert:
             file: assert-workload-ready.yaml
 
@@ -358,6 +362,71 @@ spec:
               fi
 
               echo "trigger Event present with a Pod involved object"
+
+    - name: the-issue-started-a-session
+      description: |
+        The last hop of the loop: the operator turns the issue Event into a
+        PodTraceSession, and the session's Job is told which issue started
+        it so its report can open with it. Only the session object and the
+        Job's arguments are asserted; the report itself is covered by unit
+        tests, and waiting for a session to finish would double this test.
+      try:
+        - script:
+            content: |
+              set -eu
+              session=""
+              for _ in $(seq 1 45); do
+                session=$(kubectl -n inspect-app get podtracesessions \
+                  -l podtrace.io/schedule=on-error-rate \
+                  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+                [ -n "${session}" ] && break
+                sleep 2
+              done
+              if [ -z "${session}" ]; then
+                echo "FAIL: l7.error_rate fired and its Event exists, but the schedule that"
+                echo "      selects it started no session"
+                kubectl -n inspect-app get podtraceschedule on-error-rate -o yaml || true
+                kubectl -n podtrace-system logs -l app.kubernetes.io/component=operator --tail=60 || true
+                exit 1
+              fi
+
+              issue=$(kubectl -n inspect-app get podtracesession "${session}" \
+                -o jsonpath='{.metadata.annotations.podtrace\.io/issue-id}')
+              reason=$(kubectl -n inspect-app get podtracesession "${session}" \
+                -o jsonpath='{.metadata.annotations.podtrace\.io/trigger-reason}')
+              target=$(kubectl -n inspect-app get podtracesession "${session}" \
+                -o jsonpath='{.spec.podRefs[0].name}')
+              echo "session ${session}: issue=${issue} target=${target}"
+              echo "reason: ${reason}"
+              if [ "${issue}" != "l7.error_rate" ]; then
+                echo "FAIL: the session does not record the issue that started it (got '${issue}')"
+                exit 1
+              fi
+              case "${reason}" in
+                *"broken-api"*) ;;
+                *) echo "FAIL: the session's trigger reason does not describe broken-api: '${reason}'"; exit 1 ;;
+              esac
+              case "${target}" in
+                broken-api-*) ;;
+                *) echo "FAIL: the session targets '${target}', not a broken-api pod"; exit 1 ;;
+              esac
+
+              args=""
+              for _ in $(seq 1 30); do
+                args=$(kubectl -n podtrace-system get jobs -l podtrace.io/session="${session}",podtrace.io/session-namespace=inspect-app \
+                  -o jsonpath='{.items[0].spec.template.spec.containers[0].args}' 2>/dev/null || true)
+                [ -n "${args}" ] && break
+                sleep 2
+              done
+              if [ -z "${args}" ]; then
+                echo "FAIL: no Job was created for session ${session}"
+                kubectl -n inspect-app get podtracesession "${session}" -o yaml || true
+                exit 1
+              fi
+              case "${args}" in
+                *'"--trigger-issue","l7.error_rate"'*) echo "the session Job opens its report with l7.error_rate" ;;
+                *) echo "FAIL: the session Job is not told which issue started it: ${args}"; exit 1 ;;
+              esac
 
     - name: the-issue-clears
       description: |

@@ -264,14 +264,54 @@ existing flight-recorder contract already understands. To act on it:
 apiVersion: podtrace.io/v1alpha1
 kind: PodTraceSchedule
 metadata:
-  name: on-issue
+  name: on-error-rate
   namespace: shop
 spec:
-  triggers:
-    - source: Issue
-      minSeverity: warning
-  # ... session template
+  trigger:
+    sources:
+      - kind: Issue
+        issueID: l7.error_rate
+        minSeverity: warning
+    selector:
+      matchLabels:
+        app: api
+  sessionTemplate:
+    spec:
+      selector:
+        matchLabels:
+          app: api
+      duration: 2m
+      reportRef:
+        configMap:
+          name: api-error-rate-report
 ```
+
+`issueID` picks one issue from [the rules](#the-rules). Leave it out and every
+issue at or above `minSeverity` starts a session, so a `cpu.contention`
+warning would start the same capture as an error rate. List one source per
+issue to act on several. The full trigger reference, including cooldown and
+the hourly cap, is in [PodTraceSchedule](crd-podtraceschedule.md#trigger-mode-flight-recorder).
+
+The session an issue starts carries `podtrace.io/issue-id` and
+`podtrace.io/trigger-reason` (what the agent measured), and its report opens
+with that issue:
+
+```text
+=== Started by issue l7.error_rate ===
+
+  Severity:       warning
+  Pod:            shop/api-7d9f8b6c4-x2k8q
+  Fired at:       2026-10-02T09:14:03Z
+  Agent measured: High application error rate for shop/api: 100.0% of 240 requests (threshold: 5.0%)
+  This capture:   does not raise this issue itself; the agent's measurement above is the evidence
+  Look first at:  HTTP Statistics
+```
+
+A session raises only `net.connection_failure_rate`, `net.rtt_spike_rate` and
+`resource.saturation` from its own events; the other ids read metrics a
+session does not keep. For those three the report says whether the session
+saw the condition too, which tells you whether it was still present while the
+session collected.
 
 ### The pod requirement
 

@@ -372,7 +372,7 @@ func (r *PodTraceScheduleReconciler) ensureSessionForRun(ctx context.Context, sc
 		}
 		labels[LabelManagedBy] = ManagedByValue
 		labels[LabelComponent] = ComponentSession
-		labels["podtrace.io/schedule"] = sch.Name
+		labels[LabelSchedule] = sch.Name
 		session.Labels = mergeLabels(session.Labels, labels)
 
 		anns := map[string]string{}

@@ -44,13 +44,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      - name: Free up disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL \
-            /usr/local/lib/android /usr/local/share/boost || true
-          sudo docker image prune -af || true
-          df -h /
-
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
@@ -95,9 +88,6 @@ jobs:
           sudo chmod 0755 /usr/local/bin/chainsaw
           rm -f "${tmp}"
           chainsaw version
-
-      - name: Install BPF toolchain
-        uses: ./.github/actions/setup-bpf-toolchain
 
       - name: Build podtrace image
         run: make docker-build IMAGE_TAG=ci
@@ -240,9 +230,6 @@ jobs:
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5.0.1
         with:
           version: v4.3.0
-
-      - name: Install BPF toolchain
-        uses: ./.github/actions/setup-bpf-toolchain
 
       - name: Build podtrace image
         run: |

@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	"github.com/gma1k/podtrace/internal/alerting"
 	"github.com/gma1k/podtrace/internal/config"
 )
 
@@ -121,6 +122,7 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 	if reportTo != "" {
 		sessionArgs = append(sessionArgs, "--report-to", reportTo)
 	}
+	sessionArgs = append(sessionArgs, triggerIssueArgs(s.Annotations)...)
 
 	mainEnv := []corev1.EnvVar{
 		{
@@ -298,6 +300,27 @@ func objectStoreCredentialsVolume(s *podtracev1alpha1.PodTraceSession) (corev1.V
 // *bool fields that Kubernetes API types require.
 func pointerBool(b bool) *bool {
 	return &b
+}
+
+// triggerIssueArgs tells the session which issue started it, so its report
+// opens with that issue. It returns nothing for a session no issue started.
+func triggerIssueArgs(annotations map[string]string) []string {
+	id := knownIssueID(annotations[alerting.AnnotationIssueID])
+	if id == "" {
+		return nil
+	}
+	args := []string{"--trigger-issue", id}
+	for _, f := range []struct{ flag, annotation string }{
+		{"--trigger-severity", AnnotationTriggerSeverity},
+		{"--trigger-pod", AnnotationTriggerPod},
+		{"--trigger-at", AnnotationTriggeredAt},
+		{"--trigger-reason", AnnotationTriggerReason},
+	} {
+		if v := annotations[f.annotation]; v != "" {
+			args = append(args, f.flag, truncateReason(v))
+		}
+	}
+	return args
 }
 
 // buildDiagnoseArgs produces the `podtrace` CLI args that a session Job
