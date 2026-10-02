@@ -20,6 +20,7 @@ const (
 	familyCPURunqueue     = "podtrace_workload_cpu_runqueue_latency_seconds"
 	familyLockContention  = "podtrace_workload_lock_contention_seconds"
 	familyNetworkRTT      = "podtrace_workload_network_rtt_seconds"
+	familyDNSLatency      = "podtrace_workload_dns_latency_seconds"
 )
 
 // RuleFamilies is every family the built-in rules read, and nothing else.
@@ -35,6 +36,7 @@ func RuleFamilies() []string {
 		familyCPURunqueue,
 		familyLockContention,
 		familyNetworkRTT,
+		familyDNSLatency,
 	}
 }
 
@@ -52,13 +54,8 @@ type Thresholds struct {
 
 	AcquireMean time.Duration
 
-	// RTTSpikeBound is the network-latency bound above which an operation
-	// counts as a spike. It must be one of the histogram's bucket
-	// boundaries, because the rule refuses to interpolate between them.
 	RTTSpikeBound time.Duration
 
-	// SpikeRatePercent is the share of operations above RTTSpikeBound that
-	// makes the rule fire.
 	SpikeRatePercent float64
 
 	PoolUtilizationWarn     int
@@ -66,9 +63,11 @@ type Thresholds struct {
 
 	CPUBlockedMean time.Duration
 
-	// MinPreemptions is the number of preemptions a workload must show
-	// before its mean run-queue latency is trusted.
 	MinPreemptions uint64
+
+	DNSSlowBound time.Duration
+
+	DNSSlowRatePercent float64
 
 	HoldTime time.Duration
 
@@ -91,6 +90,8 @@ func (t Thresholds) unset() bool {
 		t.PoolUtilizationCritical == 0 &&
 		t.CPUBlockedMean == 0 &&
 		t.MinPreemptions == 0 &&
+		t.DNSSlowBound == 0 &&
+		t.DNSSlowRatePercent == 0 &&
 		t.HoldTime == 0 &&
 		len(t.HoldTimes) == 0
 }
@@ -129,29 +130,18 @@ func DefaultThresholds() Thresholds {
 		UtilizationEmergency: 95,
 		AcquireMean:          100 * time.Millisecond,
 
-		// config.RTTSpikeThresholdMS, which is a bucket boundary of
-		// latencyBuckets. Changing one without the other makes the rule
-		// silently stop firing, which is why rttSpikeRule says so when
-		// the bound is missing rather than returning no issues.
 		RTTSpikeBound:    time.Duration(config.RTTSpikeThresholdMS) * time.Millisecond,
 		SpikeRatePercent: config.SpikeRateThreshold,
 
 		PoolUtilizationWarn:     80,
 		PoolUtilizationCritical: 90,
 
-		// Calibrated against run-queue latency, not off-CPU time. On a
-		// three-node kind cluster a workload pinned at its CPU limit
-		// measured a 110ms mean across 47540 preemptions, while every
-		// other workload on the node sat between 1.6ms and 2.8ms. 50ms
-		// clears the idle floor by roughly 18x and still catches the
-		// contended case with room to spare.
 		CPUBlockedMean: 50 * time.Millisecond,
 
-		// A handful of preemptions says nothing: an idle pod that gets
-		// descheduled twice, once slowly, would otherwise show a mean
-		// above any threshold. The busy workload above produced 47540
-		// samples in the same window.
 		MinPreemptions: 100,
+
+		DNSSlowBound:       100 * time.Millisecond,
+		DNSSlowRatePercent: 5,
 	}
 }
 
@@ -166,6 +156,7 @@ func Rules() []Rule {
 		rttSpikeRule(),
 		poolSaturationRule(),
 		cpuContentionRule(),
+		dnsSlowLookupRule(),
 	}
 }
 
@@ -711,4 +702,78 @@ func remediationForRTTSource(source string) string {
 		"the service map before suspecting the wire: if one dependency moved with " +
 		"it, the peer is slow, not the network. Enabling the sock_ops RTT hook " +
 		"replaces this reading with the kernel's own."
+}
+
+// dnsSlowLookupRule fires when too large a share of a workload's DNS
+// resolutions answer slower than the slow bound.
+func dnsSlowLookupRule() Rule {
+	return Rule{
+		ID:  detector.IDDNSSlowLookupRate,
+		For: 3 * time.Minute,
+		Query: `100 * (1 - (
+  sum by (namespace, workload) (rate(podtrace_workload_dns_latency_seconds_bucket{le="0.1"}[5m]))
+  / sum by (namespace, workload) (rate(podtrace_workload_dns_latency_seconds_count[5m]))))`,
+		Eval: func(w Window, t Thresholds) []detector.Issue {
+			if !w.Ready() || t.DNSSlowBound <= 0 {
+				return nil
+			}
+			bound := t.DNSSlowBound.Seconds()
+			interval := w.Interval()
+
+			byWorkload := map[string]*workloadTotals{}
+			for _, d := range w.Deltas(familyDNSLatency) {
+				if d.Reset || d.Count == 0 {
+					continue
+				}
+				share, ok := d.FractionAbove(bound)
+				if !ok {
+					continue
+				}
+				key := d.Sample.Namespace + "/" + d.Sample.Workload
+				agg, found := byWorkload[key]
+				if !found {
+					agg = &workloadTotals{sample: d.Sample}
+					byWorkload[key] = agg
+				}
+				agg.count += d.Count
+				agg.above += share / 100 * float64(d.Count)
+			}
+
+			var issues []detector.Issue
+			for _, agg := range byWorkload {
+				perSecond := float64(agg.count) / interval.Seconds()
+				if perSecond < t.MinRequestsPerSecond {
+					continue
+				}
+				rate := agg.above / float64(agg.count) * 100
+				if rate <= t.DNSSlowRatePercent {
+					continue
+				}
+				s := agg.sample
+				issues = append(issues, detector.Issue{
+					ID:       detector.IDDNSSlowLookupRate,
+					Severity: alerting.SeverityWarning,
+					Subject: detector.Subject{
+						Namespace: s.Namespace,
+						Workload:  s.Workload,
+					},
+					Evidence: []detector.Evidence{
+						detector.NewEvidence("slow_lookup_rate", rate, t.DNSSlowRatePercent, "%"),
+						detector.NewEvidence("slow_bound", bound*1000, bound*1000, "ms"),
+						detector.NewEvidence("slow_lookups", agg.above, 0, "count"),
+						detector.NewEvidence("total_lookups", float64(agg.count), 0, "count"),
+						detector.NewEvidence("lookup_rate", perSecond, t.MinRequestsPerSecond, "/s"),
+					},
+					Remediation: "Check whether CoreDNS's own upstream lookups slowed down with it: " +
+						"if they did, the upstream resolver is the cause; if not, look at the " +
+						"path between the workload and CoreDNS. A short ndots or a node-local " +
+						"DNS cache cuts the number of lookups that leave the node.",
+					Message: fmt.Sprintf("Slow DNS resolution for %s/%s: %.1f%% of %d lookups slower than %s (threshold: %.1f%%)",
+						s.Namespace, s.Workload, rate, agg.count,
+						t.DNSSlowBound.Round(time.Millisecond), t.DNSSlowRatePercent),
+				})
+			}
+			return issues
+		},
+	}
 }

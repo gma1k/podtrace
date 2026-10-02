@@ -50,6 +50,9 @@ type AgentInspectionThresholdsSpecApplyConfiguration struct {
 	// points higher. This fires before db.connection_acquire_slow, which
 	// only notices once callers are already queueing.
 	PoolUtilizationPercent *int32 `json:"poolUtilizationPercent,omitempty"`
+	// DNSSlowLookupPercent is the share of a workload's DNS lookups slower
+	// than 100ms above which dns.slow_lookup_rate fires.
+	DNSSlowLookupPercent *int32 `json:"dnsSlowLookupPercent,omitempty"`
 }
 
 // AgentInspectionThresholdsSpecApplyConfiguration constructs a declarative configuration of the AgentInspectionThresholdsSpec type for use with
@@ -103,5 +106,13 @@ func (b *AgentInspectionThresholdsSpecApplyConfiguration) WithCPUBlockedMean(val
 // If called multiple times, the PoolUtilizationPercent field is set to the value of the last call.
 func (b *AgentInspectionThresholdsSpecApplyConfiguration) WithPoolUtilizationPercent(value int32) *AgentInspectionThresholdsSpecApplyConfiguration {
 	b.PoolUtilizationPercent = &value
+	return b
+}
+
+// WithDNSSlowLookupPercent sets the DNSSlowLookupPercent field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the DNSSlowLookupPercent field is set to the value of the last call.
+func (b *AgentInspectionThresholdsSpecApplyConfiguration) WithDNSSlowLookupPercent(value int32) *AgentInspectionThresholdsSpecApplyConfiguration {
+	b.DNSSlowLookupPercent = &value
 	return b
 }

@@ -500,8 +500,11 @@ func (s *Sink) record(e *events.Event, base []string) bool {
 		s.observe(e, s.c.lockContention, "lock_contention_seconds", base, seconds)
 		return true
 
-	case events.EventDNS, events.EventDNSQuery:
+	case events.EventDNS:
 		s.observeExemplar(e, s.c.dnsLatency, "dns_latency_seconds", base, seconds, ex)
+		return true
+
+	case events.EventDNSQuery:
 		return true
 
 	case events.EventRead, events.EventWrite, events.EventFsync,

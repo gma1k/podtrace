@@ -60,6 +60,7 @@ var allEventTypes = map[events.EventType]string{
 	events.EventUSDT:           "EventUSDT",
 	events.EventTCPRTT:         "EventTCPRTT",
 	events.EventConnectResult:  "EventConnectResult",
+	events.EventRequestDone:    "EventRequestDone",
 }
 
 var ignoredEventTypes = map[events.EventType]string{
@@ -73,6 +74,7 @@ var ignoredEventTypes = map[events.EventType]string{
 	events.EventUSDT:          "user-defined probes have no fixed shape to aggregate",
 	events.EventPoolExhausted: "fires on any query >10ms after connect and reports connection age, not pool wait",
 	events.EventHTTP3:         "a QUIC connection, not a request; HTTP/3 requests are EventHTTPResp with the HTTP/3 transport",
+	events.EventRequestDone:   "a diagnose session's critical-path marker; the agent never switches it on",
 }
 
 func recordOne(t *testing.T, e *events.Event) (map[string][]*dto.Metric, bool) {
@@ -144,7 +146,7 @@ func TestEveryEventTypeIsAccountedFor(t *testing.T) {
 			t.Errorf("%s is listed as ignored but record() mapped it to %v", name, keysOf(families))
 		case !mapped && !deliberatelyIgnored:
 			unaccounted = append(unaccounted, name)
-		case mapped && len(families) == 0 && typ != events.EventHTTPReq && typ != events.EventFastCGIReq && typ != events.EventConnect:
+		case mapped && len(families) == 0 && typ != events.EventHTTPReq && typ != events.EventFastCGIReq && typ != events.EventConnect && typ != events.EventDNSQuery:
 			t.Errorf("%s was mapped but produced no series", name)
 		}
 	}
@@ -184,7 +186,6 @@ func TestEventTypeMapsToExpectedFamilyAndLabels(t *testing.T) {
 		{events.EventTCPRTT, "podtrace_workload_network_rtt_seconds", nil},
 
 		{events.EventDNS, "podtrace_workload_dns_latency_seconds", nil},
-		{events.EventDNSQuery, "podtrace_workload_dns_latency_seconds", nil},
 		{events.EventSchedSwitch, "podtrace_workload_cpu_blocked_seconds", nil},
 		{events.EventTLSHandshake, "podtrace_workload_tls_handshake_duration_seconds", nil},
 

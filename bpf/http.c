@@ -145,7 +145,7 @@ static __noinline int http_emit_request(void *ctx, void *base, u64 avail,
 		return 0;
 
 	struct http_req req = {};
-	req.start_ns = bpf_ktime_get_ns();
+	req.start_ns = request_id_now();
 	req.method = (u8)http_method_code((const u8 *)buf);
 	u32 p = 0;
 	int spaces = 0;
@@ -246,7 +246,7 @@ static __noinline int http_emit_response(void *ctx, void *base, u64 len,
 	u64 latency_ns = calc_latency(req->start_ns);
 	s32 status_num = http_parse_status3(status);
 	if (!inbound)
-		oncpu_finish_thread_request(conn, req->start_ns, latency_ns);
+		oncpu_finish_thread_request(ONCPU_KIND_HTTP1, conn, req->start_ns, latency_ns);
 
 	struct event *e = get_event_buf();
 	if (e) {

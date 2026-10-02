@@ -225,7 +225,7 @@ static __always_inline u64 h3_stash_request(u64 goroutine, u64 req, u64 recv,
 		return 0;
 	struct h3_field_offsets off = h3_field_offs();
 	struct h3_req_inflight in = {};
-	in.start_ts = bpf_ktime_get_ns();
+	in.start_ts = request_id_now();
 	in.method_len = (u8)read_go_str(req, off.method, in.method, H3_TXN_METHOD_MAX);
 
 	u64 url = 0;

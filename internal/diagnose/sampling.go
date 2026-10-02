@@ -42,7 +42,7 @@ func getEventPriority(event *events.Event) int {
 	}
 
 	switch event.Type {
-	case events.EventOOMKill, events.EventPageFault, events.EventNetDevError:
+	case events.EventOOMKill, events.EventPageFault, events.EventNetDevError, events.EventRequestDone:
 		return config.PriorityCritical
 	case events.EventTCPRetrans, events.EventLockContention:
 		return config.PriorityHigh

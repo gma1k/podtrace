@@ -263,6 +263,13 @@ type AgentInspectionThresholdsSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=100
 	PoolUtilizationPercent *int32 `json:"poolUtilizationPercent,omitempty"`
+
+	// DNSSlowLookupPercent is the share of a workload's DNS lookups slower
+	// than 100ms above which dns.slow_lookup_rate fires.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100
+	DNSSlowLookupPercent *int32 `json:"dnsSlowLookupPercent,omitempty"`
 }
 
 // AgentMetricsLabelsSpec opts into labels that are deliberately absent by

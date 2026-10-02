@@ -121,6 +121,10 @@ static inline void record_start_time(const struct pair_key *key) {
 	bpf_map_update_elem(&start_times, key, &ts, BPF_ANY);
 }
 
+static __always_inline u64 request_id_now(void) {
+	return (bpf_ktime_get_ns() & ~0xFFULL) | (bpf_get_smp_processor_id() & 0xFF);
+}
+
 static inline u64 calc_latency(u64 start) {
 	u64 now = bpf_ktime_get_ns();
 	return now > start ? now - start : 0;
@@ -228,6 +232,8 @@ static inline int cgroup_allows(u64 cgid) {
 	return bpf_map_lookup_elem(&target_cgroup_ids, &cgid) != NULL;
 }
 
+__noinline u64 podtrace_current_request(void);
+
 static inline struct event *get_event_buf(void) {
 	struct event *e = get_event_buf_unfiltered();
 	if (!e) {
@@ -243,6 +249,7 @@ static inline struct event *get_event_buf(void) {
 			return NULL;
 		}
 	}
+	e->correlation_id = podtrace_current_request();
 	return e;
 }
 

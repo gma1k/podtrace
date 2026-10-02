@@ -1,7 +1,17 @@
+// Package criticalpath breaks a request's duration down by where it went:
+// waiting on the network, the database, the filesystem, a lock, and so on.
+//
+// The kernel stamps every event with the correlation id of the request its
+// thread, goroutine or connection is serving, and reports when a served
+// request finishes (events.EventRequestDone). The collector groups the events
+// of each request by that id, so concurrent requests in one process are kept
+// apart, and turns their intervals into exclusive time: a database call's
+// socket wait is counted once, as database, and two calls made in parallel
+// are counted once, so the shares of a request never add up to more than its
+// duration.
 package criticalpath
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -11,194 +21,482 @@ import (
 	"github.com/gma1k/podtrace/internal/safeconv"
 )
 
-// Segment is one contribution to a request's total latency.
-type Segment struct {
-	Label     string
-	LatencyNS uint64
-	Fraction  float64 // filled in when CriticalPath is emitted
-}
-
-// CriticalPath is the result of analyzing one completed request window.
-type CriticalPath struct {
-	PID          uint32
-	TotalLatency time.Duration
-	Segments     []Segment
-}
-
-func (cp CriticalPath) Breakdown(topN int) string {
-	if len(cp.Segments) == 0 {
-		return ""
-	}
-	byLabel := make(map[string]float64, len(cp.Segments))
-	order := make([]string, 0, len(cp.Segments))
-	for _, s := range cp.Segments {
-		if _, ok := byLabel[s.Label]; !ok {
-			order = append(order, s.Label)
-		}
-		byLabel[s.Label] += s.Fraction
-	}
-	sort.SliceStable(order, func(i, j int) bool { return byLabel[order[i]] > byLabel[order[j]] })
-	if topN > 0 && len(order) > topN {
-		order = order[:topN]
-	}
-	var b strings.Builder
-	for i, label := range order {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		fmt.Fprintf(&b, "%s %.1f%%", label, byLabel[label]*100)
-	}
-	return b.String()
-}
-
-// requestWindow accumulates segments for a single PID until a boundary event arrives.
-type requestWindow struct {
-	segments []Segment
-	lastSeen time.Time
-}
-
-// addSegment appends seg, but once the window reaches maxSegmentsPerWindow it
-// folds further latency into a single trailing overflow segment.
-func (w *requestWindow) addSegment(seg Segment) {
-	if len(w.segments) < maxSegmentsPerWindow-1 {
-		w.segments = append(w.segments, seg)
-		return
-	}
-	if len(w.segments) == maxSegmentsPerWindow-1 {
-		w.segments = append(w.segments, Segment{Label: segmentOverflowLabel})
-	}
-	overflow := &w.segments[maxSegmentsPerWindow-1]
-	overflow.LatencyNS += seg.LatencyNS
-}
-
-// Analyzer correlates events by PID and emits CriticalPath summaries on
-// HTTP / FastCGI / gRPC response boundary events.
-type Analyzer struct {
-	mu      sync.Mutex
-	windows map[uint32]*requestWindow
-	timeout time.Duration
-	emit    func(CriticalPath)
-}
-
-// New creates an Analyzer. emit is called whenever a critical path is finalized.
-func New(windowTimeout time.Duration, emit func(CriticalPath)) *Analyzer {
-	if windowTimeout <= 0 {
-		windowTimeout = 500 * time.Millisecond
-	}
-	return &Analyzer{
-		windows: make(map[uint32]*requestWindow),
-		timeout: windowTimeout,
-		emit:    emit,
-	}
-}
-
-// isBoundary returns true for event types that close a request window.
-func isBoundary(t events.EventType) bool {
-	return t == events.EventHTTPResp || t == events.EventFastCGIResp || t == events.EventGRPCMethod
-}
+// Category is where a stretch of a request's time went.
+type Category string
 
 const (
-	maxWindows           = 8192
-	maxSegmentsPerWindow = 1024
-	segmentOverflowLabel = "other"
+	Database   Category = "database"
+	Cache      Category = "cache"
+	Messaging  Category = "messaging"
+	DNS        Category = "dns"
+	TLS        Category = "tls handshake"
+	Connect    Category = "connect"
+	Network    Category = "network"
+	Filesystem Category = "filesystem"
+	Lock       Category = "lock"
+
+	Untraced Category = "not in traced I/O"
 )
 
-// Feed processes one event. It is safe to call from multiple goroutines.
-// The emit callback runs after the analyzer's lock is released, so a slow
-// (or re-entrant) callback can neither stall the event hot path nor
-// deadlock the analyzer.
-func (a *Analyzer) Feed(e *events.Event) {
-	if e == nil || e.LatencyNS == 0 {
+// precedence orders the categories from most to least specific. Where two
+// intervals overlap, the time goes to the earlier one: a database query is
+// also a socket read, and the query says more.
+var precedence = []Category{Database, Cache, Messaging, DNS, TLS, Connect, Network, Filesystem, Lock}
+
+const (
+	maxOpenRequests      = 8192
+	maxIntervals         = 512
+	maxEndpoints         = 8192
+	recentlyFinishedSize = 4096
+	slowestKept          = 5
+	maxEndpointSummaries = 64
+
+	OtherEndpoints  = "(other endpoints)"
+	UnknownEndpoint = "(endpoint not seen)"
+)
+
+// CategoryOf returns the category of an event's latency, and false for an
+// event that is not a wait a request makes.
+func CategoryOf(e *events.Event) (Category, bool) {
+	switch e.Type {
+	case events.EventDBQuery, events.EventDBAcquire:
+		return Database, true
+	case events.EventRedisCmd, events.EventMemcachedCmd:
+		return Cache, true
+	case events.EventKafkaProduce, events.EventKafkaFetch:
+		return Messaging, true
+	case events.EventDNS:
+		return DNS, true
+	case events.EventTLSHandshake:
+		return TLS, true
+	case events.EventConnect, events.EventConnectResult:
+		return Connect, true
+	case events.EventUDPSend, events.EventUDPRecv:
+		if e.PeerDstPort == 53 || e.PeerSrcPort == 53 {
+			return DNS, true
+		}
+		return Network, true
+	case events.EventTCPSend, events.EventTCPRecv:
+		return Network, true
+	case events.EventRead, events.EventWrite, events.EventFsync, events.EventOpen,
+		events.EventClose, events.EventUnlink, events.EventRename:
+		return Filesystem, true
+	case events.EventLockContention:
+		return Lock, true
+	}
+	return "", false
+}
+
+// Share is one category's part of a duration.
+type Share struct {
+	Category Category
+	Duration time.Duration
+}
+
+// Request is one finished request and where its time went.
+type Request struct {
+	Kind      string
+	Endpoint  string
+	Namespace string
+	Pod       string
+	Process   string
+	Latency   time.Duration
+	Shares    []Share
+	Truncated bool
+}
+
+// EndpointSummary is where the requests of one endpoint spent their time.
+type EndpointSummary struct {
+	Endpoint   string
+	Requests   int
+	Total      time.Duration
+	ByCategory map[Category]time.Duration
+}
+
+// Summary is everything the collector learned.
+type Summary struct {
+	Requests int
+	ByKind   map[string]int
+
+	Total      time.Duration
+	ByCategory map[Category]time.Duration
+
+	ByEndpoint []EndpointSummary
+
+	Slowest []Request
+
+	Late      int
+	Evicted   int
+	Truncated int
+}
+
+type interval struct {
+	start, end uint64
+	category   Category
+}
+
+type pending struct {
+	intervals []interval
+	truncated bool
+}
+
+// Collector accumulates requests from a stream of events. It is safe for
+// concurrent use and bounded however long it runs.
+type Collector struct {
+	mu sync.Mutex
+
+	open      map[uint64]*pending
+	openOrder []uint64
+
+	endpoints     map[uint64]string
+	endpointOrder []uint64
+
+	finished     map[uint64]struct{}
+	finishedRing []uint64
+	finishedNext int
+
+	byEndpoint map[string]*EndpointSummary
+
+	summary Summary
+}
+
+// New returns an empty collector.
+func New() *Collector {
+	return &Collector{
+		open:       map[uint64]*pending{},
+		endpoints:  map[uint64]string{},
+		finished:   map[uint64]struct{}{},
+		byEndpoint: map[string]*EndpointSummary{},
+		summary: Summary{
+			ByKind:     map[string]int{},
+			ByCategory: map[Category]time.Duration{},
+		},
+	}
+}
+
+// Feed takes one event. Every event should be fed, before any sampling, or a
+// request is compared with part of its own waits.
+func (c *Collector) Feed(e *events.Event) {
+	if c == nil || e == nil || e.CorrelationID == 0 {
 		return
 	}
-	a.mu.Lock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	pid := e.PID
-	w, ok := a.windows[pid]
-	if !ok {
-		if !isBoundary(e.Type) && len(a.windows) >= maxWindows {
-			a.mu.Unlock()
+	switch e.Type {
+	case events.EventRequestDone:
+		c.finish(e)
+		return
+	case events.EventHTTPReq, events.EventHTTPResp:
+		if e.Target != "" {
+			c.rememberEndpoint(e.CorrelationID, endpointOf(e))
+		}
+		return
+	}
+
+	category, ok := CategoryOf(e)
+	if !ok || e.LatencyNS == 0 || e.LatencyNS > e.Timestamp {
+		return
+	}
+	if _, done := c.finished[e.CorrelationID]; done {
+		c.summary.Late++
+		return
+	}
+	p := c.open[e.CorrelationID]
+	if p == nil {
+		if len(c.open) >= maxOpenRequests {
+			c.evictOldest()
+		}
+		p = &pending{}
+		c.open[e.CorrelationID] = p
+		c.openOrder = append(c.openOrder, e.CorrelationID)
+	}
+	if len(p.intervals) >= maxIntervals {
+		p.truncated = true
+		return
+	}
+	p.intervals = append(p.intervals, interval{
+		start:    e.Timestamp - e.LatencyNS,
+		end:      e.Timestamp,
+		category: category,
+	})
+}
+
+// Summary returns a copy of what has been collected.
+func (c *Collector) Summary() Summary {
+	if c == nil {
+		return Summary{}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := c.summary
+	out.ByKind = make(map[string]int, len(c.summary.ByKind))
+	for k, v := range c.summary.ByKind {
+		out.ByKind[k] = v
+	}
+	out.ByCategory = make(map[Category]time.Duration, len(c.summary.ByCategory))
+	for k, v := range c.summary.ByCategory {
+		out.ByCategory[k] = v
+	}
+	out.Slowest = append([]Request(nil), c.summary.Slowest...)
+	out.ByEndpoint = make([]EndpointSummary, 0, len(c.byEndpoint))
+	for _, e := range c.byEndpoint {
+		cp := *e
+		cp.ByCategory = make(map[Category]time.Duration, len(e.ByCategory))
+		for k, v := range e.ByCategory {
+			cp.ByCategory[k] = v
+		}
+		out.ByEndpoint = append(out.ByEndpoint, cp)
+	}
+	sort.Slice(out.ByEndpoint, func(i, j int) bool {
+		if out.ByEndpoint[i].Total != out.ByEndpoint[j].Total {
+			return out.ByEndpoint[i].Total > out.ByEndpoint[j].Total
+		}
+		return out.ByEndpoint[i].Endpoint < out.ByEndpoint[j].Endpoint
+	})
+	return out
+}
+
+func (c *Collector) addToEndpoint(endpoint string, latency time.Duration, shares []Share) {
+	if endpoint == "" {
+		endpoint = UnknownEndpoint
+	}
+	e := c.byEndpoint[endpoint]
+	if e == nil {
+		if len(c.byEndpoint) >= maxEndpointSummaries-1 {
+			endpoint = OtherEndpoints
+			e = c.byEndpoint[endpoint]
+		}
+		if e == nil {
+			e = &EndpointSummary{Endpoint: endpoint, ByCategory: map[Category]time.Duration{}}
+			c.byEndpoint[endpoint] = e
+		}
+	}
+	e.Requests++
+	e.Total += latency
+	for _, s := range shares {
+		e.ByCategory[s.Category] += s.Duration
+	}
+}
+
+func (c *Collector) finish(e *events.Event) {
+	id := e.CorrelationID
+	p := c.open[id]
+	delete(c.open, id)
+	endpoint := c.endpoints[id]
+	delete(c.endpoints, id)
+	c.markFinished(id)
+
+	end := e.Timestamp
+	start := end
+	if e.LatencyNS <= end {
+		start = end - e.LatencyNS
+	}
+	var intervals []interval
+	truncated := false
+	if p != nil {
+		intervals = p.intervals
+		truncated = p.truncated
+	}
+	shares := breakdown(start, end, intervals)
+
+	kind := KindName(e.TCPState)
+	latency := nanoseconds(end - start)
+	c.summary.Requests++
+	c.summary.ByKind[kind]++
+	c.summary.Total += latency
+	for _, s := range shares {
+		c.summary.ByCategory[s.Category] += s.Duration
+	}
+	if truncated {
+		c.summary.Truncated++
+	}
+
+	r := Request{
+		Kind:      kind,
+		Endpoint:  endpoint,
+		Process:   e.ProcessName,
+		Latency:   latency,
+		Shares:    shares,
+		Truncated: truncated,
+	}
+	if e.K8s != nil {
+		r.Namespace, r.Pod = e.K8s.Namespace, e.K8s.PodName
+	}
+	c.addToEndpoint(endpoint, r.Latency, shares)
+	c.keepIfSlow(r)
+}
+
+func (c *Collector) keepIfSlow(r Request) {
+	s := c.summary.Slowest
+	if len(s) == slowestKept && r.Latency <= s[len(s)-1].Latency {
+		return
+	}
+	i := sort.Search(len(s), func(i int) bool { return s[i].Latency < r.Latency })
+	s = append(s, Request{})
+	copy(s[i+1:], s[i:])
+	s[i] = r
+	if len(s) > slowestKept {
+		s = s[:slowestKept]
+	}
+	c.summary.Slowest = s
+}
+
+func (c *Collector) rememberEndpoint(id uint64, endpoint string) {
+	if _, ok := c.endpoints[id]; ok {
+		return
+	}
+	if len(c.endpoints) >= maxEndpoints {
+		oldest := c.endpointOrder[0]
+		c.endpointOrder = c.endpointOrder[1:]
+		delete(c.endpoints, oldest)
+	}
+	c.endpoints[id] = endpoint
+	c.endpointOrder = append(c.endpointOrder, id)
+}
+
+func (c *Collector) evictOldest() {
+	for len(c.openOrder) > 0 {
+		oldest := c.openOrder[0]
+		c.openOrder = c.openOrder[1:]
+		if _, ok := c.open[oldest]; ok {
+			delete(c.open, oldest)
+			c.summary.Evicted++
 			return
 		}
-		w = &requestWindow{}
-		a.windows[pid] = w
 	}
-	w.lastSeen = time.Now()
+}
 
-	var path CriticalPath
-	finalized := false
-	if isBoundary(e.Type) {
-		if len(w.segments) == 0 {
-			label := e.TypeString()
-			if e.Details != "" {
-				label = e.Details
-			}
-			w.segments = append(w.segments, Segment{Label: label, LatencyNS: e.LatencyNS})
-		}
-		path, finalized = a.buildPath(pid, w, e.LatencyNS)
-		delete(a.windows, pid)
+func (c *Collector) markFinished(id uint64) {
+	if len(c.finishedRing) < recentlyFinishedSize {
+		c.finishedRing = append(c.finishedRing, id)
 	} else {
-		label := e.TypeString()
-		if e.Details != "" {
-			label = e.Details
-		}
-		w.addSegment(Segment{Label: label, LatencyNS: e.LatencyNS})
+		delete(c.finished, c.finishedRing[c.finishedNext])
+		c.finishedRing[c.finishedNext] = id
+		c.finishedNext = (c.finishedNext + 1) % recentlyFinishedSize
 	}
-	a.mu.Unlock()
-
-	if finalized && a.emit != nil {
-		a.emit(path)
-	}
-}
-
-// Evict removes windows older than the timeout and finalizes them.
-// Call periodically to prevent unbounded memory growth. Like Feed, emit
-// callbacks run after the lock is released.
-func (a *Analyzer) Evict() {
-	now := time.Now()
-	a.mu.Lock()
-	var finalized []CriticalPath
-	for pid, w := range a.windows {
-		if now.Sub(w.lastSeen) > a.timeout {
-			if path, ok := a.buildPath(pid, w, 0); ok {
-				finalized = append(finalized, path)
+	c.finished[id] = struct{}{}
+	if len(c.openOrder) > 2*maxOpenRequests {
+		live := c.openOrder[:0]
+		for _, k := range c.openOrder {
+			if _, ok := c.open[k]; ok {
+				live = append(live, k)
 			}
-			delete(a.windows, pid)
 		}
-	}
-	a.mu.Unlock()
-
-	if a.emit != nil {
-		for _, path := range finalized {
-			a.emit(path)
-		}
+		c.openOrder = live
 	}
 }
 
-// buildPath assembles the CriticalPath for a window. boundaryLatencyNS is
-// the request-spanning latency of the boundary event (0 for timeout
-// evictions, where the segment sum is the best available total). Callers
-// must hold a.mu.
-func (a *Analyzer) buildPath(pid uint32, w *requestWindow, boundaryLatencyNS uint64) (CriticalPath, bool) {
-	if len(w.segments) == 0 {
-		return CriticalPath{}, false
+// breakdown divides [start, end] between the categories of the intervals
+// that cover it, giving overlapping time to the most specific one, and the
+// rest to Untraced. The shares sum to end-start.
+func breakdown(start, end uint64, intervals []interval) []Share {
+	if end <= start {
+		return nil
 	}
-	total := boundaryLatencyNS
-	if total == 0 {
-		for _, s := range w.segments {
-			total += s.LatencyNS
+	type edge struct {
+		at    uint64
+		rank  int
+		delta int
+	}
+	rankOf := make(map[Category]int, len(precedence))
+	for i, c := range precedence {
+		rankOf[c] = i
+	}
+	edges := make([]edge, 0, 2*len(intervals))
+	for _, iv := range intervals {
+		s, e := max(iv.start, start), min(iv.end, end)
+		if e <= s {
+			continue
+		}
+		r, ok := rankOf[iv.category]
+		if !ok {
+			continue
+		}
+		edges = append(edges, edge{s, r, +1}, edge{e, r, -1})
+	}
+	sort.Slice(edges, func(i, j int) bool { return edges[i].at < edges[j].at })
+
+	active := make([]int, len(precedence))
+	spent := make([]uint64, len(precedence))
+	var untraced uint64
+	cursor := start
+	account := func(to uint64) {
+		if to <= cursor {
+			return
+		}
+		top := -1
+		for r, n := range active {
+			if n > 0 {
+				top = r
+				break
+			}
+		}
+		if top < 0 {
+			untraced += to - cursor
+		} else {
+			spent[top] += to - cursor
+		}
+		cursor = to
+	}
+	for _, e := range edges {
+		account(e.at)
+		active[e.rank] += e.delta
+	}
+	account(end)
+
+	var shares []Share
+	for r, ns := range spent {
+		if ns > 0 {
+			shares = append(shares, Share{Category: precedence[r], Duration: nanoseconds(ns)})
 		}
 	}
-	segs := make([]Segment, len(w.segments))
-	copy(segs, w.segments)
-	if total > 0 {
-		for i := range segs {
-			segs[i].Fraction = float64(segs[i].LatencyNS) / float64(total)
-		}
+	if untraced > 0 {
+		shares = append(shares, Share{Category: Untraced, Duration: nanoseconds(untraced)})
 	}
-	return CriticalPath{
-		PID:          pid,
-		TotalLatency: time.Duration(safeconv.Uint64ToInt64(total)),
-		Segments:     segs,
-	}, true
+	sort.SliceStable(shares, func(i, j int) bool { return shares[i].Duration > shares[j].Duration })
+	return shares
+}
+
+// nanoseconds converts a kernel nanosecond count to a Duration, clamping a
+// count beyond what a Duration holds rather than wrapping it negative.
+func nanoseconds(ns uint64) time.Duration {
+	return time.Duration(safeconv.Uint64ToInt64(ns))
+}
+
+const goBit = 0x100
+
+// KindName names the protocol a request-done event's kind field describes.
+func KindName(kind uint32) string {
+	if kind&goBit != 0 {
+		switch kind &^ goBit {
+		case 1:
+			return "Go net/http"
+		case 2:
+			return "Go HTTP/2"
+		case 3:
+			return "Go gRPC"
+		case 4:
+			return "Go HTTP/3"
+		}
+		return "Go"
+	}
+	switch kind {
+	case 0:
+		return "HTTP/1"
+	case 1:
+		return "HTTP/2"
+	case 2:
+		return "HTTP/3"
+	}
+	return "other"
+}
+
+// endpointOf names a request's endpoint. An HTTP/1 target already starts
+// with its method; other protocols carry the method apart.
+func endpointOf(e *events.Event) string {
+	if e.HTTPMethod != "" && !strings.HasPrefix(e.Target, e.HTTPMethod+" ") {
+		return e.HTTPMethod + " " + e.Target
+	}
+	return e.Target
 }

@@ -539,6 +539,9 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	}
 	system.CheckSELinux()
 
+	if diagnoseDuration != "" && config.CriticalPathEnabled {
+		config.RequestStamping = true
+	}
 	tracer, err := tracerFactory()
 	if err != nil {
 		return fmt.Errorf("failed to create tracer: %w", err)
@@ -733,6 +736,10 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 				}
 			}
 		}()
+	}
+
+	if config.RequestStamping {
+		stampRequests(tracer)
 	}
 
 	if err := tracer.Start(ctx, eventChan); err != nil {
@@ -945,6 +952,8 @@ func filterEvents(ctx context.Context, in <-chan *events.Event, out chan<- *even
 			}
 			shouldInclude := false
 			switch {
+			case event.Type == events.EventRequestDone:
+				shouldInclude = true
 			case filterMap["dns"] && event.Type == events.EventDNS:
 				shouldInclude = true
 			case filterMap["net"] && (event.Type == events.EventConnect || event.Type == events.EventTCPSend || event.Type == events.EventTCPRecv ||
@@ -1139,7 +1148,24 @@ func attachSourcePod(e *events.Event, resolve func(*events.Event) *kubernetes.Po
 
 // generateDiagnoseReport renders the diagnostic report.
 func generateDiagnoseReport(agg *diagnose.Diagnostician) string {
-	return diagnosereport.GenerateTriggerSection(sessionTrigger, agg) + diagnosisByPod(agg)
+	return diagnosereport.GenerateTriggerSection(sessionTrigger, agg) + diagnosisByPod(agg) +
+		diagnosereport.GenerateCriticalPathSection(agg.CriticalPath(), eventFilter)
+}
+
+// requestStamper is the tracer's switch for stamping every event with the
+// request it was made for, which the report's critical path groups by.
+type requestStamper interface {
+	StampRequests() error
+}
+
+func stampRequests(t any) {
+	s, ok := t.(requestStamper)
+	if !ok {
+		return
+	}
+	if err := s.StampRequests(); err != nil {
+		logger.Warn("Request stamping unavailable; the report will have no critical path", zap.Error(err))
+	}
 }
 
 func diagnosisByPod(agg *diagnose.Diagnostician) string {

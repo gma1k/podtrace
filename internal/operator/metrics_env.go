@@ -34,6 +34,7 @@ const (
 	envInspectionAcquireMean = "PODTRACE_INSPECTIONS_ACQUIRE_MEAN"
 	envInspectionCPUBlocked  = "PODTRACE_INSPECTIONS_CPU_BLOCKED_MEAN"
 	envInspectionPoolWarn    = "PODTRACE_INSPECTIONS_POOL_UTILIZATION_PCT"
+	envInspectionDNSSlow     = "PODTRACE_INSPECTIONS_DNS_SLOW_LOOKUP_PCT"
 )
 
 // boolEnv renders a resolved toggle.
@@ -162,6 +163,12 @@ func inspectionsEnv(spec *podtracev1alpha1.AgentInspectionsSpec) []corev1.EnvVar
 		env = append(env, corev1.EnvVar{
 			Name:  envInspectionPoolWarn,
 			Value: strconv.FormatInt(int64(*t.PoolUtilizationPercent), 10),
+		})
+	}
+	if t.DNSSlowLookupPercent != nil {
+		env = append(env, corev1.EnvVar{
+			Name:  envInspectionDNSSlow,
+			Value: strconv.FormatInt(int64(*t.DNSSlowLookupPercent), 10),
 		})
 	}
 	return env

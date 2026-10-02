@@ -115,17 +115,23 @@ func MapsFrom(maps map[string]*ebpf.Map) (Maps, error) {
 	return m, nil
 }
 
-// SetEnabled switches the sampler and the request hooks on or off.
-func SetEnabled(m *ebpf.Map, on bool) error {
+// The consumers that need requests tracked, as bits of the enabled map's
+// value. The request hooks run while any bit is set; each consumer only reads
+// its own.
+const (
+	FlagSampler uint32 = 1 << iota
+	FlagRequests
+)
+
+// SetFlags writes which consumers are on. Zero switches the request hooks
+// off.
+func SetFlags(m *ebpf.Map, flags uint32) error {
 	if m == nil {
 		return errors.New("oncpu: enabled map is nil")
 	}
-	key, value := uint32(0), uint32(0)
-	if on {
-		value = 1
-	}
-	if err := m.Update(&key, &value, ebpf.UpdateAny); err != nil {
-		return fmt.Errorf("oncpu: set enabled: %w", err)
+	key := uint32(0)
+	if err := m.Update(&key, &flags, ebpf.UpdateAny); err != nil {
+		return fmt.Errorf("oncpu: set flags: %w", err)
 	}
 	return nil
 }

@@ -89,28 +89,74 @@ Events emitted:
 [KAFKA] fetch orders 5.10ms (2048 bytes)
 ```
 
-## Critical Path Reconstruction
+## Critical path
 
-Enabled by default. Correlates latency segments by PID within a sliding time window and logs a breakdown whenever an HTTP response, FastCGI response, or gRPC call completes.
+A `--diagnose` run, and so every session report, breaks the duration of each
+request the target served down by where it went: waiting on the network, a
+database, a cache, DNS, a TLS handshake, a connect, the filesystem or a lock.
+On by default; `PODTRACE_CRITICAL_PATH=false` turns it off. The agent never
+does this.
 
-```bash
-export PODTRACE_CRITICAL_PATH=true              # default
-export PODTRACE_CRITICAL_PATH_WINDOW_MS=500     # default (ms)
-./bin/podtrace -n production my-pod
+```text
+Request Time Breakdown:
+  Requests served: 576 (HTTP/1 576)
+  Where their time went: network 98.4%, not in traced I/O 1.5%, dns 0.1%
+  By endpoint, most total time first:
+    GET /slow  288 requests, mean 302.2ms
+              network 98.5%, not in traced I/O 1.4%, dns 0.1%
+    GET /fast  288 requests, mean 200µs
+              not in traced I/O 100.0%
+  Slowest requests:
+    303.1ms   GET /slow  cp-demo/api-bc8564b55-2l42g  (HTTP/1)
+              network 99.2%, not in traced I/O 0.7%, dns 0.1%
+    ...
+  Each stretch of a request is counted once, under its most specific wait, so the shares add up to the request.
 ```
 
-Example output:
+That is a Python `ThreadingHTTPServer` on kind whose `/slow` handler calls a
+backend that answers in 300ms: the call is the network share, the lookup of
+the backend's name the dns share.
 
-```
-[CRITICAL PATH] PID 1234 total=45.2ms
-  DNS lookup        12.1ms  26.8%
-  TCP connect        2.3ms   5.1%
-  TLS handshake      8.4ms  18.6%
-  File read          4.7ms  10.4%
-  HTTP response     17.7ms  39.2%
-```
+**How a wait is joined to its request.** The kernel stamps every event with
+the correlation id of the request its thread, goroutine or connection is
+serving, chosen the same way the [on-CPU profiler](profiling.md) charges a
+sample, and reports when a served request finishes. Two requests in flight in
+one process are therefore kept apart: each is charged only its own waits.
 
-Segments are collected from all events with non-zero latency for a given PID. The window is finalized on the first HTTP response, FastCGI response, or gRPC method event received for that PID. Windows older than `PODTRACE_CRITICAL_PATH_WINDOW_MS` milliseconds are automatically evicted.
+**How the shares are counted.** Each wait is an interval. Where intervals
+overlap, the time goes to the most specific one, so a database query's socket
+read counts once, as database, and two calls made in parallel count once.
+What no traced wait covers is reported as *not in traced I/O*: running on a
+CPU, waiting to be scheduled, or waiting on something podtrace does not trace.
+The shares of a request always add up to its duration.
+
+**What it can and cannot see.**
+
+- **Blocking I/O is visible; a non-blocking runtime's network wait is not.**
+  A thread-per-request server that blocks in `read` (Java servlets on
+  blocking sockets, Python and Ruby workers, PHP-FPM, most C++ servers) shows
+  its backend waits as network time. Go, Node.js, nginx, Envoy, Netty and
+  tokio read non-blocking sockets and wait in `epoll`: the read itself
+  returns at once, so their network waits land in *not in traced I/O*. Their
+  filesystem, lock and connect waits, and database or cache calls made
+  through a traced client library, are still joined.
+- **Go request ids need kernel 5.15.** Finding the goroutine from inside a
+  kernel probe needs `bpf_task_pt_regs`; on 5.8 to 5.14 a Go request's waits
+  are left unjoined rather than guessed.
+- **Only HTTP/1 requests are named.** A Go request's id comes from its
+  handler, which podtrace does not read the URL from, and HTTP/2 and HTTP/3
+  requests are decoded with ids of their own; their requests are listed as
+  *(endpoint not seen)*, with their kind.
+- **An outbound HTTP call is not a category of its own.** The call carries
+  its own correlation id, so its time shows as the socket waits under it.
+- **Filesystem operations under 1ms are not traced**, so they are part of
+  *not in traced I/O*.
+- **`--filter` narrows the breakdown too.** The waits a filter drops never
+  reach it, so with `--filter dns` a request's socket waits count as *not in
+  traced I/O*; the section says which categories were kept.
+
+The collector keeps at most 8192 unfinished requests and 512 waits per
+request; the report says how many requests or waits it could not count.
 
 ## PII Redaction
 
@@ -183,5 +229,4 @@ When enabled, Podtrace logs all discovered USDT probes at startup:
 | `PODTRACE_USDT_ENABLED` | `true` | Scan the container binary for USDT probes; set `false` to disable |
 | `PODTRACE_REDACT_PII` | `false` | Scrub PII from event Target/Details fields |
 | `PODTRACE_REDACT_CUSTOM_RULES` | `""` | JSON array of additional redaction rules |
-| `PODTRACE_CRITICAL_PATH` | `true` | Emit per-request latency breakdowns |
-| `PODTRACE_CRITICAL_PATH_WINDOW_MS` | `500` | Window (ms) before an open PID window is evicted |
+| `PODTRACE_CRITICAL_PATH` | `true` | Break served requests down by where their time went in `--diagnose` runs |

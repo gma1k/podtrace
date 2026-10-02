@@ -373,6 +373,7 @@ func TestRuleFamiliesCoversEveryFamilyTheRulesRead(t *testing.T) {
 		familyL7Requests, familyL7Duration, familyUtilization, familyAcquire,
 		familyConnections, familyNetworkLatency, familyPoolUtilization,
 		familyCPURunqueue, familyLockContention, familyNetworkRTT,
+		familyDNSLatency,
 	} {
 		read[family] = true
 	}

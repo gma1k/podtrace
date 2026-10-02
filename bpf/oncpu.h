@@ -6,11 +6,19 @@
 #include "common.h"
 #include "maps.h"
 
-static __always_inline int oncpu_is_enabled(void)
+#define ONCPU_FLAG_SAMPLER  1
+#define ONCPU_FLAG_REQUESTS 2
+
+static __always_inline u32 oncpu_flags(void)
 {
 	u32 zero = 0;
 	u32 *enabled = bpf_map_lookup_elem(&oncpu_enabled, &zero);
-	return enabled && *enabled;
+	return enabled ? *enabled : 0;
+}
+
+static __always_inline int oncpu_is_enabled(void)
+{
+	return oncpu_flags() != 0;
 }
 
 static __always_inline int oncpu_is_go_proc(void)
@@ -19,8 +27,12 @@ static __always_inline int oncpu_is_go_proc(void)
 	return bpf_map_lookup_elem(&oncpu_go_procs, &tgid) != NULL;
 }
 
+__noinline int podtrace_emit_request_done(u64 correlation_id, u64 latency_ns, u32 kind);
+
 static __always_inline void oncpu_record_done(u64 correlation_id, u64 latency_ns)
 {
+	if (!(oncpu_flags() & ONCPU_FLAG_SAMPLER))
+		return;
 	struct oncpu_request_done done = {
 		.latency_ns = latency_ns,
 		.cgroup_id = bpf_get_current_cgroup_id(),
@@ -89,7 +101,7 @@ static __always_inline void oncpu_begin_thread_request(u32 kind, u64 conn, u64 s
 	oncpu_note_thread_conn(conn);
 }
 
-static __always_inline void oncpu_finish_thread_request(u64 conn, u64 correlation_id,
+static __always_inline void oncpu_finish_thread_request(u32 kind, u64 conn, u64 correlation_id,
 							u64 latency_ns)
 {
 	if (!oncpu_is_enabled() || oncpu_is_go_proc())
@@ -98,6 +110,8 @@ static __always_inline void oncpu_finish_thread_request(u64 conn, u64 correlatio
 
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct oncpu_thread_request *r = bpf_map_lookup_elem(&oncpu_thread_requests, &tid);
+	if (oncpu_flags() & ONCPU_FLAG_REQUESTS)
+		podtrace_emit_request_done(correlation_id, latency_ns, kind);
 	if (r && r->correlation_id == correlation_id)
 		bpf_map_delete_elem(&oncpu_thread_requests, &tid);
 	struct oncpu_thread_request *c = bpf_map_lookup_elem(&oncpu_conn_requests, &conn);
@@ -136,7 +150,10 @@ static __always_inline void oncpu_finish_goroutine(u64 goroutine, u32 kind)
 		return;
 	u64 correlation_id = r->correlation_id;
 	u64 now = bpf_ktime_get_ns();
-	oncpu_record_done(correlation_id, now > correlation_id ? now - correlation_id : 0);
+	u64 latency_ns = now > correlation_id ? now - correlation_id : 0;
+	oncpu_record_done(correlation_id, latency_ns);
+	if (oncpu_flags() & ONCPU_FLAG_REQUESTS)
+		podtrace_emit_request_done(correlation_id, latency_ns, REQUEST_DONE_GO | kind);
 	bpf_map_delete_elem(&oncpu_goroutine_requests, &k);
 }
 

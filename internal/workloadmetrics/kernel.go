@@ -274,8 +274,10 @@ func (s *Sink) ingestKernelRow(row *kernelagg.Row) bool {
 		s.kernelObserve("network_latency_seconds", appendLabels(base, direction, transport), row, seconds)
 		s.ingestKernelEdge(e, row, direction, false, seconds, count)
 
-	case events.EventDNS, events.EventDNSQuery:
+	case events.EventDNS:
 		s.kernelObserve("dns_latency_seconds", base, row, seconds)
+
+	case events.EventDNSQuery:
 
 	case events.EventRead, events.EventWrite, events.EventFsync,
 		events.EventOpen, events.EventClose, events.EventUnlink, events.EventRename:

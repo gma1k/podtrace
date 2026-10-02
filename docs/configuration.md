@@ -79,8 +79,7 @@ Other rules:
 | `PODTRACE_USDT_ENABLED` | `true` | USDT probe discovery |
 | `PODTRACE_DNS_PAYLOAD_ENABLED` | `true` | Parse DNS payloads |
 | `PODTRACE_DNS_PACKET_CAPTURE` | `true` | Parse DNS via packets rather than libc uprobes |
-| `PODTRACE_CRITICAL_PATH` | `true` | Sliding-window latency breakdown |
-| `PODTRACE_CRITICAL_PATH_WINDOW_MS` | `500` | Critical-path window |
+| `PODTRACE_CRITICAL_PATH` | `true` | In `--diagnose` runs, break each served request's duration down by where it went; see [Language Runtime Adapters](language-runtime-adapters.md#critical-path) |
 | `PODTRACE_CAPTURE_HEADERS` | unset | Comma-separated HTTP header allowlist, max 4 |
 
 See [ebpf-internals.md](ebpf-internals.md) and

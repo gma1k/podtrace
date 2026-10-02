@@ -89,7 +89,30 @@ of large requests.
 | `db.pool_saturated` | a Go `database/sql` pool is at 80% or more of `SetMaxOpenConns` | 2m |
 | `net.connection_failure_rate` | the workload's outbound connection attempts fail more often than its threshold; attempts with no route for their address family (a dual-stack client's IPv6-to-IPv4 fallback) are left out | 2m |
 | `net.rtt_spike_rate` | more than 5% of the workload's socket operations run slower than 100ms; against a kernel-aggregated (native) histogram the bound is taken at the next bucket edge, 105ms, so it only counts observations certainly above 100ms | 3m |
-| `cpu.contention` | the workload spends a mean of 500ms or more runnable but not running | 3m |
+| `cpu.contention` | the workload spends a mean of 50ms or more runnable but not running, across at least 100 preemptions | 3m |
+| `dns.slow_lookup_rate` | more than 5% of the workload's DNS lookups answer slower than 100ms, at 0.1 lookups per second or more | 3m |
+
+### DNS: a share of slow lookups, not a mean
+
+`dns.slow_lookup_rate` reads `podtrace_workload_dns_latency_seconds`. A cache
+hit answers in well under a millisecond and an upstream miss in tens of
+milliseconds, so a mean moves with the hit ratio rather than with the
+resolver's health; the share of lookups above 100ms does not. On a three-node
+kind cluster no workload, CoreDNS's own upstream lookups included, had more
+than 0.26% of lookups above 100ms, while CoreDNS had 13-23% above 25ms working
+normally, which is why the bound is not lower. A workload whose DNS replies
+were delayed by 150ms read 100% and raised the issue within its hold time.
+
+Two things it does not see. A lookup that never gets an answer records no
+latency, so a resolver that times out completely shows up as missing traffic,
+not as slow lookups. And there is no DNS *failure* rule yet: a DNS event's
+error is its response code, so `errors_total{kind="dns"}` counts NXDOMAIN,
+which Kubernetes' `ndots:5` search path produces for nearly every external
+name. A failure rule needs the response code as a dimension first.
+
+There is no filesystem rule either: the metrics plane does not capture
+filesystem events, for the cost reasons in
+[Continuous Metrics](continuous-metrics.md).
 
 ### The two planes now evaluate the same vocabulary
 
@@ -211,13 +234,14 @@ agent:
         acquireMean: 100ms
         cpuBlockedMean: 50ms
         poolUtilizationPercent: 80
+        dnsSlowLookupPercent: 5
 ```
 
 `poolUtilizationPercent` is the warning band for `db.pool_saturated`; it
 escalates to critical ten points higher.
 
-`minRequestsPerMinute` is the traffic floor below which the error-rate rule
-stays quiet. Without it, a single failed request during an idle interval reads
+`minRequestsPerMinute` is the traffic floor below which the error-rate,
+connection-failure and slow-DNS rules stay quiet. Without it, a single failed request during an idle interval reads
 as a 100% error rate, which is arithmetically true and operationally
 worthless, and would page someone for every idle workload in the cluster.
 
