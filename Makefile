@@ -1,4 +1,4 @@
-.PHONY: all build clean test check-go test-unit test-integration test-bench coverage \
+.PHONY: all build clean test check-go check-clang test-unit test-integration test-bench coverage \
         generate manifests clientset envtest docker-build helm-lint helm-template operator-tools \
         lint lint-version fmt fmt-check \
         test-bpf-load \
@@ -7,6 +7,7 @@
         bundle bundle-validate bundle-build bundle-push bundle-clean
 
 CLANG ?= clang
+CLANG_MIN_VERSION = 18
 LLC ?= llc
 GO ?= $(shell if [ -f /usr/local/go/bin/go ]; then echo /usr/local/go/bin/go; else echo go; fi)
 BPF_SRC = bpf/podtrace.bpf.c bpf/network.c bpf/filesystem.c bpf/cpu.c bpf/memory.c
@@ -41,7 +42,7 @@ BPF_CFLAGS = -O2 -g -target bpf $(BPF_ARCH_DEFINE) -mcpu=$(BPF_MCPU) \
 	-Wno-missing-declarations \
 	-I$(LIBBPF_INCLUDE) -I$(BPF_GEN_DIR)
 
-all: check-go build
+all: check-go check-clang build
 
 check-go:
 	@if ! $(GO) version | grep -qE "go1\.(2[4-9]|[3-9][0-9])"; then \
@@ -114,9 +115,38 @@ $(VMLINUX_GEN):
 	@cp bpf/vmlinux.h "$(VMLINUX_GEN)"
 endif
 
-$(BPF_OBJ): $(VMLINUX_GEN) bpf/podtrace.bpf.c bpf/*.h bpf/*.c
+$(BPF_OBJ): $(VMLINUX_GEN) bpf/podtrace.bpf.c bpf/*.h bpf/*.c | check-clang
 	@mkdir -p $(dir $(BPF_OBJ))
 	$(CLANG) $(BPF_CFLAGS) -Ibpf -I. -c bpf/podtrace.bpf.c -o $(BPF_OBJ)
+
+check-clang:
+	@if ! command -v $(CLANG) >/dev/null 2>&1; then \
+		echo ""; \
+		echo "   Error: clang not found (looked for: $(CLANG))"; \
+		echo ""; \
+		echo "   Debian/Ubuntu: sudo apt install -y clang llvm libbpf-dev"; \
+		echo "   Fedora/RHEL:   sudo dnf install -y clang llvm libbpf-devel"; \
+		echo ""; \
+		exit 1; \
+	fi
+	@major=$$($(CLANG) --version | sed -n 's/.*clang version \([0-9][0-9]*\).*/\1/p' | head -1); \
+	if [ -z "$$major" ]; then \
+		echo "   Warning: could not parse a version from $$($(CLANG) --version | head -1)"; \
+	elif [ "$$major" -lt $(CLANG_MIN_VERSION) ]; then \
+		echo ""; \
+		echo "   Error: clang $(CLANG_MIN_VERSION)+ required to compile the eBPF programs"; \
+		echo "   Current version: $$($(CLANG) --version | head -1)"; \
+		echo "   Using: $(CLANG)"; \
+		echo ""; \
+		echo "   Install a newer clang and point the build at it:"; \
+		echo "   sudo apt install -y clang-$(CLANG_MIN_VERSION)"; \
+		echo "   make build CLANG=clang-$(CLANG_MIN_VERSION)"; \
+		echo ""; \
+		echo "   Distro packages older than clang $(CLANG_MIN_VERSION) can be"; \
+		echo "   supplemented from https://apt.llvm.org/"; \
+		echo ""; \
+		exit 1; \
+	fi
 
 IMAGE_REPO ?= ghcr.io/gma1k/podtrace
 
