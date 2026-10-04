@@ -359,7 +359,7 @@ toolchain setup and build steps.
 - **Linux Kernel**: 5.8+ with BTF support
 - **Go**: 1.24+
 - **Kubernetes**: Access to a Kubernetes cluster
-- **Build Tools**: `clang` and `llc` (LLVM toolchain), **libbpf headers** (e.g. `libbpf-dev` on Debian/Ubuntu)
+- **Build Tools**: `clang 18+` and `llc` (LLVM toolchain), **libbpf headers 0.8+** (e.g. `libbpf-dev` on Debian/Ubuntu)
 
 ### Check Kernel Support
 
@@ -385,7 +385,44 @@ sudo rm -rf /usr/local/go
 sudo tar -C /usr/local -xzf go1.24.0.linux-amd64.tar.gz
 export PATH=$PATH:/usr/local/go/bin
 ```
+### Check Clang Version
 
+```bash
+clang --version
+```
+
+The eBPF programs need clang 18 or newer. Some distros ship an older default (Ubuntu 22.04 ships clang 14). Install a newer one from [apt.llvm.org](https://apt.llvm.org/):
+
+```bash
+wget https://apt.llvm.org/llvm.sh
+chmod +x llvm.sh
+sudo ./llvm.sh 18
+```
+
+This installs a versioned binary, so `clang --version` still reports the
+distro default. Check with `clang-18 --version`, and pass it to the build
+with `make build CLANG=clang-18`.
+
+### Check libbpf Headers
+
+The eBPF programs use `bpf_loop()` and `barrier_var()`, which need libbpf
+headers 0.8 or newer. Check that yours provide them:
+
+```bash
+grep -q bpf_loop /usr/include/bpf/bpf_helper_defs.h && \
+grep -q barrier_var /usr/include/bpf/bpf_helpers.h && \
+echo "libbpf headers OK"
+```
+
+If nothing is printed, your distro's `libbpf-dev` is too old (Ubuntu 22.04
+ships 0.5.0). Install newer headers into your home directory and point the
+build at them:
+
+```bash
+git clone --depth 1 https://github.com/libbpf/libbpf ~/libbpf
+make -C ~/libbpf/src install_headers DESTDIR=$HOME/libbpf-hdr
+make build LIBBPF_INCLUDE=$HOME/libbpf-hdr/usr/include
+```
 ## Building from Source
 
 ### 1. Clone the Repository
@@ -459,10 +496,17 @@ You should see usage information.
 **Error: "bpf/bpf_helpers.h file not found" (or similar libbpf header)**
 - Install libbpf headers: `sudo apt install libbpf-dev` (Debian/Ubuntu). The Makefile adds `/usr/include` so that `<bpf/bpf_helpers.h>` is found; you can override with `make LIBBPF_INCLUDE=/path/to/include` if your headers are elsewhere.
 
+
+**Error: "clang 18+ required to compile the eBPF programs"**
+- Your default `clang` is older than 18. See [Check Clang Version](#check-clang-version), then build with `make build CLANG=clang-18`.
+
+**Error: "call to undeclared function 'bpf_loop'" or "'barrier_var'"**
+- Your libbpf headers are older than 0.8. See [Check libbpf Headers](#check-libbpf-headers) and build with `make build LIBBPF_INCLUDE=$HOME/libbpf-hdr/usr/include`.
+
 **Error: "failed to load eBPF program"**
 - Ensure kernel version is 5.8+
 - Check BTF support: `ls /sys/kernel/btf/vmlinux`
-- Verify clang is installed: `clang --version`
+- Verify clang is installed: `clang --version` (or `clang-18 --version`)
 
 **Error: "Go version too old"**
 - Upgrade Go to 1.27+, or set `GOTOOLCHAIN=auto` so `go` downloads the
