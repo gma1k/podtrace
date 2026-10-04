@@ -72,7 +72,8 @@ cd podtrace
 # Install build dependencies (Debian/Ubuntu)
 sudo ./scripts/install-deps.sh
 
-# Or manually
+# Or manually, requires clang 18+ and libbpf headers 0.8+
+# See docs/installation.md#check-clang-version
 sudo apt-get install -y clang llvm libbpf-dev libelf-dev make pkg-config
 
 # Pull Go modules

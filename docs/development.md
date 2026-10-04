@@ -48,7 +48,7 @@ podtrace/
 
 - Go 1.27+ (or any earlier 1.x with `GOTOOLCHAIN=auto`, which downloads
   the toolchain version declared in `go.mod` automatically)
-- Clang and LLVM
+- Clang and LLVM 18+, libbpf headers 0.8+
 - Linux kernel 5.8+ with BTF (full L7 tracing needs the `bpf_loop` helper,
   mainline 5.17+ or a backporting distro; older kernels auto-run core L4 only)
 
@@ -498,7 +498,7 @@ Dependencies are managed via `go.mod`:
 
 ### System Dependencies
 
-- Clang/LLVM: For eBPF compilation
+- Clang/LLVM 18+: For eBPF compilation
 - Kernel headers: For BTF support
 
 ## Performance Considerations
