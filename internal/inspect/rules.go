@@ -21,6 +21,7 @@ const (
 	familyLockContention  = "podtrace_workload_lock_contention_seconds"
 	familyNetworkRTT      = "podtrace_workload_network_rtt_seconds"
 	familyDNSLatency      = "podtrace_workload_dns_latency_seconds"
+	familyFSLatency       = "podtrace_workload_filesystem_latency_seconds"
 )
 
 // RuleFamilies is every family the built-in rules read, and nothing else.
@@ -37,6 +38,7 @@ func RuleFamilies() []string {
 		familyLockContention,
 		familyNetworkRTT,
 		familyDNSLatency,
+		familyFSLatency,
 	}
 }
 
@@ -69,6 +71,10 @@ type Thresholds struct {
 
 	DNSSlowRatePercent float64
 
+	FSSlowBound time.Duration
+
+	FSSlowRatePercent float64
+
 	HoldTime time.Duration
 
 	HoldTimes map[detector.ID]time.Duration
@@ -92,6 +98,8 @@ func (t Thresholds) unset() bool {
 		t.MinPreemptions == 0 &&
 		t.DNSSlowBound == 0 &&
 		t.DNSSlowRatePercent == 0 &&
+		t.FSSlowBound == 0 &&
+		t.FSSlowRatePercent == 0 &&
 		t.HoldTime == 0 &&
 		len(t.HoldTimes) == 0
 }
@@ -142,6 +150,14 @@ func DefaultThresholds() Thresholds {
 
 		DNSSlowBound:       100 * time.Millisecond,
 		DNSSlowRatePercent: 5,
+
+		// On a three-node kind cluster no workload's regular-file read,
+		// write or fsync took 1ms or longer over five minutes; means were
+		// 1-20µs, page cache and fsync on NVMe alike. 50ms is far above
+		// local storage and still above what network block storage
+		// takes, so 5% beyond it is storage in trouble, not a busy disk.
+		FSSlowBound:       50 * time.Millisecond,
+		FSSlowRatePercent: 5,
 	}
 }
 
@@ -157,6 +173,7 @@ func Rules() []Rule {
 		poolSaturationRule(),
 		cpuContentionRule(),
 		dnsSlowLookupRule(),
+		fsSlowOperationsRule(),
 	}
 }
 
@@ -771,6 +788,84 @@ func dnsSlowLookupRule() Rule {
 					Message: fmt.Sprintf("Slow DNS resolution for %s/%s: %.1f%% of %d lookups slower than %s (threshold: %.1f%%)",
 						s.Namespace, s.Workload, rate, agg.count,
 						t.DNSSlowBound.Round(time.Millisecond), t.DNSSlowRatePercent),
+				})
+			}
+			return issues
+		},
+	}
+}
+
+// fsSlowOperationOps are the operations fs.slow_operations judges. Opens,
+// closes, unlinks and renames are metadata operations with a latency of
+// their own, and a close has none at all.
+var fsSlowOperationOps = map[string]bool{"read": true, "write": true, "fsync": true}
+
+// fsSlowOperationsRule fires when too large a share of a workload's
+// regular-file reads, writes and fsyncs take longer than the slow bound.
+func fsSlowOperationsRule() Rule {
+	return Rule{
+		ID:  detector.IDFSSlowOperations,
+		For: 3 * time.Minute,
+		Query: `100 * (1 - (
+  sum by (namespace, workload) (rate(podtrace_workload_filesystem_latency_seconds_bucket{operation=~"read|write|fsync",le="0.05"}[5m]))
+  / sum by (namespace, workload) (rate(podtrace_workload_filesystem_latency_seconds_count{operation=~"read|write|fsync"}[5m]))))`,
+		Eval: func(w Window, t Thresholds) []detector.Issue {
+			if !w.Ready() || t.FSSlowBound <= 0 {
+				return nil
+			}
+			bound := t.FSSlowBound.Seconds()
+			interval := w.Interval()
+
+			byWorkload := map[string]*workloadTotals{}
+			for _, d := range w.Deltas(familyFSLatency) {
+				if d.Reset || d.Count == 0 || !fsSlowOperationOps[d.Sample.Label("operation")] {
+					continue
+				}
+				share, ok := d.FractionAbove(bound)
+				if !ok {
+					continue
+				}
+				key := d.Sample.Namespace + "/" + d.Sample.Workload
+				agg, found := byWorkload[key]
+				if !found {
+					agg = &workloadTotals{sample: d.Sample}
+					byWorkload[key] = agg
+				}
+				agg.count += d.Count
+				agg.above += share / 100 * float64(d.Count)
+			}
+
+			var issues []detector.Issue
+			for _, agg := range byWorkload {
+				perSecond := float64(agg.count) / interval.Seconds()
+				if perSecond < t.MinRequestsPerSecond {
+					continue
+				}
+				rate := agg.above / float64(agg.count) * 100
+				if rate <= t.FSSlowRatePercent {
+					continue
+				}
+				s := agg.sample
+				issues = append(issues, detector.Issue{
+					ID:       detector.IDFSSlowOperations,
+					Severity: alerting.SeverityWarning,
+					Subject: detector.Subject{
+						Namespace: s.Namespace,
+						Workload:  s.Workload,
+					},
+					Evidence: []detector.Evidence{
+						detector.NewEvidence("slow_operation_rate", rate, t.FSSlowRatePercent, "%"),
+						detector.NewEvidence("slow_bound", bound*1000, bound*1000, "ms"),
+						detector.NewEvidence("slow_operations", agg.above, 0, "count"),
+						detector.NewEvidence("total_operations", float64(agg.count), 0, "count"),
+						detector.NewEvidence("operation_rate", perSecond, t.MinRequestsPerSecond, "/s"),
+					},
+					Remediation: "Look at the volume behind the workload: its storage class and IOPS " +
+						"limit, a cgroup io.max on the pod, and other pods on the same node or " +
+						"volume. A diagnose session names the files whose operations took 1ms or longer.",
+					Message: fmt.Sprintf("Slow filesystem operations for %s/%s: %.1f%% of %d reads, writes and fsyncs took longer than %s (threshold: %.1f%%)",
+						s.Namespace, s.Workload, rate, agg.count,
+						t.FSSlowBound.Round(time.Millisecond), t.FSSlowRatePercent),
 				})
 			}
 			return issues

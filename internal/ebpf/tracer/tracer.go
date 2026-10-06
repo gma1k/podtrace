@@ -718,6 +718,7 @@ func NewTracer(tracerOpts ...Option) (*Tracer, error) {
 
 	pruneL7ProbesIfNoBPFLoop(spec)
 	pruneOnCPUTaskRegsIfUnsupported(spec)
+	pruneFSTracingIfUnsupported(spec, kspec != nil)
 
 	HaveSkStorageCrossContext()
 

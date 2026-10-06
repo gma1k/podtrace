@@ -30,10 +30,6 @@ var mandatoryProbes = map[string]string{
 	"kretprobe_tcp_sendmsg":    "tcp_sendmsg",
 	"kprobe_tcp_recvmsg":       "tcp_recvmsg",
 	"kretprobe_tcp_recvmsg":    "tcp_recvmsg",
-	"kprobe_vfs_write":         "vfs_write",
-	"kretprobe_vfs_write":      "vfs_write",
-	"kprobe_vfs_read":          "vfs_read",
-	"kretprobe_vfs_read":       "vfs_read",
 }
 
 // optionalProbes are attached when available; failure is logged but does not abort.
@@ -44,8 +40,6 @@ var optionalProbes = map[string]string{
 	"kretprobe_udp_sendmsg":    "udp_sendmsg",
 	"kprobe_udp_recvmsg":       "udp_recvmsg",
 	"kretprobe_udp_recvmsg":    "udp_recvmsg",
-	"kprobe_vfs_fsync":         "vfs_fsync",
-	"kretprobe_vfs_fsync":      "vfs_fsync",
 	"kprobe_do_futex":          "do_futex",
 	"kretprobe_do_futex":       "do_futex",
 	"kprobe_do_sys_openat2":    "do_sys_openat2",
@@ -57,11 +51,29 @@ var optionalProbes = map[string]string{
 	"kretprobe_vfs_rename":     "vfs_rename",
 }
 
-func attachKprobe(progName, symbol string, prog *ebpf.Program) (link.Link, error) {
-	if strings.HasPrefix(progName, "kretprobe_") {
+// kprobeSymbolAlternatives lists, for a program whose kernel function was
+// replaced, the symbols to try before its table entry, newest first. close(2)
+// calls file_close_fd() since Linux 6.7; close_fd() still exists there but no
+// longer runs on an ordinary close.
+var kprobeSymbolAlternatives = map[string][]string{
+	"kprobe_close_fd": {"file_close_fd"},
+}
+
+var kprobeAttach = func(symbol string, prog *ebpf.Program, ret bool) (link.Link, error) {
+	if ret {
 		return link.Kretprobe(symbol, prog, nil)
 	}
 	return link.Kprobe(symbol, prog, nil)
+}
+
+func attachKprobe(progName, symbol string, prog *ebpf.Program) (link.Link, error) {
+	ret := strings.HasPrefix(progName, "kretprobe_")
+	for _, alt := range kprobeSymbolAlternatives[progName] {
+		if l, err := kprobeAttach(alt, prog, ret); err == nil {
+			return l, nil
+		}
+	}
+	return kprobeAttach(symbol, prog, ret)
 }
 
 // AttachProbes attaches every probe whose program is present in the
@@ -159,6 +171,23 @@ func AttachProbesByGroup(coll *ebpf.Collection) (map[ProbeGroup][]link.Link, err
 		logger.Debug("Optional probe attached", zap.String("prog", progName), zap.String("symbol", symbol))
 	}
 
+	fsLinks, fsSkipped, fe := attachFSProbes(coll)
+	if fe != nil {
+		closeAll()
+		reportAttachFailure(fe.probe.kprobe, fe.probe.symbol, true, fe.err)
+		return nil, fmt.Errorf("%w\n\n"+
+			"Hint: the filesystem probe on %q attached neither as fentry/fexit nor as a kprobe.\n"+
+			"  • Verify the symbol exists: grep -w %q /proc/kallsyms\n"+
+			"  • Check for BPF denials: dmesg | grep -i bpf",
+			NewProbeAttachError(fe.probe.kprobe, fe), fe.probe.symbol, fe.probe.symbol)
+	}
+	if len(fsLinks) > 0 {
+		groups[GroupFileSystem] = append(groups[GroupFileSystem], fsLinks...)
+	}
+	for _, sym := range fsSkipped {
+		skippedOptional = append(skippedOptional, "filesystem->"+sym)
+	}
+
 	if len(skippedOptional) > 0 {
 		logger.Info("Some optional probes unavailable (non-critical features degraded)",
 			zap.Strings("skipped", skippedOptional))
@@ -199,6 +228,10 @@ var tracepointProbes = []tracepointSpec{
 	{"raw_tracepoint_sched_process_fork", "sched", "sched_process_fork", "Process fork tracking unavailable", true},
 	{"tracepoint_sched_process_exec", "sched", "sched_process_exec", "Process exec tracking unavailable", false},
 	{"tracepoint_sys_enter_bind", "syscalls", "sys_enter_bind", "AF_ALG crypto-socket detection unavailable", false},
+	{"tracepoint_sys_exit_fsync", "syscalls", "sys_exit_fsync", "fsync tracking unavailable", false},
+	{"tracepoint_sys_enter_fsync", "syscalls", "sys_enter_fsync", "fsync tracking unavailable", false},
+	{"tracepoint_sys_exit_fdatasync", "syscalls", "sys_exit_fdatasync", "fdatasync tracking unavailable", false},
+	{"tracepoint_sys_enter_fdatasync", "syscalls", "sys_enter_fdatasync", "fdatasync tracking unavailable", false},
 }
 
 // attachTracepointSpec attaches one tracepoint, returning (link, true) on
@@ -275,6 +308,15 @@ func AttachProbeGroup(coll *ebpf.Collection, target ProbeGroup) ([]link.Link, er
 			continue
 		}
 		links = append(links, l)
+	}
+
+	if target == GroupFileSystem {
+		fsLinks, _, fe := attachFSProbes(coll)
+		if fe != nil {
+			rollback()
+			return nil, fmt.Errorf("re-attach filesystem probes: %w", fe)
+		}
+		links = append(links, fsLinks...)
 	}
 
 	for _, tp := range tracepointProbes {

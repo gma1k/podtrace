@@ -160,6 +160,8 @@ func (e *Event) IsError() bool {
 	switch e.Type {
 	case EventResourceLimit, EventDBPoolStats:
 		return false
+	case EventOpen:
+		return e.Error != 0 && e.Error != -errnoENOENT
 	default:
 		return e.Error != 0
 	}
@@ -179,6 +181,7 @@ func CountsAsConnectionAttempt(t EventType, failed bool) bool {
 }
 
 const (
+	errnoENOENT       = 2
 	errnoEAFNOSUPPORT = 97
 	errnoENETUNREACH  = 101
 )

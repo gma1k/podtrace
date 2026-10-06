@@ -147,6 +147,7 @@ data:
           nativeHistograms: {{ .Values.agent.metrics.nativeHistograms }}
           semanticConventions: {{ .Values.agent.metrics.semanticConventions }}
           kernelAggregation: {{ .Values.agent.metrics.kernelAggregation }}
+          filesystem: {{ .Values.agent.metrics.filesystem }}
           {{- if .Values.agent.metrics.attributeCardinality }}
           attributeCardinality: {{ .Values.agent.metrics.attributeCardinality }}
           {{- end }}

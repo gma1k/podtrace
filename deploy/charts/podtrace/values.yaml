@@ -119,9 +119,6 @@ agent:
 
   # The continuous APM plane: per-workload golden-signal metrics on the
   # agent's /metrics, and the inspections that raise issues from them. On by
-  # default, so an install shows workload health without further setup; the
-  # series budget below bounds it at 40k series per node when left at 0.
-  # Set enabled: false to run podtrace as an on-demand tracer only.
   metrics:
     enabled: true
 
@@ -136,10 +133,13 @@ agent:
 
     # Fold observations into a BPF map instead of shipping each one through
     # the ring buffer, so the plane costs O(series) rather than O(events).
-    # On by default. The one thing it gives up is exemplars, the trace id
-    # linking a histogram bucket to a trace: those need the event, which only
-    # reaches userspace while a PodTrace keeps the ring buffer open.
+    # On by default.
     kernelAggregation: true
+
+    # Add regular-file reads, writes, fsyncs, opens and closes to the plane.
+    # Needs kernelAggregation: every operation is counted in the kernel and
+    # only those of 1ms or more become events.
+    filesystem: true
 
     attributeCardinality: 0
 

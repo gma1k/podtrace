@@ -4,6 +4,7 @@
 #include "maps.h"
 #include "events.h"
 #include "helpers.h"
+#include "filesystem.h"
 
 struct sched_process_exec_args {
 	unsigned short common_type;
@@ -75,6 +76,8 @@ int raw_tracepoint_sched_process_fork(struct bpf_raw_tracepoint_args *ctx) {
 
 SEC("kprobe/do_sys_openat2")
 int kprobe_do_sys_openat2(struct pt_regs *ctx) {
+	if (!fs_traced())
+		return 0;
 	struct pair_key key = make_pair_key(PAIR_OPENAT);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
@@ -92,7 +95,6 @@ int kprobe_do_sys_openat2(struct pt_regs *ctx) {
 SEC("kretprobe/do_sys_openat2")
 int kretprobe_do_sys_openat2(struct pt_regs *ctx) {
 	u32 pid = agent_ns_tgid();
-	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_OPENAT);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	if (!start_ts) {
@@ -100,7 +102,13 @@ int kretprobe_do_sys_openat2(struct pt_regs *ctx) {
 	}
 
 	u64 latency = calc_latency(*start_ts);
-	s64 ret = PT_REGS_RC(ctx);
+	s64 ret = PT_REGS_RC_INT(ctx);
+
+	if (ret >= 0 && !fs_is_regular(fs_file_of_fd((u32)ret))) {
+		bpf_map_delete_elem(&syscall_paths, &key);
+		bpf_map_delete_elem(&start_times, &key);
+		return 0;
+	}
 
 	struct event *e = get_event_buf();
 	if (!e) {
@@ -124,14 +132,15 @@ int kretprobe_do_sys_openat2(struct pt_regs *ctx) {
 		e->target[0] = '\0';
 	}
 
-	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	fs_emit(ctx, e, agg_from_event(e, 0));
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
 
 SEC("kprobe/vfs_unlink")
 int kprobe_vfs_unlink(struct pt_regs *ctx) {
+	if (!fs_traced())
+		return 0;
 	struct pair_key key = make_pair_key(PAIR_VFS_UNLINK);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
@@ -155,7 +164,6 @@ int kprobe_vfs_unlink(struct pt_regs *ctx) {
 SEC("kretprobe/vfs_unlink")
 int kretprobe_vfs_unlink(struct pt_regs *ctx) {
 	u32 pid = agent_ns_tgid();
-	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_VFS_UNLINK);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	if (!start_ts)
@@ -186,14 +194,15 @@ int kretprobe_vfs_unlink(struct pt_regs *ctx) {
 		e->target[0] = '\0';
 	}
 
-	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	fs_emit(ctx, e, agg_from_event(e, 0));
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
 
 SEC("kprobe/vfs_rename")
 int kprobe_vfs_rename(struct pt_regs *ctx) {
+	if (!fs_traced())
+		return 0;
 	struct pair_key key = make_pair_key(PAIR_VFS_RENAME);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
@@ -230,7 +239,6 @@ int kprobe_vfs_rename(struct pt_regs *ctx) {
 SEC("kretprobe/vfs_rename")
 int kretprobe_vfs_rename(struct pt_regs *ctx) {
 	u32 pid = agent_ns_tgid();
-	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_VFS_RENAME);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	if (!start_ts)
@@ -261,17 +269,19 @@ int kretprobe_vfs_rename(struct pt_regs *ctx) {
 		e->target[0] = '\0';
 	}
 
-	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	fs_emit(ctx, e, agg_from_event(e, 0));
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
 
 SEC("kprobe/close_fd")
 int kprobe_close_fd(struct pt_regs *ctx) {
-	u32 pid = agent_ns_tgid();
-	u32 tid = (u32)bpf_get_current_pid_tgid();
+	if (!fs_traced())
+		return 0;
 	unsigned int fd = (unsigned int)PT_REGS_PARM1(ctx);
+	if (!fs_is_regular(fs_file_of_fd(fd)))
+		return 0;
+	u32 pid = agent_ns_tgid();
 
 	struct event *e = get_event_buf();
 	if (!e) {
@@ -286,7 +296,6 @@ int kprobe_close_fd(struct pt_regs *ctx) {
 	e->tcp_state = 0;
 	e->target[0] = '\0';
 
-	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	fs_emit(ctx, e, agg_from_event(e, 0));
 	return 0;
 }

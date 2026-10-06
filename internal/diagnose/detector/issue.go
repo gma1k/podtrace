@@ -28,6 +28,8 @@ const (
 	IDCPUContention ID = "cpu.contention"
 
 	IDDNSSlowLookupRate ID = "dns.slow_lookup_rate"
+
+	IDFSSlowOperations ID = "fs.slow_operations"
 )
 
 // Registry is the documented issue vocabulary. Every ID the detector or the
@@ -42,6 +44,7 @@ var Registry = []ID{
 	IDDBPoolSaturated,
 	IDCPUContention,
 	IDDNSSlowLookupRate,
+	IDFSSlowOperations,
 }
 
 // Subject is what an issue is about.

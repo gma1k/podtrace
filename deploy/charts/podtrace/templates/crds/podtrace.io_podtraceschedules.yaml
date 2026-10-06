@@ -574,6 +574,7 @@ spec:
                           - db.pool_saturated
                           - cpu.contention
                           - dns.slow_lookup_rate
+                          - fs.slow_operations
                           type: string
                         kind:
                           description: |-

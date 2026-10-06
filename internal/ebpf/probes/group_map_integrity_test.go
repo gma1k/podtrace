@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-var bpfProgramName = regexp.MustCompile(`(?m)^int\s+([A-Za-z0-9_]+)\s*\(`)
+var bpfProgramName = regexp.MustCompile(`(?m)^int\s+(?:BPF_PROG\(\s*)?([A-Za-z0-9_]+)\s*[(,]`)
 
 func programsInBPFSource(t *testing.T) map[string]string {
 	t.Helper()

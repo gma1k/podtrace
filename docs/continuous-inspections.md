@@ -91,6 +91,7 @@ of large requests.
 | `net.rtt_spike_rate` | more than 5% of the workload's socket operations run slower than 100ms; against a kernel-aggregated (native) histogram the bound is taken at the next bucket edge, 105ms, so it only counts observations certainly above 100ms | 3m |
 | `cpu.contention` | the workload spends a mean of 50ms or more runnable but not running, across at least 100 preemptions | 3m |
 | `dns.slow_lookup_rate` | more than 5% of the workload's DNS lookups answer slower than 100ms, at 0.1 lookups per second or more | 3m |
+| `fs.slow_operations` | more than 5% of the workload's regular-file reads, writes and fsyncs take longer than 50ms, at 0.1 operations per second or more | 3m |
 
 ### DNS: a share of slow lookups, not a mean
 
@@ -110,9 +111,20 @@ error is its response code, so `errors_total{kind="dns"}` counts NXDOMAIN,
 which Kubernetes' `ndots:5` search path produces for nearly every external
 name. A failure rule needs the response code as a dimension first.
 
-There is no filesystem rule either: the metrics plane does not capture
-filesystem events, for the cost reasons in
-[Continuous Metrics](continuous-metrics.md).
+### Filesystem: slow storage, not a slow file
+
+`fs.slow_operations` reads `podtrace_workload_filesystem_latency_seconds` for
+`read`, `write` and `fsync`, every regular-file operation counted in the
+kernel, page-cache hits included. Opens, closes, unlinks and renames are left
+out: they are metadata operations with a latency profile of their own. On a
+three-node kind cluster no workload's read, write or fsync took 1ms or longer
+over five minutes, so the 50ms bound is not about clearing a noise floor: it
+is above local storage and above what network block storage takes, and 5% of
+operations beyond it is storage in trouble. A pod whose writes were throttled
+to a handful of IOPS with a cgroup `io.max` raised it.
+
+It needs the filesystem in the plane, which is the default with kernel
+aggregation; see [Continuous Metrics](continuous-metrics.md#the-filesystem-in-the-plane).
 
 ### The two planes now evaluate the same vocabulary
 
@@ -235,6 +247,7 @@ agent:
         cpuBlockedMean: 50ms
         poolUtilizationPercent: 80
         dnsSlowLookupPercent: 5
+        fsSlowOperationsPercent: 5
 ```
 
 `poolUtilizationPercent` is the warning band for `db.pool_saturated`; it

@@ -21,6 +21,7 @@ const (
 	envMetricsProcessLabel      = "PODTRACE_WORKLOAD_METRICS_PROCESS_LABEL"
 	envMetricsSemanticConv      = "PODTRACE_WORKLOAD_METRICS_SEMANTIC_CONVENTIONS"
 	envMetricsKernelAggregation = "PODTRACE_WORKLOAD_METRICS_KERNEL_AGGREGATION"
+	envMetricsFilesystem        = "PODTRACE_WORKLOAD_METRICS_FILESYSTEM"
 	envMetricsAttributeLimit    = "PODTRACE_WORKLOAD_METRICS_ATTRIBUTE_CARDINALITY"
 
 	envInspectionsEnabled    = "PODTRACE_INSPECTIONS"
@@ -35,6 +36,7 @@ const (
 	envInspectionCPUBlocked  = "PODTRACE_INSPECTIONS_CPU_BLOCKED_MEAN"
 	envInspectionPoolWarn    = "PODTRACE_INSPECTIONS_POOL_UTILIZATION_PCT"
 	envInspectionDNSSlow     = "PODTRACE_INSPECTIONS_DNS_SLOW_LOOKUP_PCT"
+	envInspectionFSSlow      = "PODTRACE_INSPECTIONS_FS_SLOW_OPERATIONS_PCT"
 )
 
 // boolEnv renders a resolved toggle.
@@ -53,6 +55,7 @@ func metricsEnv(spec *podtracev1alpha1.AgentMetricsSpec) []corev1.EnvVar {
 		boolEnv(envMetricsEnabled, true),
 		boolEnv(envMetricsNativeHistograms, spec.NativeHistogramsEnabled()),
 		boolEnv(envMetricsKernelAggregation, spec.KernelAggregationEnabled()),
+		boolEnv(envMetricsFilesystem, spec.FilesystemEnabled()),
 	}
 	if spec == nil {
 		return append(env, inspectionsEnv(nil)...)
@@ -169,6 +172,12 @@ func inspectionsEnv(spec *podtracev1alpha1.AgentInspectionsSpec) []corev1.EnvVar
 		env = append(env, corev1.EnvVar{
 			Name:  envInspectionDNSSlow,
 			Value: strconv.FormatInt(int64(*t.DNSSlowLookupPercent), 10),
+		})
+	}
+	if t.FSSlowOperationsPercent != nil {
+		env = append(env, corev1.EnvVar{
+			Name:  envInspectionFSSlow,
+			Value: strconv.FormatInt(int64(*t.FSSlowOperationsPercent), 10),
 		})
 	}
 	return env

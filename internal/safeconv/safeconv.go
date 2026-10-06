@@ -149,3 +149,11 @@ func IntToUint64(v int) uint64 {
 	}
 	return uint64(v)
 }
+
+// Uint64ToInt converts a uint64 to int, clamping to math.MaxInt.
+func Uint64ToInt(v uint64) int {
+	if v > math.MaxInt {
+		return math.MaxInt
+	}
+	return int(v)
+}

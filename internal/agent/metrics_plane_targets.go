@@ -7,6 +7,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/pkg/tracer"
 )
 
@@ -68,12 +69,19 @@ func StartupCategories(coverage MetricsPlaneConfig) []string {
 	return []string{}
 }
 
+// metricsPlaneCategories includes the filesystem unless it is switched off,
+// and only with kernel aggregation, which counts every regular-file operation in the kernel and
+// sends only those of 1ms or more as events.
 func metricsPlaneCategories() []string {
-	return []string{
+	cs := []string{
 		string(podtracev1alpha1.FilterDNS),
 		string(podtracev1alpha1.FilterNet),
 		string(podtracev1alpha1.FilterCPU),
 	}
+	if config.WorkloadMetricsKernelAggregation && config.WorkloadMetricsFilesystem {
+		cs = append(cs, string(podtracev1alpha1.FilterFS))
+	}
+	return cs
 }
 
 // unionCategories merges the CR-derived category set with the plane's own.

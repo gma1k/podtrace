@@ -125,6 +125,9 @@
             },
             "kernelAggregation": {
               "type": "boolean"
+            },
+            "filesystem": {
+              "type": "boolean"
             }
           }
         },

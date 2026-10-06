@@ -78,3 +78,20 @@ func TestEverySlowKernelAggregatedLookupCountsAsSlow(t *testing.T) {
 		}
 	}
 }
+
+func TestSlowKernelAggregatedFilesystemOperationsRaiseTheIssue(t *testing.T) {
+	rows := []kernelagg.Row{
+		kernelRow(events.EventRead, 0, kernelagg.BucketIndex(20_000), 900, 900*20_000, 900*4096),
+		kernelRow(events.EventFsync, 0, kernelagg.BucketIndex(200_000_000), 100, 100*200_000_000, 0),
+		kernelRow(events.EventOpen, 0, kernelagg.BucketIndex(300_000_000), 500, 500*300_000_000, 0),
+	}
+	active := evaluateOverKernelRows(t, rows, rows)
+	if !hasIssue(active, detector.IDFSSlowOperations) {
+		t.Fatalf("100 of 1000 reads and fsyncs took 200ms and fs.slow_operations did not fire: %v", active)
+	}
+	for _, issue := range active {
+		if issue.ID == detector.IDFSSlowOperations && !strings.Contains(issue.Message, "10.0% of 1000") {
+			t.Errorf("opens were counted with the reads and fsyncs: %q", issue.Message)
+		}
+	}
+}

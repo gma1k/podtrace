@@ -29,8 +29,22 @@ struct path {
 	struct dentry *dentry;
 };
 
+struct inode {
+	unsigned short i_mode;
+};
+
 struct file {
 	struct path f_path;
+	struct inode *f_inode;
+};
+
+struct fdtable {
+	unsigned int max_fds;
+	struct file **fd;
+};
+
+struct files_struct {
+	struct fdtable *fdt;
 };
 
 struct renamedata {
@@ -84,6 +98,7 @@ struct task_struct {
 	struct pid *thread_pid;
 	struct nsproxy *nsproxy;
 	struct css_set *cgroups;
+	struct files_struct *files;
 };
 
 struct trace_event_raw_mark_victim {

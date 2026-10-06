@@ -45,6 +45,7 @@ func TestMetricsEnvTreatsAMissingSpecAsEveryDefault(t *testing.T) {
 				envMetricsEnabled:           "true",
 				envMetricsNativeHistograms:  "true",
 				envMetricsKernelAggregation: "true",
+				envMetricsFilesystem:        "true",
 				envInspectionsEnabled:       "true",
 				envInspectionsAlerts:        "true",
 			} {
@@ -64,6 +65,7 @@ func TestMetricsEnvWritesEveryToggleOut(t *testing.T) {
 		envMetricsEnabled,
 		envMetricsNativeHistograms,
 		envMetricsKernelAggregation,
+		envMetricsFilesystem,
 		envInspectionsEnabled,
 		envInspectionsAlerts,
 	} {
@@ -218,5 +220,12 @@ func TestMetricsEnvTurnsKernelAggregationOffWhenAsked(t *testing.T) {
 	if got[envMetricsKernelAggregation] != "false" {
 		t.Errorf("%s = %q, want false; an explicit opt-out must reach the agent",
 			envMetricsKernelAggregation, got[envMetricsKernelAggregation])
+	}
+}
+
+func TestMetricsEnvSwitchesTheFilesystemOff(t *testing.T) {
+	got := envMap(metricsEnv(&podtracev1alpha1.AgentMetricsSpec{Enabled: ptr(true), Filesystem: ptr(false)}))
+	if got[envMetricsFilesystem] != "false" {
+		t.Errorf("%s = %q, want false", envMetricsFilesystem, got[envMetricsFilesystem])
 	}
 }

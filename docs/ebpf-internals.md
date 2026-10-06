@@ -157,13 +157,22 @@ Kprobes attach to kernel functions:
   - Return: Calculate RTT/latency
 
 **File System Tracing:**
-- `vfs_read` / `vfs_write` / `vfs_fsync`: Entry and return probes
-  - Entry: Record start time, extract inode+device ID from `struct file*`
-  - Return: Calculate latency, encode inode as `ino:DEV/INO` string
-- `do_sys_openat2`: Entry and return probes
-  - Entry: Record start time, capture file path from function parameter
-  - Return: Calculate latency, emit `EventOpen` with full path
-- Path Resolution: Userspace correlates `open()` paths with `read()`/`write()` by inode
+- `vfs_read` / `vfs_write`: fentry/fexit where the kernel supports them
+  (5.11+ with BTF), kprobe/kretprobe otherwise; the agent logs which.
+  - Entry: skip a task in an untargeted cgroup and any file that is not a
+    regular file (pipes, sockets, eventfds, ttys), then record the start in
+    task-local storage (fentry) or a hash keyed by thread (kprobe)
+  - Return: count the operation in kernel aggregation; one that took 1ms or
+    longer also becomes an event, its file name read only then
+- `fsync` / `fdatasync`: the `syscalls:sys_enter_*`/`sys_exit_*`
+  tracepoints, the fd resolved to its file through the task's descriptor
+  table. Current kernels inline the work into `do_fsync`, so a probe on
+  `vfs_fsync` never runs for `fsync(2)`.
+- `do_sys_openat2`, `vfs_unlink`, `vfs_rename`: entry and return probes,
+  untargeted cgroups skipped on entry, counted in kernel aggregation
+- `file_close_fd` (Linux 6.7+), else `close_fd`: a regular file's close
+- Without kernel aggregation (a diagnose session), the operations under 1ms
+  are counted in `fs_fast_ops`, which the session drains into its report
 
 ### Uprobes
 
@@ -228,7 +237,7 @@ static inline void capture_user_stack(void *ctx, u32 pid, u32 tid, struct event 
 ### When Stack Traces Are Captured
 
 Stack traces are captured for operations exceeding performance thresholds:
-- Slow file I/O operations (read/write/fsync > 1ms)
+- Slow regular-file I/O operations (read/write/fsync of 1ms or more)
 - Slow DNS lookups
 - Slow network operations (TCP send/receive with high latency)
 - Lock contention events (futex/pthread mutex waits > 1ms)

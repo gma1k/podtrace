@@ -146,6 +146,7 @@ the agent runs with:
 | `agent.metrics.inspections.enabled` | Continuous inspections (only while the plane is on) |
 | `agent.metrics.inspections.alerts` | Raising an activated issue as an alert |
 | `agent.metrics.kernelAggregation` | Folding observations in a BPF map |
+| `agent.metrics.filesystem` | Regular-file operations in the plane (needs `kernelAggregation`) |
 | `agent.metrics.nativeHistograms` | Native histograms on `/metrics` |
 | `agent.continuousProfiling` | The always-on profile on `/profile` |
 | `agent.sockOpsRTT` | Kernel smoothed RTT via `sock_ops` |

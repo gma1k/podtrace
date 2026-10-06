@@ -247,6 +247,7 @@ _Static_assert(sizeof(struct bpf_sock) == 80, "bpf_sock must match linux/bpf.h")
 #define BPF_SK_STORAGE_GET_F_CREATE         1
 #define BPF_F_NO_PREALLOC                   (1U << 0)
 #define BPF_MAP_TYPE_SK_STORAGE             24
+#define BPF_MAP_TYPE_TASK_STORAGE           29
 
 struct bpf_raw_tracepoint_args {
 	__u64 args[0];
@@ -278,6 +279,7 @@ struct podtrace_sockaddr_alg {
 };
 #define IPPROTO_TCP 6
 #define EAGAIN 11
+#define ENOENT 2
 #define HEX_ADDR_LEN 16
 #define COMM_LEN 16
 

@@ -149,8 +149,10 @@ The shares of a request always add up to its duration.
   *(endpoint not seen)*, with their kind.
 - **An outbound HTTP call is not a category of its own.** The call carries
   its own correlation id, so its time shows as the socket waits under it.
-- **Filesystem operations under 1ms are not traced**, so they are part of
-  *not in traced I/O*.
+- **Filesystem operations under 1ms are counted but are not events**, so a
+  request does not see them as waits and they are part of *not in traced
+  I/O*. Neither are reads and writes on pipes and sockets, which the
+  network family covers.
 - **`--filter` narrows the breakdown too.** The waits a filter drops never
   reach it, so with `--filter dns` a request's socket waits count as *not in
   traced I/O*; the section says which categories were kept.

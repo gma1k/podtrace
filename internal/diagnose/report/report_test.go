@@ -11,6 +11,7 @@ import (
 )
 
 type mockDiagnostician struct {
+	fsKernel           analyzer.FSKernelCounts
 	events             []*events.Event
 	startTime          time.Time
 	endTime            time.Time
@@ -55,6 +56,8 @@ func (m *mockDiagnostician) ErrorRateThreshold() float64 {
 func (m *mockDiagnostician) RTTSpikeThreshold() float64 {
 	return m.rttSpikeThreshold
 }
+
+func (m *mockDiagnostician) FastFilesystemOps() analyzer.FSKernelCounts { return m.fsKernel }
 
 func (m *mockDiagnostician) FSSlowThreshold() float64 {
 	return m.fsSlowThreshold
@@ -1145,5 +1148,46 @@ func TestGenerateHTTPSection_TraceContextCount(t *testing.T) {
 	result := GenerateHTTPSection(d, d.endTime.Sub(d.startTime))
 	if !strings.Contains(result, "Trace context: 1/2 requests carried a W3C traceparent") {
 		t.Errorf("expected trace-context line, got:\n%s", result)
+	}
+}
+
+func TestTheFilesystemSectionCountsTheKernelsFastOperations(t *testing.T) {
+	d := &mockDiagnostician{
+		events:          []*events.Event{{Type: events.EventFsync, LatencyNS: 30_000_000, Target: "journal"}},
+		startTime:       time.Unix(0, 0),
+		endTime:         time.Unix(10, 0),
+		fsSlowThreshold: 10,
+		fsKernel: analyzer.FSKernelCounts{
+			events.EventWrite: {Count: 9, SumNS: 9 * 40_000, Bytes: 9 * 4096, Buckets: map[float64]uint64{0.05: 9}},
+		},
+	}
+	got := GenerateFileSystemSection(d, 10*time.Second)
+	for _, want := range []string{
+		"Write operations: 9",
+		"Fsync operations: 1",
+		"Of these, under 1ms and counted in the kernel: 9",
+		"files with operations of 1ms or more",
+		"journal",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("section lacks %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestTheFilesystemSectionSaysWhenItsMaxIsABucketBound(t *testing.T) {
+	d := &mockDiagnostician{
+		startTime: time.Unix(0, 0),
+		endTime:   time.Unix(10, 0),
+		fsKernel: analyzer.FSKernelCounts{
+			events.EventRead: {Count: 4, SumNS: 4 * 40_000, Buckets: map[float64]uint64{0.05: 4}},
+		},
+	}
+	got := GenerateFileSystemSection(d, 10*time.Second)
+	if !strings.Contains(got, "no operation reached 1ms") || !strings.Contains(got, "Read operations: 4") {
+		t.Errorf("section = \n%s", got)
+	}
+	if strings.Contains(got, "Top ") {
+		t.Errorf("a section with no events listed files:\n%s", got)
 	}
 }

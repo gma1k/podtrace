@@ -168,6 +168,16 @@ type AgentMetricsSpec struct {
 	// +kubebuilder:default=true
 	KernelAggregation *bool `json:"kernelAggregation,omitempty"`
 
+	// Filesystem adds regular-file reads, writes, fsyncs, opens and closes to
+	// the plane. It needs kernelAggregation, which counts every operation in
+	// the kernel; only operations of 1ms or more become events. Each traced
+	// read or write costs the workload about 0.3µs where the kernel has
+	// fentry (5.11+ with BTF) and about 0.9µs with kprobes. Set false to
+	// leave filesystem latency to diagnose sessions.
+	// +optional
+	// +kubebuilder:default=true
+	Filesystem *bool `json:"filesystem,omitempty"`
+
 	// +optional
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=10000
@@ -270,6 +280,14 @@ type AgentInspectionThresholdsSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=100
 	DNSSlowLookupPercent *int32 `json:"dnsSlowLookupPercent,omitempty"`
+
+	// FSSlowOperationsPercent is the share of a workload's regular-file
+	// reads, writes and fsyncs slower than 50ms above which
+	// fs.slow_operations fires.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100
+	FSSlowOperationsPercent *int32 `json:"fsSlowOperationsPercent,omitempty"`
 }
 
 // AgentMetricsLabelsSpec opts into labels that are deliberately absent by

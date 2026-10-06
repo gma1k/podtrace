@@ -19,6 +19,7 @@ const (
 	DefaultMetricsEnabled         = true
 	DefaultNativeHistograms       = true
 	DefaultKernelAggregation      = true
+	DefaultFilesystemMetrics      = true
 	DefaultInspectionsEnabled     = true
 	DefaultInspectionsRaiseAlerts = true
 )
@@ -80,6 +81,15 @@ func (m *AgentMetricsSpec) KernelAggregationEnabled() bool {
 		return DefaultKernelAggregation
 	}
 	return boolOr(m.KernelAggregation, DefaultKernelAggregation)
+}
+
+// FilesystemEnabled reports whether the plane covers regular-file
+// operations.
+func (m *AgentMetricsSpec) FilesystemEnabled() bool {
+	if m == nil {
+		return DefaultFilesystemMetrics
+	}
+	return boolOr(m.Filesystem, DefaultFilesystemMetrics)
 }
 
 // InspectionsSpec returns the inspections block, nil when there is none.

@@ -28,6 +28,7 @@ var issueSections = map[detector.ID]string{
 	detector.IDDBPoolSaturated:       "Connection Pool Statistics",
 	detector.IDCPUContention:         "CPU Statistics",
 	detector.IDDNSSlowLookupRate:     "DNS Statistics",
+	detector.IDFSSlowOperations:      "File System Statistics",
 }
 
 // GenerateTriggerSection opens the report of a session an issue started: what
