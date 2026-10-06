@@ -94,7 +94,7 @@ export PODTRACE_ALERT_WEBHOOK_URL=https://alerts.example.com/webhook
 Use `--filter` to focus on specific event types:
 - `dns`: DNS lookup events
 - `net`: Network events (TCP, UDP, connections)
-- `fs`: File system events (read, write, fsync)
+- `fs`: Regular-file operations (read, write, fsync, open, close, unlink, rename); a read, write or fsync becomes an event at 1ms or longer, and the report counts the faster ones too
 - `cpu`: CPU scheduling events
 - `proc`: Process lifecycle events (exec, fork, open, close)
 
@@ -269,7 +269,7 @@ Review:
 - CPU scheduling tracking requires tracepoint permissions
 - Stack trace symbol resolution requires `addr2line` tool and debug symbols
 - Database query tracing requires matching database client libraries (libpq, libmysqlclient)
-- Some syscall probes may be unavailable on certain kernel versions (e.g., `__close_fd`)
+- Some syscall probes may be unavailable on certain kernel versions; closes are traced through `file_close_fd` on Linux 6.7+ and `close_fd` before it
 
 ## Troubleshooting
 

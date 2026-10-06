@@ -11,6 +11,7 @@ import (
 )
 
 type mockDiagnostician struct {
+	fsKernel           analyzer.FSKernelCounts
 	events             []*events.Event
 	startTime          time.Time
 	endTime            time.Time
@@ -55,6 +56,8 @@ func (m *mockDiagnostician) ErrorRateThreshold() float64 {
 func (m *mockDiagnostician) RTTSpikeThreshold() float64 {
 	return m.rttSpikeThreshold
 }
+
+func (m *mockDiagnostician) FastFilesystemOps() analyzer.FSKernelCounts { return m.fsKernel }
 
 func (m *mockDiagnostician) FSSlowThreshold() float64 {
 	return m.fsSlowThreshold

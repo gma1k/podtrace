@@ -70,9 +70,11 @@ The eBPF programs run in the kernel and trace system calls and kernel events. Th
 - **Kprobes**: Attach to kernel functions
   - `tcp_v4_connect` / `tcp_v6_connect` - Network connections
   - `tcp_sendmsg` / `tcp_recvmsg` - TCP send/receive
-  - `vfs_read` / `vfs_write` / `vfs_fsync` - File system operations
+  - `vfs_read` / `vfs_write` - Regular-file reads and writes (fentry/fexit where available)
   - `do_futex` - Lock contention tracking (mutex/semaphore waits)
   - `do_sys_openat2` - File open operations
+  - `file_close_fd` / `close_fd` - Regular-file closes
+- **Tracepoints** `syscalls:sys_{enter,exit}_{fsync,fdatasync}` - fsync
   - `do_execveat_common` - Process execution
 
 - **Uprobes**: Attach to user-space functions

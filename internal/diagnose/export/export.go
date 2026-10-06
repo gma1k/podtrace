@@ -34,6 +34,7 @@ type Diagnostician interface {
 	ErrorRateThreshold() float64
 	RTTSpikeThreshold() float64
 	FSSlowThreshold() float64
+	FastFilesystemOps() analyzer.FSKernelCounts
 }
 
 func calculateRate(count int, duration time.Duration) float64 {
@@ -85,13 +86,9 @@ func ExportJSON(d Diagnostician) ExportData {
 		data.Connections["unreachable"] = unreachable
 	}
 
-	writeEvents := d.FilterEvents(events.EventWrite)
-	readEvents := d.FilterEvents(events.EventRead)
-	fsyncEvents := d.FilterEvents(events.EventFsync)
-	if len(writeEvents) > 0 || len(readEvents) > 0 || len(fsyncEvents) > 0 {
-		allFS := append(append(writeEvents, readEvents...), fsyncEvents...)
-		avgLatency, maxLatency, slowOps, p50, p95, p99, totalBytes, avgBytes := analyzer.AnalyzeFS(allFS, d.FSSlowThreshold())
-		data.FileSystem = buildFSExportData(writeEvents, readEvents, fsyncEvents, avgLatency, maxLatency, slowOps, p50, p95, p99, totalBytes, avgBytes)
+	allFS := append(append(d.FilterEvents(events.EventWrite), d.FilterEvents(events.EventRead)...), d.FilterEvents(events.EventFsync)...)
+	if st := analyzer.AnalyzeFSWithKernelCounts(allFS, d.FastFilesystemOps(), d.FSSlowThreshold()); st.Ops() > 0 {
+		data.FileSystem = buildFSExportData(st)
 	}
 
 	schedEvents := d.FilterEvents(events.EventSchedSwitch)
@@ -175,19 +172,21 @@ func buildConnectionExportData(connectEvents []*events.Event, duration time.Dura
 	}
 }
 
-func buildFSExportData(writeEvents, readEvents, fsyncEvents []*events.Event, avgLatency, maxLatency float64, slowOps int, p50, p95, p99 float64, totalBytes, avgBytes uint64) map[string]interface{} {
+func buildFSExportData(st analyzer.FSStats) map[string]interface{} {
 	return map[string]interface{}{
-		"write_operations": len(writeEvents),
-		"read_operations":  len(readEvents),
-		"fsync_operations": len(fsyncEvents),
-		"avg_latency_ms":   avgLatency,
-		"max_latency_ms":   maxLatency,
-		"p50_ms":           p50,
-		"p95_ms":           p95,
-		"p99_ms":           p99,
-		"slow_operations":  slowOps,
-		"total_bytes":      totalBytes,
-		"avg_bytes":        avgBytes,
+		"write_operations":    st.Writes,
+		"read_operations":     st.Reads,
+		"fsync_operations":    st.Fsyncs,
+		"kernel_counted":      st.KernelCounted,
+		"avg_latency_ms":      st.AvgMs,
+		"max_latency_ms":      st.MaxMs,
+		"max_is_bucket_bound": st.MaxIsKernelUpperBound,
+		"p50_ms":              st.P50,
+		"p95_ms":              st.P95,
+		"p99_ms":              st.P99,
+		"slow_operations":     st.SlowOps,
+		"total_bytes":         st.TotalBytes,
+		"avg_bytes":           st.AvgBytes,
 	}
 }
 

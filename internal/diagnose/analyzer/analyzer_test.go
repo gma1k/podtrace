@@ -242,40 +242,77 @@ func BenchmarkFormatBytes(b *testing.B) {
 
 func TestAnalyzeFS(t *testing.T) {
 	events := []*events.Event{
-		{LatencyNS: 5000000, Bytes: 1024},
-		{LatencyNS: 10000000, Bytes: 2048},
-		{LatencyNS: 15000000, Bytes: 4096},
-		{LatencyNS: 2000000, Bytes: 512},
-		{LatencyNS: 8000000, Bytes: 0},
+		{Type: events.EventRead, LatencyNS: 5000000, Bytes: 1024},
+		{Type: events.EventRead, LatencyNS: 10000000, Bytes: 2048},
+		{Type: events.EventWrite, LatencyNS: 15000000, Bytes: 4096},
+		{Type: events.EventWrite, LatencyNS: 2000000, Bytes: 512},
+		{Type: events.EventFsync, LatencyNS: 8000000, Bytes: 0},
 	}
 
-	avg, max, slowOps, _, _, _, totalBytes, avgBytes := AnalyzeFS(events, 10.0)
+	st := AnalyzeFSWithKernelCounts(events, nil, 10.0)
 
-	if avg != 8.0 {
-		t.Errorf("Expected avg latency 8.0ms, got %.2f", avg)
+	if st.AvgMs != 8.0 {
+		t.Errorf("Expected avg latency 8.0ms, got %.2f", st.AvgMs)
 	}
-	if max != 15.0 {
-		t.Errorf("Expected max latency 15.0ms, got %.2f", max)
+	if st.MaxMs != 15.0 || st.MaxIsKernelUpperBound {
+		t.Errorf("Expected max latency 15.0ms from an event, got %.2f (bucket bound %v)", st.MaxMs, st.MaxIsKernelUpperBound)
 	}
-	if slowOps != 1 {
-		t.Errorf("Expected 1 slow operation, got %d", slowOps)
+	if st.SlowOps != 1 {
+		t.Errorf("Expected 1 slow operation, got %d", st.SlowOps)
 	}
-	if totalBytes != 7680 {
-		t.Errorf("Expected total bytes 7680, got %d", totalBytes)
+	if st.TotalBytes != 7680 || st.AvgBytes != 1536 {
+		t.Errorf("Expected 7680 bytes, 1536 average, got %d, %d", st.TotalBytes, st.AvgBytes)
 	}
-	if avgBytes != 1536 {
-		t.Errorf("Expected avg bytes 1536, got %d", avgBytes)
+	if st.Reads != 2 || st.Writes != 2 || st.Fsyncs != 1 || st.KernelCounted != 0 {
+		t.Errorf("counts = %+v", st)
 	}
 }
 
 func TestAnalyzeFS_Empty(t *testing.T) {
-	avg, max, slowOps, _, _, _, totalBytes, avgBytes := AnalyzeFS([]*events.Event{}, 10.0)
-
-	if avg != 0 || max != 0 || slowOps != 0 {
-		t.Errorf("Expected zeros for empty events, got avg=%.2f max=%.2f slowOps=%d", avg, max, slowOps)
+	st := AnalyzeFSWithKernelCounts([]*events.Event{}, nil, 10.0)
+	if st.Ops() != 0 || st.AvgMs != 0 || st.MaxMs != 0 || st.SlowOps != 0 || st.TotalBytes != 0 {
+		t.Errorf("Expected zeros for empty events, got %+v", st)
 	}
-	if totalBytes != 0 || avgBytes != 0 {
-		t.Errorf("Expected zero bytes for empty events, got total=%d avg=%d", totalBytes, avgBytes)
+}
+
+func TestKernelCountsJoinTheEvents(t *testing.T) {
+	evs := []*events.Event{{Type: events.EventRead, LatencyNS: 20_000_000, Bytes: 100}}
+	kernel := FSKernelCounts{
+		events.EventRead:  {Count: 98, SumNS: 98 * 50_000, Bytes: 9800, Buckets: map[float64]uint64{0.06: 98}},
+		events.EventWrite: {Count: 1, SumNS: 900_000, Bytes: 1, Buckets: map[float64]uint64{0.95: 1}},
+		events.EventOpen:  {Count: 7, SumNS: 7, Buckets: map[float64]uint64{0.001: 7}},
+	}
+	st := AnalyzeFSWithKernelCounts(evs, kernel, 10.0)
+	if st.Reads != 99 || st.Writes != 1 || st.KernelCounted != 99 || st.Ops() != 100 {
+		t.Errorf("counts = %+v; opens are not read, write or fsync", st)
+	}
+	if st.TotalBytes != 9901 || st.SlowOps != 1 {
+		t.Errorf("bytes %d, slow %d", st.TotalBytes, st.SlowOps)
+	}
+	if st.P50 != 0.06 || st.P99 != 0.95 || st.MaxMs != 20 || st.MaxIsKernelUpperBound {
+		t.Errorf("p50 %v p99 %v max %v (bound %v)", st.P50, st.P99, st.MaxMs, st.MaxIsKernelUpperBound)
+	}
+	if want := (20_000_000 + 98*50_000 + 900_000) / 100.0 / 1e6; st.AvgMs != want {
+		t.Errorf("avg = %v, want %v", st.AvgMs, want)
+	}
+}
+
+func TestOnlyKernelCountsGiveABucketBoundAsTheMax(t *testing.T) {
+	st := AnalyzeFSWithKernelCounts(nil, FSKernelCounts{
+		events.EventFsync: {Count: 3, SumNS: 1500, Buckets: map[float64]uint64{0.5: 2, 0.9: 1}},
+	}, 10.0)
+	if st.MaxMs != 0.9 || !st.MaxIsKernelUpperBound || st.Fsyncs != 3 {
+		t.Errorf("stats = %+v", st)
+	}
+	if got := (FSKernelCounts{events.EventRead: {Count: 2}, events.EventWrite: {Count: 3}}).Total(); got != 5 {
+		t.Errorf("Total = %d", got)
+	}
+}
+
+func TestEventsOtherThanReadWriteFsyncAreIgnored(t *testing.T) {
+	st := AnalyzeFSWithKernelCounts([]*events.Event{{Type: events.EventOpen, LatencyNS: 5_000_000}}, nil, 1)
+	if st.Ops() != 0 || st.SlowOps != 0 {
+		t.Errorf("an open was analyzed as a read or write: %+v", st)
 	}
 }
 
@@ -316,6 +353,7 @@ func BenchmarkAnalyzeFS(b *testing.B) {
 	eventSlice := make([]*events.Event, 1000)
 	for i := range eventSlice {
 		eventSlice[i] = &events.Event{
+			Type:      events.EventRead,
 			LatencyNS: uint64(i * 1000000),
 			Bytes:     uint64(i * 1024),
 		}
@@ -324,7 +362,7 @@ func BenchmarkAnalyzeFS(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _, _, _, _, _, _, _ = AnalyzeFS(eventSlice, 10.0)
+		_ = AnalyzeFSWithKernelCounts(eventSlice, nil, 10.0)
 	}
 }
 
@@ -340,5 +378,12 @@ func BenchmarkAnalyzeCPU(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _, _, _, _ = AnalyzeCPU(eventSlice)
+	}
+}
+
+func TestAPercentileBeyondTheWeightsIsTheSlowestValue(t *testing.T) {
+	got := weightedPercentile([]weighted{{1, 2}, {3, 3}}, 10, 99)
+	if got != 3 {
+		t.Errorf("weightedPercentile with a total above its weights = %v, want the slowest value", got)
 	}
 }

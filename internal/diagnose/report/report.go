@@ -28,6 +28,7 @@ type Diagnostician interface {
 	RTTSpikeThreshold() float64
 	FSSlowThreshold() float64
 	ErrorRateThreshold() float64
+	FastFilesystemOps() analyzer.FSKernelCounts
 }
 
 func GenerateSummarySection(d Diagnostician, duration time.Duration) string {
@@ -205,33 +206,37 @@ func GenerateFileSystemSection(d Diagnostician, duration time.Duration) string {
 	writeEvents := d.FilterEvents(events.EventWrite)
 	readEvents := d.FilterEvents(events.EventRead)
 	fsyncEvents := d.FilterEvents(events.EventFsync)
-	if len(writeEvents) == 0 && len(readEvents) == 0 && len(fsyncEvents) == 0 {
+	allFS := append(append(writeEvents, readEvents...), fsyncEvents...)
+	st := analyzer.AnalyzeFSWithKernelCounts(allFS, d.FastFilesystemOps(), d.FSSlowThreshold())
+	if st.Ops() == 0 {
 		return ""
 	}
 
 	var report string
 	report += formatter.SectionHeader("File System")
-	writeRate := d.CalculateRate(len(writeEvents), duration)
-	readRate := d.CalculateRate(len(readEvents), duration)
-	fsyncRate := d.CalculateRate(len(fsyncEvents), duration)
-	report += fmt.Sprintf("  Write operations: %d (%.1f/sec)\n", len(writeEvents), writeRate)
-	report += fmt.Sprintf("  Read operations: %d (%.1f/sec)\n", len(readEvents), readRate)
-	report += fmt.Sprintf("  Fsync operations: %d (%.1f/sec)\n", len(fsyncEvents), fsyncRate)
+	report += fmt.Sprintf("  Write operations: %d (%.1f/sec)\n", st.Writes, d.CalculateRate(safeconv.Uint64ToInt(st.Writes), duration))
+	report += fmt.Sprintf("  Read operations: %d (%.1f/sec)\n", st.Reads, d.CalculateRate(safeconv.Uint64ToInt(st.Reads), duration))
+	report += fmt.Sprintf("  Fsync operations: %d (%.1f/sec)\n", st.Fsyncs, d.CalculateRate(safeconv.Uint64ToInt(st.Fsyncs), duration))
+	if st.KernelCounted > 0 {
+		report += fmt.Sprintf("  Of these, under 1ms and counted in the kernel: %d\n", st.KernelCounted)
+	}
+	report += formatter.LatencyMetrics(st.AvgMs, st.MaxMs)
+	if st.MaxIsKernelUpperBound {
+		report += "  (no operation reached 1ms; the max is the upper bound of the slowest bucket)\n"
+	}
+	report += formatter.Percentiles(st.P50, st.P95, st.P99)
+	report += fmt.Sprintf("  Slow operations (>%.1fms): %d\n", d.FSSlowThreshold(), st.SlowOps)
+	if st.TotalBytes > 0 {
+		report += formatter.BytesSection(st.TotalBytes, st.AvgBytes, calculateThroughput(st.TotalBytes, duration))
+	}
 
-	allFS := append(append(writeEvents, readEvents...), fsyncEvents...)
-	if len(allFS) > 0 {
-		avgLatency, maxLatency, slowOps, p50, p95, p99, totalBytes, avgBytes := analyzer.AnalyzeFS(allFS, d.FSSlowThreshold())
-		report += formatter.LatencyMetrics(avgLatency, maxLatency)
-		report += formatter.Percentiles(p50, p95, p99)
-		report += fmt.Sprintf("  Slow operations (>%.1fms): %d\n", d.FSSlowThreshold(), slowOps)
-		if totalBytes > 0 {
-			report += formatter.BytesSection(totalBytes, avgBytes, calculateThroughput(totalBytes, duration))
+	fileMap := buildFileMap(allFS)
+	if len(fileMap) > 0 {
+		label := "accessed files"
+		if st.KernelCounted > 0 {
+			label = "files with operations of 1ms or more"
 		}
-
-		fileMap := buildFileMap(allFS)
-		if len(fileMap) > 0 {
-			report += formatter.TopItems(fileMap, config.TopFilesLimit, "accessed files", "operations")
-		}
+		report += formatter.TopItems(fileMap, config.TopFilesLimit, label, "operations")
 	}
 	report += "\n"
 	return report
@@ -1479,8 +1484,16 @@ func formatSyscallCounts(execEvents, forkEvents, openEvents, closeEvents []*even
 	return result
 }
 
+// formatFileDescriptorLeak compares the opens that returned a descriptor
+// with the closes.
 func formatFileDescriptorLeak(openEvents, closeEvents []*events.Event) string {
-	diff := len(openEvents) - len(closeEvents)
+	opened := 0
+	for _, e := range openEvents {
+		if e.Error == 0 {
+			opened++
+		}
+	}
+	diff := opened - len(closeEvents)
 	if diff > 0 {
 		return fmt.Sprintf("  Potential descriptor leak: %d more opens than closes\n", diff)
 	}
@@ -1498,6 +1511,9 @@ func formatTopOpenedFiles(openEvents []*events.Event) string {
 func buildFileCounts(openEvents []*events.Event) map[string]int {
 	fileCounts := make(map[string]int)
 	for _, e := range openEvents {
+		if e.Error != 0 {
+			continue
+		}
 		name := e.Target
 		if name != "" && name != "?" && name != "unknown" {
 			fileCounts[name]++

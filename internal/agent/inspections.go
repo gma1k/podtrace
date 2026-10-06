@@ -159,6 +159,9 @@ func inspectionThresholds() inspect.Thresholds {
 		DNSSlowBound:       inspect.DefaultThresholds().DNSSlowBound,
 		DNSSlowRatePercent: config.InspectionDNSSlowLookupPct,
 
+		FSSlowBound:       inspect.DefaultThresholds().FSSlowBound,
+		FSSlowRatePercent: config.InspectionFSSlowOperationsPct,
+
 		HoldTime: config.InspectionsHoldTime,
 	}
 }

@@ -1,6 +1,7 @@
 package report
 
 import (
+	"github.com/gma1k/podtrace/internal/diagnose/analyzer"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +26,7 @@ func (m *secMock) StartTime() time.Time                         { return time.Ti
 func (m *secMock) EndTime() time.Time                           { return time.Time{} }
 func (m *secMock) RTTSpikeThreshold() float64                   { return 0 }
 func (m *secMock) FSSlowThreshold() float64                     { return 0 }
+func (m *secMock) FastFilesystemOps() analyzer.FSKernelCounts   { return nil }
 func (m *secMock) ErrorRateThreshold() float64                  { return 0 }
 
 func TestGenerateSecuritySection(t *testing.T) {

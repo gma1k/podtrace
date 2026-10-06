@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"sync"
 	"time"
 
@@ -11,12 +12,14 @@ import (
 
 	"github.com/gma1k/podtrace/internal/analysis/criticalpath"
 	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/diagnose/analyzer"
 	"github.com/gma1k/podtrace/internal/diagnose/correlator"
 	"github.com/gma1k/podtrace/internal/diagnose/export"
 	"github.com/gma1k/podtrace/internal/diagnose/profiling"
 	"github.com/gma1k/podtrace/internal/diagnose/report"
 	"github.com/gma1k/podtrace/internal/diagnose/stacktrace"
 	"github.com/gma1k/podtrace/internal/diagnose/tracker"
+	"github.com/gma1k/podtrace/internal/ebpf/kernelagg"
 	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/internal/logger"
 )
@@ -48,6 +51,7 @@ type Diagnostician struct {
 	podCommTracker     *tracker.PodCommunicationTracker
 	errorCorrelator    *correlator.ErrorCorrelator
 	criticalPath       *criticalpath.Collector
+	fsKernelRows       []kernelagg.Row
 	sourcePod          string
 	sourceNamespace    string
 }
@@ -151,6 +155,69 @@ func (d *Diagnostician) GetEvents() []*events.Event {
 		copy(result[n:], d.events[:d.evHead])
 	}
 	return result
+}
+
+// AddFastFilesystemOps keeps the kernel's counts of the filesystem
+// operations too fast to become events.
+func (d *Diagnostician) AddFastFilesystemOps(rows []kernelagg.Row) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.fsKernelRows = append(d.fsKernelRows, rows...)
+}
+
+// FastFilesystemRows returns the rows AddFastFilesystemOps kept, so a per-pod
+// diagnostician can be given them.
+func (d *Diagnostician) FastFilesystemRows() []kernelagg.Row {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return append([]kernelagg.Row(nil), d.fsKernelRows...)
+}
+
+// FastFilesystemOps sums the kernel's counts for the cgroups this
+// diagnostician's events came from, so each pod's report counts its own.
+func (d *Diagnostician) FastFilesystemOps() analyzer.FSKernelCounts {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if len(d.fsKernelRows) == 0 {
+		return nil
+	}
+	own := make(map[uint64]struct{})
+	for _, e := range d.events {
+		if e != nil && e.CgroupID != 0 {
+			own[e.CgroupID] = struct{}{}
+		}
+	}
+	out := analyzer.FSKernelCounts{}
+	for _, r := range d.fsKernelRows {
+		if _, ok := own[r.Key.CgroupID]; !ok {
+			continue
+		}
+		typ := events.EventType(r.Key.EventType)
+		switch typ {
+		case events.EventRead, events.EventWrite, events.EventFsync:
+		default:
+			continue
+		}
+		c := out[typ]
+		c.Count += r.Value.Count
+		c.SumNS += r.Value.SumNS
+		c.Bytes += r.Value.Bytes
+		if c.Buckets == nil {
+			c.Buckets = map[float64]uint64{}
+		}
+		c.Buckets[kernelBucketUpperMs(r.Key.Bucket)] += r.Value.Count
+		out[typ] = c
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// kernelBucketUpperMs is a kernel latency bucket's upper bound in
+// milliseconds.
+func kernelBucketUpperMs(bucket uint16) float64 {
+	return math.Exp2(float64(kernelagg.NativeIndex(bucket))/float64(uint(1)<<kernelagg.Schema)) * 1000
 }
 
 // CriticalPath returns where the requests served during collection spent

@@ -29,6 +29,7 @@ import (
 	"github.com/gma1k/podtrace/internal/diagnose"
 	diagnosereport "github.com/gma1k/podtrace/internal/diagnose/report"
 	"github.com/gma1k/podtrace/internal/ebpf"
+	"github.com/gma1k/podtrace/internal/ebpf/kernelagg"
 	tracerpkg "github.com/gma1k/podtrace/internal/ebpf/tracer"
 	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/internal/kubernetes"
@@ -547,6 +548,9 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create tracer: %w", err)
 	}
 	defer func() { _ = tracer.Stop() }()
+	if diagnoseDuration != "" {
+		countFastFilesystemOps(tracer)
+	}
 
 	cgroupPaths, containerIDs := targetAttachSets(targetInfos)
 	if err := attachTracerToCgroups(tracer, cgroupPaths); err != nil {
@@ -1147,7 +1151,43 @@ func attachSourcePod(e *events.Event, resolve func(*events.Event) *kubernetes.Po
 }
 
 // generateDiagnoseReport renders the diagnostic report.
+var fastFilesystemOps func() ([]kernelagg.Row, error)
+
+type fastFilesystemCounter interface {
+	CountFastFilesystemOps() error
+	DrainFastFilesystemOps() ([]kernelagg.Row, error)
+}
+
+func countFastFilesystemOps(t any) {
+	c, ok := t.(fastFilesystemCounter)
+	if !ok {
+		return
+	}
+	if err := c.CountFastFilesystemOps(); err != nil {
+		logger.Warn("Fast filesystem operations will not be counted; the report counts only those of 1ms or more", zap.Error(err))
+		return
+	}
+	fastFilesystemOps = c.DrainFastFilesystemOps
+}
+
+// takeFastFilesystemOps drains the kernel's counts into the diagnostician,
+// once: a later report would otherwise lose the counts it already drained.
+func takeFastFilesystemOps(agg *diagnose.Diagnostician) {
+	drain := fastFilesystemOps
+	if drain == nil {
+		return
+	}
+	fastFilesystemOps = nil
+	rows, err := drain()
+	if err != nil {
+		logger.Warn("Could not read the kernel's filesystem counts; the report counts only operations of 1ms or more", zap.Error(err))
+		return
+	}
+	agg.AddFastFilesystemOps(rows)
+}
+
 func generateDiagnoseReport(agg *diagnose.Diagnostician) string {
+	takeFastFilesystemOps(agg)
 	return diagnosereport.GenerateTriggerSection(sessionTrigger, agg) + diagnosisByPod(agg) +
 		diagnosereport.GenerateCriticalPathSection(agg.CriticalPath(), eventFilter)
 }
@@ -1211,6 +1251,7 @@ func diagnosisByPod(agg *diagnose.Diagnostician) string {
 		child := diagnose.NewDiagnosticianWithK8sAndThresholds(
 			b.podName, b.namespace, errorRateThreshold, rttSpikeThreshold, fsSlowThreshold)
 		child.SetTimeWindow(agg.StartTime(), agg.EndTime())
+		child.AddFastFilesystemOps(agg.FastFilesystemRows())
 		for i, e := range b.events {
 			child.AddEventWithContext(e, b.contexts[i])
 		}

@@ -43,3 +43,12 @@ func TestAddInt64(t *testing.T) {
 		}
 	}
 }
+
+func TestUint64ToIntClampsAboveMaxInt(t *testing.T) {
+	if got := Uint64ToInt(math.MaxUint64); got != math.MaxInt {
+		t.Errorf("Uint64ToInt(MaxUint64) = %d", got)
+	}
+	if got := Uint64ToInt(42); got != 42 {
+		t.Errorf("Uint64ToInt(42) = %d", got)
+	}
+}

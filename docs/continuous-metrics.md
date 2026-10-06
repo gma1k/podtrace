@@ -71,14 +71,39 @@ on the node with the workload:
 |---|---|---|
 | Plane off | — | 0.01 cores |
 | Plane on, default categories | ~34,000 | ~0.12 cores |
-| Plane on, `fs` included | ~67,000 | up to 1.00 cores |
 
-The third row is why the plane does not enable the `fs` category. Filesystem
-events alone were **94.9%** of all observations — 63,000 per second on one
-agent against 3,100 for network bytes — and including them drove the agent
-to the chart's default 1-core limit. Filesystem latency is a diagnostic
-signal rather than a golden one, so the plane does not pay for it; the two
-filesystem families still populate whenever a `PodTrace` asks for `fs`.
+### The filesystem in the plane
+
+The plane covers regular-file reads, writes, fsyncs, opens and closes when
+kernel aggregation is on, which it is by default. Every such operation of a
+targeted pod is counted in the kernel; only one that takes 1ms or longer also
+becomes an event, carrying the file name. Pipes, sockets, eventfds and ttys
+pass through the same kernel functions but are not filesystem I/O, so they
+are left out; the network and lock families cover them.
+
+Measured on a 3-node kind cluster, with two pods on one node doing 4KiB
+`dd` reads and writes as fast as they can (330,000 reads, 90,000 writes and
+350 fsyncs a second):
+
+| `filesystem` | Agent CPU on that node |
+|---|---|
+| `false` | 0.26 cores |
+| `true` | 0.23 cores |
+
+The agent does not pay for the operations; the workload does, because the
+probe runs in the task making the call. A cached 4KiB read on that node took
+1.08µs untraced:
+
+| How the kernel traces it | Read of a traced pod | Read of any other process |
+|---|---|---|
+| fentry/fexit (5.11+ with BTF) | +0.30µs | +0.12µs |
+| kprobes (older kernels, or `btfMode: file`) | +0.89µs | +0.48µs |
+
+That is noise for a workload that reads files at ordinary rates, and a few
+percent of a core for one doing hundreds of thousands of cached reads a
+second. `agent.metrics.filesystem: false` leaves filesystem latency to
+diagnose sessions. Without kernel aggregation the plane does not cover the
+filesystem at all, since it would see only the operations of 1ms or more.
 
 With the default categories the remaining volume is dominated by network
 byte counting. That is the next thing to get cheaper.
@@ -446,7 +471,11 @@ duplicating what Prometheus already does correctly.
 
 `direction` is `ingress` or `egress`; `transport` is `tcp` or `udp`.
 `operation` is `read`, `write`, `fsync`, `open`, `close`, `unlink` or
-`rename`. `kind` groups failures as `l7`, `dns`, `network`, `filesystem`,
+`rename`, on regular files only; `fsync` includes `fdatasync`. An open that
+fails is counted too, since it has no file to check. A failed operation adds
+to `errors_total` with `kind="filesystem"`, except an open that found no file
+(`ENOENT`): that is a lookup that answered no, and the loader of a dynamically
+linked program makes several on every start. `kind` groups failures as `l7`, `dns`, `network`, `filesystem`,
 `tls`, `lock` or `other`. `outcome` is `ok` or `error`, and for
 `network_connections_total` also `unreachable` (see below).
 

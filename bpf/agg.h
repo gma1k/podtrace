@@ -115,15 +115,15 @@ static __always_inline u16 agg_bucket(u64 ns)
 	return (u16)(msb * AGG_SCHEMA_STEPS + sub);
 }
 
-static __always_inline int agg_record(u64 cgroup_id, u8 event_type, u8 variant,
-				      u32 peer_ip, u16 peer_port,
-				      u64 latency_ns, u64 bytes, int bucketed)
+static __always_inline int agg_record_in(void *map, u64 cgroup_id, u8 event_type, u8 variant,
+					 u32 peer_ip, u16 peer_port,
+					 u64 latency_ns, u64 bytes, int bucketed)
 {
 	struct agg_key key = {};
 	struct agg_value init = {};
 	struct agg_value *val;
 
-	if (!agg_is_enabled() || cgroup_id == 0)
+	if (cgroup_id == 0)
 		return 0;
 
 	key.cgroup_id = cgroup_id;
@@ -133,12 +133,12 @@ static __always_inline int agg_record(u64 cgroup_id, u8 event_type, u8 variant,
 	key.variant = variant;
 	key.bucket = bucketed ? agg_bucket(agg_scale(latency_ns)) : AGG_BUCKET_NONE;
 
-	val = bpf_map_lookup_elem(&agg_metrics, &key);
+	val = bpf_map_lookup_elem(map, &key);
 	if (!val) {
 		init.count = 1;
 		init.sum_ns = bucketed ? latency_ns : 0;
 		init.bytes = bytes;
-		bpf_map_update_elem(&agg_metrics, &key, &init, BPF_ANY);
+		bpf_map_update_elem(map, &key, &init, BPF_ANY);
 		return 1;
 	}
 
@@ -147,6 +147,16 @@ static __always_inline int agg_record(u64 cgroup_id, u8 event_type, u8 variant,
 		val->sum_ns += latency_ns;
 	val->bytes += bytes;
 	return 1;
+}
+
+static __always_inline int agg_record(u64 cgroup_id, u8 event_type, u8 variant,
+				      u32 peer_ip, u16 peer_port,
+				      u64 latency_ns, u64 bytes, int bucketed)
+{
+	if (!agg_is_enabled())
+		return 0;
+	return agg_record_in(&agg_metrics, cgroup_id, event_type, variant,
+			     peer_ip, peer_port, latency_ns, bytes, bucketed);
 }
 
 #define AGG_VARIANT(proto, status_class, is_error) \
@@ -211,8 +221,12 @@ static __always_inline int agg_from_event(struct event *e, s32 status_num)
 		bytes = e->bytes;
 		break;
 
-	case EVENT_FSYNC:
 	case EVENT_OPEN:
+		if (e->error == -ENOENT)
+			is_error = 0;
+		break;
+
+	case EVENT_FSYNC:
 	case EVENT_CLOSE:
 	case EVENT_UNLINK:
 	case EVENT_RENAME:

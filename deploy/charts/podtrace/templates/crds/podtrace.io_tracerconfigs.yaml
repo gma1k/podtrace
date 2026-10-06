@@ -1045,6 +1045,16 @@ spec:
                           type: string
                         maxItems: 64
                         type: array
+                      filesystem:
+                        default: true
+                        description: |-
+                          Filesystem adds regular-file reads, writes, fsyncs, opens and closes to
+                          the plane. It needs kernelAggregation, which counts every operation in
+                          the kernel; only operations of 1ms or more become events. Each traced
+                          read or write costs the workload about 0.3µs where the kernel has
+                          fentry (5.11+ with BTF) and about 0.9µs with kprobes. Set false to
+                          leave filesystem latency to diagnose sessions.
+                        type: boolean
                       inspections:
                         default: {}
                         description: |-
@@ -1113,6 +1123,15 @@ spec:
                                 format: int32
                                 maximum: 100
                                 minimum: 0
+                                type: integer
+                              fsSlowOperationsPercent:
+                                description: |-
+                                  FSSlowOperationsPercent is the share of a workload's regular-file
+                                  reads, writes and fsyncs slower than 50ms above which
+                                  fs.slow_operations fires.
+                                format: int32
+                                maximum: 100
+                                minimum: 1
                                 type: integer
                               meanLatency:
                                 description: |-

@@ -1,6 +1,7 @@
 package report
 
 import (
+	"github.com/gma1k/podtrace/internal/diagnose/analyzer"
 	"strconv"
 	"strings"
 	"testing"
@@ -30,11 +31,12 @@ func (f *filterDiagnostician) CalculateRate(count int, duration time.Duration) f
 	}
 	return 0
 }
-func (f *filterDiagnostician) StartTime() time.Time        { return f.startTime }
-func (f *filterDiagnostician) EndTime() time.Time          { return f.endTime }
-func (f *filterDiagnostician) ErrorRateThreshold() float64 { return 0 }
-func (f *filterDiagnostician) RTTSpikeThreshold() float64  { return 0 }
-func (f *filterDiagnostician) FSSlowThreshold() float64    { return 0 }
+func (f *filterDiagnostician) StartTime() time.Time                       { return f.startTime }
+func (f *filterDiagnostician) EndTime() time.Time                         { return f.endTime }
+func (f *filterDiagnostician) ErrorRateThreshold() float64                { return 0 }
+func (f *filterDiagnostician) RTTSpikeThreshold() float64                 { return 0 }
+func (f *filterDiagnostician) FSSlowThreshold() float64                   { return 0 }
+func (f *filterDiagnostician) FastFilesystemOps() analyzer.FSKernelCounts { return nil }
 
 func TestFormatFastCGIActivity_NilEntriesAndURICap(t *testing.T) {
 	reqs := []*events.Event{nil}

@@ -53,6 +53,10 @@ type AgentInspectionThresholdsSpecApplyConfiguration struct {
 	// DNSSlowLookupPercent is the share of a workload's DNS lookups slower
 	// than 100ms above which dns.slow_lookup_rate fires.
 	DNSSlowLookupPercent *int32 `json:"dnsSlowLookupPercent,omitempty"`
+	// FSSlowOperationsPercent is the share of a workload's regular-file
+	// reads, writes and fsyncs slower than 50ms above which
+	// fs.slow_operations fires.
+	FSSlowOperationsPercent *int32 `json:"fsSlowOperationsPercent,omitempty"`
 }
 
 // AgentInspectionThresholdsSpecApplyConfiguration constructs a declarative configuration of the AgentInspectionThresholdsSpec type for use with
@@ -114,5 +118,13 @@ func (b *AgentInspectionThresholdsSpecApplyConfiguration) WithPoolUtilizationPer
 // If called multiple times, the DNSSlowLookupPercent field is set to the value of the last call.
 func (b *AgentInspectionThresholdsSpecApplyConfiguration) WithDNSSlowLookupPercent(value int32) *AgentInspectionThresholdsSpecApplyConfiguration {
 	b.DNSSlowLookupPercent = &value
+	return b
+}
+
+// WithFSSlowOperationsPercent sets the FSSlowOperationsPercent field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the FSSlowOperationsPercent field is set to the value of the last call.
+func (b *AgentInspectionThresholdsSpecApplyConfiguration) WithFSSlowOperationsPercent(value int32) *AgentInspectionThresholdsSpecApplyConfiguration {
+	b.FSSlowOperationsPercent = &value
 	return b
 }

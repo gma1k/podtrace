@@ -164,6 +164,7 @@ var (
 	WorkloadMetricsAttributeLimit   = getIntEnvOrDefault("PODTRACE_WORKLOAD_METRICS_ATTRIBUTE_CARDINALITY", 50)
 
 	WorkloadMetricsKernelAggregation = getBoolEnvOrDefault("PODTRACE_WORKLOAD_METRICS_KERNEL_AGGREGATION", false)
+	WorkloadMetricsFilesystem        = getBoolEnvOrDefault("PODTRACE_WORKLOAD_METRICS_FILESYSTEM", true)
 
 	WorkloadMetricsSeriesTTL = getDurationEnvOrDefault("PODTRACE_WORKLOAD_METRICS_SERIES_TTL", 15*time.Minute)
 
@@ -189,6 +190,7 @@ var (
 	InspectionPoolUtilizationPct   = getIntEnvOrDefault("PODTRACE_INSPECTIONS_POOL_UTILIZATION_PCT", 80)
 	InspectionMinPreemptions       = getIntEnvOrDefault("PODTRACE_INSPECTIONS_MIN_PREEMPTIONS", 100)
 	InspectionDNSSlowLookupPct     = getFloatEnvOrDefault("PODTRACE_INSPECTIONS_DNS_SLOW_LOOKUP_PCT", 5)
+	InspectionFSSlowOperationsPct  = getFloatEnvOrDefault("PODTRACE_INSPECTIONS_FS_SLOW_OPERATIONS_PCT", 5)
 
 	InspectionsHoldTime = getDurationEnvOrDefault("PODTRACE_INSPECTIONS_HOLD_TIME", 0)
 )

@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"github.com/gma1k/podtrace/internal/config"
+	"slices"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -190,13 +192,27 @@ func TestCategoryUnionUntouchedWhenPlaneDisabled(t *testing.T) {
 	}
 }
 
-func TestPlaneDoesNotEnableFilesystemByDefault(t *testing.T) {
-	for _, c := range metricsPlaneCategories() {
-		if c == "fs" {
-			t.Error("the plane enables `fs` by default. Measured on kind, filesystem " +
-				"events were 94.9% of all observations (63185/s on one agent vs 3128/s " +
-				"for network) and pinned the agent at its 1-core limit. Filesystem " +
-				"latency is a diagnostic signal, not a golden one.")
+func withPlaneSettings(t *testing.T, kernelAggregation, filesystem bool) {
+	t.Helper()
+	origAgg, origFS := config.WorkloadMetricsKernelAggregation, config.WorkloadMetricsFilesystem
+	t.Cleanup(func() { config.WorkloadMetricsKernelAggregation, config.WorkloadMetricsFilesystem = origAgg, origFS })
+	config.WorkloadMetricsKernelAggregation, config.WorkloadMetricsFilesystem = kernelAggregation, filesystem
+}
+
+func TestThePlaneCoversTheFilesystemOnlyWithKernelAggregation(t *testing.T) {
+	for _, c := range []struct {
+		kernelAggregation, filesystem, want bool
+		why                                 string
+	}{
+		{true, true, true, "the default: every operation is counted in the kernel"},
+		{false, true, false, "without kernel aggregation only operations of 1ms or more would reach the plane, and its histogram would describe nothing"},
+		{true, false, false, "agent.metrics.filesystem: false must switch it off"},
+	} {
+		withPlaneSettings(t, c.kernelAggregation, c.filesystem)
+		got := slices.Contains(metricsPlaneCategories(), "fs")
+		if got != c.want {
+			t.Errorf("kernelAggregation=%v filesystem=%v: fs in the plane = %v, want %v: %s",
+				c.kernelAggregation, c.filesystem, got, c.want, c.why)
 		}
 	}
 }
