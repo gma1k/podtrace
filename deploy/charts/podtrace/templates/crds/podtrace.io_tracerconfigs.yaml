@@ -1108,6 +1108,15 @@ spec:
                                   CPUBlockedMean is the mean time a workload spends off-CPU waiting to
                                   be scheduled above which cpu.contention fires.
                                 type: string
+                              dnsFailurePercent:
+                                description: |-
+                                  DNSFailurePercent is the share of a workload's DNS lookups that fail
+                                  (SERVFAIL, REFUSED, another error rcode, or no answer) above which
+                                  dns.failure_rate fires. NXDOMAIN is an answer and never counts.
+                                format: int32
+                                maximum: 100
+                                minimum: 1
+                                type: integer
                               dnsSlowLookupPercent:
                                 description: |-
                                   DNSSlowLookupPercent is the share of a workload's DNS lookups slower

@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
@@ -77,7 +78,21 @@ type Cluster interface {
 	Profile(ctx context.Context, agent Agent) (Profile, error)
 	ProfileStacks(ctx context.Context, agent Agent, format StackFormat, sel profiling.StackSelection) ([]byte, error)
 	IssueEvents(ctx context.Context, namespace string) ([]corev1.Event, error)
+	ActiveIssues(ctx context.Context, agent Agent) ([]LiveIssue, error)
 	Components(ctx context.Context) ([]Component, error)
+}
+
+// LiveIssue is one firing issue as an agent's /issues serves it: its latest
+// message and the time it activated.
+type LiveIssue struct {
+	ID        string    `json:"id"`
+	Severity  string    `json:"severity"`
+	Namespace string    `json:"namespace"`
+	Workload  string    `json:"workload"`
+	Pod       string    `json:"pod,omitempty"`
+	Resource  string    `json:"resource,omitempty"`
+	Since     time.Time `json:"since"`
+	Message   string    `json:"message"`
 }
 
 // KubeCluster reads the agents through the API server's pod proxy, so it
@@ -186,6 +201,23 @@ func DecodeMetrics(raw []byte, contentType string) ([]*dto.MetricFamily, error) 
 		}
 		out = append(out, f)
 	}
+}
+
+// ActiveIssues reads one agent's /issues. An agent older than the endpoint,
+// or one with inspections off, answers with an error, and the caller falls
+// back to the issues' Events.
+func (k *KubeCluster) ActiveIssues(ctx context.Context, agent Agent) ([]LiveIssue, error) {
+	raw, _, err := k.proxyGet(ctx, agent, "issues", "application/json")
+	if err != nil {
+		return nil, err
+	}
+	var body struct {
+		Issues []LiveIssue `json:"issues"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return nil, fmt.Errorf("decode issues: %w", err)
+	}
+	return body.Issues, nil
 }
 
 // Profile reads one agent's /profile.

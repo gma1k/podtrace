@@ -49,6 +49,7 @@ type collectors struct {
 	lockContention *prometheus.HistogramVec
 
 	dnsLatency *prometheus.HistogramVec
+	dnsLookups *prometheus.CounterVec
 
 	filesystemLatency *prometheus.HistogramVec
 	filesystemBytes   *prometheus.CounterVec
@@ -112,6 +113,8 @@ func (c *collectors) counterFor(family string) (*prometheus.CounterVec, bool) {
 		return c.networkDeviceErrors, true
 	case "filesystem_bytes_total":
 		return c.filesystemBytes, true
+	case "dns_lookups_total":
+		return c.dnsLookups, true
 	case "errors_total":
 		return c.errors, true
 	default:
@@ -206,6 +209,11 @@ func newCollectors(opts Options) *collectors {
 			withBase(),
 		),
 
+		dnsLookups: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: metricPrefix + "dns_lookups_total",
+			Help: "DNS lookups, by answer: NOERROR, NXDOMAIN, SERVFAIL, REFUSED, other (any other rcode or resolver error), or timeout (no answer). NXDOMAIN is an answer, not a failure: search-domain expansion makes several per lookup.",
+		}, withBase("rcode")),
+
 		filesystemLatency: prometheus.NewHistogramVec(
 			histogramOpts("filesystem_latency_seconds",
 				"Distribution of filesystem operation latency, by operation.", native),
@@ -264,6 +272,7 @@ func (c *collectors) all() []prometheus.Collector {
 		c.networkRetransmits,
 		c.networkDeviceErrors,
 		c.filesystemBytes,
+		c.dnsLookups,
 		c.errors,
 		c.eventsTotal,
 		c.seriesDropped,

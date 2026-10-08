@@ -60,7 +60,7 @@ func ExportJSON(d Diagnostician) ExportData {
 	}
 
 	dnsQueries := d.FilterEvents(events.EventDNSQuery)
-	dnsEvents := d.FilterEvents(events.EventDNS)
+	dnsEvents := analyzer.DNSLookups(d.FilterEvents(events.EventDNS), config.DNSPacketCaptureEnabled())
 	if len(dnsQueries) > 0 || len(dnsEvents) > 0 {
 		avgLatency, maxLatency, errors, p50, p95, p99, topTargets := analyzer.AnalyzeDNS(dnsQueries, dnsEvents)
 		countEvents := dnsQueries
@@ -68,6 +68,12 @@ func ExportJSON(d Diagnostician) ExportData {
 			countEvents = dnsEvents
 		}
 		data.DNS = buildDNSExportData(countEvents, duration, avgLatency, maxLatency, errors, p50, p95, p99, topTargets)
+		answers := map[string]int{}
+		for _, a := range analyzer.DNSRCodeBreakdown(dnsEvents) {
+			answers[a.Target] = a.Count
+		}
+		data.DNS["answers"] = answers
+		data.DNS["answered"] = analyzer.DNSAnswered(dnsEvents)
 	}
 
 	tcpSendEvents := d.FilterEvents(events.EventTCPSend)

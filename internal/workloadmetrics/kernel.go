@@ -275,6 +275,13 @@ func (s *Sink) ingestKernelRow(row *kernelagg.Row) bool {
 		s.ingestKernelEdge(e, row, direction, false, seconds, count)
 
 	case events.EventDNS:
+		variant := kernelagg.DecodeVariant(row.Key.Variant)
+		source := variant.Transport
+		if source == events.DNSSourceEncrypted || (s.dnsPacketCapture && source == events.DNSSourceLibc) {
+			return true
+		}
+		s.add(s.c.dnsLookups, "dns_lookups_total",
+			appendLabels(base, events.DNSAnswerOfClass(variant.StatusClass)), count)
 		s.kernelObserve("dns_latency_seconds", base, row, seconds)
 
 	case events.EventDNSQuery:

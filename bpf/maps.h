@@ -48,6 +48,7 @@ enum probe_pair {
 	PAIR_KAFKA_TOPIC_NEW,
 	PAIR_KAFKA_PRODUCE,
 	PAIR_KAFKA_POLL,
+	PAIR_GETHOSTBYNAME,
 };
 
 struct pair_key {
@@ -149,6 +150,7 @@ struct dns_query_state {
 	char comm[COMM_LEN];
 	char name[MAX_STRING_LEN];
 	u8 server_ip6[16];
+	u64 last_ns;
 };
 
 struct {
@@ -197,7 +199,8 @@ struct dns_payload_record {
 	u8  transport;
 	u8  is_v6;
 	u8  rcode;
-	u8  _pad[7];
+	u8  agg_recorded;
+	u8  _pad[6];
 };
 
 struct dns_payload_scratch {

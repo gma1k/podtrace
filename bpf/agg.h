@@ -190,7 +190,13 @@ static __always_inline int agg_from_event(struct event *e, s32 status_num)
 		variant = AGG_VARIANT(e->tcp_state, 0, 0);
 		break;
 
-	case EVENT_DNS:
+	case EVENT_DNS: {
+		u32 class = dns_answer_class(e->dns_transport, e->error);
+
+		variant = AGG_VARIANT(e->dns_transport, class, dns_class_failed(class));
+		break;
+	}
+
 	case EVENT_DNS_QUERY:
 	case EVENT_TLS_HANDSHAKE:
 	case EVENT_DB_ACQUIRE:

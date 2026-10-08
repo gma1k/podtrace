@@ -18,7 +18,9 @@ type Record struct {
 	Transport uint8
 	IsV6      bool
 	RCode     uint8
-	Msg       Message
+
+	AggRecorded bool
+	Msg         Message
 }
 
 // ParseRecord splits the fixed metadata header from the trailing raw DNS
@@ -45,6 +47,7 @@ func ParseRecord(data []byte) (Record, bool) {
 	r.Transport = data[54]
 	r.IsV6 = data[55] != 0
 	r.RCode = data[56]
+	r.AggRecorded = data[57] != 0
 	r.Msg = Parse(data[recordHeaderSize:end])
 	return r, true
 }

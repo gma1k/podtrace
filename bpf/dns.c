@@ -219,6 +219,7 @@ static __always_inline void emit_encrypted_dns(struct __sk_buff *skb, u8 is_v6, 
 	e->pid = agent_ns_tgid();
 	e->type = EVENT_DNS;
 	e->cgroup_id = bpf_skb_cgroup_id(skb);
+	e->dns_transport = DNS_SOURCE_ENCRYPTED;
 	if (is_v6) {
 		u8 a6[16] = {};
 		if (bpf_skb_load_bytes(skb, 24, a6, sizeof(a6)) == 0) {
@@ -307,8 +308,19 @@ int dns_egress(struct __sk_buff *skb) {
 	if (bpf_skb_load_bytes(skb, dns_off, &txid, sizeof(txid)) < 0)
 		return 1;
 
+	struct dns_flow_key key = {};
+	key.cgroup_id = bpf_skb_cgroup_id(skb);
+	key.txid = bpf_ntohs(txid);
+
+	struct dns_query_state *sent = bpf_map_lookup_elem(&dns_inflight, &key);
+	if (sent) {
+		sent->last_ns = bpf_ktime_get_ns();
+		return 1;
+	}
+
 	struct dns_query_state q = {};
 	q.ts_ns = bpf_ktime_get_ns();
+	q.last_ns = q.ts_ns;
 	q.pid = bpf_get_current_pid_tgid() >> 32;
 	q.transport = transport;
 	/* bpf_get_current_comm is not available to cgroup_skb programs;
@@ -326,9 +338,6 @@ int dns_egress(struct __sk_buff *skb) {
 	if (bpf_skb_load_bytes(skb, qend, &qtype, sizeof(qtype)) == 0)
 		q.qtype = bpf_ntohs(qtype);
 
-	struct dns_flow_key key = {};
-	key.cgroup_id = bpf_skb_cgroup_id(skb);
-	key.txid = bpf_ntohs(txid);
 	if (bpf_map_update_elem(&dns_inflight, &key, &q, BPF_ANY) < 0)
 		dns_drop_inc();
 
@@ -359,6 +368,7 @@ struct dns_payload_meta {
 	u16 txid;
 	u8 rcode;
 	u8 is_v6;
+	u8 agg_recorded;
 };
 
 static __noinline void emit_dns_payload(struct __sk_buff *skb, int dns_off,
@@ -381,6 +391,7 @@ static __noinline void emit_dns_payload(struct __sk_buff *skb, int dns_off,
 	scr->rec.transport = q->transport;
 	scr->rec.is_v6 = m->is_v6;
 	scr->rec.rcode = m->rcode;
+	scr->rec.agg_recorded = m->agg_recorded;
 
 	u32 avail = skb->len > (u32)dns_off ? skb->len - (u32)dns_off : 0;
 	if (avail > DNS_PAYLOAD_MAX - 1)
@@ -456,12 +467,7 @@ int dns_ingress(struct __sk_buff *skb) {
 	u32 *payload_on = bpf_map_lookup_elem(&dns_payload_enabled, &pz);
 	if (payload_on && *payload_on) {
 		u64 latency = e->latency_ns;
-		/* This is the only DNS record carrying a real latency, and with
-		 * dnsFullAnswers on it leaves through the payload ring instead of
-		 * the event ring. Fold it in before discarding, or the metrics
-		 * plane sees nothing but the zero-latency query and packet events
-		 * and dns_latency_seconds sums to zero. */
-		agg_from_event(e, 0);
+		int recorded = agg_from_event(e, 0);
 		bpf_ringbuf_discard(e, 0);
 		struct dns_payload_meta meta = {
 			.cgroup_id = key.cgroup_id,
@@ -469,6 +475,7 @@ int dns_ingress(struct __sk_buff *skb) {
 			.txid = (u16)key.txid,
 			.rcode = (u8)(flagsh & 0x000f),
 			.is_v6 = is_v6,
+			.agg_recorded = (u8)recorded,
 		};
 		emit_dns_payload(skb, dns_off, q, &meta);
 		bpf_map_delete_elem(&dns_inflight, &key);

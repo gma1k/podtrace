@@ -162,6 +162,8 @@ func inspectionThresholds() inspect.Thresholds {
 		FSSlowBound:       inspect.DefaultThresholds().FSSlowBound,
 		FSSlowRatePercent: config.InspectionFSSlowOperationsPct,
 
+		DNSFailureRatePercent: config.InspectionDNSFailurePct,
+
 		HoldTime: config.InspectionsHoldTime,
 	}
 }
@@ -202,6 +204,17 @@ func buildInspectionEngine(metrics *Metrics, sink inspect.FamilySource, resolveP
 		Observer:   observer,
 		Budget:     config.InspectionsBudget,
 	})
+}
+
+// startInspectionEngine builds the engine, or says why there is none: an
+// agent whose inspections cannot start still traces and serves its metrics.
+func startInspectionEngine(metrics *Metrics, sink inspect.FamilySource, resolvePod func(string, string) string, events alertSink, logger logr.Logger) *inspect.Engine {
+	engine, err := buildInspectionEngine(metrics, sink, resolvePod, events, logger)
+	if err != nil {
+		logger.Error(err, "continuous inspections unavailable")
+		return nil
+	}
+	return engine
 }
 
 // runInspections evaluates the rules on an interval.

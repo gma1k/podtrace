@@ -99,23 +99,41 @@ func GenerateCgroupScopeSection(d Diagnostician) string {
 
 func GenerateDNSSection(d Diagnostician, duration time.Duration) string {
 	queries := d.FilterEvents(events.EventDNSQuery)
-	responses := d.FilterEvents(events.EventDNS)
-	if len(queries) == 0 && len(responses) == 0 {
+	all := d.FilterEvents(events.EventDNS)
+	responses := analyzer.DNSLookups(all, config.DNSPacketCaptureEnabled())
+	encrypted := analyzer.DNSEncryptedResolvers(all)
+	if len(queries) == 0 && len(responses) == 0 && len(encrypted) == 0 {
 		return ""
 	}
 
+	report := formatter.SectionHeader("DNS")
+	if len(queries) > 0 || len(responses) > 0 {
+		report += dnsLookupLines(d, duration, queries, responses)
+	}
+	if len(encrypted) > 0 {
+		report += "  Encrypted resolver connections (DoT/DoH; their answers cannot be read, so they are not lookups):\n"
+		for _, r := range encrypted {
+			report += fmt.Sprintf("    - %s: %d\n", r.Target, r.Count)
+		}
+	}
+	report += "\n"
+	return report
+}
+
+func dnsLookupLines(d Diagnostician, duration time.Duration, queries, responses []*events.Event) string {
 	lookupCount := len(queries)
 	if lookupCount < len(responses) {
 		lookupCount = len(responses)
 	}
 
 	avgLatency, maxLatency, errors, p50, p95, p99, topTargets := analyzer.AnalyzeDNS(queries, responses)
-	var report string
-	report += formatter.SectionHeader("DNS")
-	dnsRate := d.CalculateRate(lookupCount, duration)
-	report += formatter.TotalWithRate("lookups", lookupCount, dnsRate)
-	report += formatter.LatencyMetrics(avgLatency, maxLatency)
-	report += formatter.Percentiles(p50, p95, p99)
+	report := formatter.TotalWithRate("lookups", lookupCount, d.CalculateRate(lookupCount, duration))
+	if analyzer.DNSAnswered(responses) > 0 {
+		report += formatter.LatencyMetrics(avgLatency, maxLatency)
+		report += formatter.Percentiles(p50, p95, p99)
+	} else {
+		report += "  No lookup was answered, so there is no latency to show\n"
+	}
 	report += formatter.ErrorRate(errors, lookupCount)
 	if rcodes := analyzer.DNSRCodeBreakdown(responses); len(rcodes) > 0 {
 		report += "  Response code breakdown:\n"
@@ -131,7 +149,6 @@ func GenerateDNSSection(d Diagnostician, duration time.Duration) string {
 	}
 	report += formatter.TopTargets(topTargets, config.TopTargetsLimit, "targets", "lookups")
 	report += formatter.ResolvedAddresses(analyzer.ResolvedAddresses(responses), config.TopTargetsLimit)
-	report += "\n"
 	return report
 }
 

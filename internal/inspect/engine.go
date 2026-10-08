@@ -2,6 +2,7 @@ package inspect
 
 import (
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -47,8 +48,10 @@ type Engine struct {
 
 	previous Snapshot
 
+	mu      sync.Mutex
 	pending map[string]time.Time
 	active  map[string]detector.Issue
+	since   map[string]time.Time
 
 	issueActive   *prometheus.GaugeVec
 	evaluations   prometheus.Counter
@@ -84,6 +87,7 @@ func New(opts Options) (*Engine, error) {
 		now:      opts.Now,
 		pending:  map[string]time.Time{},
 		active:   map[string]detector.Issue{},
+		since:    map[string]time.Time{},
 
 		issueActive: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "podtrace_issue_active",
@@ -102,7 +106,7 @@ func New(opts Options) (*Engine, error) {
 
 		transitions: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "podtrace_inspections_transitions_total",
-			Help: "Issue state changes, by id and transition. activated is what triggers a session; cleared is the recovery.",
+			Help: "Issue state changes, by id and transition. activated and escalated are what trigger a session; cleared is the recovery.",
 		}, []string{"id", "transition"}),
 
 		trackedActive: prometheus.NewGauge(prometheus.GaugeOpts{
@@ -136,9 +140,30 @@ func New(opts Options) (*Engine, error) {
 
 // Active returns the currently firing issues, ordered for stable output.
 func (e *Engine) Active() []detector.Issue {
-	out := make([]detector.Issue, 0, len(e.active))
-	for _, issue := range e.active {
-		out = append(out, issue)
+	active := e.ActiveIssues()
+	out := make([]detector.Issue, 0, len(active))
+	for _, a := range active {
+		out = append(out, a.Issue)
+	}
+	return out
+}
+
+// ActiveIssue is a firing issue as of the latest evaluation, with the time
+// it activated.
+type ActiveIssue struct {
+	detector.Issue
+	Since time.Time
+}
+
+// ActiveIssues returns the firing issues as the latest evaluation saw them:
+// their message and evidence are current, not those of the moment they
+// activated. Safe to call while Evaluate runs.
+func (e *Engine) ActiveIssues() []ActiveIssue {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := make([]ActiveIssue, 0, len(e.active))
+	for key, issue := range e.active {
+		out = append(out, ActiveIssue{Issue: issue, Since: e.since[key]})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key() < out[j].Key() })
 	return out
@@ -181,15 +206,23 @@ func (e *Engine) Evaluate() ([]detector.Issue, error) {
 		}
 	}
 
-	activated := e.applyHoldTime(firing, forDuration, now)
-	e.clearResolved(firing)
+	e.mu.Lock()
+	activated, notify := e.applyHoldTime(firing, forDuration, now)
+	notify = append(notify, e.clearResolved(firing)...)
 	e.trackedActive.Set(float64(len(e.active)))
+	e.mu.Unlock()
+
+	for _, n := range notify {
+		n()
+	}
 	return activated, gatherErr
 }
 
-// applyHoldTime promotes conditions that have held long enough.
-func (e *Engine) applyHoldTime(firing map[string]detector.Issue, forDuration map[string]time.Duration, now time.Time) []detector.Issue {
+// applyHoldTime promotes conditions that have held long enough and keeps an
+// active issue current.
+func (e *Engine) applyHoldTime(firing map[string]detector.Issue, forDuration map[string]time.Duration, now time.Time) ([]detector.Issue, []func()) {
 	var activated []detector.Issue
+	var notify []func()
 
 	for _, key := range sortedIssueKeys(firing) {
 		issue := firing[key]
@@ -209,30 +242,39 @@ func (e *Engine) applyHoldTime(firing map[string]detector.Issue, forDuration map
 		}
 
 		if previous, ok := e.active[key]; ok {
-			if previous.Severity != issue.Severity {
-				e.setInactive(previous)
-				e.setActive(issue)
-				e.active[key] = issue
+			e.active[key] = issue
+			if previous.Severity == issue.Severity {
+				continue
 			}
-			continue
+			e.setInactive(previous)
+			e.setActive(issue)
+			if severityRank(issue.Severity) < severityRank(previous.Severity) {
+				continue
+			}
+			e.transitions.WithLabelValues(string(issue.ID), "escalated").Inc()
+		} else {
+			e.active[key] = issue
+			e.since[key] = now
+			e.setActive(issue)
+			e.transitions.WithLabelValues(string(issue.ID), "activated").Inc()
 		}
 
-		e.active[key] = issue
-		e.setActive(issue)
-		e.transitions.WithLabelValues(string(issue.ID), "activated").Inc()
 		if issue.Subject.Pod == "" {
 			e.untriggerable.Inc()
 		}
 		if e.observer != nil {
-			e.observer.IssueActivated(issue)
+			observed := issue
+			notify = append(notify, func() { e.observer.IssueActivated(observed) })
 		}
 		activated = append(activated, issue)
 	}
-	return activated
+	return activated, notify
 }
 
-// clearResolved drops issues whose condition no longer holds.
-func (e *Engine) clearResolved(firing map[string]detector.Issue) {
+// clearResolved drops issues whose condition no longer holds. It returns the
+// observer calls to make once the lock is released.
+func (e *Engine) clearResolved(firing map[string]detector.Issue) []func() {
+	var notify []func()
 	for key := range e.pending {
 		if _, still := firing[key]; !still {
 			delete(e.pending, key)
@@ -244,12 +286,14 @@ func (e *Engine) clearResolved(firing map[string]detector.Issue) {
 		}
 		issue := e.active[key]
 		delete(e.active, key)
+		delete(e.since, key)
 		e.setInactive(issue)
 		e.transitions.WithLabelValues(string(issue.ID), "cleared").Inc()
 		if e.observer != nil {
-			e.observer.IssueCleared(issue)
+			notify = append(notify, func() { e.observer.IssueCleared(issue) })
 		}
 	}
+	return notify
 }
 
 func (e *Engine) setActive(issue detector.Issue) {

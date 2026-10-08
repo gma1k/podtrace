@@ -95,7 +95,7 @@ func TestServeMetricsRegistersTheProfileEndpointOnlyWithAProfiler(t *testing.T) 
 
 	p := profiling.NewContinuousProfiler(nil, nil)
 	done := make(chan error, 1)
-	go func() { done <- serveMetrics(ctx, addr, NewMetrics(), p, logr.Discard()) }()
+	go func() { done <- serveMetrics(ctx, addr, NewMetrics(), p, nil, logr.Discard()) }()
 
 	var resp *http.Response
 	for range 50 {

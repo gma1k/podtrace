@@ -54,4 +54,8 @@ func TestRuntimeThresholdsMatchTheShippedDefaults(t *testing.T) {
 		t.Errorf("DNS slow lookups = %v at %v%% at runtime, defaults say %v at %v%%",
 			got.DNSSlowBound, got.DNSSlowRatePercent, defaults.DNSSlowBound, defaults.DNSSlowRatePercent)
 	}
+	if got.DNSFailureRatePercent != defaults.DNSFailureRatePercent {
+		t.Errorf("DNS failures fire at %v%% at runtime, defaults say %v%%",
+			got.DNSFailureRatePercent, defaults.DNSFailureRatePercent)
+	}
 }

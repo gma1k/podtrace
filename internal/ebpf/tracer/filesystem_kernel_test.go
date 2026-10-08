@@ -157,12 +157,15 @@ func newFSWorker(t *testing.T, name string) fsWorker {
 	return fsWorker{cgroup: dir, id: st.Ino, file: file}
 }
 
-// run starts the worker, moves it into its cgroup before it does any I/O,
-// and waits for it.
 func (w fsWorker) run(t *testing.T, mode string) {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=^TestKernelFSWorker$")
-	cmd.Env = append(os.Environ(), fsWorkerEnv+"="+mode, fsWorkerFile+"="+w.file)
+	runInCgroup(t, w.cgroup, "TestKernelFSWorker", fsWorkerEnv+"="+mode, fsWorkerFile+"="+w.file)
+}
+
+func runInCgroup(t *testing.T, cgroup, worker string, env ...string) {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^"+worker+"$")
+	cmd.Env = append(os.Environ(), env...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -177,9 +180,9 @@ func (w fsWorker) run(t *testing.T, mode string) {
 	sc := bufio.NewScanner(out)
 	if !sc.Scan() || sc.Text() != "ready" {
 		_ = cmd.Process.Kill()
-		t.Fatalf("worker %s did not start: %q", mode, sc.Text())
+		t.Fatalf("worker %s did not start: %q", worker, sc.Text())
 	}
-	if err := os.WriteFile(w.cgroup+"/cgroup.procs", []byte(strconv.Itoa(cmd.Process.Pid)), 0o644); err != nil {
+	if err := os.WriteFile(cgroup+"/cgroup.procs", []byte(strconv.Itoa(cmd.Process.Pid)), 0o644); err != nil {
 		_ = cmd.Process.Kill()
 		t.Fatalf("move the worker into its cgroup: %v", err)
 	}
@@ -189,7 +192,7 @@ func (w fsWorker) run(t *testing.T, mode string) {
 	for sc.Scan() {
 	}
 	if err := cmd.Wait(); err != nil {
-		t.Fatalf("worker %s: %v", mode, err)
+		t.Fatalf("worker %s: %v", worker, err)
 	}
 }
 

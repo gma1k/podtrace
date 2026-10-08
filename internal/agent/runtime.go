@@ -36,6 +36,7 @@ import (
 	"github.com/gma1k/podtrace/internal/ebpf/oncpu"
 	"github.com/gma1k/podtrace/internal/ebpf/probes"
 	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/inspect"
 	"github.com/gma1k/podtrace/internal/profiling"
 	"github.com/gma1k/podtrace/internal/tracing"
 	"github.com/gma1k/podtrace/internal/workloadmetrics"
@@ -217,22 +218,20 @@ func Run(ctx context.Context, opts Options) error {
 		BackendErr:    backendErr,
 	}
 
+	inspections := startInspectionEngine(metrics, metricsSink,
+		enricherPodResolver(enricher), newAlertEventSender(mgr.GetClient()), logger)
+
 	g, gctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error { return mgr.Start(gctx) })
 	g.Go(func() error { return engine.Run(gctx, targetsCh) })
 	g.Go(func() error { return writer.Run(gctx) })
 	g.Go(func() error { return probeSrv.Run(gctx) })
-	g.Go(func() error { return serveMetrics(gctx, opts.MetricsAddr, metrics, profiler, logger) })
+	g.Go(func() error { return serveMetrics(gctx, opts.MetricsAddr, metrics, profiler, inspections, logger) })
 	g.Go(func() error { return reapWorkloadMetrics(gctx, metricsSink, logger) })
 	g.Go(func() error { return drainKernelMetrics(gctx, backend, metricsSink, router, metrics, logger) })
 	g.Go(func() error { return drainOnCPUSamples(gctx, backend, profiler, metrics, logger) })
 
-	inspections, inspErr := buildInspectionEngine(metrics, metricsSink,
-		enricherPodResolver(enricher), newAlertEventSender(mgr.GetClient()), logger)
-	if inspErr != nil {
-		logger.Error(inspErr, "continuous inspections unavailable")
-	}
 	g.Go(func() error { return runInspections(gctx, inspections, logger) })
 
 	g.Go(func() error {
@@ -307,12 +306,13 @@ func newMetricsServer(handler http.Handler) *http.Server {
 // serveMetrics exposes the agent's Prometheus registry on the
 // metrics-addr port. Short-circuit when the address is empty — useful
 // in tests.
-func serveMetrics(ctx context.Context, addr string, metrics *Metrics, profiler *profiling.ContinuousProfiler, logger logr.Logger) error {
+func serveMetrics(ctx context.Context, addr string, metrics *Metrics, profiler *profiling.ContinuousProfiler, inspections *inspect.Engine, logger logr.Logger) error {
 	if addr == "" || addr == "0" {
 		return nil
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", metrics.Handler())
+	mux.HandleFunc("/issues", issuesHandler(inspections))
 	if profiler != nil {
 		mux.HandleFunc("/profile", profileHandler(profiler))
 	}
@@ -380,6 +380,7 @@ func buildExporters(router *Router, metrics *Metrics, enricher *PodEnricher, pee
 		SemanticConventions:  config.WorkloadMetricsSemanticConv,
 		AttributeCardinality: config.WorkloadMetricsAttributeLimit,
 		KernelAggregation:    config.WorkloadMetricsKernelAggregation,
+		DNSPacketCapture:     config.DNSPacketCaptureEnabled(),
 		OnBudgetExhausted: func(budget int) {
 			logger.Error(nil, "continuous metrics series budget exhausted; new series are being refused",
 				"seriesBudget", budget,
@@ -395,7 +396,19 @@ func buildExporters(router *Router, metrics *Metrics, enricher *PodEnricher, pee
 		"seriesBudget", config.WorkloadMetricsBudget,
 		"nativeHistograms", config.WorkloadMetricsNativeHistograms,
 		"kernelAggregation", config.WorkloadMetricsKernelAggregation)
+	logDNSCoverage(logger, config.DNSPacketCaptureEnabled())
 	return append(exporters, sink), sink, profiler, nil
+}
+
+// logDNSCoverage says, once, what DNS the plane cannot see.
+func logDNSCoverage(logger logr.Logger, packetCapture bool) {
+	if packetCapture {
+		return
+	}
+	logger.Info("DNS packet capture is off: DNS lookups are read from libc's getaddrinfo, "+
+		"gethostbyname and gethostbyname2 only, so a program that resolves on its own, "+
+		"such as busybox or Go's pure-Go resolver, is not seen",
+		"remedy", "leave TracerConfig.spec.agent.dnsPacketCapture on to count every query on the wire")
 }
 
 // drainKernelMetrics folds the kernel's aggregation map into the sink on an

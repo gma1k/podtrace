@@ -1,9 +1,10 @@
 # Hash-pinned install for the bashate linter used by bash-checks.yml.
 #
 # pip's --require-hashes mode demands that every requirement, including
-# transitive ones, is pinned with == and carries a hash. bashate's only
-# dependency is pbr, so the full tree is two entries. Both wheel and sdist
-# hashes are listed so pip can satisfy either.
+# transitive ones, is pinned with == and carries a hash. bashate depends on
+# pbr, and pbr on setuptools, which has no dependencies of its own, so the
+# full tree is three entries. Both wheel and sdist hashes are listed so pip
+# can satisfy either.
 #
 # Renovate does not currently watch this file. See the Pinned-Dependencies
 # notes in CONTRIBUTING.md before bumping by hand.
@@ -12,6 +13,10 @@ bashate==2.1.1 \
     --hash=sha256:3104d565a7a0f7ee2cf4028cc584c723a202f52a8ddffe4a39b8cbb0ac5d3e94 \
     --hash=sha256:4bab6e977f8305a720535f8f93f1fb42c521fcbc4a6c2b3d3d7671f42f221f4c
 
-pbr==7.1.2 \
-    --hash=sha256:1391cb77637059096099b5012220d686deee13c1ef90247eef10de0c6b5be1f7 \
-    --hash=sha256:4639b87cc91d0d58471b7bda1f28b7d0849ba43d7935c4c482f3c74fef719804
+pbr==7.1.3 \
+    --hash=sha256:6583e878a1d97cb135fdc509811f31b9235905cde8d4dacd3dbadf9efc45d745 \
+    --hash=sha256:9a4a85b84e906337708009af0b5f5cdabeeb72d4dc213c9e97974da54fd9acc5
+
+setuptools==84.0.0 \
+    --hash=sha256:51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670 \
+    --hash=sha256:f4695c21257f0d9b537ec2692c941d02ee143b7cc1276941349a546573b2ef73

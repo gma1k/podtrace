@@ -179,9 +179,31 @@ Kprobes attach to kernel functions:
 Uprobes attach to user-space functions:
 
 **DNS Tracing:**
-- `getaddrinfo` (libc): Entry and return probes
-  - Entry: Extract hostname from arguments, store in map
-  - Return: Calculate latency, record error
+- `getaddrinfo`, `gethostbyname_r` and `gethostbyname2_r` (libc): Entry and
+  return probes. glibc's `gethostbyname` and `gethostbyname2` run the same
+  code as the `_r` forms, so these see all four.
+  - Entry: Extract hostname from arguments, store in map; for the `_r` forms
+    also where the call writes its result and `h_errno` (the seventh argument
+    of `gethostbyname2_r` is read off the stack on x86-64). A call nested in
+    another on the same thread, as musl's `gethostbyname_r` calls
+    `gethostbyname2_r`, only deepens the outer one.
+  - Return: Calculate latency, record the result as an `EAI_*` code; an
+    `ERANGE` return is glibc asking for a bigger buffer, not a finished lookup
+- `dns_egress` / `dns_ingress` (`cgroup_skb`): every query and answer on port 53
+  over UDP or TCP, read from the packets
+  - Egress: a query waits in `dns_inflight` under its cgroup and id; a
+    retransmission under the same id keeps the first send as the start and
+    moves only `last_ns`
+  - Ingress: the answer pairs with its query, and its rcode becomes the
+    answer class in the aggregation variant (NOERROR, NXDOMAIN, SERVFAIL,
+    REFUSED, other), with the error bit for every class but NOERROR and
+    NXDOMAIN
+  - A query still unanswered five seconds after `last_ns` is swept from
+    userspace into a `timeout` lookup
+- Each `EVENT_DNS` carries its source in `dns_transport`: UDP, TCP, an
+  encrypted resolver (DoT/DoH, no answer to read), or libc. With packet
+  capture on, the metrics count the packets and leave the libc call out, since
+  it is the same lookup.
 
 ### Tracepoints
 

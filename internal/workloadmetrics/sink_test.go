@@ -131,7 +131,7 @@ func TestSeriesBudgetRefusesNewSeriesAndCountsTheDrop(t *testing.T) {
 		meta := enriched()
 		meta.WorkloadName = workload
 		batch = append(batch, &events.Event{
-			Type:      events.EventDNS,
+			Type:      events.EventLockContention,
 			LatencyNS: 1_000_000,
 			K8s:       meta,
 		})
@@ -140,14 +140,14 @@ func TestSeriesBudgetRefusesNewSeriesAndCountsTheDrop(t *testing.T) {
 		t.Fatalf("Export: %v", err)
 	}
 
-	series := gather(t, reg, "podtrace_workload_dns_latency_seconds")
+	series := gather(t, reg, "podtrace_workload_lock_contention_seconds")
 	if len(series) != 2 {
 		t.Fatalf("budget of 2 admitted %d series", len(series))
 	}
 
 	var dropped float64
 	for _, m := range gather(t, reg, "podtrace_workload_metrics_series_dropped_total") {
-		if labelsOf(m)["family"] == "dns_latency_seconds" {
+		if labelsOf(m)["family"] == "lock_contention_seconds" {
 			dropped = m.GetCounter().GetValue()
 		}
 	}
@@ -167,7 +167,7 @@ func TestBudgetAdmitsRepeatObservationsOfAKnownSeries(t *testing.T) {
 	var batch []*events.Event
 	for i := 0; i < 50; i++ {
 		batch = append(batch, &events.Event{
-			Type:      events.EventDNS,
+			Type:      events.EventLockContention,
 			LatencyNS: 1_000_000,
 			K8s:       enriched(),
 		})
@@ -176,7 +176,7 @@ func TestBudgetAdmitsRepeatObservationsOfAKnownSeries(t *testing.T) {
 		t.Fatalf("Export: %v", err)
 	}
 
-	series := gather(t, reg, "podtrace_workload_dns_latency_seconds")
+	series := gather(t, reg, "podtrace_workload_lock_contention_seconds")
 	if len(series) != 1 {
 		t.Fatalf("want 1 series, got %d", len(series))
 	}
@@ -603,7 +603,7 @@ func TestIdleSeriesAreEvictedAndBudgetFreed(t *testing.T) {
 		meta := enriched()
 		meta.WorkloadName = workload
 		if err := sink.Export(context.Background(), []*events.Event{{
-			Type: events.EventDNS, LatencyNS: 1_000_000, K8s: meta,
+			Type: events.EventLockContention, LatencyNS: 1_000_000, K8s: meta,
 		}}); err != nil {
 			t.Fatalf("Export: %v", err)
 		}
@@ -611,7 +611,7 @@ func TestIdleSeriesAreEvictedAndBudgetFreed(t *testing.T) {
 
 	send("gone-a")
 	send("gone-b")
-	if got := len(gather(t, reg, "podtrace_workload_dns_latency_seconds")); got != 2 {
+	if got := len(gather(t, reg, "podtrace_workload_lock_contention_seconds")); got != 2 {
 		t.Fatalf("want 2 series, got %d", got)
 	}
 
@@ -625,13 +625,13 @@ func TestIdleSeriesAreEvictedAndBudgetFreed(t *testing.T) {
 		t.Fatalf("reaped %d, want 2", n)
 	}
 
-	if got := len(gather(t, reg, "podtrace_workload_dns_latency_seconds")); got != 0 {
+	if got := len(gather(t, reg, "podtrace_workload_lock_contention_seconds")); got != 0 {
 		t.Errorf("evicted series are still exposed (%d); a series that merely stops "+
 			"updating keeps answering instant queries with a stale value", got)
 	}
 
 	send("new-workload")
-	series := gather(t, reg, "podtrace_workload_dns_latency_seconds")
+	series := gather(t, reg, "podtrace_workload_lock_contention_seconds")
 	if len(series) != 1 || labelsOf(series[0])["workload"] != "new-workload" {
 		t.Errorf("a live workload was not admitted after eviction freed budget: %+v", series)
 	}
@@ -731,12 +731,12 @@ func TestEvictionWorksWithTheBudgetDisabled(t *testing.T) {
 		meta := enriched()
 		meta.WorkloadName = workload
 		if err := sink.Export(context.Background(), []*events.Event{{
-			Type: events.EventDNS, LatencyNS: 1_000_000, K8s: meta,
+			Type: events.EventLockContention, LatencyNS: 1_000_000, K8s: meta,
 		}}); err != nil {
 			t.Fatalf("Export: %v", err)
 		}
 	}
-	if got := len(gather(t, reg, "podtrace_workload_dns_latency_seconds")); got != 3 {
+	if got := len(gather(t, reg, "podtrace_workload_lock_contention_seconds")); got != 3 {
 		t.Fatalf("want 3 series with the cap lifted, got %d", got)
 	}
 
@@ -745,7 +745,7 @@ func TestEvictionWorksWithTheBudgetDisabled(t *testing.T) {
 		t.Errorf("reaped %d with the budget disabled, want 3; lifting the cap must "+
 			"not also disable eviction, or every series ever produced leaks", n)
 	}
-	if got := len(gather(t, reg, "podtrace_workload_dns_latency_seconds")); got != 0 {
+	if got := len(gather(t, reg, "podtrace_workload_lock_contention_seconds")); got != 0 {
 		t.Errorf("%d series survived eviction", got)
 	}
 }

@@ -120,6 +120,7 @@ type apiServer struct {
 	metrics []byte
 	mtype   string
 	profile []byte
+	issues  []byte
 	status  int
 	accept  string
 	paths   []string
@@ -144,6 +145,9 @@ func (s *apiServer) start() kubernetes.Interface {
 		case strings.HasSuffix(r.URL.Path, "/proxy/profile"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write(s.profile)
+		case strings.HasSuffix(r.URL.Path, "/proxy/issues") && s.issues != nil:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(s.issues)
 		default:
 			http.NotFound(w, r)
 		}

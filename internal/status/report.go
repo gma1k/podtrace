@@ -116,6 +116,9 @@ type AgentScrape struct {
 	Agent  Agent
 	Window inspect.Window
 	Err    error
+
+	Live     []LiveIssue
+	LiveRead bool
 }
 
 // Build turns the scrapes into a report. It does no I/O.
@@ -328,17 +331,40 @@ func issuesOf(s AgentScrape, events issueEvents, opts Options) []Issue {
 			Resource:  sample.Label("resource"),
 			Node:      s.Agent.Node,
 		}
-		if e, ok := events.find(is.Namespace, is.Workload, is.ID, is.Pod); ok {
+		e, hasEvent := events.find(is.Namespace, is.Workload, is.ID, is.Pod)
+		if live, ok := findLive(s, is); ok {
+			since := live.Since
+			is.Since = &since
+			is.Message = live.Message
+			if is.Pod == "" {
+				is.Pod = live.Pod
+			}
+		} else if hasEvent {
 			since := eventStart(e)
 			is.Since = &since
 			is.Message = e.Message
-			if is.Pod == "" {
-				is.Pod = e.InvolvedObject.Name
-			}
+		}
+		if is.Pod == "" && hasEvent {
+			is.Pod = e.InvolvedObject.Name
 		}
 		out = append(out, is)
 	}
 	return out
+}
+
+// findLive returns the live view of an issue the gauge reports, matched on
+// what identifies it.
+func findLive(s AgentScrape, is Issue) (LiveIssue, bool) {
+	if !s.LiveRead {
+		return LiveIssue{}, false
+	}
+	for _, l := range s.Live {
+		if l.ID == is.ID && l.Namespace == is.Namespace && l.Workload == is.Workload &&
+			l.Resource == is.Resource && (is.Pod == "" || l.Pod == is.Pod) {
+			return l, true
+		}
+	}
+	return LiveIssue{}, false
 }
 
 func severityRank(s string) int {

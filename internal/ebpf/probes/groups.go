@@ -79,6 +79,10 @@ var probeGroupMap = map[string]ProbeGroup{
 	// TLS (uprobes attached separately via SetContainerID)
 	"uprobe_getaddrinfo":           GroupTLS,
 	"uretprobe_getaddrinfo":        GroupTLS,
+	"uprobe_gethostbyname_r":       GroupTLS,
+	"uretprobe_gethostbyname_r":    GroupTLS,
+	"uprobe_gethostbyname2_r":      GroupTLS,
+	"uretprobe_gethostbyname2_r":   GroupTLS,
 	"uprobe_pthread_mutex_lock":    GroupTLS,
 	"uretprobe_pthread_mutex_lock": GroupTLS,
 

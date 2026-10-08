@@ -9,11 +9,22 @@ import (
 	"github.com/gma1k/podtrace/internal/events"
 )
 
+// DNSLookups keeps the DNS events that are lookups, by the rule the metrics
+// plane counts them with: not a connection to an encrypted resolver, and not
+// a getaddrinfo call when the packets already show its queries.
+func DNSLookups(responses []*events.Event, packetCapture bool) []*events.Event {
+	out := make([]*events.Event, 0, len(responses))
+	for _, e := range responses {
+		if e != nil && e.CountsAsDNSLookup(packetCapture) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // AnalyzeDNS aggregates DNS activity. Names and per-name lookup counts come
 // from queries (every lookup, reliable even without a response); latency,
-// response codes (errors) and percentiles come from responses. If no queries
-// were captured (egress missed but the response was seen), responses are used
-// for the target list too.
+// errors and percentiles come from responses.
 func AnalyzeDNS(queries, responses []*events.Event) (avgLatency, maxLatency float64, errors int, p50, p95, p99 float64, topTargets []TargetCount) {
 	var totalLatency float64
 	var latencies []float64
@@ -21,19 +32,22 @@ func AnalyzeDNS(queries, responses []*events.Event) (avgLatency, maxLatency floa
 	errors = 0
 
 	for _, e := range responses {
+		if e.IsError() {
+			errors++
+		}
+		if e.DNSAnswer() == events.DNSAnswerTimeout {
+			continue
+		}
 		latencyMs := float64(e.LatencyNS) / float64(config.NSPerMS)
 		latencies = append(latencies, latencyMs)
 		totalLatency += latencyMs
 		if latencyMs > maxLatency {
 			maxLatency = latencyMs
 		}
-		if e.Error != 0 {
-			errors++
-		}
 	}
 
-	if len(responses) > 0 {
-		avgLatency = totalLatency / float64(len(responses))
+	if len(latencies) > 0 {
+		avgLatency = totalLatency / float64(len(latencies))
 		sort.Float64s(latencies)
 		p50 = Percentile(latencies, 50)
 		p95 = Percentile(latencies, 95)
@@ -60,16 +74,42 @@ func AnalyzeDNS(queries, responses []*events.Event) (avgLatency, maxLatency floa
 	return
 }
 
-// DNSRCodeBreakdown counts DNS responses by response-code mnemonic (NXDOMAIN,
-// SERVFAIL, …), excluding successes, sorted most-frequent first. It surfaces
-// WHY lookups failed rather than a bare error total.
+// DNSEncryptedResolvers counts the connections to encrypted resolvers (DoT,
+// or DoH to a well-known resolver) by resolver, most first.
+func DNSEncryptedResolvers(evs []*events.Event) []TargetCount {
+	counts := make(map[string]int)
+	for _, e := range evs {
+		if e != nil && e.Type == events.EventDNS && e.DNSTransport == events.DNSSourceEncrypted {
+			counts[e.Target]++
+		}
+	}
+	return sortedNameCounts(counts)
+}
+
+// DNSAnswered counts the lookups that got an answer, whatever it was: the
+// ones latency figures describe.
+func DNSAnswered(responses []*events.Event) int {
+	n := 0
+	for _, e := range responses {
+		if e != nil && e.DNSAnswer() != events.DNSAnswerTimeout {
+			n++
+		}
+	}
+	return n
+}
+
+// DNSRCodeBreakdown counts DNS responses by answer (NXDOMAIN, SERVFAIL,
+// timeout, …), excluding NOERROR, sorted most-frequent first. It shows why
+// lookups did not resolve rather than a bare error total.
 func DNSRCodeBreakdown(responses []*events.Event) []TargetCount {
 	counts := make(map[string]int)
 	for _, e := range responses {
-		if e == nil || e.Error == 0 {
+		if e == nil {
 			continue
 		}
-		counts[e.DNSResponseCode()]++
+		if answer := e.DNSAnswer(); answer != events.DNSAnswerNoError {
+			counts[answer]++
+		}
 	}
 	return sortedNameCounts(counts)
 }

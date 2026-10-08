@@ -70,6 +70,7 @@ func TestTheNewInspectionThresholdsReachTheAgentEnvironment(t *testing.T) {
 	pct := int32(70)
 	dnsPct := int32(12)
 	fsPct := int32(9)
+	dnsFailPct := int32(15)
 	env := metricsEnv(&podtracev1alpha1.AgentMetricsSpec{
 		Enabled: ptr(true),
 		Inspections: &podtracev1alpha1.AgentInspectionsSpec{
@@ -79,6 +80,7 @@ func TestTheNewInspectionThresholdsReachTheAgentEnvironment(t *testing.T) {
 				PoolUtilizationPercent:  &pct,
 				DNSSlowLookupPercent:    &dnsPct,
 				FSSlowOperationsPercent: &fsPct,
+				DNSFailurePercent:       &dnsFailPct,
 			},
 		},
 	})
@@ -95,6 +97,9 @@ func TestTheNewInspectionThresholdsReachTheAgentEnvironment(t *testing.T) {
 	if v, ok := envValue(env, "PODTRACE_INSPECTIONS_FS_SLOW_OPERATIONS_PCT"); !ok || v != "9" {
 		t.Errorf("PODTRACE_INSPECTIONS_FS_SLOW_OPERATIONS_PCT=%q ok=%v want 9", v, ok)
 	}
+	if v, ok := envValue(env, "PODTRACE_INSPECTIONS_DNS_FAILURE_PCT"); !ok || v != "15" {
+		t.Errorf("PODTRACE_INSPECTIONS_DNS_FAILURE_PCT=%q ok=%v want 15", v, ok)
+	}
 }
 
 func TestUnsetInspectionThresholdsLeaveTheAgentOnItsDefaults(t *testing.T) {
@@ -108,6 +113,7 @@ func TestUnsetInspectionThresholdsLeaveTheAgentOnItsDefaults(t *testing.T) {
 		"PODTRACE_INSPECTIONS_POOL_UTILIZATION_PCT",
 		"PODTRACE_INSPECTIONS_DNS_SLOW_LOOKUP_PCT",
 		"PODTRACE_INSPECTIONS_FS_SLOW_OPERATIONS_PCT",
+		"PODTRACE_INSPECTIONS_DNS_FAILURE_PCT",
 	} {
 		if v, ok := envValue(env, name); ok {
 			t.Errorf("%s=%q was set from an unset field, pinning the agent to a value "+

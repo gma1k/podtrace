@@ -92,6 +92,7 @@ of large requests.
 | `cpu.contention` | the workload spends a mean of 50ms or more runnable but not running, across at least 100 preemptions | 3m |
 | `dns.slow_lookup_rate` | more than 5% of the workload's DNS lookups answer slower than 100ms, at 0.1 lookups per second or more | 3m |
 | `fs.slow_operations` | more than 5% of the workload's regular-file reads, writes and fsyncs take longer than 50ms, at 0.1 operations per second or more | 3m |
+| `dns.failure_rate` | more than 5% of the workload's DNS lookups fail (SERVFAIL, REFUSED, another error rcode, or no answer at all), at 0.1 lookups per second or more; NXDOMAIN is an answer and never counts | 3m |
 
 ### DNS: a share of slow lookups, not a mean
 
@@ -104,12 +105,31 @@ than 0.26% of lookups above 100ms, while CoreDNS had 13-23% above 25ms working
 normally, which is why the bound is not lower. A workload whose DNS replies
 were delayed by 150ms read 100% and raised the issue within its hold time.
 
-Two things it does not see. A lookup that never gets an answer records no
-latency, so a resolver that times out completely shows up as missing traffic,
-not as slow lookups. And there is no DNS *failure* rule yet: a DNS event's
-error is its response code, so `errors_total{kind="dns"}` counts NXDOMAIN,
-which Kubernetes' `ndots:5` search path produces for nearly every external
-name. A failure rule needs the response code as a dimension first.
+A lookup that never gets an answer has no answer time, so it records no
+latency and is not a slow lookup: it is a failure, and `dns.failure_rate` sees
+it.
+
+### DNS: failures, not names that do not exist
+
+`dns.failure_rate` reads `podtrace_workload_dns_lookups_total`, which counts
+every lookup by its answer in the `rcode` label. A failure is a `SERVFAIL`, a
+`REFUSED`, any other error rcode (`other`), or a `timeout`: a query still
+unanswered five seconds after its latest send. `NXDOMAIN` is not a failure.
+Kubernetes' `ndots:5` search path tries a short name under every search
+domain first, so a lookup of `kubernetes.default` answers `NXDOMAIN` several
+times on its way to the name that exists; on a kind cluster a pod doing
+nothing but resolving names saw 88% of its answers be `NXDOMAIN`. Counting
+those would fire on every workload that resolves anything.
+
+A resolver retransmits a query it got no answer to under the same id. The
+retransmission keeps the query's first send as its start, so a lookup
+answered on its second try carries the whole wait into
+`podtrace_workload_dns_latency_seconds`, and only the latest send moves the
+timeout. On an idle kind cluster no workload had a failed lookup; a pod
+querying a server that never answers raised the issue within its hold time.
+The message names the commonest failure, and the remediation follows it: a
+timeout points at the resolver's reachability and conntrack, a `SERVFAIL` at
+the resolver's upstreams, a `REFUSED` at which server the workload asks.
 
 ### Filesystem: slow storage, not a slow file
 
@@ -248,6 +268,7 @@ agent:
         poolUtilizationPercent: 80
         dnsSlowLookupPercent: 5
         fsSlowOperationsPercent: 5
+        dnsFailurePercent: 5
 ```
 
 `poolUtilizationPercent` is the warning band for `db.pool_saturated`; it
@@ -273,11 +294,24 @@ registry changes, so a rename cannot happen by accident.
 | `podtrace_issue_active{id,namespace,workload,pod,resource,severity}` | 1 while an issue is firing |
 | `podtrace_inspections_evaluations_total` | the loop is running; a flat counter means it is not |
 | `podtrace_inspections_failures_total` | passes that could not gather fully; rules are narrowed while this rises |
-| `podtrace_inspections_transitions_total{id,transition}` | activations and recoveries |
+| `podtrace_inspections_transitions_total{id,transition}` | activations, escalations and recoveries |
 | `podtrace_inspections_tracked_issues` | issue instances held against the budget |
 | `podtrace_inspections_dropped_total` | instances refused because the budget was full |
 | `podtrace_inspections_untriggerable_total` | activated issues that could not start a session |
 | `podtrace_agent_issue_pod_unresolved_total` | issues for which no pod could be resolved |
+
+Each agent also serves its active issues as JSON at `/issues` on the metrics
+port: id, severity, subject, the time each activated, and its message as the
+latest evaluation wrote it. `kubectl podtrace status` reads it, so an issue's
+message there is current. The Kubernetes Event an issue writes records the
+moment it activated and is never rewritten, since an Event that looked new
+again would start another session; an agent that predates `/issues` is read
+from its Events instead.
+
+An issue that worsens, warning to critical, is reported like an activation:
+it writes its own Event and counts as `transition="escalated"`, so a
+`PodTraceSchedule` whose `minSeverity` is the higher one starts a session from
+it. One that eases back changes its severity and nothing else.
 
 A resolved issue's `podtrace_issue_active` series is **deleted**, not set to 0.
 A series left at 0 keeps answering instant queries forever, so the issue list
