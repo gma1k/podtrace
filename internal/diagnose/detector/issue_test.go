@@ -22,6 +22,7 @@ func TestTheIssueVocabularyIsStable(t *testing.T) {
 		"dns.slow_lookup_rate",
 		"fs.slow_operations",
 		"dns.failure_rate",
+		"tls.handshake_failure_rate",
 	}
 
 	got := make([]string, 0, len(Registry))

@@ -97,6 +97,26 @@ func GenerateCgroupScopeSection(d Diagnostician) string {
 	return report
 }
 
+// GenerateTLSSection reports the session's TLS handshakes: how many, how
+// many failed, how long they took, and which processes failed.
+func GenerateTLSSection(d Diagnostician, duration time.Duration) string {
+	handshakes := d.FilterEvents(events.EventTLSHandshake)
+	if len(handshakes) == 0 {
+		return ""
+	}
+	avgLatency, maxLatency, failed, p50, p95, p99, _, _ := analyzer.AnalyzeTLS(handshakes)
+	report := formatter.SectionHeader("TLS")
+	report += formatter.TotalWithRate("handshakes", len(handshakes), d.CalculateRate(len(handshakes), duration))
+	report += formatter.LatencyMetrics(avgLatency, maxLatency)
+	report += formatter.Percentiles(p50, p95, p99)
+	report += fmt.Sprintf("  Failed handshakes: %d (%.1f%%)\n", failed,
+		float64(failed)*float64(config.Percent100)/float64(len(handshakes)))
+	report += formatter.TopItems(analyzer.TLSFailingProcesses(handshakes), config.TopTargetsLimit,
+		"processes with failed handshakes", "failed")
+	report += "\n"
+	return report
+}
+
 func GenerateDNSSection(d Diagnostician, duration time.Duration) string {
 	queries := d.FilterEvents(events.EventDNSQuery)
 	all := d.FilterEvents(events.EventDNS)

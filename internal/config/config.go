@@ -192,6 +192,7 @@ var (
 	InspectionDNSSlowLookupPct     = getFloatEnvOrDefault("PODTRACE_INSPECTIONS_DNS_SLOW_LOOKUP_PCT", 5)
 	InspectionFSSlowOperationsPct  = getFloatEnvOrDefault("PODTRACE_INSPECTIONS_FS_SLOW_OPERATIONS_PCT", 5)
 	InspectionDNSFailurePct        = getFloatEnvOrDefault("PODTRACE_INSPECTIONS_DNS_FAILURE_PCT", 5)
+	InspectionTLSFailurePct        = getFloatEnvOrDefault("PODTRACE_INSPECTIONS_TLS_HANDSHAKE_FAILURE_PCT", 5)
 
 	InspectionsHoldTime = getDurationEnvOrDefault("PODTRACE_INSPECTIONS_HOLD_TIME", 0)
 )

@@ -124,7 +124,7 @@ type TriggerSource struct {
 	// IssueID narrows an Issue source to one issue, such as l7.error_rate.
 	// Leave it unset to fire on every issue. The ids are listed in
 	// docs/continuous-inspections.md.
-	// +kubebuilder:validation:Enum=net.connection_failure_rate;net.rtt_spike_rate;resource.saturation;l7.error_rate;l7.latency_degraded;db.connection_acquire_slow;db.pool_saturated;cpu.contention;dns.slow_lookup_rate;fs.slow_operations;dns.failure_rate
+	// +kubebuilder:validation:Enum=net.connection_failure_rate;net.rtt_spike_rate;resource.saturation;l7.error_rate;l7.latency_degraded;db.connection_acquire_slow;db.pool_saturated;cpu.contention;dns.slow_lookup_rate;fs.slow_operations;dns.failure_rate;tls.handshake_failure_rate
 	// +optional
 	IssueID string `json:"issueID,omitempty"`
 }

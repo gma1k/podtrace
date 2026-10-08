@@ -38,6 +38,7 @@ const (
 	envInspectionDNSSlow     = "PODTRACE_INSPECTIONS_DNS_SLOW_LOOKUP_PCT"
 	envInspectionFSSlow      = "PODTRACE_INSPECTIONS_FS_SLOW_OPERATIONS_PCT"
 	envInspectionDNSFailure  = "PODTRACE_INSPECTIONS_DNS_FAILURE_PCT"
+	envInspectionTLSFailure  = "PODTRACE_INSPECTIONS_TLS_HANDSHAKE_FAILURE_PCT"
 )
 
 // boolEnv renders a resolved toggle.
@@ -185,6 +186,12 @@ func inspectionsEnv(spec *podtracev1alpha1.AgentInspectionsSpec) []corev1.EnvVar
 		env = append(env, corev1.EnvVar{
 			Name:  envInspectionDNSFailure,
 			Value: strconv.FormatInt(int64(*t.DNSFailurePercent), 10),
+		})
+	}
+	if t.TLSHandshakeFailurePercent != nil {
+		env = append(env, corev1.EnvVar{
+			Name:  envInspectionTLSFailure,
+			Value: strconv.FormatInt(int64(*t.TLSHandshakeFailurePercent), 10),
 		})
 	}
 	return env

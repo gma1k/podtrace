@@ -24,6 +24,8 @@ const (
 	familyDNSLatency      = "podtrace_workload_dns_latency_seconds"
 	familyFSLatency       = "podtrace_workload_filesystem_latency_seconds"
 	familyDNSLookups      = "podtrace_workload_dns_lookups_total"
+	familyTLSHandshake    = "podtrace_workload_tls_handshake_duration_seconds"
+	familyErrors          = "podtrace_workload_errors_total"
 )
 
 // RuleFamilies is every family the built-in rules read, and nothing else.
@@ -42,6 +44,8 @@ func RuleFamilies() []string {
 		familyDNSLatency,
 		familyFSLatency,
 		familyDNSLookups,
+		familyTLSHandshake,
+		familyErrors,
 	}
 }
 
@@ -80,6 +84,8 @@ type Thresholds struct {
 
 	DNSFailureRatePercent float64
 
+	TLSHandshakeFailurePercent float64
+
 	HoldTime time.Duration
 
 	HoldTimes map[detector.ID]time.Duration
@@ -106,6 +112,7 @@ func (t Thresholds) unset() bool {
 		t.FSSlowBound == 0 &&
 		t.FSSlowRatePercent == 0 &&
 		t.DNSFailureRatePercent == 0 &&
+		t.TLSHandshakeFailurePercent == 0 &&
 		t.HoldTime == 0 &&
 		len(t.HoldTimes) == 0
 }
@@ -161,6 +168,8 @@ func DefaultThresholds() Thresholds {
 		FSSlowRatePercent: 5,
 
 		DNSFailureRatePercent: 5,
+
+		TLSHandshakeFailurePercent: 5,
 	}
 }
 
@@ -178,6 +187,7 @@ func Rules() []Rule {
 		dnsSlowLookupRule(),
 		fsSlowOperationsRule(),
 		dnsFailureRateRule(),
+		tlsHandshakeFailureRule(),
 	}
 }
 
@@ -977,5 +987,79 @@ func remediationForDNSFailure(answer string) string {
 			"and that the server allows recursion for it."
 	default:
 		return "Check CoreDNS's logs for the rcode, and the workload's resolver configuration."
+	}
+}
+
+// tlsHandshakeFailureRule fires when too large a share of a workload's TLS
+// handshakes fail: failures from errors_total{kind="tls"}, divided by every
+// handshake, failed ones included, from the handshake histogram's count.
+func tlsHandshakeFailureRule() Rule {
+	return Rule{
+		ID:  detector.IDTLSHandshakeFailureRate,
+		For: 3 * time.Minute,
+		Query: `100 * sum by (namespace, workload) (rate(podtrace_workload_errors_total{kind="tls"}[5m]))
+  / sum by (namespace, workload) (rate(podtrace_workload_tls_handshake_duration_seconds_count[5m]))`,
+		Eval: func(w Window, t Thresholds) []detector.Issue {
+			if !w.Ready() || t.TLSHandshakeFailurePercent <= 0 {
+				return nil
+			}
+			interval := w.Interval()
+
+			byWorkload := map[string]*workloadTotals{}
+			for _, d := range w.Deltas(familyTLSHandshake) {
+				if d.Reset || d.Count == 0 {
+					continue
+				}
+				key := d.Sample.Namespace + "/" + d.Sample.Workload
+				agg, ok := byWorkload[key]
+				if !ok {
+					agg = &workloadTotals{sample: d.Sample}
+					byWorkload[key] = agg
+				}
+				agg.value += float64(d.Count)
+			}
+			for _, d := range w.Deltas(familyErrors) {
+				if d.Reset || d.Sample.Label("kind") != "tls" {
+					continue
+				}
+				if agg, ok := byWorkload[d.Sample.Namespace+"/"+d.Sample.Workload]; ok {
+					agg.errors += d.Value
+				}
+			}
+
+			var issues []detector.Issue
+			for _, agg := range byWorkload {
+				perSecond := agg.value / interval.Seconds()
+				if perSecond < t.MinRequestsPerSecond {
+					continue
+				}
+				rate := min(agg.errors/agg.value*100, 100)
+				if rate <= t.TLSHandshakeFailurePercent {
+					continue
+				}
+				s := agg.sample
+				issues = append(issues, detector.Issue{
+					ID:       detector.IDTLSHandshakeFailureRate,
+					Severity: alerting.SeverityWarning,
+					Subject: detector.Subject{
+						Namespace: s.Namespace,
+						Workload:  s.Workload,
+					},
+					Evidence: []detector.Evidence{
+						detector.NewEvidence("failure_rate", rate, t.TLSHandshakeFailurePercent, "%"),
+						detector.NewEvidence("failed_handshakes", agg.errors, 0, "count"),
+						detector.NewEvidence("total_handshakes", agg.value, 0, "count"),
+						detector.NewEvidence("handshake_rate", perSecond, t.MinRequestsPerSecond, "/s"),
+					},
+					Remediation: "Check the certificates on both sides (expiry, the chain the client trusts, " +
+						"the name it asks for), that client and server share a TLS version and cipher, and " +
+						"that the client is not speaking TLS to a plaintext port; the session report lists " +
+						"which processes fail.",
+					Message: fmt.Sprintf("TLS handshakes failing for %s/%s: %.1f%% of %.0f handshakes (threshold: %.1f%%)",
+						s.Namespace, s.Workload, rate, agg.value, t.TLSHandshakeFailurePercent),
+				})
+			}
+			return issues
+		},
 	}
 }

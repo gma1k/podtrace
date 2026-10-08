@@ -34,8 +34,6 @@ jobs:
             devscripts \
             shfmt \
             python3-venv
-          # The runner's Python refuses system-wide pip installs (PEP 668),
-          # so bashate goes into its own virtualenv.
           python3 -m venv "$RUNNER_TEMP/bashate"
           "$RUNNER_TEMP/bashate/bin/pip" install --require-hashes -r .github/requirements-bashate.txt
           echo "$RUNNER_TEMP/bashate/bin" >> "$GITHUB_PATH"
@@ -62,8 +60,6 @@ jobs:
         run: |
           echo "Running bashate..."
           command -v bashate
-          # Indentation is shfmt's: the scripts use tabs (.editorconfig), which
-          # bashate's E002 and E003 would flag on nearly every line.
           git ls-files -z '*.sh' | xargs -0 -r bashate --ignore=E002,E003 || echo "bashate check completed with warnings"
 
       - name: Check formatting (shfmt)

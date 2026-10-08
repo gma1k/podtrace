@@ -333,6 +333,7 @@ func (d *Diagnostician) GenerateReportWithContext(ctx context.Context) string {
 	result += report.GenerateCgroupScopeSection(d)
 	result += report.GenerateDNSSection(d, duration)
 	result += report.GenerateTCPSection(d, duration)
+	result += report.GenerateTLSSection(d, duration)
 	result += report.GenerateConnectionSection(d, duration)
 	result += report.GenerateFileSystemSection(d, duration)
 	result += report.GenerateUDPSection(d, duration)

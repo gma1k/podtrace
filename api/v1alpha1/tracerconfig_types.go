@@ -296,6 +296,15 @@ type AgentInspectionThresholdsSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=100
 	DNSFailurePercent *int32 `json:"dnsFailurePercent,omitempty"`
+
+	// TLSHandshakeFailurePercent is the share of a workload's TLS handshakes
+	// that fail above which tls.handshake_failure_rate fires. Only
+	// handshakes through Go's crypto/tls, OpenSSL, LibreSSL, BoringSSL,
+	// GnuTLS and mbedTLS are seen.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100
+	TLSHandshakeFailurePercent *int32 `json:"tlsHandshakeFailurePercent,omitempty"`
 }
 
 // AgentMetricsLabelsSpec opts into labels that are deliberately absent by

@@ -1306,154 +1306,144 @@ static __always_inline int mbedtls_handshake_step(long ret)
 	       ret == -0x7C00 /* MBEDTLS_ERR_SSL_RECEIVED_EARLY_DATA */;
 }
 
-SEC("uprobe/SSL_connect")
-int uprobe_SSL_connect(struct pt_regs *ctx) {
-	struct pair_key key = make_pair_key(PAIR_SSL_CONNECT);
+struct ssl_hs_key {
+	u64 ssl;
+	u32 tgid;
+	u32 _pad;
+};
+
+struct ssl_hs_state {
+	u64 start_ns;
+	u32 decided;
+	u32 _pad;
+};
+
+static __always_inline struct ssl_hs_key ssl_hs_key_of(u64 ssl)
+{
+	struct ssl_hs_key key = {.ssl = ssl, .tgid = bpf_get_current_pid_tgid() >> 32};
+	return key;
+}
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 16384);
+	__type(key, struct ssl_hs_key);
+	__type(value, struct ssl_hs_state);
+} ssl_hs_states SEC(".maps");
+
+static __always_inline void ssl_hs_begin(u64 ssl)
+{
+	if (!ssl)
+		return;
+	struct ssl_hs_key key = ssl_hs_key_of(ssl);
+	struct ssl_hs_state fresh = {.start_ns = bpf_ktime_get_ns()};
+	bpf_map_update_elem(&ssl_hs_states, &key, &fresh, BPF_NOEXIST);
+}
+
+static __always_inline int ssl_hs_decide(u64 ssl, u64 *latency)
+{
+	struct ssl_hs_key key = ssl_hs_key_of(ssl);
+	struct ssl_hs_state *st = bpf_map_lookup_elem(&ssl_hs_states, &key);
+	if (!st)
+		return 1;
+	if (st->decided)
+		return 0;
+	st->decided = 1;
+	u64 now = bpf_ktime_get_ns();
+	if (now > st->start_ns)
+		*latency = now - st->start_ns;
+	return 1;
+}
+
+static __always_inline void ssl_emit_handshake(struct pt_regs *ctx, u64 latency, s32 error)
+{
+	u32 pid = agent_ns_tgid();
+	u32 tid = (u32)bpf_get_current_pid_tgid();
+	struct event *e = get_event_buf();
+	if (!e)
+		return;
+	e->timestamp = bpf_ktime_get_ns();
+	e->pid = pid;
+	e->type = EVENT_TLS_HANDSHAKE;
+	e->latency_ns = latency;
+	e->error = error;
+	e->bytes = 0;
+	e->tcp_state = 0;
+	e->target[0] = '\0';
+	capture_user_stack(ctx, pid, tid, e);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+}
+
+static __always_inline int ssl_handshake_entry(struct pt_regs *ctx, u32 pair)
+{
+	struct pair_key key = make_pair_key(pair);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 	ssl_note_handshake(ctx);
+	ssl_hs_begin((u64)PT_REGS_PARM1(ctx));
 	return 0;
+}
+
+static __always_inline int ssl_handshake_return(struct pt_regs *ctx, u32 pair, long ret)
+{
+	struct pair_key key = make_pair_key(pair);
+	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
+	if (!start_ts) {
+		drop_pair_sidemaps(&key);
+		return 0;
+	}
+	u64 latency = calc_latency(*start_ts);
+	if (ssl_handshake_nested()) {
+		drop_pair_sidemaps(&key);
+		return 0;
+	}
+	u64 id = bpf_get_current_pid_tgid();
+	struct ssl_hs_call *c = bpf_map_lookup_elem(&ssl_hs_ssl, &id);
+	u64 ssl = c ? c->ssl : 0;
+	if (openssl_handshake_step(ret)) {
+		ssl_park_handshake(latency);
+		drop_pair_sidemaps(&key);
+		return 0;
+	}
+	ssl_forget_handshake();
+	drop_pair_sidemaps(&key);
+	if (ssl_hs_decide(ssl, &latency))
+		ssl_emit_handshake(ctx, latency, openssl_handshake_error(ret));
+	return 0;
+}
+
+SEC("uprobe/SSL_connect")
+int uprobe_SSL_connect(struct pt_regs *ctx) {
+	return ssl_handshake_entry(ctx, PAIR_SSL_CONNECT);
 }
 
 SEC("uretprobe/SSL_connect")
 int uretprobe_SSL_connect(struct pt_regs *ctx) {
-	u32 pid = agent_ns_tgid();
-	u32 tid = (u32)bpf_get_current_pid_tgid();
-	struct pair_key key = make_pair_key(PAIR_SSL_CONNECT);
-	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
-	if (!start_ts) {
-		drop_pair_sidemaps(&key);
-		return 0;
-	}
 	long ret = PT_REGS_RC_INT(ctx);
-	if (ssl_handshake_nested()) {
-		drop_pair_sidemaps(&key);
-		return 0;
-	}
-	if (openssl_handshake_step(ret)) {
-		ssl_park_handshake(calc_latency(*start_ts));
-		drop_pair_sidemaps(&key);
-		return 0;
-	}
-	ssl_forget_handshake();
-	struct event *e = get_event_buf();
-	if (!e) {
-		drop_pair_sidemaps(&key);
-		return 0;
-	}
-	e->timestamp = bpf_ktime_get_ns();
-	e->pid = pid;
-	e->type = EVENT_TLS_HANDSHAKE;
-	e->latency_ns = calc_latency(*start_ts);
-	e->error = openssl_handshake_error(ret);
-	e->bytes = 0;
-	e->tcp_state = 0;
-	e->target[0] = '\0';
-	capture_user_stack(ctx, pid, tid, e);
-	if (!agg_absorbed(e, 0))
-		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
-	bpf_map_delete_elem(&start_times, &key);
-	return 0;
+	return ssl_handshake_return(ctx, PAIR_SSL_CONNECT, ret);
 }
 
 SEC("uprobe/SSL_accept")
 int uprobe_SSL_accept(struct pt_regs *ctx) {
-	struct pair_key key = make_pair_key(PAIR_SSL_ACCEPT);
-	u64 ts = bpf_ktime_get_ns();
-	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
-	ssl_note_handshake(ctx);
-	return 0;
+	return ssl_handshake_entry(ctx, PAIR_SSL_ACCEPT);
 }
 
 SEC("uretprobe/SSL_accept")
 int uretprobe_SSL_accept(struct pt_regs *ctx) {
-	u32 pid = agent_ns_tgid();
-	u32 tid = (u32)bpf_get_current_pid_tgid();
-	struct pair_key key = make_pair_key(PAIR_SSL_ACCEPT);
-	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
-	if (!start_ts) {
-		drop_pair_sidemaps(&key);
-		return 0;
-	}
 	long ret = PT_REGS_RC_INT(ctx);
-	if (ssl_handshake_nested()) {
-		drop_pair_sidemaps(&key);
-		return 0;
-	}
-	if (openssl_handshake_step(ret)) {
-		ssl_park_handshake(calc_latency(*start_ts));
-		drop_pair_sidemaps(&key);
-		return 0;
-	}
-	ssl_forget_handshake();
-	struct event *e = get_event_buf();
-	if (!e) {
-		drop_pair_sidemaps(&key);
-		return 0;
-	}
-	e->timestamp = bpf_ktime_get_ns();
-	e->pid = pid;
-	e->type = EVENT_TLS_HANDSHAKE;
-	e->latency_ns = calc_latency(*start_ts);
-	e->error = openssl_handshake_error(ret);
-	e->bytes = 0;
-	e->tcp_state = 0;
-	e->target[0] = '\0';
-	capture_user_stack(ctx, pid, tid, e);
-	if (!agg_absorbed(e, 0))
-		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
-	bpf_map_delete_elem(&start_times, &key);
-	return 0;
+	return ssl_handshake_return(ctx, PAIR_SSL_ACCEPT, ret);
 }
 
 SEC("uprobe/SSL_do_handshake")
 int uprobe_SSL_do_handshake(struct pt_regs *ctx) {
-	struct pair_key key = make_pair_key(PAIR_SSL_DO_HANDSHAKE);
-	u64 ts = bpf_ktime_get_ns();
-	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
-	ssl_note_handshake(ctx);
-	return 0;
+	return ssl_handshake_entry(ctx, PAIR_SSL_DO_HANDSHAKE);
 }
 
 SEC("uretprobe/SSL_do_handshake")
 int uretprobe_SSL_do_handshake(struct pt_regs *ctx) {
-	u32 pid = agent_ns_tgid();
-	u32 tid = (u32)bpf_get_current_pid_tgid();
-	struct pair_key key = make_pair_key(PAIR_SSL_DO_HANDSHAKE);
-	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
-	if (!start_ts) {
-		drop_pair_sidemaps(&key);
-		return 0;
-	}
 	long ret = PT_REGS_RC_INT(ctx);
-	if (ssl_handshake_nested()) {
-		drop_pair_sidemaps(&key);
-		return 0;
-	}
-	if (openssl_handshake_step(ret)) {
-		ssl_park_handshake(calc_latency(*start_ts));
-		drop_pair_sidemaps(&key);
-		return 0;
-	}
-	ssl_forget_handshake();
-	struct event *e = get_event_buf();
-	if (!e) {
-		drop_pair_sidemaps(&key);
-		return 0;
-	}
-	e->timestamp = bpf_ktime_get_ns();
-	e->pid = pid;
-	e->type = EVENT_TLS_HANDSHAKE;
-	e->latency_ns = calc_latency(*start_ts);
-	e->error = openssl_handshake_error(ret);
-	e->bytes = 0;
-	e->tcp_state = 0;
-	e->target[0] = '\0';
-	capture_user_stack(ctx, pid, tid, e);
-	if (!agg_absorbed(e, 0))
-		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
-	bpf_map_delete_elem(&start_times, &key);
-	return 0;
+	return ssl_handshake_return(ctx, PAIR_SSL_DO_HANDSHAKE, ret);
 }
 
 SEC("uprobe/SSL_get_error")
@@ -1469,6 +1459,7 @@ int uprobe_SSL_get_error(struct pt_regs *ctx) {
 
 SEC("uretprobe/SSL_get_error")
 int uretprobe_SSL_get_error(struct pt_regs *ctx) {
+	long reason = PT_REGS_RC_INT(ctx);
 	u64 id = bpf_get_current_pid_tgid();
 	if (!bpf_map_lookup_elem(&ssl_get_error_args, &id))
 		return 0;
@@ -1477,29 +1468,30 @@ int uretprobe_SSL_get_error(struct pt_regs *ctx) {
 	if (!p)
 		return 0;
 	u64 latency = p->latency_ns;
-	long reason = PT_REGS_RC_INT(ctx);
+	u64 ssl = p->ssl;
 	if (!openssl_error_is_fatal(reason)) {
 		bpf_map_delete_elem(&ssl_hs_pending, &id);
 		return 0;
 	}
 	ssl_forget_handshake();
+	if (ssl_hs_decide(ssl, &latency))
+		ssl_emit_handshake(ctx, latency, -(s32)reason);
+	return 0;
+}
 
-	u32 pid = agent_ns_tgid();
-	u32 tid = (u32)id;
-	struct event *e = get_event_buf();
-	if (!e)
+SEC("uprobe/SSL_free")
+int uprobe_SSL_free(struct pt_regs *ctx) {
+	struct ssl_hs_key key = ssl_hs_key_of((u64)PT_REGS_PARM1(ctx));
+	struct ssl_hs_state *st = bpf_map_lookup_elem(&ssl_hs_states, &key);
+	if (!st)
 		return 0;
-	e->timestamp = bpf_ktime_get_ns();
-	e->pid = pid;
-	e->type = EVENT_TLS_HANDSHAKE;
-	e->latency_ns = latency;
-	e->error = -(s32)reason;
-	e->bytes = 0;
-	e->tcp_state = 0;
-	e->target[0] = '\0';
-	capture_user_stack(ctx, pid, tid, e);
-	if (!agg_absorbed(e, 0))
-		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	u64 start = st->start_ns;
+	u32 decided = st->decided;
+	bpf_map_delete_elem(&ssl_hs_states, &key);
+	if (decided)
+		return 0;
+	u64 now = bpf_ktime_get_ns();
+	ssl_emit_handshake(ctx, now > start ? now - start : 0, -1);
 	return 0;
 }
 

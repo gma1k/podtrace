@@ -576,6 +576,7 @@ spec:
                           - dns.slow_lookup_rate
                           - fs.slow_operations
                           - dns.failure_rate
+                          - tls.handshake_failure_rate
                           type: string
                         kind:
                           description: |-

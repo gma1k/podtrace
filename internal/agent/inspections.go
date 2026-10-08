@@ -164,6 +164,8 @@ func inspectionThresholds() inspect.Thresholds {
 
 		DNSFailureRatePercent: config.InspectionDNSFailurePct,
 
+		TLSHandshakeFailurePercent: config.InspectionTLSFailurePct,
+
 		HoldTime: config.InspectionsHoldTime,
 	}
 }

@@ -71,16 +71,18 @@ func TestTheNewInspectionThresholdsReachTheAgentEnvironment(t *testing.T) {
 	dnsPct := int32(12)
 	fsPct := int32(9)
 	dnsFailPct := int32(15)
+	tlsFailPct := int32(25)
 	env := metricsEnv(&podtracev1alpha1.AgentMetricsSpec{
 		Enabled: ptr(true),
 		Inspections: &podtracev1alpha1.AgentInspectionsSpec{
 			Enabled: ptr(true),
 			Thresholds: &podtracev1alpha1.AgentInspectionThresholdsSpec{
-				CPUBlockedMean:          &metav1.Duration{Duration: 250 * time.Millisecond},
-				PoolUtilizationPercent:  &pct,
-				DNSSlowLookupPercent:    &dnsPct,
-				FSSlowOperationsPercent: &fsPct,
-				DNSFailurePercent:       &dnsFailPct,
+				CPUBlockedMean:             &metav1.Duration{Duration: 250 * time.Millisecond},
+				PoolUtilizationPercent:     &pct,
+				DNSSlowLookupPercent:       &dnsPct,
+				FSSlowOperationsPercent:    &fsPct,
+				DNSFailurePercent:          &dnsFailPct,
+				TLSHandshakeFailurePercent: &tlsFailPct,
 			},
 		},
 	})
@@ -100,6 +102,9 @@ func TestTheNewInspectionThresholdsReachTheAgentEnvironment(t *testing.T) {
 	if v, ok := envValue(env, "PODTRACE_INSPECTIONS_DNS_FAILURE_PCT"); !ok || v != "15" {
 		t.Errorf("PODTRACE_INSPECTIONS_DNS_FAILURE_PCT=%q ok=%v want 15", v, ok)
 	}
+	if v, ok := envValue(env, "PODTRACE_INSPECTIONS_TLS_HANDSHAKE_FAILURE_PCT"); !ok || v != "25" {
+		t.Errorf("PODTRACE_INSPECTIONS_TLS_HANDSHAKE_FAILURE_PCT=%q ok=%v want 25", v, ok)
+	}
 }
 
 func TestUnsetInspectionThresholdsLeaveTheAgentOnItsDefaults(t *testing.T) {
@@ -114,6 +119,7 @@ func TestUnsetInspectionThresholdsLeaveTheAgentOnItsDefaults(t *testing.T) {
 		"PODTRACE_INSPECTIONS_DNS_SLOW_LOOKUP_PCT",
 		"PODTRACE_INSPECTIONS_FS_SLOW_OPERATIONS_PCT",
 		"PODTRACE_INSPECTIONS_DNS_FAILURE_PCT",
+		"PODTRACE_INSPECTIONS_TLS_HANDSHAKE_FAILURE_PCT",
 	} {
 		if v, ok := envValue(env, name); ok {
 			t.Errorf("%s=%q was set from an unset field, pinning the agent to a value "+
