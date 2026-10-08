@@ -41,12 +41,12 @@ func TestAnalyzeDNS_QueryResponseSplit(t *testing.T) {
 	}
 	responses := []*events.Event{
 		{Type: events.EventDNS, Target: "example.com", LatencyNS: 2_000_000, Error: 0},
-		{Type: events.EventDNS, Target: "nope.invalid", LatencyNS: 1_000_000, Error: 3}, // NXDOMAIN
+		{Type: events.EventDNS, Target: "nope.invalid", LatencyNS: 1_000_000, Error: 2}, // SERVFAIL
 	}
 	avg, _, errors, _, _, _, topTargets := AnalyzeDNS(queries, responses)
 
 	if errors != 1 {
-		t.Errorf("errors = %d, want 1 (one NXDOMAIN response)", errors)
+		t.Errorf("errors = %d, want 1 (one SERVFAIL response)", errors)
 	}
 	if avg <= 0 {
 		t.Errorf("avg latency should be >0 from responses, got %v", avg)

@@ -453,21 +453,8 @@ func AttachDNSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint3
 	if libcPath != "" {
 		uprobe, err := openExecutable(libcPath)
 		if err == nil {
-			if uprobeProg := coll.Programs["uprobe_getaddrinfo"]; uprobeProg != nil {
-				l, err := uprobe.Uprobe("getaddrinfo", uprobeProg, nil)
-				if err == nil {
-					links = append(links, l)
-				} else {
-					logger.Info("DNS tracking (uprobe) unavailable", zap.Error(err))
-				}
-			}
-			if uretprobeProg := coll.Programs["uretprobe_getaddrinfo"]; uretprobeProg != nil {
-				l, err := uprobe.Uretprobe("getaddrinfo", uretprobeProg, nil)
-				if err == nil {
-					links = append(links, l)
-				} else {
-					logger.Info("DNS tracking (uretprobe) unavailable", zap.Error(err))
-				}
+			for _, fn := range libcResolvers {
+				links = append(links, attachLibcResolver(coll, uprobe, fn)...)
 			}
 		} else if packetDNSCaptureEnabled() {
 			logger.Debug("libc uprobe DNS unavailable; DNS is captured via the packet-based path instead")
@@ -480,6 +467,38 @@ func AttachDNSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint3
 		logger.Info("DNS tracking disabled: no libc found in the target container and packet-based DNS capture is disabled. DNS name resolution will not be traced; other tracing is unaffected.")
 	}
 	return links
+}
+
+// libcResolvers are the libc functions a lookup goes through. glibc's
+// gethostbyname and gethostbyname2 run the same code as their _r forms, so
+// probing the _r forms sees all four.
+var libcResolvers = []string{"getaddrinfo", "gethostbyname_r", "gethostbyname2_r"}
+
+// uprobeTarget is the binary a resolver's probes attach to.
+type uprobeTarget interface {
+	Uprobe(symbol string, prog *ebpf.Program, opts *link.UprobeOptions) (link.Link, error)
+	Uretprobe(symbol string, prog *ebpf.Program, opts *link.UprobeOptions) (link.Link, error)
+}
+
+// attachLibcResolver attaches one resolver's return probe and then its entry
+// probe, so no entry is recorded with nothing to consume it.
+func attachLibcResolver(coll *ebpf.Collection, exe uprobeTarget, fn string) []link.Link {
+	ret, entry := coll.Programs["uretprobe_"+fn], coll.Programs["uprobe_"+fn]
+	if ret == nil || entry == nil {
+		return nil
+	}
+	retLink, err := exe.Uretprobe(fn, ret, nil)
+	if err != nil {
+		logger.Info("DNS tracking (uretprobe) unavailable", zap.String("function", fn), zap.Error(err))
+		return nil
+	}
+	entryLink, err := exe.Uprobe(fn, entry, nil)
+	if err != nil {
+		_ = retLink.Close()
+		logger.Info("DNS tracking (uprobe) unavailable", zap.String("function", fn), zap.Error(err))
+		return nil
+	}
+	return []link.Link{retLink, entryLink}
 }
 
 func AttachSyncProbes(coll *ebpf.Collection, containerID string) []link.Link {

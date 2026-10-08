@@ -1,0 +1,250 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: dns-failures
+spec:
+  concurrent: false
+  description: |
+    Property tested: a workload whose DNS lookups get no answer raises
+    dns.failure_rate, and a workload whose lookups all answer NXDOMAIN raises
+    nothing and counts no DNS errors.
+
+    Unit tests prove the answer classes and the rule arithmetic, and the
+    kernel tests prove the BPF classes rcodes and keeps a retransmission's
+    first send. Only this layer proves that a real resolver timeout becomes
+    a timeout lookup in the plane, that the threshold reaches the agent, and
+    that the issue clears when the lookups stop failing.
+
+    Steps:
+      1. Turn on inspections with a short interval and hold, and a DNS
+         failure threshold, via the TracerConfig.
+      2. Assert the operator translated the threshold into agent environment.
+      3. Run one workload querying a server that never answers and one
+         looking up a name that does not exist.
+      4. Assert dns.failure_rate fires for the first, from timeout lookups.
+      5. Assert the second counted NXDOMAIN lookups, no DNS errors, and no
+         issue.
+      6. Stop the failing workload and assert the issue clears.
+  timeouts:
+    apply: 60s
+    assert: 120s
+    exec: 600s
+    cleanup: 180s
+    delete: 180s
+  steps:
+    - name: enable-inspections
+      try:
+        - script:
+            content: |
+              set -eu
+
+              for _ in $(seq 1 60); do
+                if kubectl -n podtrace-system get endpoints podtrace-webhook \
+                     -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null | grep -q .; then
+                  if kubectl patch tracerconfig default --type=merge --dry-run=server \
+                       -p '{"metadata":{"annotations":{}}}' >/dev/null 2>&1; then
+                    break
+                  fi
+                fi
+                sleep 2
+              done
+
+              saved=$(kubectl get tracerconfig default -o jsonpath='{.spec.agent.metrics}')
+              kubectl -n "${NAMESPACE}" create configmap tracerconfig-before \
+                --from-literal=metrics="${saved}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+              kubectl patch tracerconfig default --type=merge -p '{
+                "spec": {
+                  "agent": {
+                    "metrics": {
+                      "enabled": true,
+                      "kernelAggregation": true,
+                      "inspections": {
+                        "enabled": true,
+                        "interval": "10s",
+                        "holdTime": "20s",
+                        "thresholds": {
+                          "dnsFailurePercent": 10
+                        }
+                      }
+                    }
+                  }
+                }
+              }'
+
+              for _ in $(seq 1 150); do
+                desired=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.desiredNumberScheduled}')
+                updated=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.updatedNumberScheduled}')
+                ready=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.status.numberReady}')
+                if [ -n "${desired}" ] && [ "${updated}" = "${desired}" ] && [ "${ready}" = "${desired}" ]; then
+                  echo "all ${desired} agents updated and ready"
+                  break
+                fi
+                sleep 2
+              done
+              if [ "${updated:-0}" != "${desired:-1}" ] || [ "${ready:-0}" != "${desired:-1}" ]; then
+                echo "FAIL: agents did not converge (updated=${updated:-?} ready=${ready:-?} desired=${desired:-?})"
+                kubectl -n podtrace-system get pod -l podtrace.io/component=agent
+                exit 1
+              fi
+      cleanup:
+        - script:
+            content: |
+              if ! kubectl -n "${NAMESPACE}" get configmap tracerconfig-before >/dev/null 2>&1; then
+                echo "no snapshot taken, so the tracerconfig was never changed"
+                exit 0
+              fi
+              before=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.metadata.generation}' 2>/dev/null || true)
+              saved=$(kubectl -n "${NAMESPACE}" get configmap tracerconfig-before \
+                -o jsonpath='{.data.metrics}')
+              if [ -n "${saved}" ]; then
+                kubectl patch tracerconfig default --type=json \
+                  -p "[{\"op\":\"replace\",\"path\":\"/spec/agent/metrics\",\"value\":${saved}}]"
+              else
+                kubectl patch tracerconfig default --type=json \
+                  -p '[{"op":"remove","path":"/spec/agent/metrics"}]' || true
+              fi
+              echo "spec.agent.metrics restored to what the test found"
+              for i in $(seq 1 30); do
+                now=$(kubectl -n podtrace-system get ds podtrace-agent -o jsonpath='{.metadata.generation}' 2>/dev/null || true)
+                [ "${now}" != "${before}" ] && break
+                sleep 2
+              done
+              kubectl -n podtrace-system rollout status ds/podtrace-agent --timeout=110s || true
+
+    - name: agent-carries-the-threshold
+      description: |
+        Asserted apart from the behaviour so a failure here points at the
+        operator's translation, or at a CRD that predates the field and
+        silently stripped it.
+      try:
+        - script:
+            content: |
+              set -eu
+              env=$(kubectl -n podtrace-system get ds podtrace-agent \
+                -o jsonpath='{range .spec.template.spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}')
+              if ! printf '%s' "${env}" | grep -qx 'PODTRACE_INSPECTIONS_DNS_FAILURE_PCT=10'; then
+                echo "FAIL: agent env lacks PODTRACE_INSPECTIONS_DNS_FAILURE_PCT=10"
+                kubectl get tracerconfig default -o jsonpath='{.spec.agent.metrics.inspections}{"\n"}' || true
+                kubectl get crd tracerconfigs.podtrace.io -o json | grep -q '"dnsFailurePercent"' \
+                  && echo "the CRD accepts dnsFailurePercent" \
+                  || echo "the CRD does NOT accept dnsFailurePercent; run helm upgrade first"
+                printf '%s\n' "${env}"
+                exit 1
+              fi
+              echo "operator rendered the DNS failure threshold"
+
+    - name: run-the-workloads
+      try:
+        - apply:
+            file: workload.yaml
+        - assert:
+            file: assert-workload-ready.yaml
+
+    - name: the-timeouts-raise-the-issue
+      description: |
+        Every lookup of dns-timeouts goes to an address nothing answers, so
+        each becomes a timeout five seconds after its last send, and the
+        failure share is 100%.
+      try:
+        - script:
+            content: |
+              set -eu
+              scrape() {
+                for a in $(kubectl -n podtrace-system get pod -l podtrace.io/component=agent -o name); do
+                  kubectl get --raw "/api/v1/namespaces/podtrace-system/pods/${a#pod/}:9090/proxy/metrics" 2>/dev/null || true
+                done
+              }
+
+              for attempt in $(seq 1 36); do
+                out=$(scrape)
+                if printf '%s' "${out}" | grep '^podtrace_issue_active' \
+                     | grep 'id="dns.failure_rate"' | grep 'workload="dns-timeouts"' \
+                     | awk '{ if ($2 + 0 == 1) print }' | grep -q .; then
+                  echo "dns.failure_rate active on attempt ${attempt}"
+                  break
+                fi
+                sleep 5
+              done
+
+              out=$(scrape)
+              if ! printf '%s' "${out}" | grep '^podtrace_issue_active' \
+                   | grep 'id="dns.failure_rate"' | grep 'workload="dns-timeouts"' \
+                   | awk '{ if ($2 + 0 == 1) print }' | grep -q .; then
+                echo "FAIL: dns.failure_rate never fired for dns-timeouts, whose every lookup times out"
+                echo "--- its DNS series ---"
+                printf '%s\n' "${out}" | grep 'workload="dns-timeouts"' | grep -E 'dns_|errors_total' | grep -v _bucket || true
+                echo "--- issue series ---"
+                printf '%s\n' "${out}" | grep '^podtrace_issue_active' || true
+                kubectl -n podtrace-system logs -l podtrace.io/component=agent --tail=60 || true
+                exit 1
+              fi
+
+              if ! printf '%s' "${out}" | grep '^podtrace_workload_dns_lookups_total' \
+                   | grep 'workload="dns-timeouts"' | grep 'rcode="timeout"' \
+                   | awk '{ if ($2 + 0 > 0) print }' | grep -q .; then
+                echo "FAIL: the issue fired but no lookup of dns-timeouts is counted as a timeout"
+                printf '%s\n' "${out}" | grep 'workload="dns-timeouts"' | grep dns_lookups_total || true
+                exit 1
+              fi
+              echo "timeouts counted and dns.failure_rate fired"
+
+    - name: nxdomain-is-not-a-failure
+      description: |
+        Checked after the issue fired for dns-timeouts, so the hold time has
+        passed: had NXDOMAIN counted as a failure, the issue would be active
+        for dns-nxdomain too by now.
+      try:
+        - script:
+            content: |
+              set -eu
+              out=""
+              for a in $(kubectl -n podtrace-system get pod -l podtrace.io/component=agent -o name); do
+                out="${out}$(kubectl get --raw "/api/v1/namespaces/podtrace-system/pods/${a#pod/}:9090/proxy/metrics" 2>/dev/null || true)
+              "
+              done
+
+              if ! printf '%s' "${out}" | grep '^podtrace_workload_dns_lookups_total' \
+                   | grep 'workload="dns-nxdomain"' | grep 'rcode="NXDOMAIN"' \
+                   | awk '{ if ($2 + 0 > 0) print }' | grep -q .; then
+                echo "FAIL: dns-nxdomain's lookups are not counted as NXDOMAIN"
+                printf '%s\n' "${out}" | grep 'workload="dns-nxdomain"' | grep -v _bucket || true
+                exit 1
+              fi
+              if printf '%s' "${out}" | grep '^podtrace_workload_errors_total' \
+                   | grep 'workload="dns-nxdomain"' | grep 'kind="dns"' \
+                   | awk '{ if ($2 + 0 > 0) print }' | grep -q .; then
+                echo "FAIL: NXDOMAIN answers were counted as DNS errors"
+                printf '%s\n' "${out}" | grep 'workload="dns-nxdomain"' | grep errors_total || true
+                exit 1
+              fi
+              if printf '%s' "${out}" | grep '^podtrace_issue_active' \
+                   | grep 'id="dns.failure_rate"' | grep 'workload="dns-nxdomain"' \
+                   | awk '{ if ($2 + 0 == 1) print }' | grep -q .; then
+                echo "FAIL: dns.failure_rate fired for a workload whose every answer is NXDOMAIN"
+                exit 1
+              fi
+              echo "NXDOMAIN counted as an answer, not a failure"
+
+    - name: the-issue-clears
+      try:
+        - script:
+            content: |
+              set -eu
+              kubectl -n dns-failures delete deployment dns-timeouts --wait=true
+
+              for attempt in $(seq 1 36); do
+                active=""
+                for a in $(kubectl -n podtrace-system get pod -l podtrace.io/component=agent -o name); do
+                  active="${active}$(kubectl get --raw "/api/v1/namespaces/podtrace-system/pods/${a#pod/}:9090/proxy/metrics" 2>/dev/null \
+                    | grep '^podtrace_issue_active' | grep 'id="dns.failure_rate"' \
+                    | grep 'workload="dns-timeouts"' | awk '{ if ($2 + 0 == 1) print }' || true)"
+                done
+                if [ -z "${active}" ]; then
+                  echo "dns.failure_rate cleared on attempt ${attempt}"
+                  exit 0
+                fi
+                sleep 5
+              done
+              echo "FAIL: dns.failure_rate stayed active three minutes after the failing workload stopped"
+              exit 1

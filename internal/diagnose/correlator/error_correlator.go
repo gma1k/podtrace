@@ -176,12 +176,41 @@ func (ec *ErrorCorrelator) isRelated(err1, err2 *ErrorEvent) bool {
 	return false
 }
 
+// dnsSuggestions is where each kind of failed lookup is fixed. A DNS event's
+// error is an rcode or a timeout, not an errno, so the errno suggestions do
+// not apply to it.
+var dnsSuggestions = map[string]string{
+	events.DNSAnswerTimeout:  "No answer from the resolver - check that it is running and reachable on port 53, and for conntrack races on UDP",
+	events.DNSAnswerServFail: "The resolver could not answer - check its logs and its upstream resolvers",
+	events.DNSAnswerRefused:  "The server refused the query - check which server the workload asks and whether it allows recursion",
+	events.DNSAnswerOther:    "The server answered with an error rcode - check its logs",
+}
+
+// errorCodeText names an error the way its event reports it: a DNS lookup by
+// its answer, anything else by its code.
+func errorCodeText(e *ErrorEvent) string {
+	if e.Event != nil && e.Event.Type == events.EventDNS {
+		return "answer: " + e.Event.DNSAnswer()
+	}
+	return fmt.Sprintf("code: %d", e.ErrorCode)
+}
+
 func (ec *ErrorCorrelator) generateSuggestions(chain []*ErrorEvent) []string {
 	suggestions := make([]string, 0)
 
 	errorCodes := make(map[int32]int)
+	dnsAnswers := make(map[string]bool)
 	for _, err := range chain {
+		if err.Event != nil && err.Event.Type == events.EventDNS {
+			dnsAnswers[err.Event.DNSAnswer()] = true
+			continue
+		}
 		errorCodes[err.ErrorCode]++
+	}
+	for _, answer := range []string{events.DNSAnswerTimeout, events.DNSAnswerServFail, events.DNSAnswerRefused, events.DNSAnswerOther} {
+		if dnsAnswers[answer] {
+			suggestions = append(suggestions, dnsSuggestions[answer])
+		}
 	}
 
 	for code, count := range errorCodes {
@@ -262,8 +291,8 @@ func (ec *ErrorCorrelator) GetErrorSummary() string {
 		for i := 0; i < maxChains; i++ {
 			chain := ec.chains[i]
 			report += fmt.Sprintf("    Chain %d (Severity: %s):\n", i+1, chain.Severity)
-			report += fmt.Sprintf("      Root cause: %s error on %s (code: %d)\n",
-				chain.RootCause.Operation, chain.RootCause.Target, chain.RootCause.ErrorCode)
+			report += fmt.Sprintf("      Root cause: %s error on %s (%s)\n",
+				chain.RootCause.Operation, chain.RootCause.Target, errorCodeText(chain.RootCause))
 			report += fmt.Sprintf("      Chain length: %d errors\n", len(chain.Chain))
 			report += fmt.Sprintf("      Time window: %s\n", chain.Chain[len(chain.Chain)-1].Timestamp.Sub(chain.RootCause.Timestamp))
 

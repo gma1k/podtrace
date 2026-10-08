@@ -34,6 +34,7 @@ type dnsQueryState struct {
 	Comm      [16]byte
 	Name      [128]byte
 	ServerIP6 [16]byte
+	LastNS    uint64
 }
 
 const (
@@ -111,13 +112,10 @@ func (t *Tracer) sweepDNSTimeouts(ctx context.Context, eventChan chan<- *events.
 
 	iter := m.Iterate()
 	for iter.Next(&key, &val) {
-		if val.TsNS == 0 || now <= val.TsNS {
+		if val.TsNS == 0 || now <= val.LastNS || now-val.LastNS <= dnsTimeoutThresholdNS {
 			continue
 		}
 		age := now - val.TsNS
-		if age <= dnsTimeoutThresholdNS {
-			continue
-		}
 		staleKey = key
 		stale = append(stale, staleKey)
 
@@ -144,15 +142,19 @@ func (t *Tracer) sweepDNSTimeouts(ctx context.Context, eventChan chan<- *events.
 // applying the same protections as the main pipeline.
 func (t *Tracer) buildDNSTimeoutEvent(key dnsFlowKey, val dnsQueryState, now, age uint64) *events.Event {
 	ev := &events.Event{
-		Timestamp:   now,
-		PID:         val.PID,
-		Type:        events.EventDNS,
-		LatencyNS:   age,
-		CgroupID:    key.CgroupID,
-		TCPState:    val.QType,
-		Target:      sanitize.Terminal(string(bytes.TrimRight(val.Name[:], "\x00"))),
-		Details:     "timeout",
-		ProcessName: string(bytes.TrimRight(val.Comm[:], "\x00")),
+		Timestamp:    now,
+		PID:          val.PID,
+		Type:         events.EventDNS,
+		LatencyNS:    age,
+		Error:        events.DNSErrorTimeout,
+		CgroupID:     key.CgroupID,
+		TCPState:     val.QType,
+		DNSServerIP:  val.ServerIP,
+		DNSServerIP6: val.ServerIP6,
+		DNSTransport: val.Transport,
+		Target:       sanitize.Terminal(string(bytes.TrimRight(val.Name[:], "\x00"))),
+		Details:      "timeout",
+		ProcessName:  string(bytes.TrimRight(val.Comm[:], "\x00")),
 	}
 	t.attributeProcessName(ev)
 	ev.ProcessName = validation.SanitizeProcessName(ev.ProcessName)

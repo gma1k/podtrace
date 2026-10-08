@@ -57,6 +57,10 @@ type AgentInspectionThresholdsSpecApplyConfiguration struct {
 	// reads, writes and fsyncs slower than 50ms above which
 	// fs.slow_operations fires.
 	FSSlowOperationsPercent *int32 `json:"fsSlowOperationsPercent,omitempty"`
+	// DNSFailurePercent is the share of a workload's DNS lookups that fail
+	// (SERVFAIL, REFUSED, another error rcode, or no answer) above which
+	// dns.failure_rate fires. NXDOMAIN is an answer and never counts.
+	DNSFailurePercent *int32 `json:"dnsFailurePercent,omitempty"`
 }
 
 // AgentInspectionThresholdsSpecApplyConfiguration constructs a declarative configuration of the AgentInspectionThresholdsSpec type for use with
@@ -126,5 +130,13 @@ func (b *AgentInspectionThresholdsSpecApplyConfiguration) WithDNSSlowLookupPerce
 // If called multiple times, the FSSlowOperationsPercent field is set to the value of the last call.
 func (b *AgentInspectionThresholdsSpecApplyConfiguration) WithFSSlowOperationsPercent(value int32) *AgentInspectionThresholdsSpecApplyConfiguration {
 	b.FSSlowOperationsPercent = &value
+	return b
+}
+
+// WithDNSFailurePercent sets the DNSFailurePercent field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the DNSFailurePercent field is set to the value of the last call.
+func (b *AgentInspectionThresholdsSpecApplyConfiguration) WithDNSFailurePercent(value int32) *AgentInspectionThresholdsSpecApplyConfiguration {
+	b.DNSFailurePercent = &value
 	return b
 }

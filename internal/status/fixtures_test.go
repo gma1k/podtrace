@@ -2,6 +2,7 @@ package status
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -82,6 +83,7 @@ type fakeCluster struct {
 	scrape    func(agent Agent, call int) ([]*dto.MetricFamily, error)
 	profiles  map[string]Profile
 	profErr   map[string]error
+	live      map[string][]LiveIssue
 	stacks    map[string][]byte
 	stackErr  map[string]error
 	events    []corev1.Event
@@ -132,6 +134,14 @@ func (f *fakeCluster) ProfileStacks(_ context.Context, a Agent, _ StackFormat, _
 		return nil, err
 	}
 	return f.stacks[a.Name], nil
+}
+
+func (f *fakeCluster) ActiveIssues(_ context.Context, a Agent) ([]LiveIssue, error) {
+	live, ok := f.live[a.Name]
+	if !ok {
+		return nil, errors.New("404 page not found")
+	}
+	return live, nil
 }
 
 func (f *fakeCluster) IssueEvents(context.Context, string) ([]corev1.Event, error) {

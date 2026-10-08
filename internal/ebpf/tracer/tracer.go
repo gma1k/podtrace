@@ -2050,6 +2050,8 @@ func buildDNSEventFromRecord(rec dns.Record) *events.Event {
 		DNSServerIP6: rec.ServerIP6,
 		DNSTransport: rec.Transport,
 		Target:       sanitize.Terminal(rec.Msg.QName),
+
+		KernelAggregated: rec.AggRecorded,
 	}
 
 	if ips := rec.ResolvedIPs(); len(ips) > 0 {

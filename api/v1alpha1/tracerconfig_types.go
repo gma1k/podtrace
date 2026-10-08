@@ -288,6 +288,14 @@ type AgentInspectionThresholdsSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=100
 	FSSlowOperationsPercent *int32 `json:"fsSlowOperationsPercent,omitempty"`
+
+	// DNSFailurePercent is the share of a workload's DNS lookups that fail
+	// (SERVFAIL, REFUSED, another error rcode, or no answer) above which
+	// dns.failure_rate fires. NXDOMAIN is an answer and never counts.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100
+	DNSFailurePercent *int32 `json:"dnsFailurePercent,omitempty"`
 }
 
 // AgentMetricsLabelsSpec opts into labels that are deliberately absent by

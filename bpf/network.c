@@ -480,6 +480,153 @@ int kretprobe_tcp_recvmsg(struct pt_regs *ctx) {
 	return 0;
 }
 
+struct hostent_call {
+	u64 result;
+	u64 h_errnop;
+	u32 depth;
+	u32 _pad;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 4096);
+	__type(key, struct pair_key);
+	__type(value, struct hostent_call);
+} hostent_calls SEC(".maps");
+
+#define HOST_NOT_FOUND 1
+#define TRY_AGAIN      2
+#define NO_RECOVERY    3
+#define NO_DATA        4
+#define EAI_FAIL       -4
+#define ERANGE_ERRNO   34
+
+static __always_inline int hostent_enter(u64 name, u64 result, u64 h_errnop)
+{
+	struct pair_key key = make_pair_key(PAIR_GETHOSTBYNAME);
+	struct hostent_call *outer = bpf_map_lookup_elem(&hostent_calls, &key);
+	if (outer) {
+		outer->depth++;
+		return 0;
+	}
+	struct hostent_call call = { .result = result, .h_errnop = h_errnop, .depth = 1 };
+	bpf_map_update_elem(&hostent_calls, &key, &call, BPF_ANY);
+
+	u64 ts = bpf_ktime_get_ns();
+	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
+	if (name) {
+		char target[MAX_STRING_LEN] = {};
+		bpf_probe_read_user_str(target, sizeof(target), (void *)name);
+		bpf_map_update_elem(&dns_targets, &key, target, BPF_ANY);
+	}
+	return 0;
+}
+
+static __always_inline s32 hostent_error(u64 entry, s32 h_errno)
+{
+	if (entry)
+		return 0;
+	switch (h_errno) {
+	case HOST_NOT_FOUND:
+		return EAI_NONAME;
+	case TRY_AGAIN:
+		return EAI_AGAIN;
+	case NO_DATA:
+		return EAI_NODATA;
+	default:
+		return EAI_FAIL;
+	}
+}
+
+static __always_inline int hostent_exit(struct pt_regs *ctx, s32 ret)
+{
+	struct pair_key key = make_pair_key(PAIR_GETHOSTBYNAME);
+	struct hostent_call *call = bpf_map_lookup_elem(&hostent_calls, &key);
+	if (!call)
+		return 0;
+	if (call->depth > 1) {
+		call->depth--;
+		return 0;
+	}
+	u64 result = call->result;
+	u64 h_errnop = call->h_errnop;
+	bpf_map_delete_elem(&hostent_calls, &key);
+
+	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
+	if (!start_ts || ret == ERANGE_ERRNO) {
+		drop_pair_sidemaps(&key);
+		return 0;
+	}
+	u64 latency = calc_latency(*start_ts);
+
+	u64 entry = 0;
+	s32 h_errno = 0;
+	if (result)
+		bpf_probe_read_user(&entry, sizeof(entry), (void *)result);
+	if (h_errnop)
+		bpf_probe_read_user(&h_errno, sizeof(h_errno), (void *)h_errnop);
+
+	struct event *e = get_event_buf();
+	if (!e) {
+		drop_pair_sidemaps(&key);
+		return 0;
+	}
+	e->timestamp = bpf_ktime_get_ns();
+	e->pid = agent_ns_tgid();
+	e->type = EVENT_DNS;
+	e->latency_ns = latency;
+	e->dns_transport = DNS_SOURCE_LIBC;
+	e->error = hostent_error(entry, h_errno);
+
+	char *target = bpf_map_lookup_elem(&dns_targets, &key);
+	if (target)
+		bpf_probe_read_kernel_str(e->target, sizeof(e->target), target);
+	capture_user_stack(ctx, e->pid, (u32)bpf_get_current_pid_tgid(), e);
+	if (!agg_absorbed(e, 0))
+		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	drop_pair_sidemaps(&key);
+	return 0;
+}
+
+SEC("uprobe/gethostbyname_r")
+int uprobe_gethostbyname_r(struct pt_regs *ctx) {
+#if defined(__TARGET_ARCH_arm64)
+	u64 h_errnop = ctx->regs[5];
+#else
+	u64 h_errnop = ctx->r9;
+#endif
+	u64 name = PT_REGS_PARM1(ctx);
+	u64 result = PT_REGS_PARM5(ctx);
+	return hostent_enter(name, result, h_errnop);
+}
+
+SEC("uretprobe/gethostbyname_r")
+int uretprobe_gethostbyname_r(struct pt_regs *ctx) {
+	s32 ret = (s32)PT_REGS_RC(ctx);
+	return hostent_exit(ctx, ret);
+}
+
+SEC("uprobe/gethostbyname2_r")
+int uprobe_gethostbyname2_r(struct pt_regs *ctx) {
+	u64 name = PT_REGS_PARM1(ctx);
+#if defined(__TARGET_ARCH_arm64)
+	u64 result = ctx->regs[5];
+	u64 h_errnop = ctx->regs[6];
+#else
+	u64 result = ctx->r9;
+	u64 sp = PT_REGS_SP(ctx);
+	u64 h_errnop = 0;
+	bpf_probe_read_user(&h_errnop, sizeof(h_errnop), (void *)(sp + 8));
+#endif
+	return hostent_enter(name, result, h_errnop);
+}
+
+SEC("uretprobe/gethostbyname2_r")
+int uretprobe_gethostbyname2_r(struct pt_regs *ctx) {
+	s32 ret = (s32)PT_REGS_RC(ctx);
+	return hostent_exit(ctx, ret);
+}
+
 SEC("uprobe/getaddrinfo")
 int uprobe_getaddrinfo(struct pt_regs *ctx) {
 	struct pair_key key = make_pair_key(PAIR_GETADDRINFO);
@@ -521,8 +668,9 @@ int uretprobe_getaddrinfo(struct pt_regs *ctx) {
 	e->latency_ns = latency;
 	e->bytes = 0;
 	e->tcp_state = 0;
+	e->dns_transport = DNS_SOURCE_LIBC;
 	
-	s64 ret = PT_REGS_RC(ctx);
+	s64 ret = PT_REGS_RC_INT(ctx);
 	if (ret == 0) {
 		e->error = 0;
 	} else {

@@ -39,6 +39,8 @@ type Options struct {
 	AttributeCardinality int
 
 	KernelAggregation bool
+
+	DNSPacketCapture bool
 }
 
 // schedPreempted is the value bpf/cpu.c puts in TCPState when the task left
@@ -66,6 +68,8 @@ type Sink struct {
 
 	includePod     bool
 	includeProcess bool
+
+	dnsPacketCapture bool
 
 	traceContext func(*events.Event) bool
 
@@ -145,10 +149,13 @@ func New(reg prometheus.Registerer, opts Options) (*Sink, error) {
 		traceContext:   opts.TraceContext,
 		includePod:     opts.IncludePodLabel,
 		includeProcess: opts.IncludeProcessLabel,
-		seen:           make(map[string]*seriesEntry),
-		budget:         opts.SeriesBudget,
-		onExhausted:    opts.OnBudgetExhausted,
-		now:            clock,
+
+		dnsPacketCapture: opts.DNSPacketCapture,
+
+		seen:        make(map[string]*seriesEntry),
+		budget:      opts.SeriesBudget,
+		onExhausted: opts.OnBudgetExhausted,
+		now:         clock,
 	}, nil
 }
 
@@ -439,6 +446,10 @@ func (s *Sink) record(e *events.Event, base []string) bool {
 		return true
 	}
 
+	if e.Type == events.EventDNS && !e.CountsAsDNSLookup(s.dnsPacketCapture) {
+		return true
+	}
+
 	ex, _ := exemplarFor(e)
 
 	if e.IsError() {
@@ -501,7 +512,11 @@ func (s *Sink) record(e *events.Event, base []string) bool {
 		return true
 
 	case events.EventDNS:
-		s.observeExemplar(e, s.c.dnsLatency, "dns_latency_seconds", base, seconds, ex)
+		answer := e.DNSAnswer()
+		s.add(s.c.dnsLookups, "dns_lookups_total", appendLabels(base, answer), 1)
+		if answer != events.DNSAnswerTimeout {
+			s.observeExemplar(e, s.c.dnsLatency, "dns_latency_seconds", base, seconds, ex)
+		}
 		return true
 
 	case events.EventDNSQuery:

@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.27
+# syntax=docker/dockerfile:1.28
 #
 # Podtrace container image.
 #
@@ -11,7 +11,7 @@
 
 ARG GO_VERSION=1.27.1
 ARG DEBIAN_RELEASE=trixie
-ARG GO_IMAGE_DIGEST=sha256:0982f930de50a4f1a2b4453d51651f0031082ef2e3a25deb3c763fc39a1094a0
+ARG GO_IMAGE_DIGEST=sha256:8f58fd67ea075142d947a60e0caa4317746a55118d312f027793d382c7741734
 
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-${DEBIAN_RELEASE}@${GO_IMAGE_DIGEST} AS builder
 

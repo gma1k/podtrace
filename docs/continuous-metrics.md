@@ -461,6 +461,7 @@ duplicating what Prometheus already does correctly.
 | `podtrace_workload_network_device_errors_total` | Counter | — |
 | `podtrace_workload_network_rtt_seconds` | Histogram | — |
 | `podtrace_workload_dns_latency_seconds` | Histogram | — |
+| `podtrace_workload_dns_lookups_total` | Counter | `rcode` |
 | `podtrace_workload_filesystem_latency_seconds` | Histogram | `operation` |
 | `podtrace_workload_filesystem_bytes_total` | Counter | `operation` |
 | `podtrace_workload_cpu_blocked_seconds` | Histogram | — |
@@ -478,6 +479,30 @@ to `errors_total` with `kind="filesystem"`, except an open that found no file
 linked program makes several on every start. `kind` groups failures as `l7`, `dns`, `network`, `filesystem`,
 `tls`, `lock` or `other`. `outcome` is `ok` or `error`, and for
 `network_connections_total` also `unreachable` (see below).
+
+`rcode` is the answer a DNS lookup got: `NOERROR`, `NXDOMAIN`, `SERVFAIL`,
+`REFUSED`, `other` for any other rcode or resolver error, or `timeout` for a
+query still unanswered five seconds after its latest send. The set is fixed,
+so the label adds at most six series per workload. A failed lookup adds to
+`errors_total` with `kind="dns"`, except `NXDOMAIN`: a name that does not
+exist is an answer, and the `ndots:5` search path answers it several times on
+every lookup of a short name. A timeout has no answer time, so it is counted
+here and not in `dns_latency_seconds`.
+
+Both DNS families count each query on the wire once, read from the packets.
+A libc lookup is the same lookup seen a second time, and one call can stand
+for several queries, so it is counted only when packet capture is off
+(`TracerConfig.spec.agent.dnsPacketCapture: false`). libc's lookups are then
+read from `getaddrinfo`, `gethostbyname` and `gethostbyname2` and their `_r`
+forms; their results map onto the same answers. A name that does not exist
+(`EAI_NONAME`, `HOST_NOT_FOUND`) is `NXDOMAIN`, a name with no address of the
+asked family is `NOERROR`, and a temporary failure (`EAI_AGAIN`, `TRY_AGAIN`)
+is `SERVFAIL`, since libc reports a server failure and a timeout alike. A
+program that resolves on its own, such as busybox or Go's pure-Go resolver,
+calls none of them, so without packet capture its lookups are not seen; the
+agent says so in its log when it starts. A connection to an encrypted
+resolver (DoT, or DoH to a well-known resolver) is not a lookup: its answer
+cannot be read.
 
 `network_connections_total` is the denominator `errors_total` never had. A
 connection failure count on its own cannot say whether ten failures in a

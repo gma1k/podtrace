@@ -198,4 +198,50 @@ struct h3_stream_chunk {
 	char data[H3_CHUNK_DATA_MAX];
 };
 
+#define DNS_SOURCE_UDP       0
+#define DNS_SOURCE_TCP       1
+#define DNS_SOURCE_ENCRYPTED 2
+#define DNS_SOURCE_LIBC      3
+
+#define DNS_CLASS_NOERROR  0
+#define DNS_CLASS_NXDOMAIN 1
+#define DNS_CLASS_SERVFAIL 2
+#define DNS_CLASS_REFUSED  3
+#define DNS_CLASS_OTHER    4
+
+#define DNS_RCODE_SERVFAIL 2
+#define DNS_RCODE_NXDOMAIN 3
+#define DNS_RCODE_REFUSED  5
+
+#define EAI_NONAME -2
+#define EAI_AGAIN  -3
+#define EAI_NODATA -5
+
+static __always_inline u32 dns_answer_class(u8 source, s32 error)
+{
+	if (error == 0)
+		return DNS_CLASS_NOERROR;
+	if (source == DNS_SOURCE_LIBC) {
+		if (error == EAI_NONAME)
+			return DNS_CLASS_NXDOMAIN;
+		if (error == EAI_NODATA)
+			return DNS_CLASS_NOERROR;
+		if (error == EAI_AGAIN)
+			return DNS_CLASS_SERVFAIL;
+		return DNS_CLASS_OTHER;
+	}
+	if (error == DNS_RCODE_NXDOMAIN)
+		return DNS_CLASS_NXDOMAIN;
+	if (error == DNS_RCODE_SERVFAIL)
+		return DNS_CLASS_SERVFAIL;
+	if (error == DNS_RCODE_REFUSED)
+		return DNS_CLASS_REFUSED;
+	return DNS_CLASS_OTHER;
+}
+
+static __always_inline int dns_class_failed(u32 class)
+{
+	return class != DNS_CLASS_NOERROR && class != DNS_CLASS_NXDOMAIN;
+}
+
 #endif

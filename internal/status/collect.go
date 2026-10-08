@@ -106,6 +106,9 @@ func (c *Collector) Collect(ctx context.Context) (Report, error) {
 		s := AgentScrape{Agent: a, Err: res.err}
 		if res.err == nil {
 			s.Window = inspect.Window{Prev: prev[a.Name].snapshot, Cur: res.snapshot}
+			if live, err := c.Cluster.ActiveIssues(ctx, a); err == nil {
+				s.Live, s.LiveRead = live, true
+			}
 		}
 		scrapes = append(scrapes, s)
 	}

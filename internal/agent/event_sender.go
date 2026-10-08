@@ -48,11 +48,13 @@ func (s *alertEventSender) Send(ctx context.Context, alert *alerting.Alert) erro
 	return nil
 }
 
-// throttledDuplicate reports whether an identical (pod, source, severity)
-// alert was emitted within the throttle window, and otherwise records this
-// emission. It prunes stale keys opportunistically so the map is bounded.
+// throttledDuplicate reports whether an identical (pod, source, severity,
+// code) alert was emitted within the throttle window, and otherwise records
+// this emission. The code keeps two issues on one pod apart: each Event is
+// what a schedule selecting that issue starts a session from. It prunes stale
+// keys opportunistically so the map is bounded.
 func (s *alertEventSender) throttledDuplicate(alert *alerting.Alert, now time.Time) bool {
-	key := alert.Namespace + "/" + alert.PodName + "|" + alert.Source + "|" + string(alert.Severity)
+	key := alert.Namespace + "/" + alert.PodName + "|" + alert.Source + "|" + string(alert.Severity) + "|" + alert.ErrorCode
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if last, ok := s.last[key]; ok && now.Sub(last) < s.throttle {

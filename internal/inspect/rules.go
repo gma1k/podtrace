@@ -7,6 +7,7 @@ import (
 	"github.com/gma1k/podtrace/internal/alerting"
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/diagnose/detector"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 const (
@@ -22,6 +23,7 @@ const (
 	familyNetworkRTT      = "podtrace_workload_network_rtt_seconds"
 	familyDNSLatency      = "podtrace_workload_dns_latency_seconds"
 	familyFSLatency       = "podtrace_workload_filesystem_latency_seconds"
+	familyDNSLookups      = "podtrace_workload_dns_lookups_total"
 )
 
 // RuleFamilies is every family the built-in rules read, and nothing else.
@@ -39,6 +41,7 @@ func RuleFamilies() []string {
 		familyNetworkRTT,
 		familyDNSLatency,
 		familyFSLatency,
+		familyDNSLookups,
 	}
 }
 
@@ -75,6 +78,8 @@ type Thresholds struct {
 
 	FSSlowRatePercent float64
 
+	DNSFailureRatePercent float64
+
 	HoldTime time.Duration
 
 	HoldTimes map[detector.ID]time.Duration
@@ -100,6 +105,7 @@ func (t Thresholds) unset() bool {
 		t.DNSSlowRatePercent == 0 &&
 		t.FSSlowBound == 0 &&
 		t.FSSlowRatePercent == 0 &&
+		t.DNSFailureRatePercent == 0 &&
 		t.HoldTime == 0 &&
 		len(t.HoldTimes) == 0
 }
@@ -151,13 +157,10 @@ func DefaultThresholds() Thresholds {
 		DNSSlowBound:       100 * time.Millisecond,
 		DNSSlowRatePercent: 5,
 
-		// On a three-node kind cluster no workload's regular-file read,
-		// write or fsync took 1ms or longer over five minutes; means were
-		// 1-20µs, page cache and fsync on NVMe alike. 50ms is far above
-		// local storage and still above what network block storage
-		// takes, so 5% beyond it is storage in trouble, not a busy disk.
 		FSSlowBound:       50 * time.Millisecond,
 		FSSlowRatePercent: 5,
+
+		DNSFailureRatePercent: 5,
 	}
 }
 
@@ -174,6 +177,7 @@ func Rules() []Rule {
 		cpuContentionRule(),
 		dnsSlowLookupRule(),
 		fsSlowOperationsRule(),
+		dnsFailureRateRule(),
 	}
 }
 
@@ -870,5 +874,108 @@ func fsSlowOperationsRule() Rule {
 			}
 			return issues
 		},
+	}
+}
+
+// dnsFailureRateRule fires when too large a share of a workload's DNS
+// lookups fail: a server failure, a refusal, another error rcode, or no
+// answer at all.
+func dnsFailureRateRule() Rule {
+	return Rule{
+		ID:  detector.IDDNSFailureRate,
+		For: 3 * time.Minute,
+		Query: `100 * sum by (namespace, workload) (rate(podtrace_workload_dns_lookups_total{rcode!~"NOERROR|NXDOMAIN"}[5m]))
+  / sum by (namespace, workload) (rate(podtrace_workload_dns_lookups_total[5m]))`,
+		Eval: func(w Window, t Thresholds) []detector.Issue {
+			if !w.Ready() || t.DNSFailureRatePercent <= 0 {
+				return nil
+			}
+			interval := w.Interval()
+
+			byWorkload := map[string]*workloadTotals{}
+			failedBy := map[string]map[string]float64{}
+			for _, d := range w.Deltas(familyDNSLookups) {
+				if d.Reset {
+					continue
+				}
+				key := d.Sample.Namespace + "/" + d.Sample.Workload
+				agg, ok := byWorkload[key]
+				if !ok {
+					agg = &workloadTotals{sample: d.Sample}
+					byWorkload[key] = agg
+					failedBy[key] = map[string]float64{}
+				}
+				agg.value += d.Value
+				if answer := d.Sample.Label("rcode"); events.DNSAnswerFailed(answer) {
+					agg.errors += d.Value
+					failedBy[key][answer] += d.Value
+				}
+			}
+
+			var issues []detector.Issue
+			for key, agg := range byWorkload {
+				if agg.value == 0 {
+					continue
+				}
+				perSecond := agg.value / interval.Seconds()
+				if perSecond < t.MinRequestsPerSecond {
+					continue
+				}
+				rate := agg.errors / agg.value * 100
+				if rate <= t.DNSFailureRatePercent {
+					continue
+				}
+				s := agg.sample
+				top := topDNSFailure(failedBy[key])
+				issues = append(issues, detector.Issue{
+					ID:       detector.IDDNSFailureRate,
+					Severity: alerting.SeverityWarning,
+					Subject: detector.Subject{
+						Namespace: s.Namespace,
+						Workload:  s.Workload,
+					},
+					Evidence: []detector.Evidence{
+						detector.NewEvidence("failure_rate", rate, t.DNSFailureRatePercent, "%"),
+						detector.NewEvidence("failed_lookups", agg.errors, 0, "count"),
+						detector.NewEvidence("total_lookups", agg.value, 0, "count"),
+						detector.NewEvidence("lookup_rate", perSecond, t.MinRequestsPerSecond, "/s"),
+					},
+					Remediation: remediationForDNSFailure(top),
+					Message: fmt.Sprintf("DNS lookups failing for %s/%s: %.1f%% of %.0f lookups, mostly %s (threshold: %.1f%%)",
+						s.Namespace, s.Workload, rate, agg.value, top, t.DNSFailureRatePercent),
+				})
+			}
+			return issues
+		},
+	}
+}
+
+// topDNSFailure names the failure with the most lookups, the first by name
+// on a tie, so the message is stable.
+func topDNSFailure(failed map[string]float64) string {
+	top, most := "", -1.0
+	for answer, n := range failed {
+		if n > most || (n == most && answer < top) {
+			top, most = answer, n
+		}
+	}
+	return top
+}
+
+// remediationForDNSFailure points at where each kind of failure is fixed.
+func remediationForDNSFailure(answer string) string {
+	switch answer {
+	case events.DNSAnswerTimeout:
+		return "Queries get no answer: check that CoreDNS (or the node-local cache) is running and " +
+			"reachable, that no NetworkPolicy blocks port 53, and for conntrack races on UDP " +
+			"(the five-second stall); the query's server is in the DNS event."
+	case events.DNSAnswerServFail:
+		return "The resolver could not answer: check CoreDNS's logs and its upstream resolvers, " +
+			"since a SERVFAIL is usually the upstream timing out or failing DNSSEC."
+	case events.DNSAnswerRefused:
+		return "The server refused the query: check that the workload asks the cluster resolver " +
+			"and that the server allows recursion for it."
+	default:
+		return "Check CoreDNS's logs for the rcode, and the workload's resolver configuration."
 	}
 }

@@ -11,8 +11,11 @@ func TestDNSStructLayout(t *testing.T) {
 	if got := unsafe.Sizeof(dnsFlowKey{}); got != 16 {
 		t.Errorf("dnsFlowKey size = %d, want 16 (u64 cgroup_id + u32 txid + u32 pad)", got)
 	}
-	if got := unsafe.Sizeof(dnsQueryState{}); got != 184 {
-		t.Errorf("dnsQueryState size = %d, want 184", got)
+	if got := unsafe.Sizeof(dnsQueryState{}); got != 192 {
+		t.Errorf("dnsQueryState size = %d, want 192", got)
+	}
+	if got := unsafe.Offsetof(dnsQueryState{}.LastNS); got != 184 {
+		t.Errorf("dnsQueryState.LastNS offset = %d, want 184", got)
 	}
 }
 

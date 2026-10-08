@@ -30,6 +30,8 @@ const (
 	IDDNSSlowLookupRate ID = "dns.slow_lookup_rate"
 
 	IDFSSlowOperations ID = "fs.slow_operations"
+
+	IDDNSFailureRate ID = "dns.failure_rate"
 )
 
 // Registry is the documented issue vocabulary. Every ID the detector or the
@@ -45,6 +47,7 @@ var Registry = []ID{
 	IDCPUContention,
 	IDDNSSlowLookupRate,
 	IDFSSlowOperations,
+	IDDNSFailureRate,
 }
 
 // Subject is what an issue is about.

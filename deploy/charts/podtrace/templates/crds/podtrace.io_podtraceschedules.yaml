@@ -575,6 +575,7 @@ spec:
                           - cpu.contention
                           - dns.slow_lookup_rate
                           - fs.slow_operations
+                          - dns.failure_rate
                           type: string
                         kind:
                           description: |-

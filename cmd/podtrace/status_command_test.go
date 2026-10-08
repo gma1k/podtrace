@@ -70,6 +70,10 @@ func (f *statusFake) ProfileStacks(_ context.Context, _ status.Agent, _ status.S
 
 func (f *statusFake) IssueEvents(context.Context, string) ([]corev1.Event, error) { return nil, nil }
 
+func (f *statusFake) ActiveIssues(context.Context, status.Agent) ([]status.LiveIssue, error) {
+	return nil, errors.New("404 page not found")
+}
+
 func (f *statusFake) Components(context.Context) ([]status.Component, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

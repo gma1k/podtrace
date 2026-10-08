@@ -162,6 +162,8 @@ func (e *Event) IsError() bool {
 		return false
 	case EventOpen:
 		return e.Error != 0 && e.Error != -errnoENOENT
+	case EventDNS:
+		return e.IsDNSLookup() && DNSAnswerFailed(e.DNSAnswer())
 	default:
 		return e.Error != 0
 	}
@@ -386,6 +388,99 @@ func dnsServerStr(e *Event) string {
 // DNSQueryType returns the DNS query-type mnemonic (A, AAAA, …) for an
 // EVENT_DNS event; the numeric qtype is carried in TCPState.
 func (e *Event) DNSQueryType() string { return dnsQTypeName(e.TCPState) }
+
+// Where an EVENT_DNS came from, carried in DNSTransport; mirrors the
+// DNS_SOURCE_* values in bpf/events.h.
+const (
+	DNSSourceUDP       uint8 = 0
+	DNSSourceTCP       uint8 = 1
+	DNSSourceEncrypted uint8 = 2
+	DNSSourceLibc      uint8 = 3
+)
+
+const DNSErrorTimeout int32 = -110
+
+// The answers a lookup is classed by, in podtrace_workload_dns_lookups_total's
+// rcode label: a small fixed set, so the label stays bounded.
+const (
+	DNSAnswerNoError  = "NOERROR"
+	DNSAnswerNXDomain = "NXDOMAIN"
+	DNSAnswerServFail = "SERVFAIL"
+	DNSAnswerRefused  = "REFUSED"
+	DNSAnswerOther    = "other"
+	DNSAnswerTimeout  = "timeout"
+)
+
+// dnsAnswerByClass is indexed by the answer class bpf/events.h carries in a
+// kernel-aggregated row's status-class slot.
+var dnsAnswerByClass = [...]string{
+	DNSAnswerNoError, DNSAnswerNXDomain, DNSAnswerServFail, DNSAnswerRefused, DNSAnswerOther,
+}
+
+// DNSAnswerOfClass names the answer class of a kernel-aggregated DNS row.
+func DNSAnswerOfClass(class uint8) string {
+	if int(class) < len(dnsAnswerByClass) {
+		return dnsAnswerByClass[class]
+	}
+	return DNSAnswerOther
+}
+
+const (
+	dnsRCodeServFail = 2
+	dnsRCodeNXDomain = 3
+	dnsRCodeRefused  = 5
+
+	eaiNoName = -2
+	eaiAgain  = -3
+	eaiNoData = -5
+)
+
+// DNSAnswer classes an EVENT_DNS's answer as dns_answer_class in
+// bpf/events.h does, plus a timeout.
+func (e *Event) DNSAnswer() string {
+	switch {
+	case e.Error == 0:
+		return DNSAnswerNoError
+	case e.Error == DNSErrorTimeout:
+		return DNSAnswerTimeout
+	case e.DNSTransport == DNSSourceLibc:
+		switch e.Error {
+		case eaiNoName:
+			return DNSAnswerNXDomain
+		case eaiNoData:
+			return DNSAnswerNoError
+		case eaiAgain:
+			return DNSAnswerServFail
+		}
+		return DNSAnswerOther
+	}
+	switch e.Error {
+	case dnsRCodeNXDomain:
+		return DNSAnswerNXDomain
+	case dnsRCodeServFail:
+		return DNSAnswerServFail
+	case dnsRCodeRefused:
+		return DNSAnswerRefused
+	}
+	return DNSAnswerOther
+}
+
+// DNSAnswerFailed reports whether an answer is a failure.
+func DNSAnswerFailed(answer string) bool {
+	return answer != DNSAnswerNoError && answer != DNSAnswerNXDomain
+}
+
+// IsDNSLookup reports whether e is a DNS lookup with an answer to class: an
+// encrypted resolver's answer cannot be read, so its events are connections,
+// not lookups.
+func (e *Event) IsDNSLookup() bool {
+	return e.Type == EventDNS && e.DNSTransport != DNSSourceEncrypted
+}
+
+// CountsAsDNSLookup reports whether e counts in DNS lookup totals.
+func (e *Event) CountsAsDNSLookup(packetCapture bool) bool {
+	return e.IsDNSLookup() && (!packetCapture || e.DNSTransport != DNSSourceLibc)
+}
 
 // DNSResponseCode returns the DNS response-code mnemonic (NOERROR, NXDOMAIN, …)
 // for an EVENT_DNS event; the numeric rcode is carried in Error.
