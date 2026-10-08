@@ -1166,6 +1166,16 @@ spec:
                                 maximum: 100
                                 minimum: 1
                                 type: integer
+                              tlsHandshakeFailurePercent:
+                                description: |-
+                                  TLSHandshakeFailurePercent is the share of a workload's TLS handshakes
+                                  that fail above which tls.handshake_failure_rate fires. Only
+                                  handshakes through Go's crypto/tls, OpenSSL, LibreSSL, BoringSSL,
+                                  GnuTLS and mbedTLS are seen.
+                                format: int32
+                                maximum: 100
+                                minimum: 1
+                                type: integer
                             type: object
                         type: object
                       kernelAggregation:

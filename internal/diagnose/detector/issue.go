@@ -32,6 +32,8 @@ const (
 	IDFSSlowOperations ID = "fs.slow_operations"
 
 	IDDNSFailureRate ID = "dns.failure_rate"
+
+	IDTLSHandshakeFailureRate ID = "tls.handshake_failure_rate"
 )
 
 // Registry is the documented issue vocabulary. Every ID the detector or the
@@ -48,6 +50,7 @@ var Registry = []ID{
 	IDDNSSlowLookupRate,
 	IDFSSlowOperations,
 	IDDNSFailureRate,
+	IDTLSHandshakeFailureRate,
 }
 
 // Subject is what an issue is about.

@@ -61,6 +61,11 @@ type AgentInspectionThresholdsSpecApplyConfiguration struct {
 	// (SERVFAIL, REFUSED, another error rcode, or no answer) above which
 	// dns.failure_rate fires. NXDOMAIN is an answer and never counts.
 	DNSFailurePercent *int32 `json:"dnsFailurePercent,omitempty"`
+	// TLSHandshakeFailurePercent is the share of a workload's TLS handshakes
+	// that fail above which tls.handshake_failure_rate fires. Only
+	// handshakes through Go's crypto/tls, OpenSSL, LibreSSL, BoringSSL,
+	// GnuTLS and mbedTLS are seen.
+	TLSHandshakeFailurePercent *int32 `json:"tlsHandshakeFailurePercent,omitempty"`
 }
 
 // AgentInspectionThresholdsSpecApplyConfiguration constructs a declarative configuration of the AgentInspectionThresholdsSpec type for use with
@@ -138,5 +143,13 @@ func (b *AgentInspectionThresholdsSpecApplyConfiguration) WithFSSlowOperationsPe
 // If called multiple times, the DNSFailurePercent field is set to the value of the last call.
 func (b *AgentInspectionThresholdsSpecApplyConfiguration) WithDNSFailurePercent(value int32) *AgentInspectionThresholdsSpecApplyConfiguration {
 	b.DNSFailurePercent = &value
+	return b
+}
+
+// WithTLSHandshakeFailurePercent sets the TLSHandshakeFailurePercent field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the TLSHandshakeFailurePercent field is set to the value of the last call.
+func (b *AgentInspectionThresholdsSpecApplyConfiguration) WithTLSHandshakeFailurePercent(value int32) *AgentInspectionThresholdsSpecApplyConfiguration {
+	b.TLSHandshakeFailurePercent = &value
 	return b
 }

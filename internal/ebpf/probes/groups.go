@@ -95,9 +95,11 @@ var probeGroupMap = map[string]ProbeGroup{
 	"uretprobe_gnutls_record_recv": GroupTLS,
 
 	// Go crypto/tls (statically-linked Go HTTPS)
-	"uprobe_go_tls_write":    GroupTLS,
-	"uprobe_go_tls_read":     GroupTLS,
-	"uprobe_go_tls_read_ret": GroupTLS,
+	"uprobe_go_tls_write":         GroupTLS,
+	"uprobe_go_tls_read":          GroupTLS,
+	"uprobe_go_tls_read_ret":      GroupTLS,
+	"uprobe_go_tls_handshake":     GroupTLS,
+	"uprobe_go_tls_handshake_ret": GroupTLS,
 
 	// Database
 	"uprobe_PQexec":    GroupDatabase,

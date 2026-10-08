@@ -19,17 +19,18 @@ type Trigger struct {
 
 // issueSections names the report section that holds each issue's evidence.
 var issueSections = map[detector.ID]string{
-	detector.IDConnectionFailureRate: "Connection Statistics",
-	detector.IDRTTSpikeRate:          "TCP Statistics",
-	detector.IDResourceSaturation:    "Resource Limits Statistics",
-	detector.IDL7ErrorRate:           "HTTP Statistics",
-	detector.IDL7LatencyDegraded:     "HTTP Statistics",
-	detector.IDDBAcquireSlow:         "Connection Pool Statistics",
-	detector.IDDBPoolSaturated:       "Connection Pool Statistics",
-	detector.IDCPUContention:         "CPU Statistics",
-	detector.IDDNSSlowLookupRate:     "DNS Statistics",
-	detector.IDFSSlowOperations:      "File System Statistics",
-	detector.IDDNSFailureRate:        "DNS Statistics",
+	detector.IDConnectionFailureRate:   "Connection Statistics",
+	detector.IDRTTSpikeRate:            "TCP Statistics",
+	detector.IDResourceSaturation:      "Resource Limits Statistics",
+	detector.IDL7ErrorRate:             "HTTP Statistics",
+	detector.IDL7LatencyDegraded:       "HTTP Statistics",
+	detector.IDDBAcquireSlow:           "Connection Pool Statistics",
+	detector.IDDBPoolSaturated:         "Connection Pool Statistics",
+	detector.IDCPUContention:           "CPU Statistics",
+	detector.IDDNSSlowLookupRate:       "DNS Statistics",
+	detector.IDFSSlowOperations:        "File System Statistics",
+	detector.IDDNSFailureRate:          "DNS Statistics",
+	detector.IDTLSHandshakeFailureRate: "TLS Statistics",
 }
 
 // GenerateTriggerSection opens the report of a session an issue started: what

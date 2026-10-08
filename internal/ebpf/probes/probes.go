@@ -1906,6 +1906,7 @@ func AttachTLSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint3
 		"SSL_accept":            {"uprobe_SSL_accept", "uretprobe_SSL_accept"},
 		"SSL_do_handshake":      {"uprobe_SSL_do_handshake", "uretprobe_SSL_do_handshake"},
 		"SSL_get_error":         {"uprobe_SSL_get_error", "uretprobe_SSL_get_error"},
+		"SSL_free":              {"uprobe_SSL_free", ""},
 		"gnutls_handshake":      {"uprobe_gnutls_handshake", "uretprobe_gnutls_handshake"},
 		"mbedtls_ssl_handshake": {"uprobe_mbedtls_ssl_handshake", "uretprobe_mbedtls_ssl_handshake"},
 		"SSL_write":             {"uprobe_SSL_write", ""},
@@ -1993,6 +1994,7 @@ func AttachGoTLSProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 			zap.String("path", exePath), zap.Error(err))
 		return links
 	}
+	links = append(links, attachGoHandshakeProbes(coll, exe, exePath, pid)...)
 	const sym = "crypto/tls.(*Conn).Write"
 	l, err := exe.Uprobe(sym, prog, nil)
 	if err != nil {
@@ -2013,6 +2015,55 @@ func AttachGoTLSProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 	logger.Debug("Go TLS uprobe attached", zap.Uint32("pid", pid))
 
 	links = append(links, attachGoTLSReadProbes(coll, exe, exePath, pid)...)
+	return links
+}
+
+// goHandshakeFuncs are the crypto/tls functions that run a handshake that
+// actually happens.
+var goHandshakeFuncs = []string{
+	"crypto/tls.(*Conn).clientHandshake",
+	"crypto/tls.(*Conn).serverHandshake",
+}
+
+var goFuncReturns = goFuncReturnOffsets
+
+// attachGoHandshakeProbes attaches, for each handshake function, an entry
+// uprobe and one on every RET: a uretprobe is unsafe in Go, whose goroutine
+// stacks move.
+func attachGoHandshakeProbes(coll *ebpf.Collection, exe uprobeTarget, exePath string, pid uint32) []link.Link {
+	entryProg, retProg := coll.Programs["uprobe_go_tls_handshake"], coll.Programs["uprobe_go_tls_handshake_ret"]
+	if entryProg == nil || retProg == nil {
+		return nil
+	}
+	var links []link.Link
+	for _, sym := range goHandshakeFuncs {
+		entryOff, retOffs, ok := goFuncReturns(exePath, sym)
+		if !ok {
+			logger.Debug("Go TLS handshake probe: symbol not resolved",
+				zap.String("symbol", sym), zap.Uint32("pid", pid))
+			continue
+		}
+		var rets []link.Link
+		for _, ro := range retOffs {
+			if rl, err := exe.Uprobe("", retProg, &link.UprobeOptions{Address: ro}); err == nil {
+				rets = append(rets, rl)
+			}
+		}
+		if len(rets) == 0 {
+			continue
+		}
+		el, err := exe.Uprobe("", entryProg, &link.UprobeOptions{Address: entryOff})
+		if err != nil {
+			for _, l := range rets {
+				_ = l.Close()
+			}
+			continue
+		}
+		links = append(append(links, rets...), el)
+	}
+	if len(links) > 0 {
+		logger.Debug("Go TLS handshake uprobes attached", zap.Uint32("pid", pid), zap.Int("links", len(links)))
+	}
 	return links
 }
 

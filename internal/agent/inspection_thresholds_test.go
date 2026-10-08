@@ -58,4 +58,8 @@ func TestRuntimeThresholdsMatchTheShippedDefaults(t *testing.T) {
 		t.Errorf("DNS failures fire at %v%% at runtime, defaults say %v%%",
 			got.DNSFailureRatePercent, defaults.DNSFailureRatePercent)
 	}
+	if got.TLSHandshakeFailurePercent != defaults.TLSHandshakeFailurePercent {
+		t.Errorf("TLS handshake failures fire at %v%% at runtime, defaults say %v%%",
+			got.TLSHandshakeFailurePercent, defaults.TLSHandshakeFailurePercent)
+	}
 }

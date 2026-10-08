@@ -93,6 +93,42 @@ of large requests.
 | `dns.slow_lookup_rate` | more than 5% of the workload's DNS lookups answer slower than 100ms, at 0.1 lookups per second or more | 3m |
 | `fs.slow_operations` | more than 5% of the workload's regular-file reads, writes and fsyncs take longer than 50ms, at 0.1 operations per second or more | 3m |
 | `dns.failure_rate` | more than 5% of the workload's DNS lookups fail (SERVFAIL, REFUSED, another error rcode, or no answer at all), at 0.1 lookups per second or more; NXDOMAIN is an answer and never counts | 3m |
+| `tls.handshake_failure_rate` | more than 5% of the workload's TLS handshakes fail, at 0.1 handshakes per second or more; only handshakes through Go's `crypto/tls`, OpenSSL, LibreSSL, BoringSSL (gRPC-Java's netty-tcnative included), GnuTLS and mbedTLS are seen | 3m |
+
+### TLS: failed handshakes, from the C libraries
+
+`tls.handshake_failure_rate` divides `errors_total{kind="tls"}` by every
+handshake in `podtrace_workload_tls_handshake_duration_seconds`, failed ones
+included. A handshake is counted once, by its outcome: OpenSSL's non-blocking
+handshake returns below zero on every round trip it waits for, and only the
+`SSL_get_error` that follows tells a wait from a failure, so a wait is
+dropped and a fatal error is the one failure. With kernel aggregation on, in
+either mode the agent uses, a failed handshake reaches the counter through
+the error bit of its aggregated row; a kernel test drives a real `curl`
+through one refused and one accepted handshake and checks both.
+
+A library that decides the handshake itself can abandon it without OpenSSL
+ever reporting an error. netty-tcnative, the BoringSSL that gRPC-Java and
+Netty ship, verifies the peer's certificate in Java: on a certificate it
+rejects, every `SSL_do_handshake` returns a wait, and the connection is
+freed mid-handshake. So each connection's handshake is tracked from its first
+call until it is decided, and an `SSL_free` of one that never was is one
+failure. A handshake is also decided only once per connection, since netty
+calls `SSL_do_handshake` again on a connection that is already up.
+
+The handshakes are those of Go's `crypto/tls`, OpenSSL (and LibreSSL and
+BoringSSL), GnuTLS and mbedTLS. A Go handshake is probed at the entry of
+`(*Conn).clientHandshake` and `(*Conn).serverHandshake` and at every return
+in them, keyed by its goroutine since a handshake that waits on the network
+can resume on another thread; `(*Conn).Handshake` is not used, since every
+`Read` and `Write` calls it. Java's JSSE and rustls handshake without any of
+these, so a workload built on them has no handshakes here and the rule never
+fires for it.
+
+The failures are the usual suspects: a certificate that expired or that the
+client does not trust, a name that does not match, no TLS version or cipher
+in common, or a client speaking TLS to a plaintext port. The session report's
+TLS section lists the processes whose handshakes failed.
 
 ### DNS: a share of slow lookups, not a mean
 
@@ -269,6 +305,7 @@ agent:
         dnsSlowLookupPercent: 5
         fsSlowOperationsPercent: 5
         dnsFailurePercent: 5
+        tlsHandshakeFailurePercent: 5
 ```
 
 `poolUtilizationPercent` is the warning band for `db.pool_saturated`; it
