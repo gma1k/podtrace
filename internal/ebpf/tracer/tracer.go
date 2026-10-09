@@ -135,6 +135,7 @@ type Tracer struct {
 	profilingCtrl                 ProfilingController
 
 	stopCancel context.CancelFunc
+	stopOnce   sync.Once
 	readerWG   sync.WaitGroup
 }
 
@@ -719,6 +720,7 @@ func NewTracer(tracerOpts ...Option) (*Tracer, error) {
 	pruneL7ProbesIfNoBPFLoop(spec)
 	pruneOnCPUTaskRegsIfUnsupported(spec)
 	pruneFSTracingIfUnsupported(spec, kspec != nil)
+	pruneReturnTracingIfUnsupported(spec, kspec != nil)
 
 	HaveSkStorageCrossContext()
 
@@ -2475,7 +2477,14 @@ func (t *Tracer) runQUICInitialReader(ctx context.Context, eventChan chan<- *eve
 	}
 }
 
+// Stop tears the tracer down. Only the first call does anything, so a
+// shutdown path and a deferred cleanup can both call it.
 func (t *Tracer) Stop() error {
+	t.stopOnce.Do(t.stop)
+	return nil
+}
+
+func (t *Tracer) stop() {
 	if t.stopCancel != nil {
 		t.stopCancel()
 	}
@@ -2540,8 +2549,6 @@ func (t *Tracer) Stop() error {
 	if t.resourceMgr != nil {
 		t.resourceMgr.stopAll()
 	}
-
-	return nil
 }
 
 func isLikelyTransientComm(name string) bool {

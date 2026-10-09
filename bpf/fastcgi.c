@@ -34,8 +34,7 @@ int kprobe_unix_stream_recvmsg(struct pt_regs *ctx)
 	return 0;
 }
 
-SEC("kretprobe/unix_stream_recvmsg")
-int kretprobe_unix_stream_recvmsg(struct pt_regs *ctx)
+static __always_inline int unix_stream_recvmsg_return(void *ctx, long rc)
 {
 	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
@@ -46,7 +45,7 @@ int kretprobe_unix_stream_recvmsg(struct pt_regs *ctx)
 	u64 user_ptr = *user_ptr_stored;
 	bpf_map_delete_elem(&recvmsg_args, &key);
 
-	long rc_bytes = PT_REGS_RC_INT(ctx);
+	long rc_bytes = (int)rc;
 	if (rc_bytes <= 0 || !user_ptr) return 0;
 
 	u16 request_id;
@@ -205,6 +204,21 @@ emit_params: ;
 	e->tcp_state  = 0;
 	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	return 0;
+}
+
+SEC("kretprobe/unix_stream_recvmsg")
+int kretprobe_unix_stream_recvmsg(struct pt_regs *ctx)
+{
+	long rc = PT_REGS_RC(ctx);
+	return unix_stream_recvmsg_return(ctx, rc);
+}
+
+SEC("fexit/unix_stream_recvmsg")
+int fexit_unix_stream_recvmsg(u64 *ctx)
+{
+	u64 rc = 0;
+	bpf_get_func_ret(ctx, &rc);
+	return unix_stream_recvmsg_return(ctx, (long)rc);
 }
 
 

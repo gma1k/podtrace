@@ -18,6 +18,7 @@
 #endif
 
 #define POOL_STATS_INTERVAL_NS (1000ULL * 1000ULL * 1000ULL)
+#define POOL_SAMPLE_ONE (1ULL << 32)
 
 
 #ifdef GO_ACQUIRE_SUPPORTED
@@ -34,18 +35,21 @@ static __always_inline void emit_pool_stats(struct pt_regs *ctx, u64 now)
 	if (db == 0)
 		return;
 
-	s64 num_open = 0, max_open = 0;
+	s64 num_open = 0, max_open = 0, idle = 0;
 	if (bpf_probe_read_user(&num_open, sizeof(num_open), (void *)(db + off->num_open)) != 0)
 		return;
 	if (bpf_probe_read_user(&max_open, sizeof(max_open), (void *)(db + off->max_open)) != 0)
 		return;
+	if (bpf_probe_read_user(&idle, sizeof(idle), (void *)(db + off->free_conn + 8)) != 0)
+		return;
 
-	if (num_open < 0 || max_open < 0 || num_open > 1000000 || max_open > 1000000)
+	if (num_open < 0 || max_open < 0 || idle < 0 ||
+	    num_open > 1000000 || max_open > 1000000 || idle > num_open)
 		return;
 
 	u32 pct = 0;
 	if (max_open > 0) {
-		pct = (u32)((num_open * 100) / max_open);
+		pct = (u32)(((u64)(num_open - idle) * 100) / (u64)max_open);
 		if (pct > 100)
 			pct = 100;
 	}
@@ -54,26 +58,32 @@ static __always_inline void emit_pool_stats(struct pt_regs *ctx, u64 now)
 	if (!s) {
 		struct pool_sample fresh = {};
 		fresh.last_emit_ns = now;
-		bpf_map_update_elem(&pool_samples, &tgid, &fresh, BPF_ANY);
-	} else {
-		if ((u32)num_open > s->peak_open) {
-			s->peak_open = (u32)num_open;
-			s->peak_pct = pct;
-			s->peak_max_open = (u32)max_open;
-		}
-		if (now <= s->last_emit_ns || (now - s->last_emit_ns) < POOL_STATS_INTERVAL_NS)
-			return;
-
-		if (s->peak_open > (u32)num_open) {
-			num_open = s->peak_open;
-			pct = s->peak_pct;
-			max_open = s->peak_max_open;
-		}
-		s->last_emit_ns = now;
-		s->peak_open = 0;
-		s->peak_pct = 0;
-		s->peak_max_open = 0;
+		fresh.acc = POOL_SAMPLE_ONE | pct;
+		fresh.peak_open = (u32)num_open;
+		fresh.max_open = (u32)max_open;
+		bpf_map_update_elem(&pool_samples, &tgid, &fresh, BPF_NOEXIST);
+		return;
 	}
+
+	__sync_fetch_and_add(&s->acc, POOL_SAMPLE_ONE | pct);
+	if ((u32)num_open > s->peak_open)
+		s->peak_open = (u32)num_open;
+	s->max_open = (u32)max_open;
+	if (now <= s->last_emit_ns || (now - s->last_emit_ns) < POOL_STATS_INTERVAL_NS)
+		return;
+	s->last_emit_ns = now;
+
+	u64 taken = s->acc;
+	__sync_fetch_and_add(&s->acc, -taken);
+	u32 samples = (u32)(taken >> 32);
+	if (samples == 0)
+		return;
+	u32 mean = (u32)((taken & 0xffffffffULL) / samples);
+	if (mean > 100)
+		mean = 100;
+	u32 open = s->peak_open;
+	u32 max = s->max_open;
+	s->peak_open = 0;
 
 	struct event *e = get_event_buf();
 	if (!e)
@@ -82,9 +92,9 @@ static __always_inline void emit_pool_stats(struct pt_regs *ctx, u64 now)
 	e->timestamp = now;
 	e->pid = agent_ns_tgid();
 	e->type = EVENT_DB_POOL_STATS;
-	e->error = (s32)pct;
-	e->bytes = (u64)num_open;
-	e->tcp_state = (u32)max_open;
+	e->error = (s32)mean;
+	e->bytes = (u64)open;
+	e->tcp_state = max;
 
 	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 }

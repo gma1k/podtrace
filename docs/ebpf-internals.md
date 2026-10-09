@@ -156,6 +156,17 @@ Kprobes attach to kernel functions:
   - Entry: Record start time
   - Return: Calculate RTT/latency
 
+**Return probes on functions a task waits in:** `tcp_recvmsg`,
+`tcp_sendmsg`, `udp_recvmsg`, `udp_sendmsg`, `unix_stream_recvmsg` and
+`do_futex` return through fexit where the kernel can load it (5.17+ with
+BTF: it needs `bpf_get_func_ret`), and through a kretprobe otherwise; the
+agent logs each one that falls back, and why. A kretprobe keeps one instance per task inside the
+function, from a pool of about twice the CPU count, and every thread blocked
+in a read or parked on a lock holds one. On a busy node the pool runs dry and
+returns are dropped without a trace, so a request that began is never seen
+to end. An fexit trampoline has no pool. Each of these return probes is
+built twice from one body, so both report the same thing.
+
 **File System Tracing:**
 - `vfs_read` / `vfs_write`: fentry/fexit where the kernel supports them
   (5.11+ with BTF), kprobe/kretprobe otherwise; the agent logs which.

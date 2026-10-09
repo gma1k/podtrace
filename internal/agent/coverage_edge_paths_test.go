@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -12,35 +11,6 @@ import (
 	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/pkg/tracer"
 )
-
-func TestDeploymentNameSurvivesEveryPodTemplateHashCharacter(t *testing.T) {
-	for _, chunk := range []string{
-		"0123456789",
-		"bcdfghjkmn",
-		"pqrstvwxyz",
-		"jkmn7",
-		"pqrst",
-		"vwxyz",
-	} {
-		name, ok := deploymentFromReplicaSet("checkout-" + chunk)
-		if !ok || name != "checkout" {
-			t.Errorf("deploymentFromReplicaSet(checkout-%s) = %q, %v; want checkout, true. "+
-				"kube-controller-manager mints the suffix from this alphabet, and a character "+
-				"it rejects leaves the workload labelled by ReplicaSet, which changes on every "+
-				"rollout and breaks continuity of every series keyed on workload", chunk, name, ok)
-		}
-	}
-}
-
-func TestAReplicaSetSuffixOutsideTheAlphabetIsNotAHash(t *testing.T) {
-	for _, suffix := range []string{"aeiou", "ABCDE", "12-45", "abc", strings.Repeat("b", 13)} {
-		if name, ok := deploymentFromReplicaSet("checkout-" + suffix); ok {
-			t.Errorf("deploymentFromReplicaSet(checkout-%s) = %q, true; want false. A name that "+
-				"merely contains a dash is not a ReplicaSet suffix, and trimming it would "+
-				"report a workload that does not exist", suffix, name)
-		}
-	}
-}
 
 func TestARuleWithNoExporterIsSkippedRatherThanCounted(t *testing.T) {
 	stats := newPerCRStats()

@@ -52,6 +52,8 @@ type Engine struct {
 	pending map[string]time.Time
 	active  map[string]detector.Issue
 	since   map[string]time.Time
+	causes  map[detector.IssueRef][]detector.Cause
+	edges   []Edge
 
 	issueActive   *prometheus.GaugeVec
 	evaluations   prometheus.Counter
@@ -149,10 +151,17 @@ func (e *Engine) Active() []detector.Issue {
 }
 
 // ActiveIssue is a firing issue as of the latest evaluation, with the time
-// it activated.
+// it activated and its likely causes among the issues active with it.
 type ActiveIssue struct {
 	detector.Issue
 	Since time.Time
+}
+
+// Edges returns the workload-to-Service calls the latest evaluation saw.
+func (e *Engine) Edges() []Edge {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]Edge(nil), e.edges...)
 }
 
 // ActiveIssues returns the firing issues as the latest evaluation saw them:
@@ -163,6 +172,7 @@ func (e *Engine) ActiveIssues() []ActiveIssue {
 	defer e.mu.Unlock()
 	out := make([]ActiveIssue, 0, len(e.active))
 	for key, issue := range e.active {
+		issue.Causes = e.causes[issue.Ref()]
 		out = append(out, ActiveIssue{Issue: issue, Since: e.since[key]})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key() < out[j].Key() })
@@ -207,10 +217,25 @@ func (e *Engine) Evaluate() ([]detector.Issue, error) {
 	}
 
 	e.mu.Lock()
-	activated, notify := e.applyHoldTime(firing, forDuration, now)
-	notify = append(notify, e.clearResolved(firing)...)
+	activated := e.applyHoldTime(firing, forDuration, now)
+	cleared := e.clearResolved(firing)
+	e.causes = localCauses(e.active)
+	e.edges = Edges(window)
+	for i := range activated {
+		activated[i].Causes = e.causes[activated[i].Ref()]
+	}
 	e.trackedActive.Set(float64(len(e.active)))
 	e.mu.Unlock()
+
+	var notify []func()
+	if e.observer != nil {
+		for _, issue := range activated {
+			notify = append(notify, func() { e.observer.IssueActivated(issue) })
+		}
+		for _, issue := range cleared {
+			notify = append(notify, func() { e.observer.IssueCleared(issue) })
+		}
+	}
 
 	for _, n := range notify {
 		n()
@@ -219,10 +244,9 @@ func (e *Engine) Evaluate() ([]detector.Issue, error) {
 }
 
 // applyHoldTime promotes conditions that have held long enough and keeps an
-// active issue current.
-func (e *Engine) applyHoldTime(firing map[string]detector.Issue, forDuration map[string]time.Duration, now time.Time) ([]detector.Issue, []func()) {
+// active issue current. It returns the issues that activated or escalated.
+func (e *Engine) applyHoldTime(firing map[string]detector.Issue, forDuration map[string]time.Duration, now time.Time) []detector.Issue {
 	var activated []detector.Issue
-	var notify []func()
 
 	for _, key := range sortedIssueKeys(firing) {
 		issue := firing[key]
@@ -262,19 +286,15 @@ func (e *Engine) applyHoldTime(firing map[string]detector.Issue, forDuration map
 		if issue.Subject.Pod == "" {
 			e.untriggerable.Inc()
 		}
-		if e.observer != nil {
-			observed := issue
-			notify = append(notify, func() { e.observer.IssueActivated(observed) })
-		}
 		activated = append(activated, issue)
 	}
-	return activated, notify
+	return activated
 }
 
-// clearResolved drops issues whose condition no longer holds. It returns the
-// observer calls to make once the lock is released.
-func (e *Engine) clearResolved(firing map[string]detector.Issue) []func() {
-	var notify []func()
+// clearResolved drops issues whose condition no longer holds and returns
+// them.
+func (e *Engine) clearResolved(firing map[string]detector.Issue) []detector.Issue {
+	var cleared []detector.Issue
 	for key := range e.pending {
 		if _, still := firing[key]; !still {
 			delete(e.pending, key)
@@ -289,11 +309,9 @@ func (e *Engine) clearResolved(firing map[string]detector.Issue) []func() {
 		delete(e.since, key)
 		e.setInactive(issue)
 		e.transitions.WithLabelValues(string(issue.ID), "cleared").Inc()
-		if e.observer != nil {
-			notify = append(notify, func() { e.observer.IssueCleared(issue) })
-		}
+		cleared = append(cleared, issue)
 	}
-	return notify
+	return cleared
 }
 
 func (e *Engine) setActive(issue detector.Issue) {

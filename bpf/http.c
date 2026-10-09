@@ -309,8 +309,7 @@ int kprobe_http_tcp_recvmsg(struct pt_regs *ctx)
 	return 0;
 }
 
-SEC("kretprobe/tcp_recvmsg")
-int kretprobe_http_tcp_recvmsg(struct pt_regs *ctx)
+static __always_inline int http_tcp_recvmsg_return(void *ctx, long rc)
 {
 	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
@@ -323,13 +322,28 @@ int kretprobe_http_tcp_recvmsg(struct pt_regs *ctx)
 	u64 sk = st->conn;
 	bpf_map_delete_elem(&http_recv_base, &key);
 
-	s32 ret = (s32)PT_REGS_RC(ctx);
+	s32 ret = (s32)rc;
 	if (ret <= 0)
 		return 0;
 	oncpu_note_socket(sk);
 	if (!http_emit_response(ctx, base, (u64)ret, HTTP_TRANSPORT_PLAINTEXT | HTTP_INBOUND, sk))
 		http_emit_request(ctx, base, (u64)ret, HTTP_TRANSPORT_PLAINTEXT | HTTP_INBOUND, sk);
 	return 0;
+}
+
+SEC("kretprobe/tcp_recvmsg")
+int kretprobe_http_tcp_recvmsg(struct pt_regs *ctx)
+{
+	long rc = PT_REGS_RC(ctx);
+	return http_tcp_recvmsg_return(ctx, rc);
+}
+
+SEC("fexit/tcp_recvmsg")
+int fexit_http_tcp_recvmsg(u64 *ctx)
+{
+	u64 rc = 0;
+	bpf_get_func_ret(ctx, &rc);
+	return http_tcp_recvmsg_return(ctx, (long)rc);
 }
 
 static __always_inline void h2_emit_frames(void *base, u64 avail, u64 conn,

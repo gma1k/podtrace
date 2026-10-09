@@ -24,6 +24,7 @@ type LRUCache struct {
 	ttl         time.Duration
 	mutex       sync.RWMutex
 	stopCleanup chan struct{}
+	closeOnce   sync.Once
 }
 
 func NewLRUCache(maxSize int, ttl time.Duration) *LRUCache {
@@ -134,6 +135,7 @@ func (c *LRUCache) cleanupExpired() {
 	}
 }
 
+// Close stops the expiry loop. It is safe to call more than once.
 func (c *LRUCache) Close() {
-	close(c.stopCleanup)
+	c.closeOnce.Do(func() { close(c.stopCleanup) })
 }

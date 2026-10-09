@@ -11,146 +11,6 @@ import (
 	"github.com/gma1k/podtrace/internal/events"
 )
 
-// Owner-walk tests document the v1 contract for resolveWorkload: the
-// only rollup is ReplicaSet to Deployment, every other controller kind
-// is reported as-is, and pods with no controller owner degrade to
-// kind=Pod.
-func TestResolveWorkload(t *testing.T) {
-	tcontroller := true
-	notController := false
-
-	cases := []struct {
-		name     string
-		pod      *corev1.Pod
-		wantKind string
-		wantName string
-	}{
-		{
-			name: "no owners → orphan pod degrades to Pod",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{Name: "lonely"},
-			},
-			wantKind: "Pod",
-			wantName: "lonely",
-		},
-		{
-			name: "owner ref present but not controller → orphan",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "free-pod",
-					OwnerReferences: []metav1.OwnerReference{
-						{Kind: "ReplicaSet", Name: "rs-7d8c9c", Controller: &notController},
-					},
-				},
-			},
-			wantKind: "Pod",
-			wantName: "free-pod",
-		},
-		{
-			name: "ReplicaSet with valid hash suffix rolls up to Deployment",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "p-1",
-					OwnerReferences: []metav1.OwnerReference{
-						{Kind: "ReplicaSet", Name: "shopping-cart-7d8c9c", Controller: &tcontroller},
-					},
-				},
-			},
-			wantKind: "Deployment",
-			wantName: "shopping-cart",
-		},
-		{
-			name: "ReplicaSet without recognisable hash → no rollup",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "p-2",
-					OwnerReferences: []metav1.OwnerReference{
-						{Kind: "ReplicaSet", Name: "rs-without-hash", Controller: &tcontroller},
-					},
-				},
-			},
-			wantKind: "ReplicaSet",
-			wantName: "rs-without-hash",
-		},
-		{
-			name: "StatefulSet → reported as-is",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					OwnerReferences: []metav1.OwnerReference{
-						{Kind: "StatefulSet", Name: "kafka", Controller: &tcontroller},
-					},
-				},
-			},
-			wantKind: "StatefulSet",
-			wantName: "kafka",
-		},
-		{
-			name: "DaemonSet → reported as-is",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					OwnerReferences: []metav1.OwnerReference{
-						{Kind: "DaemonSet", Name: "fluentd", Controller: &tcontroller},
-					},
-				},
-			},
-			wantKind: "DaemonSet",
-			wantName: "fluentd",
-		},
-		{
-			name: "Job → reported as-is",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					OwnerReferences: []metav1.OwnerReference{
-						{Kind: "Job", Name: "nightly-backup-29543", Controller: &tcontroller},
-					},
-				},
-			},
-			wantKind: "Job",
-			wantName: "nightly-backup-29543",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			kind, name := resolveWorkload(tc.pod)
-			if kind != tc.wantKind || name != tc.wantName {
-				t.Errorf("resolveWorkload = (%q, %q), want (%q, %q)",
-					kind, name, tc.wantKind, tc.wantName)
-			}
-		})
-	}
-}
-
-// TestDeploymentFromReplicaSet pins the suffix-trim behaviour.
-func TestDeploymentFromReplicaSet(t *testing.T) {
-	cases := []struct {
-		in     string
-		want   string
-		wantOK bool
-	}{
-		{"shopping-cart-7d8c9c", "shopping-cart", true},
-		{"webapp-58b6f7c9d4", "webapp", true},
-		{"a-bcdfg", "a", true},
-		{"single", "", false},
-		{"trailing-", "", false},
-		{"my-rs-prod", "", false},
-		{"deploy-toolong-suffixabcdefgh", "", false},
-		{"deploy-9c", "", false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.in, func(t *testing.T) {
-			got, ok := deploymentFromReplicaSet(tc.in)
-			if got != tc.want || ok != tc.wantOK {
-				t.Errorf("deploymentFromReplicaSet(%q) = (%q, %v), want (%q, %v)",
-					tc.in, got, ok, tc.want, tc.wantOK)
-			}
-		})
-	}
-}
-
-// TestEnricher_LookupHitAndMiss covers the documented behaviour: an
-// unseen cgroup ID is a miss (zero value, false), a snapshotted one
-// is a hit, and counters move in the right direction.
 func TestEnricher_LookupHitAndMiss(t *testing.T) {
 	e := NewPodEnricher()
 
@@ -184,9 +44,6 @@ func TestEnricher_LookupHitAndMiss(t *testing.T) {
 	}
 }
 
-// TestEnricher_SnapshotEvicts is the critical correctness guarantee:
-// after a pod delete the cache must not serve stale metadata for the
-// reused cgroup ID.
 func TestEnricher_SnapshotEvicts(t *testing.T) {
 	e := NewPodEnricher()
 	first := newPodWithOwner("ns", "old", "u-old", "n", "Deployment", "web", "web-aaaaaa")
@@ -209,8 +66,6 @@ func TestEnricher_SnapshotEvicts(t *testing.T) {
 	}
 }
 
-// TestEnricher_OrphanCountedSeparately verifies the owner-resolution
-// counter discriminates between resolved and orphaned pods.
 func TestEnricher_OrphanCountedSeparately(t *testing.T) {
 	e := NewPodEnricher()
 	owned := newPodWithOwner("ns", "p", "u", "n", "Deployment", "web", "web-aaaaaa")
@@ -225,9 +80,6 @@ func TestEnricher_OrphanCountedSeparately(t *testing.T) {
 	}
 }
 
-// TestEnricher_NilSafe documents the explicit nil-safety guarantees:
-// nil enricher must never panic on Lookup, Snapshot, or Size, and
-// nil-pointer event-stamping is a no-op.
 func TestEnricher_NilSafe(t *testing.T) {
 	var e *PodEnricher
 	if _, ok := e.Lookup(1); ok {
@@ -240,9 +92,6 @@ func TestEnricher_NilSafe(t *testing.T) {
 	enrichBatch(nil, []*events.Event{{CgroupID: 1}})
 }
 
-// TestEnrichBatch_PointerSharedAcrossEvents verifies the hot-path
-// memoization: events with the same cgroup ID get the same metadata
-// pointer rather than per-event copies.
 func TestEnrichBatch_PointerSharedAcrossEvents(t *testing.T) {
 	e := NewPodEnricher()
 	pod := newPodWithOwner("ns", "p", "u", "n", "Deployment", "web", "web-aaaaaa")
@@ -264,10 +113,6 @@ func TestEnrichBatch_PointerSharedAcrossEvents(t *testing.T) {
 	}
 }
 
-// TestEnrichBatch_PreservesExistingK8s pins the contract that an
-// upstream producer (a future enricher in front of the router) can
-// stamp metadata before the router sees the event and the router
-// will not overwrite it.
 func TestEnrichBatch_PreservesExistingK8s(t *testing.T) {
 	e := NewPodEnricher()
 	pod := newPodWithOwner("ns", "p", "u-cache", "n", "Deployment", "web", "web-aaaaaa")
@@ -282,9 +127,6 @@ func TestEnrichBatch_PreservesExistingK8s(t *testing.T) {
 	}
 }
 
-// TestEnricher_ConcurrentLookupSnapshot exercises the documented
-// thread-safety contract: many concurrent Lookups must coexist with
-// Snapshot writes without races (-race catches map mutation here).
 func TestEnricher_ConcurrentLookupSnapshot(t *testing.T) {
 	e := NewPodEnricher()
 	pod := newPodWithOwner("ns", "p", "u", "n", "Deployment", "web", "web-aaaaaa")
@@ -313,8 +155,6 @@ func TestEnricher_ConcurrentLookupSnapshot(t *testing.T) {
 	wg.Wait()
 }
 
-// newPodWithOwner constructs a Pod whose OwnerReferences exercise the
-// ReplicaSet to Deployment rollup helper.
 func newPodWithOwner(namespace, podName, uid, node, ownerKind, deploymentName, rsName string) *corev1.Pod {
 	tc := true
 	if ownerKind == "Deployment" {

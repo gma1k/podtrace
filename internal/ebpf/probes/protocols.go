@@ -180,7 +180,7 @@ func AttachFastCGIProbes(coll *ebpf.Collection) []link.Link {
 		var l link.Link
 		var err error
 		if kp.retprobe {
-			l, err = link.Kretprobe(kp.sym, prog, nil)
+			l, err = attachReturn(coll, progName, func() (link.Link, error) { return link.Kretprobe(kp.sym, prog, nil) })
 		} else {
 			l, err = link.Kprobe(kp.sym, prog, nil)
 		}
@@ -225,7 +225,7 @@ func AttachHTTPProbes(coll *ebpf.Collection) []link.Link {
 		var l link.Link
 		var err error
 		if ret {
-			l, err = link.Kretprobe(sym, prog, nil)
+			l, err = attachReturn(coll, progName, func() (link.Link, error) { return link.Kretprobe(sym, prog, nil) })
 		} else {
 			l, err = link.Kprobe(sym, prog, nil)
 		}
@@ -255,7 +255,7 @@ func AttachH2Probes(coll *ebpf.Collection) []link.Link {
 		var l link.Link
 		var err error
 		if ret {
-			l, err = link.Kretprobe(sym, prog, nil)
+			l, err = attachReturn(coll, progName, func() (link.Link, error) { return link.Kretprobe(sym, prog, nil) })
 		} else {
 			l, err = link.Kprobe(sym, prog, nil)
 		}

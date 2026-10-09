@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/gma1k/podtrace/internal/alerting"
@@ -42,17 +43,29 @@ func (s *alertEventSender) Send(ctx context.Context, alert *alerting.Alert) erro
 	if s.throttledDuplicate(alert, now) {
 		return nil
 	}
+	s.bindToPod(ctx, event)
 	if err := s.client.Create(ctx, event); err != nil {
 		return fmt.Errorf("create alert Event for %s/%s: %w", alert.Namespace, alert.PodName, err)
 	}
 	return nil
 }
 
+// bindToPod fills in the pod's UID, which kubectl describe matches Events on:
+// an Event that names its pod only by name is listed by kubectl get events
+// and never under the pod.
+func (s *alertEventSender) bindToPod(ctx context.Context, event *corev1.Event) {
+	var pod corev1.Pod
+	key := client.ObjectKey{Namespace: event.InvolvedObject.Namespace, Name: event.InvolvedObject.Name}
+	if err := s.client.Get(ctx, key, &pod); err != nil {
+		return
+	}
+	event.InvolvedObject.UID = pod.UID
+	event.InvolvedObject.APIVersion = "v1"
+}
+
 // throttledDuplicate reports whether an identical (pod, source, severity,
 // code) alert was emitted within the throttle window, and otherwise records
-// this emission. The code keeps two issues on one pod apart: each Event is
-// what a schedule selecting that issue starts a session from. It prunes stale
-// keys opportunistically so the map is bounded.
+// this emission.
 func (s *alertEventSender) throttledDuplicate(alert *alerting.Alert, now time.Time) bool {
 	key := alert.Namespace + "/" + alert.PodName + "|" + alert.Source + "|" + string(alert.Severity) + "|" + alert.ErrorCode
 	s.mu.Lock()

@@ -12,12 +12,14 @@ import (
 // poolFieldOffsets mirrors struct pool_field_offsets in bpf/events.h: the
 // offsets of the database/sql.DB fields the pool uprobe reads.
 type poolFieldOffsets struct {
-	NumOpen uint32 // database/sql.DB.numOpen  — connections currently open
-	MaxOpen uint32 // database/sql.DB.maxOpen  — SetMaxOpenConns, 0 means unlimited
+	NumOpen  uint32 // database/sql.DB.numOpen  — connections currently open
+	MaxOpen  uint32 // database/sql.DB.maxOpen  — SetMaxOpenConns, 0 means unlimited
+	FreeConn uint32 // database/sql.DB.freeConn — the idle connections, a slice
 }
 
-// resolvePoolFieldOffsets reads the two field offsets from the target
-// binary's DWARF.
+// resolvePoolFieldOffsets reads the three field offsets from the target
+// binary's DWARF. Utilization is the connections in use, open minus idle:
+// counting open connections alone reads an idle pool at its ceiling as full.
 //
 // DWARF only, deliberately — unlike resolveH3FieldOffsets, there is no
 // version-table fallback for stripped binaries. The h3 fields are strings and
@@ -68,7 +70,7 @@ func poolOffsetsFromDWARF(exePath string) (result poolFieldOffsets, ok bool) {
 	}
 
 	var off poolFieldOffsets
-	foundNumOpen, foundMaxOpen := false, false
+	foundNumOpen, foundMaxOpen, foundFreeConn := false, false, false
 
 	r := d.Reader()
 	for {
@@ -104,12 +106,14 @@ func poolOffsetsFromDWARF(exePath string) (result poolFieldOffsets, ok bool) {
 				off.NumOpen, foundNumOpen = uint32(loc), true
 			case "maxOpen":
 				off.MaxOpen, foundMaxOpen = uint32(loc), true
+			case "freeConn":
+				off.FreeConn, foundFreeConn = uint32(loc), true
 			}
 		}
 		break
 	}
 
-	if !foundNumOpen || !foundMaxOpen {
+	if !foundNumOpen || !foundMaxOpen || !foundFreeConn {
 		return poolFieldOffsets{}, false
 	}
 	return off, true

@@ -341,8 +341,8 @@ int kprobe_tcp_sendmsg(struct pt_regs *ctx) {
 	return 0;
 }
 
-SEC("kretprobe/tcp_sendmsg")
-int kretprobe_tcp_sendmsg(struct pt_regs *ctx) {
+static __always_inline int tcp_sendmsg_return(void *ctx, long rc)
+{
 	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_TCP_SENDMSG);
@@ -353,7 +353,7 @@ int kretprobe_tcp_sendmsg(struct pt_regs *ctx) {
 		return 0;
 	}
 
-	s64 ret = PT_REGS_RC_INT(ctx);
+	s64 ret = (int)rc;
 	u64 bytes = 0;
 	if (ret > 0 && (u64)ret < MAX_BYTES_THRESHOLD) {
 		bytes = (u64)ret;
@@ -417,6 +417,21 @@ int kretprobe_tcp_sendmsg(struct pt_regs *ctx) {
 	return 0;
 }
 
+SEC("kretprobe/tcp_sendmsg")
+int kretprobe_tcp_sendmsg(struct pt_regs *ctx)
+{
+	long rc = PT_REGS_RC(ctx);
+	return tcp_sendmsg_return(ctx, rc);
+}
+
+SEC("fexit/tcp_sendmsg")
+int fexit_tcp_sendmsg(u64 *ctx)
+{
+	u64 rc = 0;
+	bpf_get_func_ret(ctx, &rc);
+	return tcp_sendmsg_return(ctx, (long)rc);
+}
+
 SEC("kprobe/tcp_recvmsg")
 int kprobe_tcp_recvmsg(struct pt_regs *ctx) {
 	struct pair_key key = make_pair_key(PAIR_TCP_RECVMSG);
@@ -428,8 +443,8 @@ int kprobe_tcp_recvmsg(struct pt_regs *ctx) {
 	return 0;
 }
 
-SEC("kretprobe/tcp_recvmsg")
-int kretprobe_tcp_recvmsg(struct pt_regs *ctx) {
+static __always_inline int tcp_recvmsg_return(void *ctx, long rc)
+{
 	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_TCP_RECVMSG);
@@ -440,7 +455,7 @@ int kretprobe_tcp_recvmsg(struct pt_regs *ctx) {
 		return 0;
 	}
 	
-	s64 ret = PT_REGS_RC_INT(ctx);
+	s64 ret = (int)rc;
 	u64 bytes = 0;
 	if (ret > 0 && (u64)ret < MAX_BYTES_THRESHOLD) {
 		bytes = (u64)ret;
@@ -478,6 +493,21 @@ int kretprobe_tcp_recvmsg(struct pt_regs *ctx) {
 		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
+}
+
+SEC("kretprobe/tcp_recvmsg")
+int kretprobe_tcp_recvmsg(struct pt_regs *ctx)
+{
+	long rc = PT_REGS_RC(ctx);
+	return tcp_recvmsg_return(ctx, rc);
+}
+
+SEC("fexit/tcp_recvmsg")
+int fexit_tcp_recvmsg(u64 *ctx)
+{
+	u64 rc = 0;
+	bpf_get_func_ret(ctx, &rc);
+	return tcp_recvmsg_return(ctx, (long)rc);
 }
 
 struct hostent_call {
@@ -909,8 +939,8 @@ int kprobe_udp_sendmsg(struct pt_regs *ctx) {
 	return 0;
 }
 
-SEC("kretprobe/udp_sendmsg")
-int kretprobe_udp_sendmsg(struct pt_regs *ctx) {
+static __always_inline int udp_sendmsg_return(void *ctx, long rc)
+{
 	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_UDP_SENDMSG);
@@ -921,7 +951,7 @@ int kretprobe_udp_sendmsg(struct pt_regs *ctx) {
 		return 0;
 	}
 	
-	s64 ret = PT_REGS_RC_INT(ctx);
+	s64 ret = (int)rc;
 	u64 bytes = 0;
 	if (ret > 0 && (u64)ret < MAX_BYTES_THRESHOLD) {
 		bytes = (u64)ret;
@@ -949,6 +979,21 @@ int kretprobe_udp_sendmsg(struct pt_regs *ctx) {
 	return 0;
 }
 
+SEC("kretprobe/udp_sendmsg")
+int kretprobe_udp_sendmsg(struct pt_regs *ctx)
+{
+	long rc = PT_REGS_RC(ctx);
+	return udp_sendmsg_return(ctx, rc);
+}
+
+SEC("fexit/udp_sendmsg")
+int fexit_udp_sendmsg(u64 *ctx)
+{
+	u64 rc = 0;
+	bpf_get_func_ret(ctx, &rc);
+	return udp_sendmsg_return(ctx, (long)rc);
+}
+
 SEC("kprobe/udp_recvmsg")
 int kprobe_udp_recvmsg(struct pt_regs *ctx) {
 	struct pair_key key = make_pair_key(PAIR_UDP_RECVMSG);
@@ -967,8 +1012,8 @@ int kprobe_udp_recvmsg(struct pt_regs *ctx) {
 	return 0;
 }
 
-SEC("kretprobe/udp_recvmsg")
-int kretprobe_udp_recvmsg(struct pt_regs *ctx) {
+static __always_inline int udp_recvmsg_return(void *ctx, long rc)
+{
 	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_UDP_RECVMSG);
@@ -979,7 +1024,7 @@ int kretprobe_udp_recvmsg(struct pt_regs *ctx) {
 		return 0;
 	}
 	
-	s64 ret = PT_REGS_RC_INT(ctx);
+	s64 ret = (int)rc;
 	u64 bytes = 0;
 	if (ret > 0 && (u64)ret < MAX_BYTES_THRESHOLD) {
 		bytes = (u64)ret;
@@ -1006,6 +1051,21 @@ int kretprobe_udp_recvmsg(struct pt_regs *ctx) {
 		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
+}
+
+SEC("kretprobe/udp_recvmsg")
+int kretprobe_udp_recvmsg(struct pt_regs *ctx)
+{
+	long rc = PT_REGS_RC(ctx);
+	return udp_recvmsg_return(ctx, rc);
+}
+
+SEC("fexit/udp_recvmsg")
+int fexit_udp_recvmsg(u64 *ctx)
+{
+	u64 rc = 0;
+	bpf_get_func_ret(ctx, &rc);
+	return udp_recvmsg_return(ctx, (long)rc);
 }
 
 SEC("uprobe/http_request")

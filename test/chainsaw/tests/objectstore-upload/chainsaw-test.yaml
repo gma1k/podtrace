@@ -103,6 +103,23 @@ spec:
             file: ./session.yaml
         - assert:
             file: ./assert-completed.yaml
+      catch:
+        - script:
+            timeout: 120s
+            content: |
+              echo "== session status"
+              kubectl -n "${NAMESPACE}" get podtracesession objstore-diag \
+                -o jsonpath='{.status.state}{"\n"}{.status.reportFailureReason}{"\n"}{range .status.conditions[*]}{.type}={.status} {.reason}: {.message}{"\n"}{end}' || true
+              for p in $(kubectl -n podtrace-system get pods -o name \
+                  -l podtrace.io/session=objstore-diag,podtrace.io/session-namespace="${NAMESPACE}"); do
+                echo "== ${p} report-uploader exit"
+                kubectl -n podtrace-system get "${p}" \
+                  -o jsonpath='{range .status.initContainerStatuses[?(@.name=="report-uploader")]}restarts={.restartCount} exit={.state.terminated.exitCode} message={.state.terminated.message}{"\n"}{end}' || true
+                echo "== ${p} report-uploader log"
+                kubectl -n podtrace-system logs "${p}" -c report-uploader 2>&1 | tail -40 || true
+              done
+              echo "== seaweedfs log"
+              kubectl -n "${NAMESPACE}" logs deploy/seaweedfs --tail=40 2>&1 || true
 
     - name: verify-report-location-uri
       try:

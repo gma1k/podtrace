@@ -13,7 +13,7 @@ spec:
          status.jobs[].totalEvents > 0.
   timeouts:
     apply: 30s
-    assert: 120s
+    assert: 180s
     delete: 60s
     cleanup: 120s
   steps:

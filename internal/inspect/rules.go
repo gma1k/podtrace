@@ -647,7 +647,7 @@ func poolSaturationRule() Rule {
 					Remediation: "Raise SetMaxOpenConns, or find what is holding connections: " +
 						"the pool is near its ceiling but callers are not queueing yet, so " +
 						"there is still time to act before latency moves.",
-					Message: fmt.Sprintf("Database pool near capacity: %s/%s at %d%% of SetMaxOpenConns (threshold: %d%% warning, %d%% critical)",
+					Message: fmt.Sprintf("Database pool near capacity: %s/%s has %d%% of SetMaxOpenConns in use (threshold: %d%% warning, %d%% critical)",
 						s.Namespace, s.Workload, pct,
 						t.PoolUtilizationWarn, t.PoolUtilizationCritical),
 				})

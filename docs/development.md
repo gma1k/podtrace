@@ -271,6 +271,8 @@ int kretprobe_new_function(struct pt_regs *ctx) {
 
 **Important**: Always use `get_event_buf()` instead of stack-allocating `struct event` to avoid BPF stack overflow (512 byte limit). The same applies to stack traces - use `stack_buf` via `capture_user_stack()`.
 
+If a task can wait inside the function, as in a read, a send or a lock, a kretprobe alone will drop returns once more tasks wait there than its instance pool holds. Build the return twice from one body, as `tcp_recvmsg_return()` in `bpf/network.c` does: the kretprobe passes `PT_REGS_RC(ctx)`, a `SEC("fexit/new_function")` program passes what `bpf_get_func_ret()` reads, and the pair goes into `returnTracing` in `internal/ebpf/probes/return_tracing.go`, which attaches the fexit where the kernel can load it.
+
 ### 3. Register Probe
 
 In `internal/ebpf/probes/probes.go`, add to `AttachProbes()`:

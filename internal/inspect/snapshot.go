@@ -55,9 +55,9 @@ type FamilySource interface {
 }
 
 // TakeFrom builds a snapshot from a FamilySource, touching only the families
-// the rules actually read.
+// the rules and the correlation read.
 func TakeFrom(src FamilySource, now time.Time) Snapshot {
-	names := src.RuleFamilies()
+	names := append(append([]string(nil), src.RuleFamilies()...), EdgeFamilies()...)
 	families := src.CollectFamilies(names)
 
 	snap := Snapshot{At: now, families: make(map[string][]Sample, len(families))}

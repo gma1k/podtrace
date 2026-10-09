@@ -47,6 +47,14 @@ func (s *Sink) collectorFor(full string) (prometheus.Collector, bool) {
 	if g, ok := s.c.sat.gaugeFor(short); ok {
 		return g, true
 	}
+	if s.edges != nil {
+		switch short {
+		case edgeRequestsTotal:
+			return s.edges.requests, true
+		case edgeBytesTotal:
+			return s.edges.bytes, true
+		}
+	}
 	return nil, false
 }
 
