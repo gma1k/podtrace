@@ -15,6 +15,8 @@ import (
 
 const messageWidth = 90
 
+const causeWidth = 160
+
 // RenderJSON writes the report as JSON: indented for one-off output, one
 // compact object per line for --watch, so the stream stays line-delimited.
 func RenderJSON(w io.Writer, r Report, indent bool) error {
@@ -75,6 +77,7 @@ func RenderText(w io.Writer, r Report) error {
 				orDash(is.Pod), since, orDash(clean(is.Message, messageWidth))})
 		}
 		writeTable(b, issues)
+		writeLikelyCauses(b, r.Issues)
 	}
 
 	b.WriteString("\nWORKLOADS\n")
@@ -201,4 +204,25 @@ func renderSlowRequests(b *strings.Builder, s *SlowRequestFrames) {
 // formatQuantileShare turns 0.99 into "1%", the share of requests above it.
 func formatQuantileShare(q float64) string {
 	return strconv.FormatFloat(math.Round((1-q)*1000)/10, 'f', -1, 64) + "%"
+}
+
+// writeLikelyCauses lists, once per workload issue, what likely caused it.
+func writeLikelyCauses(b *strings.Builder, issues []Issue) {
+	rows := [][]string{{"WORKLOAD", "ISSUE", "LIKELY CAUSE"}}
+	seen := map[string]bool{}
+	for _, is := range issues {
+		for _, c := range is.Causes {
+			key := is.Namespace + "/" + is.Workload + "|" + is.ID + "|" + c.String()
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			rows = append(rows, []string{is.Namespace + "/" + is.Workload, is.ID, clean(c.String(), causeWidth)})
+		}
+	}
+	if len(rows) == 1 {
+		return
+	}
+	b.WriteString("\nLIKELY CAUSES\n")
+	writeTable(b, rows)
 }

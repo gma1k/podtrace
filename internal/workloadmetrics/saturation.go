@@ -70,7 +70,7 @@ func newSaturationCollectors(native bool, withBase func(...string) []string) sat
 
 		poolUtilization: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: metricPrefix + "db_pool_utilization_percent",
-			Help: "How full a Go database/sql connection pool is, 0-100, sampled from the pool's own numOpen and maxOpen. Alert on this before callers start queueing, which is what db_connection_acquire_seconds shows after the fact. Absent when SetMaxOpenConns is unlimited, since there is no capacity to be a fraction of, and absent for binaries built without DWARF.",
+			Help: "How busy a Go database/sql connection pool is as callers meet it, 0-100: the mean share of SetMaxOpenConns that acquisitions found in use, open minus idle, over each second. An idle open connection is not busy. Alert on this before callers start queueing, which is what db_connection_acquire_seconds shows after the fact. Absent when SetMaxOpenConns is unlimited, since there is no capacity to be a fraction of, and absent for binaries built without DWARF.",
 		}, withBase()),
 
 		poolOpen: prometheus.NewGaugeVec(prometheus.GaugeOpts{

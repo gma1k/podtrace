@@ -82,6 +82,8 @@ type Issue struct {
 	Remediation string
 
 	Message string
+
+	Causes []Cause
 }
 
 func (i Issue) String() string { return i.Message }

@@ -25,6 +25,14 @@ spec:
       from:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+    - ports:
+        - port: metrics
+          protocol: TCP
+      from:
+        - podSelector:
+            matchLabels:
+              {{- include "podtrace.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: operator
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -76,6 +84,28 @@ spec:
       toPorts:
         - ports:
             - port: "9090"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "podtrace.fullname" . }}-operator-apiserver-proxy
+  namespace: {{ include "podtrace.systemNamespace" . }}
+  labels:
+    {{- include "podtrace.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- include "podtrace.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: operator
+  ingress:
+    - fromEntities:
+        - kube-apiserver
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "8080"
               protocol: TCP
 {{- end }}
 {{- end }}

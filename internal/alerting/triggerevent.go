@@ -1,6 +1,7 @@
 package alerting
 
 import (
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -21,6 +22,8 @@ const (
 
 	AnnotationIssueID  = "podtrace.io/issue-id"
 	AnnotationWorkload = "podtrace.io/workload"
+
+	AnnotationLikelyCauses = "podtrace.io/likely-causes"
 )
 
 // Canonical alert Source tokens the trigger contract recognizes. Resource
@@ -54,6 +57,11 @@ func BuildAlertEvent(alert *Alert, now time.Time) *corev1.Event {
 			annotations[AnnotationWorkload] = workload
 		}
 	}
+	message := alert.Title
+	if causes := likelyCauses(alert); causes != "" {
+		annotations[AnnotationLikelyCauses] = causes
+		message += ". Likely cause: " + causes
+	}
 	return &corev1.Event{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "podtrace-alert-",
@@ -66,11 +74,22 @@ func BuildAlertEvent(alert *Alert, now time.Time) *corev1.Event {
 			Name:      alert.PodName,
 		},
 		Reason:         EventReasonAlert,
-		Message:        alert.Title,
+		Message:        message,
 		Type:           corev1.EventTypeWarning,
 		Source:         corev1.EventSource{Component: EventComponent},
 		FirstTimestamp: ts,
 		LastTimestamp:  ts,
 		Count:          1,
 	}
+}
+
+// likelyCauses reads an issue alert's likely causes. Only the Event carries
+// them, not the title: the title is what deduplication keys on, and a cause
+// appearing must not make an issue look new.
+func likelyCauses(alert *Alert) string {
+	if alert.Source != AlertSourceIssue {
+		return ""
+	}
+	causes, _ := alert.Context["likely_causes"].([]string)
+	return strings.Join(causes, "; ")
 }

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -57,7 +58,7 @@ func (a *issueAlerter) IssueActivated(issue detector.Issue) {
 		Namespace:       issue.Subject.Namespace,
 		PodName:         pod,
 		Title:           sanitize.Terminal(issue.Message),
-		Message:         sanitize.Terminal(issue.Message),
+		Message:         sanitize.Terminal(withLikelyCauses(issue)),
 		Timestamp:       a.now(),
 		ErrorCode:       string(issue.ID),
 		Recommendations: []string{sanitize.Terminal(issue.Remediation)},
@@ -102,6 +103,22 @@ func (a *issueAlerter) IssueCleared(issue detector.Issue) {
 		"workload", issue.Subject.Workload, "resource", issue.Subject.Resource)
 }
 
+// withLikelyCauses appends what likely caused the issue to its message.
+func withLikelyCauses(issue detector.Issue) string {
+	if len(issue.Causes) == 0 {
+		return issue.Message
+	}
+	return issue.Message + ". Likely cause: " + strings.Join(causeNames(issue.Causes), "; ")
+}
+
+func causeNames(causes []detector.Cause) []string {
+	out := make([]string, 0, len(causes))
+	for _, c := range causes {
+		out = append(out, c.String())
+	}
+	return out
+}
+
 // issueContext carries the evidence onto the alert so a consumer can see the
 // measured values without re-running the query.
 func issueContext(issue detector.Issue) map[string]interface{} {
@@ -115,6 +132,9 @@ func issueContext(issue detector.Issue) map[string]interface{} {
 	}
 	if issue.Subject.Resource != "" {
 		out["resource"] = issue.Subject.Resource
+	}
+	if len(issue.Causes) > 0 {
+		out["likely_causes"] = causeNames(issue.Causes)
 	}
 	for _, ev := range issue.Evidence {
 		out[ev.Name] = ev.Value

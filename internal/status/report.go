@@ -12,6 +12,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/gma1k/podtrace/internal/alerting"
+	"github.com/gma1k/podtrace/internal/diagnose/detector"
 	"github.com/gma1k/podtrace/internal/inspect"
 )
 
@@ -87,6 +88,8 @@ type Issue struct {
 	Node      string     `json:"node"`
 	Since     *time.Time `json:"since,omitempty"`
 	Message   string     `json:"message,omitempty"`
+
+	Causes []detector.Cause `json:"causes,omitempty"`
 }
 
 // Workload is one workload's traffic over the window.
@@ -193,6 +196,23 @@ func Build(scrapes []AgentScrape, events []corev1.Event, opts Options, now time.
 	r.Summary.Workloads = len(workloads)
 	r.Warnings = warnings(len(scrapes), forbidden, unreachable)
 	return r
+}
+
+// AttachCauses replaces each issue's causes with the operator's cluster-wide
+// view, which also sees causes on the workloads an issue's workload calls.
+// An issue the operator has not yet seen keeps the causes its own agent found.
+func (r *Report) AttachCauses(c Correlation) {
+	byIssue := make(map[detector.IssueRef][]detector.Cause, len(c.Issues))
+	for _, is := range c.Issues {
+		byIssue[is.IssueRef] = is.Causes
+	}
+	for i := range r.Issues {
+		is := &r.Issues[i]
+		ref := detector.IssueRef{ID: detector.ID(is.ID), Namespace: is.Namespace, Workload: is.Workload}
+		if causes, ok := byIssue[ref]; ok {
+			is.Causes = causes
+		}
+	}
 }
 
 func classifyScrapeError(err error) (state, reason string) {
@@ -336,6 +356,7 @@ func issuesOf(s AgentScrape, events issueEvents, opts Options) []Issue {
 			since := live.Since
 			is.Since = &since
 			is.Message = live.Message
+			is.Causes = live.Causes
 			if is.Pod == "" {
 				is.Pod = live.Pod
 			}

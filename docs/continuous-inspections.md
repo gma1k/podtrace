@@ -49,6 +49,18 @@ To keep the rules evaluating but write no Events:
 That exposes `podtrace_issue_active` and writes no Events, so nothing starts a
 session.
 
+On a TracerConfig you edit directly, the same holds: only `enabled: false`
+turns them off. Removing the `inspections` block, or `enabled` from it, puts
+them back to the default, which is on:
+
+```yaml
+spec:
+  agent:
+    metrics:
+      inspections:
+        enabled: false
+```
+
 ## Why rules read metrics, not events
 
 The obvious implementation is to run the existing diagnostic detector over the
@@ -86,7 +98,7 @@ of large requests.
 | `l7.error_rate` | the workload's application-layer error ratio exceeds its threshold | 2m |
 | `l7.latency_degraded` | the workload's mean request duration exceeds its threshold | 3m |
 | `db.connection_acquire_slow` | callers spend a mean of 100ms or more obtaining a database connection | 2m |
-| `db.pool_saturated` | a Go `database/sql` pool is at 80% or more of `SetMaxOpenConns` | 2m |
+| `db.pool_saturated` | a Go `database/sql` pool has 80% or more of `SetMaxOpenConns` in use | 2m |
 | `net.connection_failure_rate` | the workload's outbound connection attempts fail more often than its threshold; attempts with no route for their address family (a dual-stack client's IPv6-to-IPv4 fallback) are left out | 2m |
 | `net.rtt_spike_rate` | more than 5% of the workload's socket operations run slower than 100ms; against a kernel-aggregated (native) histogram the bound is taken at the next bucket edge, 105ms, so it only counts observations certainly above 100ms | 3m |
 | `cpu.contention` | the workload spends a mean of 50ms or more runnable but not running, across at least 100 preemptions | 3m |
@@ -227,7 +239,9 @@ fallback tells you to rule out a slow peer first.
 which existed with no rule reading it. It fires *before*
 `db.connection_acquire_slow`: a pool at 90% of its ceiling with fast acquires
 has a problem that has not reached callers yet, which is the whole point of
-sampling `numOpen` and `maxOpen` rather than waiting for queueing.
+sampling the pool rather than waiting for queueing. Utilization counts the
+connections in use, open minus idle, so a pool whose connections sit open
+and idle between fast queries is not reported saturated.
 
 `cpu.contention` reads `podtrace_workload_cpu_runqueue_latency_seconds` and
 carries `podtrace_workload_lock_contention_seconds` as evidence rather than as
@@ -338,8 +352,10 @@ registry changes, so a rename cannot happen by accident.
 | `podtrace_agent_issue_pod_unresolved_total` | issues for which no pod could be resolved |
 
 Each agent also serves its active issues as JSON at `/issues` on the metrics
-port: id, severity, subject, the time each activated, and its message as the
-latest evaluation wrote it. `kubectl podtrace status` reads it, so an issue's
+port: id, severity, subject, the time each activated, its message as the
+latest evaluation wrote it, and its likely causes on the same workload (see
+[Likely causes](#likely-causes)), with the calls the agent saw in its latest
+window. `kubectl podtrace status` reads it, so an issue's
 message there is current. The Kubernetes Event an issue writes records the
 moment it activated and is never rewritten, since an Event that looked new
 again would start another session; an agent that predates `/issues` is read
@@ -362,6 +378,110 @@ otherwise contend on the same object's status, a write per node per
 evaluation, with the last writer winning and no way to tell whose reading you
 are looking at. The same reasoning is recorded for kernel aggregation in
 [continuous-metrics.md](continuous-metrics.md).
+
+## Likely causes
+
+Issues rarely come alone. A saturated connection pool makes requests slow; a
+slow dependency makes its callers slow. podtrace links each active issue to
+the active issues that likely caused it, and follows the chain to the root:
+
+```
+WORKLOAD      ISSUE                LIKELY CAUSE
+shop/front    l7.latency_degraded  db.pool_saturated on shop/backend, through l7.latency_degraded on shop/backend
+shop/backend  l7.latency_degraded  db.pool_saturated on shop/backend
+```
+
+A link is a likely cause, never a verdict, and it only annotates. It never
+changes when an issue fires or clears, never silences one, and never stops a
+`PodTraceSchedule` from starting a session: the root cause's own issue starts
+its session as it always did, so the deep capture lands on the workload that
+is actually at fault.
+
+### What can cause what
+
+Two active issues are linked only when the table says one can cause the
+other. Every pair is a mechanism, not a coincidence.
+
+On the same workload:
+
+| Issue | Likely causes |
+|---|---|
+| `l7.latency_degraded` | `db.pool_saturated`, `db.connection_acquire_slow`, `cpu.contention`, `resource.saturation`, `dns.slow_lookup_rate`, `fs.slow_operations`, `net.rtt_spike_rate` |
+| `l7.error_rate` | `dns.failure_rate`, `tls.handshake_failure_rate`, `net.connection_failure_rate`, `db.pool_saturated` |
+| `db.connection_acquire_slow` | `db.pool_saturated` |
+
+On a workload it called in the same window, read from the service map:
+
+| Issue | Likely causes |
+|---|---|
+| `l7.latency_degraded` | `l7.latency_degraded` of the dependency |
+| `l7.error_rate` | `l7.error_rate` of the dependency |
+
+Activation order is not consulted: being active at the same time is enough.
+Every rule holds for the same time, so which of two co-active issues
+activated first is mostly which evaluation saw it first.
+
+A chain is followed to its root, an issue nothing further explains, by the
+shortest path, at most six hops. When two workloads call each other while
+both are slow, the chain stops at the issue that would close the cycle; when
+a cycle leaves no root at all, the issue's direct causes are reported.
+
+### Where the links come from
+
+Each agent links the issues it sees itself, which covers causes on the same
+workload, and serves them on `/issues`. When an issue activates with a cause
+already active, its alert and its Kubernetes Event say so: the message gains
+"Likely cause: ...", the Event gains a `podtrace.io/likely-causes`
+annotation, and a session the Event starts records the cause in its reason.
+The alert's title, which deduplication keys on, does not change, and an Event
+is never rewritten, so a same-workload cause that appears later shows up in
+`kubectl podtrace status` and the metrics, not on the Event.
+
+A dependency usually runs on other nodes, so the cross-workload links are made
+by the operator. On the leader, every 30 seconds, it reads each agent's
+`/issues`, which also carries the calls the agent saw in its latest window,
+maps each called Service to the workloads behind it through its
+EndpointSlices, named exactly as the agents name workloads, and links the
+whole cluster's issues at once. It publishes the links as
+`podtrace_issue_cause` and serves the latest pass at `/correlations` on its
+metrics port. `kubectl podtrace status` reads it and shows a LIKELY CAUSES
+section; when the operator cannot be read, it falls back to the agents'
+same-workload links and says so.
+
+When an issue's likely cause is on another workload, the operator also writes
+one Event on a pod of the affected workload, the pod the agent named or else
+the first of the workload's pods by name, when the link appears:
+
+```
+Warning  PodtraceLikelyCause  pod/front-5bf4f4d7d6-znkhm  l7.latency_degraded on corr/front: likely cause db.pool_saturated on corr/backend, through l7.latency_degraded on corr/backend
+```
+
+It carries the same `podtrace.io/issue-id`, `podtrace.io/workload` and
+`podtrace.io/likely-causes` annotations as an issue's Event, but its reason is
+`PodtraceLikelyCause`, not the alert reason, so it never starts a session and
+never counts as an issue. It is written once while the link holds and again
+if the link goes away and comes back; a restarted operator announces the
+links it finds once more.
+
+A call counts as a dependency only when it carried traffic, requests or bytes,
+in the window, and only to a Service that resolves to workloads. A call over
+the service map's cardinality bound, recorded as `target_namespace="unknown"`,
+names no real service and is never a dependency.
+
+| Metric (operator) | What it tells you |
+|---|---|
+| `podtrace_issue_cause{id,namespace,workload,cause_id,cause_namespace,cause_workload}` | 1 while an issue's likely root cause is that other issue; deleted when the link no longer holds |
+| `podtrace_correlation_agent_reads_failed_total` | agent reads that failed; links involving those agents' workloads are missing while it rises |
+
+With `networkPolicy.metricsFrom` set, the chart still lets the operator reach
+the agents' metrics port.
+
+### Cost
+
+The operator reads one small JSON document per agent per interval, at most
+eight at a time, and caches EndpointSlices trimmed to the Service name and each
+endpoint's pod reference. Linking is linear in the links per issue, so a
+densely connected call graph stays cheap.
 
 ## Starting a session from an issue
 

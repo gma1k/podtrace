@@ -166,8 +166,8 @@ int kprobe_do_futex(struct pt_regs *ctx) {
 	return 0;
 }
 
-SEC("kretprobe/do_futex")
-int kretprobe_do_futex(struct pt_regs *ctx) {
+static __always_inline int do_futex_return(void *ctx, long rc)
+{
 	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_FUTEX);
@@ -181,7 +181,7 @@ int kretprobe_do_futex(struct pt_regs *ctx) {
 		bpf_map_delete_elem(&start_times, &key);
 		return 0;
 	}
-	long ret = PT_REGS_RC(ctx);
+	long ret = rc;
 	struct event *e = get_event_buf();
 	if (!e) {
 		bpf_map_delete_elem(&lock_targets, &key);
@@ -206,6 +206,21 @@ int kretprobe_do_futex(struct pt_regs *ctx) {
 	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
+}
+
+SEC("kretprobe/do_futex")
+int kretprobe_do_futex(struct pt_regs *ctx)
+{
+	long rc = PT_REGS_RC(ctx);
+	return do_futex_return(ctx, rc);
+}
+
+SEC("fexit/do_futex")
+int fexit_do_futex(u64 *ctx)
+{
+	u64 rc = 0;
+	bpf_get_func_ret(ctx, &rc);
+	return do_futex_return(ctx, (long)rc);
 }
 
 SEC("uprobe/pthread_mutex_lock")

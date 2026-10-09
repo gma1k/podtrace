@@ -1,14 +1,13 @@
 package agent
 
 import (
-	"strings"
 	"sync"
 	"sync/atomic"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/podworkload"
 )
 
 // PodEnricher maps kernel cgroup inode IDs to a frozen, six-attribute
@@ -89,7 +88,7 @@ func (e *PodEnricher) Snapshot(entries []PodCgroupEntry) {
 			continue
 		}
 		seenPods[uid] = struct{}{}
-		if controllerOwnerRef(entry.Pod.OwnerReferences) == nil {
+		if podworkload.ControllerOwnerRef(entry.Pod.OwnerReferences) == nil {
 			e.ownerOrphaned.Add(1)
 		} else {
 			e.ownerResolved.Add(1)
@@ -188,71 +187,8 @@ func buildK8sMetadata(entry PodCgroupEntry) events.K8sMetadata {
 		NodeName:      pod.Spec.NodeName,
 		ContainerName: entry.ContainerName,
 	}
-	kind, name := resolveWorkload(pod)
+	kind, name := podworkload.Of(pod)
 	meta.WorkloadKind = kind
 	meta.WorkloadName = name
 	return meta
-}
-
-// resolveWorkload walks pod.OwnerReferences and returns the
-// (kind, name) of the workload that ultimately produced this pod.
-func resolveWorkload(pod *corev1.Pod) (kind, name string) {
-	owner := controllerOwnerRef(pod.OwnerReferences)
-	if owner == nil {
-		return "Pod", pod.Name
-	}
-	if owner.Kind == "ReplicaSet" {
-		if deployment, ok := deploymentFromReplicaSet(owner.Name); ok {
-			return "Deployment", deployment
-		}
-		return "ReplicaSet", owner.Name
-	}
-	return owner.Kind, owner.Name
-}
-
-// controllerOwnerRef returns the OwnerReference flagged as the
-// controller.
-func controllerOwnerRef(refs []metav1.OwnerReference) *metav1.OwnerReference {
-	for i := range refs {
-		ref := &refs[i]
-		if ref.Controller != nil && *ref.Controller {
-			return ref
-		}
-	}
-	return nil
-}
-
-// deploymentFromReplicaSet strips the kubernetes-controller-manager
-// pod-template-hash suffix from a ReplicaSet name.
-func deploymentFromReplicaSet(rsName string) (string, bool) {
-	idx := strings.LastIndex(rsName, "-")
-	if idx < 1 || idx == len(rsName)-1 {
-		return "", false
-	}
-	suffix := rsName[idx+1:]
-	if !isPodTemplateHash(suffix) {
-		return "", false
-	}
-	return rsName[:idx], true
-}
-
-// isPodTemplateHash matches the alphabet kube-controller-manager
-// uses for the ReplicaSet pod-template-hash suffix.
-func isPodTemplateHash(s string) bool {
-	if len(s) < 5 || len(s) > 12 {
-		return false
-	}
-	for _, c := range s {
-		switch {
-		case c >= '0' && c <= '9':
-		case c == 'b', c == 'c', c == 'd':
-		case c == 'f', c == 'g', c == 'h':
-		case c == 'j', c == 'k', c == 'm', c == 'n':
-		case c >= 'p' && c <= 't':
-		case c == 'v', c == 'w', c == 'x', c == 'y', c == 'z':
-		default:
-			return false
-		}
-	}
-	return true
 }

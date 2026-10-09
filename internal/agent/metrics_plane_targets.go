@@ -8,6 +8,7 @@ import (
 
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/podworkload"
 	"github.com/gma1k/podtrace/pkg/tracer"
 )
 
@@ -134,7 +135,7 @@ func expandTargetsForMetricsPlane(
 		}
 		covered[id] = struct{}{}
 
-		kind, name := resolveWorkload(entry.Pod)
+		kind, name := podworkload.Of(entry.Pod)
 		out = append(out, tracer.Target{
 			PodName:       entry.Pod.Name,
 			Namespace:     entry.Pod.Namespace,

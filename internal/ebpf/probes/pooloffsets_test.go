@@ -101,9 +101,14 @@ func runtimePoolOffsets(t *testing.T) poolFieldOffsets {
 	if !ok {
 		t.Skip("database/sql.DB has no maxOpen field in this Go release")
 	}
+	freeConn, ok := typ.FieldByName("freeConn")
+	if !ok {
+		t.Skip("database/sql.DB has no freeConn field in this Go release")
+	}
 	return poolFieldOffsets{
-		NumOpen: uint32(numOpen.Offset),
-		MaxOpen: uint32(maxOpen.Offset),
+		NumOpen:  uint32(numOpen.Offset),
+		MaxOpen:  uint32(maxOpen.Offset),
+		FreeConn: uint32(freeConn.Offset),
 	}
 }
 

@@ -92,6 +92,8 @@ type fakeCluster struct {
 	components    []Component
 	componentsErr error
 
+	correlation *Correlation
+
 	scrapes     map[string]int
 	inFlight    atomic.Int32
 	maxInFlight atomic.Int32
@@ -159,3 +161,12 @@ func (f *fakeCluster) scrapeCount(name string) int {
 }
 
 func noSleep(context.Context, time.Duration) error { return nil }
+
+var errNoOperator = errors.New("no running operator pod")
+
+func (f *fakeCluster) Correlations(context.Context) (Correlation, error) {
+	if f.correlation == nil {
+		return Correlation{}, errNoOperator
+	}
+	return *f.correlation, nil
+}

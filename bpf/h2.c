@@ -404,17 +404,31 @@ int kprobe_h2_tcp_sendmsg(struct pt_regs *ctx)
 	return 0;
 }
 
-SEC("kretprobe/tcp_sendmsg")
-int kretprobe_h2_tcp_sendmsg(struct pt_regs *ctx)
+static __always_inline int h2_tcp_sendmsg_return(void *ctx, long rc)
 {
 	struct h2_recv_info info;
 	if (!h2_take_message(&h2_send_base, &info))
 		return 0;
-	s64 ret = PT_REGS_RC_INT(ctx);
+	s64 ret = (int)rc;
 	if (ret <= 0)
 		return 0;
 	h2_emit_message(&info, (u64)ret, H2_DIR_EGRESS, HTTP_TRANSPORT_H2C);
 	return 0;
+}
+
+SEC("kretprobe/tcp_sendmsg")
+int kretprobe_h2_tcp_sendmsg(struct pt_regs *ctx)
+{
+	long rc = PT_REGS_RC(ctx);
+	return h2_tcp_sendmsg_return(ctx, rc);
+}
+
+SEC("fexit/tcp_sendmsg")
+int fexit_h2_tcp_sendmsg(u64 *ctx)
+{
+	u64 rc = 0;
+	bpf_get_func_ret(ctx, &rc);
+	return h2_tcp_sendmsg_return(ctx, (long)rc);
 }
 
 SEC("kprobe/tcp_recvmsg")
@@ -426,17 +440,31 @@ int kprobe_h2_tcp_recvmsg(struct pt_regs *ctx)
 	return 0;
 }
 
-SEC("kretprobe/tcp_recvmsg")
-int kretprobe_h2_tcp_recvmsg(struct pt_regs *ctx)
+static __always_inline int h2_tcp_recvmsg_return(void *ctx, long rc)
 {
 	struct h2_recv_info info;
 	if (!h2_take_message(&h2_recv_base, &info))
 		return 0;
-	s64 ret = PT_REGS_RC_INT(ctx);
+	s64 ret = (int)rc;
 	if (ret <= 0)
 		return 0;
 	h2_emit_message(&info, (u64)ret, H2_DIR_INGRESS, HTTP_TRANSPORT_H2C);
 	return 0;
+}
+
+SEC("kretprobe/tcp_recvmsg")
+int kretprobe_h2_tcp_recvmsg(struct pt_regs *ctx)
+{
+	long rc = PT_REGS_RC(ctx);
+	return h2_tcp_recvmsg_return(ctx, rc);
+}
+
+SEC("fexit/tcp_recvmsg")
+int fexit_h2_tcp_recvmsg(u64 *ctx)
+{
+	u64 rc = 0;
+	bpf_get_func_ret(ctx, &rc);
+	return h2_tcp_recvmsg_return(ctx, (long)rc);
 }
 
 SEC("kprobe/tcp_close")

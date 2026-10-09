@@ -74,6 +74,10 @@ func (f *statusFake) ActiveIssues(context.Context, status.Agent) ([]status.LiveI
 	return nil, errors.New("404 page not found")
 }
 
+func (f *statusFake) Correlations(context.Context) (status.Correlation, error) {
+	return status.Correlation{}, errors.New("no running operator pod")
+}
+
 func (f *statusFake) Components(context.Context) ([]status.Component, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

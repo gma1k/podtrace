@@ -23,6 +23,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/gma1k/podtrace/internal/alerting"
+	"github.com/gma1k/podtrace/internal/diagnose/detector"
 	"github.com/gma1k/podtrace/internal/profiling"
 )
 
@@ -32,6 +33,8 @@ const (
 	tracerConfigLabel  = "podtrace.io/tracer-config"
 	metricsPortName    = "metrics"
 	defaultMetricsPort = 9090
+
+	operatorMetricsPort = 8080
 
 	protobufAccept = "application/vnd.google.protobuf;proto=io.prometheus.client.MetricFamily;encoding=delimited;q=0.9,text/plain;version=0.0.4;q=0.1"
 )
@@ -80,6 +83,22 @@ type Cluster interface {
 	IssueEvents(ctx context.Context, namespace string) ([]corev1.Event, error)
 	ActiveIssues(ctx context.Context, agent Agent) ([]LiveIssue, error)
 	Components(ctx context.Context) ([]Component, error)
+	Correlations(ctx context.Context) (Correlation, error)
+}
+
+// Correlation is the operator's latest cluster-wide link of each active
+// issue to its likely root causes.
+type Correlation struct {
+	GeneratedAt  time.Time         `json:"generatedAt"`
+	AgentsRead   int               `json:"agentsRead"`
+	AgentsFailed int               `json:"agentsFailed"`
+	Issues       []CorrelatedIssue `json:"issues"`
+}
+
+// CorrelatedIssue is one issue of a Correlation.
+type CorrelatedIssue struct {
+	detector.IssueRef
+	Causes []detector.Cause `json:"causes,omitempty"`
 }
 
 // LiveIssue is one firing issue as an agent's /issues serves it: its latest
@@ -93,6 +112,8 @@ type LiveIssue struct {
 	Resource  string    `json:"resource,omitempty"`
 	Since     time.Time `json:"since"`
 	Message   string    `json:"message"`
+
+	Causes []detector.Cause `json:"causes,omitempty"`
 }
 
 // KubeCluster reads the agents through the API server's pod proxy, so it
@@ -259,6 +280,41 @@ func (k *KubeCluster) IssueEvents(ctx context.Context, namespace string) ([]core
 		}
 	}
 	return out, nil
+}
+
+// Correlations reads the operator's /correlations through the pod proxy.
+func (k *KubeCluster) Correlations(ctx context.Context) (Correlation, error) {
+	pods, err := k.Client.CoreV1().Pods(k.SystemNamespace).List(ctx, metav1.ListOptions{LabelSelector: operatorSelector})
+	if err != nil {
+		return Correlation{}, err
+	}
+	lastErr := errors.New("no running operator pod")
+	for i := range pods.Items {
+		p := &pods.Items[i]
+		if p.Status.Phase != corev1.PodRunning || p.DeletionTimestamp != nil {
+			continue
+		}
+		target := Agent{Name: p.Name, Port: operatorMetricsPort}
+		for _, c := range p.Spec.Containers {
+			for _, port := range c.Ports {
+				if port.Name == metricsPortName {
+					target.Port = port.ContainerPort
+				}
+			}
+		}
+		raw, _, err := k.proxyGet(ctx, target, "correlations", "application/json")
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var c Correlation
+		if err := json.Unmarshal(raw, &c); err != nil {
+			lastErr = fmt.Errorf("decode correlations: %w", err)
+			continue
+		}
+		return c, nil
+	}
+	return Correlation{}, lastErr
 }
 
 // Components lists the operator Deployment and every fleet's agent

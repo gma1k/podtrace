@@ -120,6 +120,12 @@ func (c *Collector) Collect(ctx context.Context) (Report, error) {
 		report.Warnings = append(report.Warnings, "could not read the issue Events, so issues show "+
 			"no message or start time: "+oneLine(eventsErr.Error()))
 	}
+	if correlation, err := c.Cluster.Correlations(ctx); err == nil {
+		report.AttachCauses(correlation)
+	} else if len(report.Issues) > 0 {
+		report.Warnings = append(report.Warnings, "could not read the operator's issue correlation, "+
+			"so likely causes are limited to each issue's own workload: "+oneLine(err.Error()))
+	}
 	report.Assess(c.Cluster.Components(ctx))
 	return report, nil
 }

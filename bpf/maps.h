@@ -741,6 +741,7 @@ struct {
 struct pool_field_offsets {
 	u32 num_open;
 	u32 max_open;
+	u32 free_conn;
 };
 
 struct {
@@ -752,9 +753,9 @@ struct {
 
 struct pool_sample {
 	u64 last_emit_ns;
+	u64 acc;
 	u32 peak_open;
-	u32 peak_pct;
-	u32 peak_max_open;
+	u32 max_open;
 };
 
 struct {

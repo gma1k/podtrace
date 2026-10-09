@@ -29,6 +29,7 @@ import (
 	"github.com/gma1k/podtrace/internal/ebpf/probes"
 	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/internal/operator"
+	"github.com/gma1k/podtrace/internal/podworkload"
 	"github.com/gma1k/podtrace/internal/sysfs"
 	bundlepkg "github.com/gma1k/podtrace/pkg/exporter/bundle"
 	"github.com/gma1k/podtrace/pkg/tracer"
@@ -619,7 +620,7 @@ func buildTargetSet(rules []CRRule, pods []*corev1.Pod, podEntries []PodCgroupEn
 			}
 			seen[id] = struct{}{}
 			if entry, ok := byCgroup[id]; ok {
-				kind, name := resolveWorkload(entry.Pod)
+				kind, name := podworkload.Of(entry.Pod)
 				out = append(out, tracer.Target{
 					PodName:       entry.Pod.Name,
 					Namespace:     entry.Pod.Namespace,

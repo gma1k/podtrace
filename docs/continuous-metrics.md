@@ -735,7 +735,7 @@ which is the reading worth alerting on:
 | Metric | Reads | Absent when |
 |---|---|---|
 | `podtrace_workload_db_pool_connections_open` | `database/sql.DB.numOpen` | the binary carries no DWARF |
-| `podtrace_workload_db_pool_utilization_percent` | `numOpen` as a percentage of `maxOpen` | the same, or the pool is unlimited |
+| `podtrace_workload_db_pool_utilization_percent` | connections in use, `numOpen` minus the idle ones in `freeConn`, as a percentage of `maxOpen` | the same, or the pool is unlimited |
 
 An unlimited pool `SetMaxOpenConns` unset or zero, reports the count but no
 percentage. There is no ceiling for the count to be a fraction of, and
@@ -748,6 +748,15 @@ podtrace_workload_db_pool_utilization_percent > 90
 ```
 
 Both come from the same `database/sql.(*DB).conn` probe that times acquisition.
+Each acquisition samples the pool as it arrives, and the utilization is the
+mean of those samples over a second: the pool as callers meet it. Callers
+spread evenly over time see the share of time the connections are busy;
+callers arriving in bursts find them busy more often than that, which is the
+contention those bursts really hit. A pool every caller finds full reads 100;
+a pool whose one connection sits idle between occasional fast queries reads
+near 0. Counting open connections alone read that pool as full, since an idle
+connection stays open. The open count keeps its peak over the second, so a
+leak still shows.
 Every call is read; one reading per second per process is emitted, and it is
 the **highest** occupancy seen since the last one. Emitting whatever the pool
 happened to hold at one arbitrary instant per second reads the trough of a

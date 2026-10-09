@@ -132,7 +132,7 @@ func AttachProbesByGroup(coll *ebpf.Collection) (map[ProbeGroup][]link.Link, err
 			continue
 		}
 
-		l, err := attachKprobe(progName, symbol, prog)
+		l, err := attachProbe(coll, progName, symbol, prog)
 		if err != nil {
 			reportAttachFailure(progName, symbol, true, err)
 			closeAll()
@@ -159,7 +159,7 @@ func AttachProbesByGroup(coll *ebpf.Collection) (map[ProbeGroup][]link.Link, err
 			continue
 		}
 
-		l, err := attachKprobe(progName, symbol, prog)
+		l, err := attachProbe(coll, progName, symbol, prog)
 		if err != nil {
 			reportAttachFailure(progName, symbol, false, err)
 			skippedOptional = append(skippedOptional, fmt.Sprintf("%s->%s", progName, symbol))
@@ -284,7 +284,7 @@ func AttachProbeGroup(coll *ebpf.Collection, target ProbeGroup) ([]link.Link, er
 		if prog == nil {
 			continue
 		}
-		l, err := attachKprobe(progName, symbol, prog)
+		l, err := attachProbe(coll, progName, symbol, prog)
 		if err != nil {
 			reportAttachFailure(progName, symbol, true, err)
 			rollback()
@@ -301,7 +301,7 @@ func AttachProbeGroup(coll *ebpf.Collection, target ProbeGroup) ([]link.Link, er
 		if prog == nil {
 			continue
 		}
-		l, err := attachKprobe(progName, symbol, prog)
+		l, err := attachProbe(coll, progName, symbol, prog)
 		if err != nil {
 			logger.Debug("optional probe unavailable on re-attach",
 				zap.String("prog", progName), zap.String("symbol", symbol), zap.Error(err))
@@ -2155,7 +2155,7 @@ func publishPoolOffsets(coll *ebpf.Collection, exePath string, pid uint32) {
 	if !ok {
 		return
 	}
-	value := struct{ NumOpen, MaxOpen uint32 }{NumOpen: off.NumOpen, MaxOpen: off.MaxOpen}
+	value := struct{ NumOpen, MaxOpen, FreeConn uint32 }{NumOpen: off.NumOpen, MaxOpen: off.MaxOpen, FreeConn: off.FreeConn}
 	if err := m.Update(pid, value, ebpf.UpdateAny); err != nil {
 		logger.Debug("Pool utilization: could not publish field offsets",
 			zap.Uint32("pid", pid), zap.Error(err))
@@ -2164,7 +2164,8 @@ func publishPoolOffsets(coll *ebpf.Collection, exePath string, pid uint32) {
 	logger.Debug("Pool utilization: field offsets published",
 		zap.Uint32("pid", pid),
 		zap.Uint32("num_open", off.NumOpen),
-		zap.Uint32("max_open", off.MaxOpen))
+		zap.Uint32("max_open", off.MaxOpen),
+		zap.Uint32("free_conn", off.FreeConn))
 }
 
 // attachGoAcquireProbes attaches the entry + return uprobes on
