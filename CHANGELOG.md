@@ -9,6 +9,14 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.14.11](https://github.com/gma1k/podtrace/compare/v0.14.10...v0.14.11) (2026-10-17)
+
+
+### Bug Fixes
+
+* harden diagnose stack symbolisation, sampling and report accuracy ([#536](https://github.com/gma1k/podtrace/issues/536)) ([55c067d](https://github.com/gma1k/podtrace/commit/55c067d6efd6c216c6682e2a01931be79e7a39ae))
+* harden metrics plane label safety, tenancy and L7 attribution ([#534](https://github.com/gma1k/podtrace/issues/534)) ([2021c27](https://github.com/gma1k/podtrace/commit/2021c272473c3040639432e5fede549fc5f56f52))
+
 ## [0.14.10](https://github.com/gma1k/podtrace/compare/v0.14.9...v0.14.10) (2026-10-17)
 
 
