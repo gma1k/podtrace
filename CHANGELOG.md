@@ -9,6 +9,17 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.15.2](https://github.com/gma1k/podtrace/compare/v0.15.1...v0.15.2) (2026-10-28)
+
+
+### Maintenance
+
+* **deps:** bump klauspost/compress to v1.20.2 to fix CVE-2026-116591 ([#554](https://github.com/gma1k/podtrace/issues/554)) ([49890c0](https://github.com/gma1k/podtrace/commit/49890c0aca535e4810529170ef0973b7d022d504))
+* **deps:** update gcr.io/distroless/static-debian13:nonroot docker digest to 18f4cc2 ([#549](https://github.com/gma1k/podtrace/issues/549)) ([2f7d6e7](https://github.com/gma1k/podtrace/commit/2f7d6e72159cfc875868a27a4022b01524d51023))
+* **deps:** update go modules (non-major) ([#552](https://github.com/gma1k/podtrace/issues/552)) ([3f18c50](https://github.com/gma1k/podtrace/commit/3f18c50108f4cd8c5a04b7e150ab83d3a322661c))
+* **deps:** update Go modules, k8s v0.37.2, golang image digest and setup-oras v2.0.3, and fix go-jose and x/net CVEs ([#553](https://github.com/gma1k/podtrace/issues/553)) ([e6a2eea](https://github.com/gma1k/podtrace/commit/e6a2eea614645f72f6b709b24677f4bcb1fc078e))
+* **deps:** update golang:1.27.3-trixie docker digest to c124b9a ([#551](https://github.com/gma1k/podtrace/issues/551)) ([8b1fb99](https://github.com/gma1k/podtrace/commit/8b1fb99bac203fa5f8b1e41dbe3a6554cbf33d2d))
+
 ## [0.15.1](https://github.com/gma1k/podtrace/compare/v0.15.0...v0.15.1) (2026-10-23)
 
 
