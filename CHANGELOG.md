@@ -9,6 +9,13 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.15.3](https://github.com/gma1k/podtrace/compare/v0.15.2...v0.15.3) (2026-10-31)
+
+
+### Maintenance
+
+* **deps:** update go modules (non-major) ([#555](https://github.com/gma1k/podtrace/issues/555)) ([3196f38](https://github.com/gma1k/podtrace/commit/3196f387ef3de488b991ab4c415749bbf1226cba))
+
 ## [0.15.2](https://github.com/gma1k/podtrace/compare/v0.15.1...v0.15.2) (2026-10-28)
 
 
