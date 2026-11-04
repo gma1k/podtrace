@@ -76,8 +76,10 @@ int tracepoint_oom_mark_victim(void *ctx) {
 		victim_tgid = BPF_CORE_READ(victim, tgid);
 		e->cgroup_id = BPF_CORE_READ(victim, cgroups, dfl_cgrp, kn, id);
 		e->net_ns_id = BPF_CORE_READ(victim, nsproxy, net_ns, ns.inum);
-		e->pid = task_ns_tgid(victim, e->pid);
+		e->pid = task_ns_tgid(victim, victim_tgid);
 		bpf_task_release(victim);
+	} else {
+		e->cgroup_id = 0;
 	}
 	if (bpf_core_field_exists(tp->__data_loc_comm)) {
 		u32 comm_loc = BPF_CORE_READ(tp, __data_loc_comm);

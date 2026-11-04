@@ -408,7 +408,7 @@ struct {
 } cgroup_alerts SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 4096);
 	__type(key, u64);
 	__type(value, u8);
@@ -561,9 +561,14 @@ struct {
 	__type(value, u32);
 } alert_thresholds SEC(".maps");
 
+#define EVENT_BUF_TASK    0
+#define EVENT_BUF_SOFTIRQ 1
+#define EVENT_BUF_SOCKOPS 2
+#define EVENT_BUF_SLOTS   3
+
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-	__uint(max_entries, 1);
+	__uint(max_entries, EVENT_BUF_SLOTS);
 	__type(key, u32);
 	__type(value, struct event);
 } event_buf SEC(".maps");
@@ -1046,7 +1051,7 @@ struct {
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-	__uint(max_entries, 1);
+	__uint(max_entries, EVENT_BUF_SLOTS);
 	__type(key, u32);
 	__type(value, struct stack_trace_t);
 } stack_buf SEC(".maps");

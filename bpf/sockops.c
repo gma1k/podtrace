@@ -100,7 +100,7 @@ int sockops_rtt(struct bpf_sock_ops *skops)
 		return 0;
 	}
 
-	struct event *e = get_event_buf_unfiltered();
+	struct event *e = event_buf_slot(EVENT_BUF_SOCKOPS);
 	if (!e) {
 		return 0;
 	}

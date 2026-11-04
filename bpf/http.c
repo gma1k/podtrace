@@ -187,9 +187,10 @@ static __noinline int http_emit_request(void *ctx, void *base, u64 avail,
 		bpf_probe_read_kernel_str(e->target, sizeof(e->target), req.endpoint);
 		http_capture_traceparent(base, avail, e->details);
 		fill_event_peer(e);
-		capture_user_stack(ctx, pid, tid, e);
-		if (!agg_absorbed(e, 0))
+		if (!agg_absorbed(e, 0)) {
+			capture_user_stack(ctx, pid, tid, e);
 			bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+		}
 	}
 	return 1;
 }
@@ -262,9 +263,10 @@ static __noinline int http_emit_response(void *ctx, void *base, u64 len,
 		bpf_probe_read_kernel_str(e->target, sizeof(e->target), req->endpoint);
 		bpf_probe_read_kernel_str(e->details, sizeof(e->details), status);
 		fill_event_peer(e);
-		capture_user_stack(ctx, pid, tid, e);
-		if (!agg_absorbed(e, status_num))
+		if (!agg_absorbed(e, status_num)) {
+			capture_user_stack(ctx, pid, tid, e);
 			bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+		}
 	}
 	bpf_map_delete_elem(&http_reqs, &conn);
 	return 1;

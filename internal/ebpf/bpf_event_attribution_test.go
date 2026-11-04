@@ -1,6 +1,7 @@
 package ebpf
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -89,5 +90,30 @@ func TestTasksInvisibleToTheAgentGetNoHostPID(t *testing.T) {
 	}
 	if !strings.Contains(functionBody(t, bpfSource(t, "http3.c"), "quic_ship"), "egress ? agent_ns_tgid() : 0") {
 		t.Error("an ingress QUIC packet is handled in softirq; current is not the receiving process")
+	}
+}
+
+func TestOOMVictimIsAttributedToItsOwnProcessAndCgroup(t *testing.T) {
+	body := functionBody(t, bpfSource(t, "memory.c"), "tracepoint_oom_mark_victim")
+	if !strings.Contains(body, "task_ns_tgid(victim, victim_tgid)") {
+		t.Error("mark_victim reports a thread ID; without a pid namespace reference the event must fall back to the victim's process ID")
+	}
+	lookup := strings.Index(body, "if (victim) {")
+	if lookup < 0 {
+		t.Fatal("tracepoint_oom_mark_victim no longer looks up the victim task")
+	}
+	if !regexp.MustCompile(`\}\s*else\s*\{\s*e->cgroup_id = 0;`).MatchString(body[lookup:]) {
+		t.Error("when the victim cannot be found the event must not keep the cgroup of the task that triggered the OOM")
+	}
+}
+
+func TestStaleGethostbynameCallDoesNotSilenceItsThread(t *testing.T) {
+	text := bpfSource(t, "network.c")
+	body := functionBody(t, text, "hostent_enter")
+	if !strings.Contains(body, "outer && ts - outer->start_ns < HOSTENT_STALE_NS") {
+		t.Error("a gethostbyname call whose return probe was missed must not be treated as an outer call forever")
+	}
+	if !strings.Contains(body, ".start_ns = ts") {
+		t.Error("hostent_enter must record when the outer call started")
 	}
 }

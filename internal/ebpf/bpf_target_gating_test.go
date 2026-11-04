@@ -14,6 +14,16 @@ func TestNodeWideEntryProbesGateOnTargetCgroup(t *testing.T) {
 		{"network.c", "kprobe_tcp_recvmsg"},
 		{"network.c", "kprobe_udp_sendmsg"},
 		{"network.c", "kprobe_udp_recvmsg"},
+		{"cpu.c", "uprobe_pthread_mutex_lock"},
+		{"network.c", "hostent_enter"},
+		{"network.c", "uprobe_getaddrinfo"},
+		{"network.c", "uprobe_http_request"},
+		{"network.c", "uprobe_http_response"},
+		{"network.c", "uprobe_PQexec"},
+		{"network.c", "uprobe_mysql_real_query"},
+		{"network.c", "ssl_handshake_entry"},
+		{"network.c", "uprobe_gnutls_handshake"},
+		{"network.c", "uprobe_mbedtls_ssl_handshake"},
 	}
 	for _, tc := range cases {
 		body := functionBody(t, bpfSource(t, tc.file), tc.function)
@@ -152,5 +162,30 @@ func TestContainersCreatedUnderATargetedPodAreTracedFromTheStart(t *testing.T) {
 		if strings.Contains(bpfSource(t, file), "bpf_map_lookup_elem(&target_cgroup_ids") {
 			t.Errorf("%s checks target_cgroup_ids directly and so ignores inherited container cgroups", file)
 		}
+	}
+}
+
+func TestSchedSwitchStampsOnlyTargetedThreadsOut(t *testing.T) {
+	body := functionBody(t, bpfSource(t, "cpu.c"), "tracepoint_sched_switch")
+	stamp := strings.Index(body, "bpf_map_update_elem(&sched_out_ts, &prev_pid")
+	if stamp < 0 {
+		t.Fatal("sched_switch no longer stamps the outgoing thread")
+	}
+	gate := strings.LastIndex(body[:stamp], "if (cgroup_allows(bpf_get_current_cgroup_id()))")
+	if gate < 0 {
+		t.Fatal("sched_switch stamps every thread on the node into sched_out_ts, so untargeted threads evict the stamps of targeted ones")
+	}
+	if between := body[gate:stamp]; strings.Count(between, "{") <= strings.Count(between, "}") {
+		t.Error("the sched_out_ts stamp must sit inside the target cgroup gate")
+	}
+}
+
+func TestTargetCgroupAllowlistIsNotEvictable(t *testing.T) {
+	block, ok := mapBlock(bpfSource(t, "maps.h"), "target_cgroup_ids")
+	if !ok {
+		t.Fatal("map target_cgroup_ids not found in maps.h")
+	}
+	if !strings.Contains(block, "BPF_MAP_TYPE_HASH") || strings.Contains(block, "LRU") {
+		t.Error("target_cgroup_ids is filled only by userspace; as an LRU map the kernel can evict a live target and silently drop its events")
 	}
 }

@@ -96,7 +96,7 @@ static __always_inline void apply_sk_owner(struct event *e, u64 skaddr)
 static __always_inline void socket_event_context(void *ctx, struct event *e, u32 cur_pid)
 {
 	if (e->pid && e->pid == cur_pid) {
-		capture_user_stack(ctx, cur_pid, 0, e);
+		capture_user_stack_slot(ctx, cur_pid, 0, e, EVENT_BUF_SOFTIRQ);
 		return;
 	}
 	e->stack_key = 0;
@@ -316,9 +316,10 @@ int kretprobe_tcp_v6_connect(struct pt_regs *ctx) {
 			__builtin_memcpy(e->details, resolved, MAX_STRING_LEN);
 		}
 	}
-	capture_user_stack(ctx, pid, tid, e);
-	if (!agg_absorbed(e, 0))
+	if (!agg_absorbed(e, 0)) {
+		capture_user_stack(ctx, pid, tid, e);
 		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	}
 	bpf_map_delete_elem(&connect_addrs, &key);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
@@ -363,9 +364,10 @@ int kretprobe_tcp_connect(struct pt_regs *ctx) {
 			__builtin_memcpy(e->details, resolved, MAX_STRING_LEN);
 		}
 	}
-	capture_user_stack(ctx, pid, tid, e);
-	if (!agg_absorbed(e, 0))
+	if (!agg_absorbed(e, 0)) {
+		capture_user_stack(ctx, pid, tid, e);
 		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	}
 	bpf_map_delete_elem(&connect_addrs, &key);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
@@ -433,9 +435,10 @@ static __always_inline int tcp_sendmsg_return(void *ctx, long rc)
 	}
 	bpf_map_delete_elem(&tcp_target, &key);
 	fill_event_peer_pref(e, PAIR_TCP_SENDMSG);
-	capture_user_stack(ctx, pid, tid, e);
-	if (!agg_absorbed(e, 0))
+	if (!agg_absorbed(e, 0)) {
+		capture_user_stack(ctx, pid, tid, e);
 		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	}
 	bpf_map_delete_elem(&start_times, &key);
 
 	char *grpc_method_ptr = bpf_map_lookup_elem(&grpc_methods, &conn_key);
@@ -533,9 +536,10 @@ static __always_inline int tcp_recvmsg_return(void *ctx, long rc)
 	}
 	bpf_map_delete_elem(&tcp_target, &key);
 	fill_event_peer_pref(e, PAIR_TCP_RECVMSG);
-	capture_user_stack(ctx, pid, tid, e);
-	if (!agg_absorbed(e, 0))
+	if (!agg_absorbed(e, 0)) {
+		capture_user_stack(ctx, pid, tid, e);
 		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	}
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
@@ -558,9 +562,12 @@ int fexit_tcp_recvmsg(u64 *ctx)
 struct hostent_call {
 	u64 result;
 	u64 h_errnop;
+	u64 start_ns;
 	u32 depth;
 	u32 _pad;
 };
+
+#define HOSTENT_STALE_NS (120ULL * 1000ULL * NS_PER_MS)
 
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
@@ -578,16 +585,18 @@ struct {
 
 static __always_inline int hostent_enter(u64 name, u64 result, u64 h_errnop)
 {
+	if (!cgroup_allows(bpf_get_current_cgroup_id()))
+		return 0;
 	struct pair_key key = make_pair_key(PAIR_GETHOSTBYNAME);
+	u64 ts = bpf_ktime_get_ns();
 	struct hostent_call *outer = bpf_map_lookup_elem(&hostent_calls, &key);
-	if (outer) {
+	if (outer && ts - outer->start_ns < HOSTENT_STALE_NS) {
 		outer->depth++;
 		return 0;
 	}
-	struct hostent_call call = { .result = result, .h_errnop = h_errnop, .depth = 1 };
+	struct hostent_call call = { .result = result, .h_errnop = h_errnop, .start_ns = ts, .depth = 1 };
 	bpf_map_update_elem(&hostent_calls, &key, &call, BPF_ANY);
 
-	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
 	if (name) {
 		char target[MAX_STRING_LEN] = {};
@@ -656,9 +665,10 @@ static __always_inline int hostent_exit(struct pt_regs *ctx, s32 ret)
 	char *target = bpf_map_lookup_elem(&dns_targets, &key);
 	if (target)
 		bpf_probe_read_kernel_str(e->target, sizeof(e->target), target);
-	capture_user_stack(ctx, e->pid, (u32)bpf_get_current_pid_tgid(), e);
-	if (!agg_absorbed(e, 0))
+	if (!agg_absorbed(e, 0)) {
+		capture_user_stack(ctx, e->pid, (u32)bpf_get_current_pid_tgid(), e);
 		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	}
 	drop_pair_sidemaps(&key);
 	return 0;
 }
@@ -704,6 +714,8 @@ int uretprobe_gethostbyname2_r(struct pt_regs *ctx) {
 
 SEC("uprobe/getaddrinfo")
 int uprobe_getaddrinfo(struct pt_regs *ctx) {
+	if (!cgroup_allows(bpf_get_current_cgroup_id()))
+		return 0;
 	struct pair_key key = make_pair_key(PAIR_GETADDRINFO);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
@@ -759,9 +771,10 @@ int uretprobe_getaddrinfo(struct pt_regs *ctx) {
 	} else {
 		e->target[0] = '\0';
 	}
-	capture_user_stack(ctx, pid, tid, e);
-	if (!agg_absorbed(e, 0))
+	if (!agg_absorbed(e, 0)) {
+		capture_user_stack(ctx, pid, tid, e);
 		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	}
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
@@ -836,7 +849,7 @@ int tracepoint_inet_sock_set_state(void *ctx) {
 		return 0;
 	}
 
-	struct event *e = get_event_buf_unfiltered();
+	struct event *e = event_buf_slot(EVENT_BUF_SOFTIRQ);
 	if (!e) {
 		return 0;
 	}
@@ -908,7 +921,7 @@ int tracepoint_tcp_retransmit_skb(void *ctx) {
 	if (bpf_probe_read_kernel(&args_local, sizeof(args_local), ctx) != 0) {
 		return 0;
 	}
-	struct event *e = get_event_buf_unfiltered();
+	struct event *e = event_buf_slot(EVENT_BUF_SOFTIRQ);
 	if (!e) {
 		return 0;
 	}
@@ -964,7 +977,7 @@ int tracepoint_net_dev_xmit(void *ctx) {
 	if (args_local.rc == 0) {
 		return 0;
 	}
-	struct event *e = get_event_buf_unfiltered();
+	struct event *e = event_buf_slot(EVENT_BUF_SOFTIRQ);
 	if (!e) {
 		return 0;
 	}
@@ -1029,10 +1042,11 @@ static __always_inline int udp_sendmsg_return(void *ctx, long rc)
 	e->tcp_state = 0;
 	e->target[0] = '\0';
 	
-	capture_user_stack(ctx, pid, tid, e);
 	fill_event_peer_pref(e, PAIR_UDP_SENDMSG);
-	if (!agg_absorbed(e, 0))
+	if (!agg_absorbed(e, 0)) {
+		capture_user_stack(ctx, pid, tid, e);
 		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	}
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
@@ -1104,11 +1118,12 @@ static __always_inline int udp_recvmsg_return(void *ctx, long rc)
 	e->tcp_state = 0;
 	e->target[0] = '\0';
 	
-	capture_user_stack(ctx, pid, tid, e);
 	stash_udp_recv_peer();
 	fill_event_peer_pref(e, PAIR_UDP_RECVMSG);
-	if (!agg_absorbed(e, 0))
+	if (!agg_absorbed(e, 0)) {
+		capture_user_stack(ctx, pid, tid, e);
 		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	}
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
@@ -1130,6 +1145,8 @@ int fexit_udp_recvmsg(u64 *ctx)
 
 SEC("uprobe/http_request")
 int uprobe_http_request(struct pt_regs *ctx) {
+	if (!cgroup_allows(bpf_get_current_cgroup_id()))
+		return 0;
 	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct pair_key key = make_pair_key(PAIR_HTTP_REQUEST);
@@ -1181,15 +1198,18 @@ int uretprobe_http_request(struct pt_regs *ctx) {
 	} else {
 		e->target[0] = '\0';
 	}
-	capture_user_stack(ctx, pid, tid, e);
-	if (!agg_absorbed(e, 0))
+	if (!agg_absorbed(e, 0)) {
+		capture_user_stack(ctx, pid, tid, e);
 		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	}
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
 
 SEC("uprobe/http_response")
 int uprobe_http_response(struct pt_regs *ctx) {
+	if (!cgroup_allows(bpf_get_current_cgroup_id()))
+		return 0;
 	struct pair_key key = make_pair_key(PAIR_HTTP_RESPONSE);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
@@ -1228,15 +1248,18 @@ int uretprobe_http_response(struct pt_regs *ctx) {
 	e->tcp_state = 0;
 	e->target[0] = '\0';
 	
-	capture_user_stack(ctx, pid, tid, e);
-	if (!agg_absorbed(e, 0))
+	if (!agg_absorbed(e, 0)) {
+		capture_user_stack(ctx, pid, tid, e);
 		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	}
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
 
 SEC("uprobe/PQexec")
 int uprobe_PQexec(struct pt_regs *ctx) {
+	if (!cgroup_allows(bpf_get_current_cgroup_id()))
+		return 0;
 	struct pair_key key = make_pair_key(PAIR_PQEXEC);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
@@ -1287,15 +1310,18 @@ int uretprobe_PQexec(struct pt_regs *ctx) {
 	} else {
 		e->target[0] = '\0';
 	}
-	capture_user_stack(ctx, pid, tid, e);
-	if (!agg_absorbed(e, 0))
+	if (!agg_absorbed(e, 0)) {
+		capture_user_stack(ctx, pid, tid, e);
 		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	}
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
 
 SEC("uprobe/mysql_real_query")
 int uprobe_mysql_real_query(struct pt_regs *ctx) {
+	if (!cgroup_allows(bpf_get_current_cgroup_id()))
+		return 0;
 	struct pair_key key = make_pair_key(PAIR_MYSQL_QUERY);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
@@ -1346,9 +1372,10 @@ int uretprobe_mysql_real_query(struct pt_regs *ctx) {
 	} else {
 		e->target[0] = '\0';
 	}
-	capture_user_stack(ctx, pid, tid, e);
-	if (!agg_absorbed(e, 0))
+	if (!agg_absorbed(e, 0)) {
+		capture_user_stack(ctx, pid, tid, e);
 		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	}
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
@@ -1490,9 +1517,10 @@ static __always_inline void ssl_emit_handshake(struct pt_regs *ctx, u64 latency,
 	e->bytes = 0;
 	e->tcp_state = 0;
 	e->target[0] = '\0';
-	capture_user_stack(ctx, pid, tid, e);
-	if (!agg_absorbed(e, 0))
+	if (!agg_absorbed(e, 0)) {
+		capture_user_stack(ctx, pid, tid, e);
 		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	}
 }
 
 static __always_inline int ssl_hs_undecided(u64 ssl)
@@ -1515,6 +1543,8 @@ static __always_inline void ssl_hs_settle(struct pt_regs *ctx, u64 ssl)
 
 static __always_inline int ssl_handshake_entry(struct pt_regs *ctx, u32 pair)
 {
+	if (!cgroup_allows(bpf_get_current_cgroup_id()))
+		return 0;
 	struct pair_key key = make_pair_key(pair);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
@@ -1635,6 +1665,8 @@ int uprobe_SSL_free(struct pt_regs *ctx) {
 
 SEC("uprobe/gnutls_handshake")
 int uprobe_gnutls_handshake(struct pt_regs *ctx) {
+	if (!cgroup_allows(bpf_get_current_cgroup_id()))
+		return 0;
 	struct pair_key key = make_pair_key(PAIR_GNUTLS_HANDSHAKE);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
@@ -1669,15 +1701,18 @@ int uretprobe_gnutls_handshake(struct pt_regs *ctx) {
 	e->bytes = 0;
 	e->tcp_state = 0;
 	e->target[0] = '\0';
-	capture_user_stack(ctx, pid, tid, e);
-	if (!agg_absorbed(e, 0))
+	if (!agg_absorbed(e, 0)) {
+		capture_user_stack(ctx, pid, tid, e);
 		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	}
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
 
 SEC("uprobe/mbedtls_ssl_handshake")
 int uprobe_mbedtls_ssl_handshake(struct pt_regs *ctx) {
+	if (!cgroup_allows(bpf_get_current_cgroup_id()))
+		return 0;
 	struct pair_key key = make_pair_key(PAIR_MBEDTLS_HANDSHAKE);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
@@ -1712,9 +1747,10 @@ int uretprobe_mbedtls_ssl_handshake(struct pt_regs *ctx) {
 	e->bytes = 0;
 	e->tcp_state = 0;
 	e->target[0] = '\0';
-	capture_user_stack(ctx, pid, tid, e);
-	if (!agg_absorbed(e, 0))
+	if (!agg_absorbed(e, 0)) {
+		capture_user_stack(ctx, pid, tid, e);
 		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	}
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
