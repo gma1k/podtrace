@@ -149,5 +149,5 @@ annotations:
         - linux/amd64
         - linux/arm64
     - name: crd-labeler
-      image: alpine/k8s:1.37.1@sha256:712dc5385d1c1a3f83b747fa9e40f64d433a97f72ff42f9755ff7dd1f62846e4
+      image: alpine/k8s:1.37.2@sha256:dcb7185e112a453aa72f426754849a97357727ef8f40168fb208c8cf59952042
       whitelisted: true

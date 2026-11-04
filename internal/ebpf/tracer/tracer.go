@@ -662,8 +662,24 @@ func (t *Tracer) storeCgroupIDs(m map[uint64]struct{}) {
 	t.targetCgroupIDs.Store(&m)
 }
 
-// roundUpPow2 rounds n up to the nearest power of two, minimum 4096 and
-// maximum 1<<31, the largest power of two a uint32 holds.
+var sharedLRUMaps = []string{"start_times", "inherited_cgroup_ids"}
+
+const lruFreeNodesPerCPU = 128
+
+// raiseSharedLRUMaps sizes each shared LRU map so that the free nodes the
+// CPUs keep for themselves can take at most half of it.
+func raiseSharedLRUMaps(spec *ebpf.CollectionSpec, cpus int) {
+	if cpus <= 0 {
+		return
+	}
+	floor := config.ClampUint32(cpus * lruFreeNodesPerCPU * 2)
+	for _, name := range sharedLRUMaps {
+		if m, ok := spec.Maps[name]; ok && m.Type == ebpf.LRUHash && m.MaxEntries < floor {
+			m.MaxEntries = floor
+		}
+	}
+}
+
 func roundUpPow2(n uint32) uint32 {
 	if n < 4096 {
 		return 4096
@@ -790,6 +806,9 @@ func NewTracer(tracerOpts ...Option) (*Tracer, error) {
 		if m.Type == ebpf.Hash && m.MaxEntries < hashSize {
 			spec.Maps[name].MaxEntries = hashSize
 		}
+	}
+	if cpus, err := ebpf.PossibleCPU(); err == nil {
+		raiseSharedLRUMaps(spec, cpus)
 	}
 
 	var opts ebpf.CollectionOptions
@@ -1261,9 +1280,8 @@ func classifyCgroupCapacity(count int, maxEntries uint32) int {
 }
 
 // warnOnCgroupCapacity logs when the desired target set approaches or exceeds
-// the capacity of the LRU target_cgroup_ids map: beyond capacity the kernel
-// silently evicts the oldest entries and their containers' events are
-// dropped.
+// the capacity of the target_cgroup_ids map: targets beyond capacity cannot
+// be added and their containers' events are dropped.
 func (t *Tracer) warnOnCgroupCapacity(count int, maxEntries uint32) {
 	level := classifyCgroupCapacity(count, maxEntries)
 	if level == cgroupCapacityOK {
@@ -1274,12 +1292,12 @@ func (t *Tracer) warnOnCgroupCapacity(count int, maxEntries uint32) {
 		return
 	}
 	if level == cgroupCapacityExceeded {
-		logger.Error("Target cgroup count exceeds kernel filter capacity; the oldest entries are silently evicted (LRU) and their containers' events dropped",
+		logger.Error("Target cgroup count exceeds kernel filter capacity; targets beyond capacity are not added and their containers' events are dropped",
 			zap.Int("target_count", count),
 			zap.Uint32("max_entries", maxEntries))
 		return
 	}
-	logger.Warn("Target cgroup count approaching kernel filter capacity; targets beyond capacity will be silently evicted (LRU)",
+	logger.Warn("Target cgroup count approaching kernel filter capacity; targets beyond capacity will not be added",
 		zap.Int("target_count", count),
 		zap.Uint32("max_entries", maxEntries))
 }

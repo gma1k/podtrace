@@ -152,11 +152,13 @@ int tracepoint_sched_switch(void *ctx) {
 			}
 		}
 
-		struct sched_interval out = {
-			.ns = now,
-			.preempted = ((args_local.prev_state & 0xFF) == 0) ? 1 : 0,
-		};
-		bpf_map_update_elem(&sched_out_ts, &prev_pid, &out, BPF_ANY);
+		if (cgroup_allows(bpf_get_current_cgroup_id())) {
+			struct sched_interval out = {
+				.ns = now,
+				.preempted = ((args_local.prev_state & 0xFF) == 0) ? 1 : 0,
+			};
+			bpf_map_update_elem(&sched_out_ts, &prev_pid, &out, BPF_ANY);
+		}
 	}
 
 	return 0;
@@ -252,6 +254,8 @@ int fexit_do_futex(u64 *ctx)
 
 SEC("uprobe/pthread_mutex_lock")
 int uprobe_pthread_mutex_lock(struct pt_regs *ctx) {
+	if (!cgroup_allows(bpf_get_current_cgroup_id()))
+		return 0;
 	struct pair_key key = make_pair_key(PAIR_PTHREAD_MUTEX);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);

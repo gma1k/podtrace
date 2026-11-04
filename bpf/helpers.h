@@ -226,9 +226,8 @@ static inline u64 build_stack_key(u32 pid, u32 tid, u64 timestamp) {
 	return h;
 }
 
-static inline struct event *get_event_buf_unfiltered(void) {
-	u32 zero = 0;
-	struct event *e = bpf_map_lookup_elem(&event_buf, &zero);
+static inline struct event *event_buf_slot(u32 slot) {
+	struct event *e = bpf_map_lookup_elem(&event_buf, &slot);
 	if (e) {
 		__builtin_memset(e, 0, sizeof(*e));
 		e->cgroup_id = bpf_get_current_cgroup_id();
@@ -240,6 +239,10 @@ static inline struct event *get_event_buf_unfiltered(void) {
 		}
 	}
 	return e;
+}
+
+static inline struct event *get_event_buf_unfiltered(void) {
+	return event_buf_slot(EVENT_BUF_TASK);
 }
 
 static __always_inline int cgroup_targeted(u64 cgid) {
@@ -271,12 +274,11 @@ static inline struct event *get_event_buf(void) {
 	return e;
 }
 
-static inline void capture_user_stack(void *ctx, u32 pid, u32 tid, struct event *e) {
+static inline void capture_user_stack_slot(void *ctx, u32 pid, u32 tid, struct event *e, u32 slot) {
 	if (!e) {
 		return;
 	}
-	u32 zero = 0;
-	struct stack_trace_t *trace = bpf_map_lookup_elem(&stack_buf, &zero);
+	struct stack_trace_t *trace = bpf_map_lookup_elem(&stack_buf, &slot);
 	if (!trace) {
 		e->stack_key = 0;
 		return;
@@ -293,6 +295,10 @@ static inline void capture_user_stack(void *ctx, u32 pid, u32 tid, struct event 
 	u64 key = build_stack_key(pid, tid, e->timestamp);
 	bpf_map_update_elem(&stack_traces, &key, trace, BPF_ANY);
 	e->stack_key = key;
+}
+
+static inline void capture_user_stack(void *ctx, u32 pid, u32 tid, struct event *e) {
+	capture_user_stack_slot(ctx, pid, tid, e, EVENT_BUF_TASK);
 }
 
 static __always_inline s32 http_parse_status3(const char *s)
