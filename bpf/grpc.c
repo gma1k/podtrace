@@ -6,12 +6,14 @@
 #include "helpers.h"
 #include "protocols.h"
 
-#define GRPC_INSPECT_LEN 50
+#define GRPC_INSPECT_LEN 128
 
 
 SEC("kprobe/tcp_sendmsg")
 int kprobe_grpc_tcp_sendmsg(struct pt_regs *ctx)
 {
+	if (!cgroup_allows(bpf_get_current_cgroup_id()))
+		return 0;
 	struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
 	if (!sk)
 		return 0;
@@ -36,38 +38,47 @@ int kprobe_grpc_tcp_sendmsg(struct pt_regs *ctx)
 	if (bpf_probe_read_user(buf, read_len, base) != 0)
 		return 0;
 
-	if (buf[3] != HTTP2_HEADERS)
+	if (buf[3] != HTTP2_HEADERS || !h2_frame_header_plausible(buf))
+		return 0;
+
+	u32 flen = ((u32)buf[0] << 16) | ((u32)buf[1] << 8) | (u32)buf[2];
+	u8 flags = buf[4];
+	u32 start = HTTP2_FRAME_HDR;
+	u32 end = HTTP2_FRAME_HDR + flen;
+	if (flags & HTTP2_FLAG_PADDED) {
+		u32 pad = buf[HTTP2_FRAME_HDR];
+		start += 1;
+		if (start + pad > end)
+			return 0;
+		end -= pad;
+	}
+	if (flags & HTTP2_FLAG_PRIORITY)
+		start += 5;
+	if (end > read_len)
+		end = read_len;
+
+	u32 vstart = 0, vlen = 0;
+	if (!hpack_literal_path(buf, GRPC_INSPECT_LEN - 1, start, end, &vstart, &vlen))
+		return 0;
+	if (buf[vstart & (GRPC_INSPECT_LEN - 1)] != '/')
+		return 0;
+
+	char path[MAX_STRING_LEN] = {};
+	u32 p = 0;
+	for (u32 i = 0; i < MAX_STRING_LEN - 1; i++) {
+		if (i >= vlen)
+			break;
+		u8 c = buf[(vstart + i) & (GRPC_INSPECT_LEN - 1)];
+		if (c < 0x21 || c > 0x7e)
+			return 0;
+		path[p++ & (MAX_STRING_LEN - 1)] = c;
+	}
+	if (p == 0)
 		return 0;
 
 	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_key(pid, tid);
-
-	u32 path_start = 0;
-	u32 i;
-	for (i = HTTP2_FRAME_HDR; i < GRPC_INSPECT_LEN; i++) {
-		if (buf[i] == '/') {
-			path_start = i;
-			break;
-		}
-	}
-
-	if (path_start == 0)
-		return 0;
-
-	char path[MAX_STRING_LEN] = {};
-	u32 p = 0;
-	for (i = path_start; i < GRPC_INSPECT_LEN && p < MAX_STRING_LEN - 1; i++) {
-		u8 c = buf[i];
-		if (c < 0x20 || c == ':' || c == ' ')
-			break;
-		path[p++] = c;
-	}
-	if (p == 0)
-		return 0;
-	path[p] = '\0';
-
 	bpf_map_update_elem(&grpc_methods, &key, path, BPF_ANY);
 	return 0;
 }
-

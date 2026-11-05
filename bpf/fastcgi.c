@@ -235,7 +235,6 @@ int kprobe_unix_stream_sendmsg(struct pt_regs *ctx)
 	void *user_base = msghdr_user_base(msg, &avail);
 	if (!user_base) return 0;
 
-	const u32 FCGI_MAX_RECORD_BODY = 8 * 1024;
 	u32 offset = 0;
 	u8 hdr[16] = {};
 	u8 found_end = 0;
@@ -243,7 +242,7 @@ int kprobe_unix_stream_sendmsg(struct pt_regs *ctx)
 	u32 app_status = 0;
 
 	#pragma unroll
-	for (int k = 0; k < 4; k++) {
+	for (int k = 0; k < FCGI_END_SCAN_RECORDS; k++) {
 		if ((u64)offset + sizeof(hdr) > avail)
 			break;
 		if (bpf_probe_read_user(hdr, sizeof(hdr), (u8 *)user_base + offset) != 0)
@@ -259,8 +258,6 @@ int kprobe_unix_stream_sendmsg(struct pt_regs *ctx)
 			found_end = 1;
 			break;
 		}
-		if (content_len > FCGI_MAX_RECORD_BODY)
-			break;
 		offset += FCGI_HEADER_LEN + (u32)content_len + (u32)padding_len;
 	}
 	if (!found_end)

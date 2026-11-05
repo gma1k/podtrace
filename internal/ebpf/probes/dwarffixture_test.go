@@ -28,13 +28,54 @@ import (
 
 var sink any
 
+type framer struct{ n int }
+
+type loopyWriter struct {
+	side          int
+	cbuf          *int
+	sendQuota     uint32
+	oiws          uint32
+	estdStreams   map[uint32]*int
+	activeStreams *int
+	framer        *framer
+}
+
+type http2Server struct {
+	lastRead        int64
+	done            chan struct{}
+	conn            net.Conn
+	loopy           *loopyWriter
+	readerDone      chan struct{}
+	loopyWriterDone chan struct{}
+	peer            [6]uintptr
+	inTapHandle     func()
+	framer          *framer
+}
+
+type http2Client struct {
+	lastRead int64
+	ctx      [2]uintptr
+	framer   *framer
+}
+
+type noFramerloopyWriter struct{ side int }
+
+type valueFramerloopyWriter struct{ framer framer }
+
+type loopyOnlyloopyWriter struct{ framer *framer }
+
+type noClientloopyWriter struct{ framer *framer }
+
+type noClienthttp2Server struct{ framer *framer }
+
 func main() {
 	var a net.UDPAddr
 	var r http.Request
 	var resp http.Response
 	var u url.URL
 	var o sync.Once
-	sink = []any{&a, &r, &resp, &u, &o}
+	sink = []any{&a, &r, &resp, &u, &o, &loopyWriter{}, &http2Server{}, &http2Client{},
+		&noFramerloopyWriter{}, &valueFramerloopyWriter{}, &loopyOnlyloopyWriter{}, &noClientloopyWriter{}, &noClienthttp2Server{}}
 	fmt.Println(sink)
 }
 `

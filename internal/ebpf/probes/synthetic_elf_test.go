@@ -20,6 +20,7 @@ type testSection struct {
 	data    []byte
 	link    uint32
 	entsize uint64
+	load    bool
 }
 
 const (
@@ -45,7 +46,13 @@ func writeTestELF(t *testing.T, path string, sections []testSection) {
 	shstr = append(shstr, ".shstrtab\x00"...)
 	all := append(append([]testSection{}, sections...), testSection{typ: shtStrtab, data: shstr})
 
-	buf := make([]byte, 64)
+	var loads []int
+	for i, s := range all {
+		if s.load {
+			loads = append(loads, i)
+		}
+	}
+	buf := make([]byte, 64+56*len(loads))
 	offs := make([]uint64, len(all))
 	for i, s := range all {
 		for len(buf)%8 != 0 {
@@ -65,6 +72,21 @@ func writeTestELF(t *testing.T, path string, sections []testSection) {
 	le.PutUint16(buf[16:], 2)
 	le.PutUint16(buf[18:], 62)
 	le.PutUint32(buf[20:], 1)
+	if len(loads) > 0 {
+		le.PutUint64(buf[32:], 64)
+		le.PutUint16(buf[56:], uint16(len(loads)))
+	}
+	for n, i := range loads {
+		ph := buf[64+56*n:]
+		le.PutUint32(ph[0:], 1)
+		le.PutUint32(ph[4:], 5)
+		le.PutUint64(ph[8:], offs[i])
+		le.PutUint64(ph[16:], all[i].addr)
+		le.PutUint64(ph[24:], all[i].addr)
+		le.PutUint64(ph[32:], uint64(len(all[i].data)))
+		le.PutUint64(ph[40:], uint64(len(all[i].data)))
+		le.PutUint64(ph[48:], 0x1000)
+	}
 	le.PutUint64(buf[40:], shoff)
 	le.PutUint16(buf[52:], 64)
 	le.PutUint16(buf[54:], 56)
@@ -148,8 +170,8 @@ func TestRustProbesOpenARustBinaryWithTheirSymbols(t *testing.T) {
 		"_ZN6rustls4conn6Reader4read17h0000000000000000E",
 		"_ZN6quiche2h310Connection12send_request17h0000000000000000E",
 	))
-	coll := placeholderPrograms("uprobe_rustls_write", "uprobe_rustls_read", "uretprobe_rustls_read",
-		"uprobe_quiche_rs_send_request")
+	coll := placeholderPrograms("uprobe_rustls_write", "uretprobe_rustls_write", "uprobe_rustls_read",
+		"uretprobe_rustls_read", "uprobe_quiche_rs_send_request")
 	if n := len(AttachRustlsProbes(coll, pid)) + len(AttachQuicheRustProbes(coll, pid)); n != 0 {
 		t.Errorf("attached %d links from placeholder programs", n)
 	}

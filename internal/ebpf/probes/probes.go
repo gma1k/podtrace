@@ -631,31 +631,20 @@ func databaseProbeConfigs() []dbProbeConfig {
 			exhaustRetProg: "uretprobe_sqlite3_step",
 		},
 		{
-			name:        "postgresql",
-			libPatterns: []string{"libpq.so.5", "libpq.so"},
-			// The public connection entry points. PQconnectStart alone was
-			// wrong: it is the low-level asynchronous API, and synchronous
-			// clients, which is nearly all of them, psql and pgbench
-			// included, reach libpq through PQconnectdb or
-			// PQconnectdbParams instead and never call it.
+			name:           "postgresql",
+			libPatterns:    []string{"libpq.so.5", "libpq.so"},
 			acquireSymbols: []string{"PQconnectdb", "PQconnectdbParams", "PQconnectStart"},
 			releaseSymbol:  "PQfinish",
-			exhaustSymbol:  "PQexec",
 			acquireProg:    "uprobe_PQconnectStart",
 			releaseProg:    "uretprobe_PQfinish",
-			exhaustProg:    "uprobe_PQexec_pool",
-			exhaustRetProg: "",
 		},
 		{
 			name:           "mysql",
 			libPatterns:    []string{"libmysqlclient.so.21", "libmysqlclient.so"},
 			acquireSymbols: []string{"mysql_real_connect"},
 			releaseSymbol:  "mysql_close",
-			exhaustSymbol:  "mysql_real_query",
 			acquireProg:    "uprobe_mysql_real_connect",
 			releaseProg:    "uretprobe_mysql_close",
-			exhaustProg:    "uprobe_mysql_real_query_pool",
-			exhaustRetProg: "",
 		},
 	}
 }
@@ -2037,6 +2026,9 @@ func AttachGoGRPCProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 		}
 		links = append(links, l)
 		logger.Debug("Go gRPC uprobe attached", zap.String("symbol", t.sym), zap.Uint32("pid", pid))
+	}
+	if len(links) > 0 {
+		publishGRPCGoOffsets(coll, exePath, pid)
 	}
 	return links
 }

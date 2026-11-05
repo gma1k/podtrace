@@ -107,6 +107,36 @@ static __always_inline void h2_oncpu_frame(u64 conn, u32 dir, u8 type, u8 flags,
 	bpf_map_delete_elem(&h2_streams, &k);
 }
 
+static __always_inline void h2_mark_desync(struct h2_frame_state *fs, u64 conn, u32 dir)
+{
+	if (!fs->desync)
+		h2_next_seq(conn, dir);
+	fs->desync = 1;
+	fs->remaining = 0;
+	fs->hdr_have = 0;
+	fs->pad = 0;
+	fs->pad_len_pending = 0;
+	fs->pre_skip = 0;
+	fs->sliced = 0;
+}
+
+static __always_inline void h2_desync(u64 conn, u32 dir)
+{
+	struct h2_seq_key fk = { .conn_id = conn, .dir = dir };
+	struct h2_frame_state *fs = bpf_map_lookup_elem(&h2_frame_state, &fk);
+	if (fs)
+		h2_mark_desync(fs, conn, dir);
+}
+
+#define H2_KEEP_PARTIAL(i)							\
+	do {									\
+		if ((i) >= have && (i) < have + avail_here) {			\
+			u8 b = 0;						\
+			bpf_probe_read_user(&b, 1, (u8 *)c->base + off + ((i) - have)); \
+			fs->hdr_partial[i] = b;					\
+		}								\
+	} while (0)
+
 static long h2_frames_cb(u32 idx, void *vctx)
 {
 	struct h2_raw_ctx *c = vctx;
@@ -202,8 +232,23 @@ static long h2_frames_cb(u32 idx, void *vctx)
 		u32 have = fs->hdr_have;
 		u32 avail_here = c->avail - off;
 		u32 need = HTTP2_FRAME_HDR - have;
+		if (have >= HTTP2_FRAME_HDR) {
+			h2_mark_desync(fs, c->conn_id, c->dir);
+			s->off = c->avail;
+			return 1;
+		}
 		if (avail_here < need) {
-			fs->hdr_have = 0;
+			H2_KEEP_PARTIAL(0);
+			H2_KEEP_PARTIAL(1);
+			H2_KEEP_PARTIAL(2);
+			H2_KEEP_PARTIAL(3);
+			H2_KEEP_PARTIAL(4);
+			H2_KEEP_PARTIAL(5);
+			H2_KEEP_PARTIAL(6);
+			H2_KEEP_PARTIAL(7);
+			H2_KEEP_PARTIAL(8);
+			fs->hdr_have = (u8)(have + avail_here);
+			s->off = c->avail;
 			return 1;
 		}
 #pragma clang loop unroll(full)
@@ -233,11 +278,19 @@ static long h2_frames_cb(u32 idx, void *vctx)
 			s->off = c->avail;
 			return 1;
 		}
-		if (bpf_probe_read_user(fh, sizeof(fh), (u8 *)c->base + off) != 0)
+		if (bpf_probe_read_user(fh, sizeof(fh), (u8 *)c->base + off) != 0) {
+			h2_mark_desync(fs, c->conn_id, c->dir);
+			s->off = c->avail;
 			return 1;
+		}
 		off += HTTP2_FRAME_HDR;
 	}
-	u32 flen = ((u32)fh[0] << 16) | ((u32)fh[1] << 8) | (u32)fh[2];
+	if (!h2_frame_header_plausible(fh)) {
+		h2_mark_desync(fs, c->conn_id, c->dir);
+		s->off = c->avail;
+		return 1;
+	}
+	u32 flen =((u32)fh[0] << 16) | ((u32)fh[1] << 8) | (u32)fh[2];
 	u8 type = fh[3];
 	u8 flags = fh[4];
 	u32 sid = (((u32)fh[5] << 24) | ((u32)fh[6] << 16) |
@@ -256,7 +309,7 @@ static long h2_frames_cb(u32 idx, void *vctx)
 	return 0;
 }
 
-#define H2_MAX_FRAME_STEPS 48
+#define H2_MAX_FRAME_STEPS 512
 
 static __always_inline void h2_emit_frames(void *base, u64 avail, u64 conn,
 					   u32 dir, u8 transport)
@@ -319,6 +372,10 @@ static __always_inline void h2_emit_frames(void *base, u64 avail, u64 conn,
 			return;
 		}
 		start = HTTP2_PREFACE_LEN;
+	} else if (fs->desync) {
+		if (!h2_start_looks_h2(base, avail))
+			return;
+		__builtin_memset(fs, 0, sizeof(*fs));
 	}
 	fs->preface_seen = 1;
 	s->off = start;
@@ -334,6 +391,29 @@ static __always_inline void h2_emit_frames(void *base, u64 avail, u64 conn,
 		.transport = transport,
 	};
 	bpf_loop(H2_MAX_FRAME_STEPS, h2_frames_cb, &c, 0);
+	if (s->off < c.avail)
+		h2_desync(conn, dir);
+}
+
+static __always_inline void h2_forget_conn(u64 conn)
+{
+	struct h2_seq_key ke = { .conn_id = conn, .dir = H2_DIR_EGRESS };
+	struct h2_seq_key ki = { .conn_id = conn, .dir = H2_DIR_INGRESS };
+	bpf_map_delete_elem(&h2_seq, &ke);
+	bpf_map_delete_elem(&h2_seq, &ki);
+	bpf_map_delete_elem(&h2_frame_state, &ke);
+	bpf_map_delete_elem(&h2_frame_state, &ki);
+	bpf_map_delete_elem(&h2_conns, &conn);
+	bpf_map_delete_elem(&h2_server_conns, &conn);
+
+	struct h2_hdr_scratch *s = h2_hdr_scratch_lookup();
+	if (!s)
+		return;
+	__builtin_memset(&s->rec, 0, sizeof(s->rec));
+	s->rec.conn_id = conn;
+	s->rec.timestamp = bpf_ktime_get_ns();
+	s->rec.flags = H2_HDR_FLAG_CLOSE;
+	bpf_ringbuf_output(&h2_hdr_events, &s->rec, sizeof(s->rec), 0);
 }
 
 #define H2_MAX_SEGS 8
@@ -366,10 +446,8 @@ static __always_inline void h2_emit_message(struct h2_recv_info *info, u64 moved
 			h2_emit_segment(v.iov_base, take, conn, dir, transport);
 		left -= take;
 	}
-	if (left > 0) {
-		struct h2_seq_key fk = { .conn_id = conn, .dir = dir };
-		bpf_map_delete_elem(&h2_frame_state, &fk);
-	}
+	if (left > 0)
+		h2_desync(conn, dir);
 }
 
 static __always_inline void h2_stash_message(struct pt_regs *ctx, void *map)
@@ -489,24 +567,10 @@ int kprobe_h2_tcp_close(struct pt_regs *ctx)
 	if (!http_should_trace())
 		return 0;
 
-	u64 conn = (u64)PT_REGS_PARM1(ctx);
-
-	struct h2_seq_key ke = { .conn_id = conn, .dir = H2_DIR_EGRESS };
-	struct h2_seq_key ki = { .conn_id = conn, .dir = H2_DIR_INGRESS };
-	bpf_map_delete_elem(&h2_seq, &ke);
-	bpf_map_delete_elem(&h2_seq, &ki);
-	bpf_map_delete_elem(&h2_frame_state, &ke);
-	bpf_map_delete_elem(&h2_frame_state, &ki);
-	bpf_map_delete_elem(&h2_conns, &conn);
-	bpf_map_delete_elem(&h2_server_conns, &conn);
-
-	struct h2_hdr_scratch *s = h2_hdr_scratch_lookup();
-	if (!s)
-		return 0;
-	__builtin_memset(&s->rec, 0, sizeof(s->rec));
-	s->rec.conn_id = conn;
-	s->rec.timestamp = bpf_ktime_get_ns();
-	s->rec.flags = H2_HDR_FLAG_CLOSE;
-	bpf_ringbuf_output(&h2_hdr_events, &s->rec, sizeof(s->rec), 0);
+	u64 sk = (u64)PT_REGS_PARM1(ctx);
+	h2_forget_conn(sk);
+	u64 scoped = process_scoped_id(sk);
+	if (bpf_map_lookup_elem(&h2_conns, &scoped))
+		h2_forget_conn(scoped);
 	return 0;
 }

@@ -71,9 +71,10 @@ func AttachRustlsProbes(coll *ebpf.Collection, pid uint32) (links []link.Link) {
 		return links
 	}
 	writeProg := coll.Programs["uprobe_rustls_write"]
+	writeRetProg := coll.Programs["uretprobe_rustls_write"]
 	readProg := coll.Programs["uprobe_rustls_read"]
 	readRetProg := coll.Programs["uretprobe_rustls_read"]
-	if writeProg == nil || readProg == nil || readRetProg == nil {
+	if writeProg == nil || writeRetProg == nil || readProg == nil || readRetProg == nil {
 		return links
 	}
 
@@ -112,11 +113,15 @@ func AttachRustlsProbes(coll *ebpf.Collection, pid uint32) (links []link.Link) {
 
 	if okW {
 		if off, ok := vaddrToFileOffset(f, writeVaddr); ok {
-			if l, err := exe.Uprobe("", writeProg, &link.UprobeOptions{Address: off}); err == nil {
-				links = append(links, l)
-				logger.Debug("rustls write uprobe attached", zap.Uint32("pid", pid), zap.Uint64("offset", off))
-			} else {
+			entry, err := exe.Uprobe("", writeProg, &link.UprobeOptions{Address: off})
+			if err != nil {
 				logger.Debug("rustls write uprobe not attached", zap.Uint32("pid", pid), zap.Error(err))
+			} else if ret, err := exe.Uretprobe("", writeRetProg, &link.UprobeOptions{Address: off}); err != nil {
+				_ = entry.Close()
+				logger.Debug("rustls write uretprobe not attached", zap.Uint32("pid", pid), zap.Error(err))
+			} else {
+				links = append(links, entry, ret)
+				logger.Debug("rustls write uprobes attached", zap.Uint32("pid", pid), zap.Uint64("offset", off))
 			}
 		}
 	}

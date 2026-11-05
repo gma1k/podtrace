@@ -254,8 +254,11 @@ static __always_inline void h3_emit_txn(u64 goroutine, u16 status, u8 is_client,
 {
 	u64 key = h3_stash_key(goroutine, is_client);
 	struct h3_req_inflight *in = bpf_map_lookup_elem(&h3_req_stash, &key);
-	if (!in)
+	if (!in) {
+		bpf_map_delete_elem(&h3_pending_tp, &key);
+		bpf_map_delete_elem(&h3_pending_hdrs, &key);
 		return;
+	}
 
 	u32 zero = 0;
 	struct h3_txn_scratch *s = bpf_map_lookup_elem(&h3_txn_scratch_map, &zero);
@@ -289,18 +292,18 @@ static __always_inline void h3_emit_txn(u64 goroutine, u16 status, u8 is_client,
 		__builtin_memcpy(rec->peer_daddr6, in->peer_daddr6, 16);
 	}
 
-	struct h3_pending_tp *tp = bpf_map_lookup_elem(&h3_pending_tp, &goroutine);
+	struct h3_pending_tp *tp = bpf_map_lookup_elem(&h3_pending_tp, &key);
 	if (tp) {
 		rec->tp_len = tp->len > H3_TXN_TP_MAX ? H3_TXN_TP_MAX : tp->len;
 		__builtin_memcpy(rec->traceparent, tp->buf, H3_TXN_TP_MAX);
-		bpf_map_delete_elem(&h3_pending_tp, &goroutine);
+		bpf_map_delete_elem(&h3_pending_tp, &key);
 	}
 
-	struct h3_pending_hdrs *ph = bpf_map_lookup_elem(&h3_pending_hdrs, &goroutine);
+	struct h3_pending_hdrs *ph = bpf_map_lookup_elem(&h3_pending_hdrs, &key);
 	if (ph) {
 		__builtin_memcpy(rec->hdr_vlen, ph->vlen, H3_HDR_SLOTS);
 		__builtin_memcpy(rec->hdr_val, ph->val, sizeof(rec->hdr_val));
-		bpf_map_delete_elem(&h3_pending_hdrs, &goroutine);
+		bpf_map_delete_elem(&h3_pending_hdrs, &key);
 	}
 
 	bpf_map_delete_elem(&h3_req_stash, &key);
@@ -367,13 +370,21 @@ int uprobe_h3_handle_request_ret(struct pt_regs *ctx)
 	return 0;
 }
 
+static __always_inline u64 h3_client_inflight_key(u64 goroutine)
+{
+	u64 key = h3_stash_key(goroutine, 1);
+	return bpf_map_lookup_elem(&h3_req_stash, &key) ? key : 0;
+}
+
 SEC("uprobe/h3_qpack_write_field")
 int uprobe_h3_qpack_write_field(struct pt_regs *ctx)
 {
 	if (!http_should_trace())
 		return 0;
-	h3_capture_field(process_scoped_id(GO_GOROUTINE(ctx)), GO_REG1(ctx), GO_REG2(ctx),
-			 GO_REG3(ctx), GO_REG4(ctx));
+	u64 key = h3_client_inflight_key(process_scoped_id(GO_GOROUTINE(ctx)));
+	if (!key)
+		return 0;
+	h3_capture_field(key, GO_REG1(ctx), GO_REG2(ctx), GO_REG3(ctx), GO_REG4(ctx));
 	return 0;
 }
 
@@ -426,10 +437,11 @@ int uprobe_h3_parse_headers_ret(struct pt_regs *ctx)
 		return 0;
 
 	u32 count = slice.len > H3_MAX_FIELDS ? H3_MAX_FIELDS : (u32)slice.len;
+	u64 key = h3_client_inflight_key(g);
 	struct h3_tp_iter_ctx c = {
 		.data = slice.ptr,
 		.count = count,
-		.goroutine = g,
+		.goroutine = key ? key : h3_stash_key(g, 0),
 	};
 	bpf_loop(count, h3_tp_field_cb, &c, 0);
 	return 0;

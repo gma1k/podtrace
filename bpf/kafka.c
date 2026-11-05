@@ -33,7 +33,8 @@ int uretprobe_rd_kafka_topic_new(struct pt_regs *ctx)
 
 	char *name = bpf_map_lookup_elem(&kafka_topic_tmp, &key);
 	if (name) {
-		bpf_map_update_elem(&kafka_topic_names, &topic_ptr, name, BPF_ANY);
+		u64 topic_id = process_scoped_id(topic_ptr);
+		bpf_map_update_elem(&kafka_topic_names, &topic_id, name, BPF_ANY);
 		bpf_map_delete_elem(&kafka_topic_tmp, &key);
 	}
 	return 0;
@@ -49,7 +50,8 @@ int uprobe_rd_kafka_produce(struct pt_regs *ctx)
 	u64 payload_len = (u64)PT_REGS_PARM5(ctx);
 
 	char topic_buf[MAX_STRING_LEN] = {};
-	char *topic = bpf_map_lookup_elem(&kafka_topic_names, &rkt_ptr);
+	u64 topic_id = process_scoped_id(rkt_ptr);
+	char *topic = bpf_map_lookup_elem(&kafka_topic_names, &topic_id);
 	if (topic)
 		bpf_probe_read_kernel_str(topic_buf, sizeof(topic_buf), topic);
 	bpf_map_update_elem(&kafka_topic_tmp, &key, topic_buf, BPF_ANY);
@@ -163,7 +165,8 @@ int uretprobe_rd_kafka_consumer_poll(struct pt_regs *ctx)
 	e->bytes = (msg_len < MAX_BYTES_THRESHOLD) ? msg_len : 0;
 
 	if (rkt_ptr) {
-		char *topic = bpf_map_lookup_elem(&kafka_topic_names, &rkt_ptr);
+		u64 topic_id = process_scoped_id(rkt_ptr);
+		char *topic = bpf_map_lookup_elem(&kafka_topic_names, &topic_id);
 		if (topic)
 			bpf_probe_read_kernel_str(e->details, sizeof(e->details), topic);
 		else

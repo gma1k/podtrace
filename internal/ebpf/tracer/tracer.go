@@ -112,7 +112,7 @@ type Tracer struct {
 	l7DropSnapshot                l7DecoderDropSnapshot
 	h3ParkedMu                    sync.Mutex
 	h3Parked                      []h3ParkedTxn
-	quicReader                    *ringbuf.Reader
+	quicReader                    recordReader
 	dnsPayloadReader              *ringbuf.Reader
 	dnsResolvedMap                *ebpf.Map
 	dnsResolved6Map               *ebpf.Map
@@ -966,7 +966,7 @@ func NewTracer(tracerOpts ...Option) (*Tracer, error) {
 		h3ChunkReader:                 h3chunkrd,
 		h3Assembler:                   h3asm,
 		h3SectionStash:                h3stash,
-		quicReader:                    quicrd,
+		quicReader:                    asRecordReader(quicrd),
 		dnsPayloadReader:              dnspayrd,
 		dnsResolvedMap:                dnsResolvedMap,
 		dnsResolved6Map:               dnsResolved6Map,
@@ -2487,26 +2487,30 @@ func populateCaptureHeaderNames(coll *ebpf.Collection, names []string) {
 	logger.Debug("capture headers configured", zap.Strings("names", names))
 }
 
-// quicFlowKey identifies one QUIC flow, mirroring the BPF quic_seen key.
+// quicFlowKey identifies one QUIC flow, mirroring the BPF quic_seen key:
+// the local port separates connections a pod opens to the same server.
 type quicFlowKey struct {
 	cgroup uint64
 	addr   [16]byte
 	port   uint16
+	lport  uint16
 }
 
 // quicFlowState accumulates the Initial packets of one flow until the SNI is
 // extracted (quic-go splits the ClientHello across two Initials) or the BPF
 // per-flow packet cap is reached.
 type quicFlowState struct {
-	pkts     [][]byte
-	done     bool
-	lastSeen time.Time
+	pkts        [][]byte
+	done        bool
+	lastSeen    time.Time
+	windowStart uint64
 }
 
 const (
 	quicInitialMaxPackets = 3
 	quicMaxTrackedFlows   = 2048
 	quicFlowTTL           = 30 * time.Second
+	quicInitialWindowNs   = uint64(2 * time.Second)
 )
 
 // evictQUICFlows makes room in the flow table without discarding flows that are
@@ -2529,6 +2533,24 @@ func evictQUICFlows(flows map[quicFlowKey]*quicFlowState, now time.Time) {
 	}
 }
 
+// quicFlowFor returns the reassembly state for the flow an Initial packet
+// stamped at stamp belongs to.
+func quicFlowFor(flows map[quicFlowKey]*quicFlowState, key quicFlowKey, stamp uint64,
+	now time.Time) *quicFlowState {
+	st := flows[key]
+	if st != nil && stamp > st.windowStart && stamp-st.windowStart > quicInitialWindowNs {
+		st.pkts, st.done, st.windowStart = nil, false, stamp
+	}
+	if st == nil {
+		if len(flows) >= quicMaxTrackedFlows {
+			evictQUICFlows(flows, now)
+		}
+		st = &quicFlowState{lastSeen: now, windowStart: stamp}
+		flows[key] = st
+	}
+	return st
+}
+
 // runQUICInitialReader drains the QUIC Initial packet ringbuf, extracts the SNI
 // (server name) and ALPN from the client's ClientHello via the quicinitial
 // package (reassembling across a flow's Initial packets), and emits one
@@ -2541,7 +2563,6 @@ func (t *Tracer) runQUICInitialReader(ctx context.Context, eventChan chan<- *eve
 				zap.Any("panic", r), zap.ByteString("stack", debug.Stack()))
 		}
 	}()
-	const hdr = 60
 	flows := make(map[quicFlowKey]*quicFlowState)
 	for {
 		select {
@@ -2559,70 +2580,77 @@ func (t *Tracer) runQUICInitialReader(ctx context.Context, eventChan chan<- *eve
 		}
 		func() {
 			defer recoverReaderPanic("http/3 quic")
-			data := record.RawSample
-			if len(data) <= hdr {
-				return
+			if ev := quicInitialEvent(flows, record.RawSample, time.Now()); ev != nil {
+				t.processAndDispatch(ctx, ev, eventChan, stackMap, ec, time.Now())
 			}
-			family := data[20]
-			dport := binary.LittleEndian.Uint16(data[22:24])
-			var v6 [16]byte
-			copy(v6[:], data[24:40])
-			var ip string
-			if family == 10 {
-				ip = events.PeerIP(10, 0, v6)
-			} else {
-				ip = events.PeerIP(2, binary.BigEndian.Uint32(data[24:28]), v6)
-			}
-
-			now := time.Now()
-			key := quicFlowKey{cgroup: binary.LittleEndian.Uint64(data[8:16]), addr: v6, port: dport}
-			st := flows[key]
-			if st == nil {
-				if len(flows) >= quicMaxTrackedFlows {
-					evictQUICFlows(flows, now)
-				}
-				st = &quicFlowState{lastSeen: now}
-				flows[key] = st
-			}
-			if st.done {
-				return
-			}
-			st.lastSeen = now
-			pktEnd := hdr + int(binary.LittleEndian.Uint16(data[40:42]))
-			if pktEnd > len(data) {
-				pktEnd = len(data)
-			}
-			pkt := make([]byte, pktEnd-hdr)
-			copy(pkt, data[hdr:pktEnd])
-			st.pkts = append(st.pkts, pkt)
-
-			info, xerr := quicinitial.ExtractPackets(st.pkts)
-			if xerr != nil && len(st.pkts) < quicInitialMaxPackets {
-				return
-			}
-			st.done = true
-			st.pkts = nil
-
-			ev := &events.Event{}
-			ev.Timestamp = binary.LittleEndian.Uint64(data[0:8])
-			ev.CgroupID = binary.LittleEndian.Uint64(data[8:16])
-			ev.PID = binary.LittleEndian.Uint32(data[16:20])
-			ev.ProcessName = string(bytes.TrimRight(data[44:60], "\x00"))
-			ev.Type = events.EventHTTP3
-			ev.Target = fmt.Sprintf("%s:%d", ip, dport)
-			ev.PeerDstIP = ip
-			ev.PeerDstPort = dport
-			if xerr == nil && info.SNI != "" {
-				ev.Details = "sni: " + info.SNI
-				if len(info.ALPN) > 0 {
-					ev.Details += " alpn: " + strings.Join(info.ALPN, ",")
-				}
-			} else {
-				ev.Details = "HTTP/3 (QUIC)"
-			}
-			t.processAndDispatch(ctx, ev, eventChan, stackMap, ec, time.Now())
 		}()
 	}
+}
+
+const quicInitialRecordHeader = 60
+
+// quicInitialEvent adds one captured Initial packet to its flow and returns the
+// connection event once the flow's ClientHello is reassembled or its packet
+// budget is spent.
+func quicInitialEvent(flows map[quicFlowKey]*quicFlowState, data []byte, now time.Time) *events.Event {
+	if len(data) <= quicInitialRecordHeader {
+		return nil
+	}
+	family := data[20]
+	dport := binary.LittleEndian.Uint16(data[22:24])
+	var v6 [16]byte
+	copy(v6[:], data[24:40])
+	var ip string
+	if family == 10 {
+		ip = events.PeerIP(10, 0, v6)
+	} else {
+		ip = events.PeerIP(2, binary.BigEndian.Uint32(data[24:28]), v6)
+	}
+
+	key := quicFlowKey{
+		cgroup: binary.LittleEndian.Uint64(data[8:16]),
+		addr:   v6,
+		port:   dport,
+		lport:  binary.LittleEndian.Uint16(data[42:44]),
+	}
+	st := quicFlowFor(flows, key, binary.LittleEndian.Uint64(data[0:8]), now)
+	if st.done {
+		return nil
+	}
+	st.lastSeen = now
+	pktEnd := quicInitialRecordHeader + int(binary.LittleEndian.Uint16(data[40:42]))
+	if pktEnd > len(data) {
+		pktEnd = len(data)
+	}
+	pkt := make([]byte, pktEnd-quicInitialRecordHeader)
+	copy(pkt, data[quicInitialRecordHeader:pktEnd])
+	st.pkts = append(st.pkts, pkt)
+
+	info, xerr := quicinitial.ExtractPackets(st.pkts)
+	if xerr != nil && len(st.pkts) < quicInitialMaxPackets {
+		return nil
+	}
+	st.done = true
+	st.pkts = nil
+
+	ev := &events.Event{}
+	ev.Timestamp = binary.LittleEndian.Uint64(data[0:8])
+	ev.CgroupID = binary.LittleEndian.Uint64(data[8:16])
+	ev.PID = binary.LittleEndian.Uint32(data[16:20])
+	ev.ProcessName = string(bytes.TrimRight(data[44:60], "\x00"))
+	ev.Type = events.EventHTTP3
+	ev.Target = fmt.Sprintf("%s:%d", ip, dport)
+	ev.PeerDstIP = ip
+	ev.PeerDstPort = dport
+	if xerr == nil && info.SNI != "" {
+		ev.Details = "sni: " + info.SNI
+		if len(info.ALPN) > 0 {
+			ev.Details += " alpn: " + strings.Join(info.ALPN, ",")
+		}
+	} else {
+		ev.Details = "HTTP/3 (QUIC)"
+	}
+	return ev
 }
 
 // Stop tears the tracer down. Only the first call does anything, so a

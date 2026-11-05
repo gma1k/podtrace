@@ -286,6 +286,7 @@ struct tcp_peer {
 	u8  saddr6[16];
 	u8  daddr6[16];
 	u64 stash_ns;
+	u64 sk;
 };
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
@@ -315,18 +316,24 @@ struct {
 } sk_owner SEC(".maps");
 
 #define QUIC_INITIAL_MAX_PKTS 3
+#define QUIC_INITIAL_WINDOW_NS 2000000000ULL
 
 struct quic_flow_key {
 	u64 cgroup_id;
 	u8  daddr6[16];
 	u16 dport;
-	u16 _pad;
+	u16 lport;
+};
+struct quic_flow_budget {
+	u64 first_ns;
+	u32 count;
+	u32 _pad;
 };
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 4096);
 	__type(key, struct quic_flow_key);
-	__type(value, u8);
+	__type(value, struct quic_flow_budget);
 } quic_seen SEC(".maps");
 
 struct encrypted_dns_flow {
@@ -353,7 +360,7 @@ struct quic_initial_record {
 	u16 dport;
 	u8  daddr6[16];
 	u16 pktlen;
-	u16 _pad2;
+	u16 lport;
 	char comm[COMM_LEN];
 	u8  pkt[QUIC_PKT_CAP];
 };
@@ -362,9 +369,12 @@ struct {
 	__uint(max_entries, 512 * 1024);
 } quic_initial_events SEC(".maps");
 
+#define QUIC_SCRATCH_INGRESS 0
+#define QUIC_SCRATCH_EGRESS  1
+
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-	__uint(max_entries, 1);
+	__uint(max_entries, 2);
 	__type(key, u32);
 	__type(value, struct quic_initial_record);
 } quic_initial_scratch SEC(".maps");
@@ -585,7 +595,7 @@ struct fcgi_req_key {
 	u16 _pad;
 };
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 1024);
 	__type(key, struct fcgi_req_key);
 	__type(value, struct fastcgi_req);
@@ -683,6 +693,18 @@ struct {
 	__type(value, struct ssl_read_state);
 } rustls_read_args SEC(".maps");
 
+struct rustls_write_state {
+	u64 buf;
+	u64 len;
+	u64 ts;
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u64);
+	__type(value, struct rustls_write_state);
+} rustls_write_args SEC(".maps");
+
 struct h2_recv_info {
 	u64 base;
 	u64 conn_id;
@@ -738,13 +760,23 @@ struct {
 } grpc_go_scratch_map SEC(".maps");
 
 struct grpc_pair_key {
-	u32 saddr;
-	u32 daddr;
-	u16 sport;
-	u16 dport;
+	u64 conn;
 	u32 stream;
 	u32 _pad;
 };
+
+struct grpc_go_field_offsets {
+	u32 loopy_framer;
+	u32 server_framer;
+	u32 client_framer;
+	u32 _pad;
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 1024);
+	__type(key, u32);
+	__type(value, struct grpc_go_field_offsets);
+} grpc_go_offsets SEC(".maps");
 struct grpc_pair_val {
 	u64 start_ns;
 	char path[MAX_STRING_LEN];
@@ -979,6 +1011,27 @@ struct {
 	__type(value, u64);
 } h3_conn_epoch SEC(".maps");
 
+#define H3_ADAPTER_DONE_TTL_NS 30000000000ULL
+
+struct h3_adapter_mark {
+	u64 epoch;
+	u64 ts;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 8192);
+	__type(key, struct h3_adapter_stream_key);
+	__type(value, struct h3_adapter_mark);
+} h3_adapter_done SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 4096);
+	__type(key, struct h3_conn_key);
+	__type(value, struct h3_adapter_mark);
+} h3_adapter_client_conns SEC(".maps");
+
 struct h3_pending_tp {
 	u8   len;
 	u8   _pad[7];
@@ -1020,6 +1073,7 @@ struct h2_frame_state {
 	u8  pad_len_pending;
 	u8  pre_skip;
 	u8  sliced;
+	u8  desync;
 };
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);

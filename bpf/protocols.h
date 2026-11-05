@@ -45,6 +45,7 @@
 #define FCGI_NV_LEN_4BYTE    0x80
 
 #define FCGI_HEADER_LEN      8
+#define FCGI_END_SCAN_RECORDS 8
 
 #define FCGI_PARAMS_SCAN_LEN 128
 

@@ -1557,16 +1557,14 @@ func TestAttachPoolProbes(t *testing.T) {
 func TestAttachPoolProbes_WithPrograms(t *testing.T) {
 	coll := &ebpf.Collection{
 		Programs: map[string]*ebpf.Program{
-			"uprobe_sqlite3_prepare_v2":    {},
-			"uretprobe_sqlite3_finalize":   {},
-			"uprobe_sqlite3_step":          {},
-			"uretprobe_sqlite3_step":       {},
-			"uprobe_PQconnectStart":        {},
-			"uretprobe_PQfinish":           {},
-			"uprobe_PQexec_pool":           {},
-			"uprobe_mysql_real_connect":    {},
-			"uretprobe_mysql_close":        {},
-			"uprobe_mysql_real_query_pool": {},
+			"uprobe_sqlite3_prepare_v2":  {},
+			"uretprobe_sqlite3_finalize": {},
+			"uprobe_sqlite3_step":        {},
+			"uretprobe_sqlite3_step":     {},
+			"uprobe_PQconnectStart":      {},
+			"uretprobe_PQfinish":         {},
+			"uprobe_mysql_real_connect":  {},
+			"uretprobe_mysql_close":      {},
 		},
 	}
 
