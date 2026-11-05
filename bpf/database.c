@@ -184,16 +184,6 @@ int uretprobe_PQfinish(struct pt_regs *ctx) {
 	return 0;
 }
 
-SEC("uprobe/PQexec_pool")
-int uprobe_PQexec_pool(struct pt_regs *ctx) {
-	u32 pid = agent_ns_tgid();
-	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_pool_key(pid, tid);
-	u64 now = bpf_ktime_get_ns();
-	handle_pool_exhaustion(pid, tid, key, now);
-	return 0;
-}
-
 SEC("uprobe/mysql_real_connect")
 int uprobe_mysql_real_connect(struct pt_regs *ctx) {
 	u32 pid = agent_ns_tgid();
@@ -213,12 +203,3 @@ int uretprobe_mysql_close(struct pt_regs *ctx) {
 	return 0;
 }
 
-SEC("uprobe/mysql_real_query_pool")
-int uprobe_mysql_real_query_pool(struct pt_regs *ctx) {
-	u32 pid = agent_ns_tgid();
-	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_pool_key(pid, tid);
-	u64 now = bpf_ktime_get_ns();
-	handle_pool_exhaustion(pid, tid, key, now);
-	return 0;
-}

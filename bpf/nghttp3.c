@@ -168,12 +168,56 @@ static __always_inline void h3_adapter_emit(struct h3_txn_record *rec,
 	bpf_ringbuf_output(&h3_txn_events, rec, sizeof(*rec), 0);
 }
 
+static __always_inline u64 h3_adapter_epoch(u64 conn)
+{
+	struct h3_conn_key ck = { .tgid = agent_ns_tgid(), .conn = conn };
+	u64 *epoch = bpf_map_lookup_elem(&h3_conn_epoch, &ck);
+	return epoch ? *epoch : 0;
+}
+
+static __always_inline void h3_adapter_mark_client(u64 conn)
+{
+	if (!conn)
+		return;
+	struct h3_conn_key ck = { .tgid = agent_ns_tgid(), .conn = conn };
+	struct h3_adapter_mark m = { .epoch = h3_adapter_epoch(conn), .ts = bpf_ktime_get_ns() };
+	bpf_map_update_elem(&h3_adapter_client_conns, &ck, &m, BPF_ANY);
+}
+
+static __always_inline int h3_adapter_is_client(u64 conn)
+{
+	struct h3_conn_key ck = { .tgid = agent_ns_tgid(), .conn = conn };
+	struct h3_adapter_mark *m = bpf_map_lookup_elem(&h3_adapter_client_conns, &ck);
+	return m && m->epoch == h3_adapter_epoch(conn);
+}
+
+static __always_inline void h3_adapter_stream_finished(struct h3_adapter_stream_key *k, u64 conn)
+{
+	bpf_map_delete_elem(&h3_adapter_streams, k);
+	struct h3_adapter_mark m = { .epoch = h3_adapter_epoch(conn), .ts = bpf_ktime_get_ns() };
+	bpf_map_update_elem(&h3_adapter_done, k, &m, BPF_ANY);
+}
+
+static __always_inline int h3_adapter_stream_was_finished(struct h3_adapter_stream_key *k, u64 conn)
+{
+	struct h3_adapter_mark *m = bpf_map_lookup_elem(&h3_adapter_done, k);
+	if (!m)
+		return 0;
+	if (m->epoch == h3_adapter_epoch(conn) &&
+	    bpf_ktime_get_ns() - m->ts <= H3_ADAPTER_DONE_TTL_NS)
+		return 1;
+	bpf_map_delete_elem(&h3_adapter_done, k);
+	return 0;
+}
+
 static __always_inline void h3_adapter_first_inbound(u64 conn, u64 stream_id)
 {
 	struct h3_adapter_stream_key k = h3_adapter_key(conn, stream_id);
 	struct h3_txn_record *st = bpf_map_lookup_elem(&h3_adapter_streams, &k);
 	if (!st) {
 		if ((stream_id & 3) != 0)
+			return;
+		if (h3_adapter_is_client(conn) || h3_adapter_stream_was_finished(&k, conn))
 			return;
 		u32 zero = 0;
 		struct h3_txn_scratch *s = bpf_map_lookup_elem(&h3_txn_scratch_map, &zero);
@@ -222,8 +266,8 @@ static __always_inline void h3_adapter_respond(struct h3_txn_record *rec,
 		rec->timestamp = st->timestamp;
 		rec->latency_ns = now > st->timestamp ? now - st->timestamp : 0;
 		oncpu_finish_thread_request(ONCPU_KIND_H3, conn, rec->timestamp, rec->latency_ns);
-		bpf_map_delete_elem(&h3_adapter_streams, &k);
 	}
+	h3_adapter_stream_finished(&k, conn);
 	h3_adapter_emit(rec, 0, H3_TXN_F_RESP_ONLY);
 }
 
@@ -232,6 +276,7 @@ int uprobe_nghttp3_submit_request(struct pt_regs *ctx)
 {
 	if (!http_should_trace())
 		return 0;
+	h3_adapter_mark_client((u64)PT_REGS_PARM1(ctx));
 	struct h3_txn_record *rec =
 		nghttp3_collect((u64)PT_REGS_PARM3(ctx), (u64)PT_REGS_PARM4(ctx));
 	if (rec)

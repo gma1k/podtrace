@@ -807,11 +807,11 @@ Earlier versions of this document listed `pool_connections`,
 existed; the two above are what capacity is reported under.
 
 
-Note the BPF side also emits an internal "pool exhausted" event, which this
-surface deliberately drops: it fires on any query more than 10ms after the
-connection opened and never refreshes its timestamp, so it reports the
-connection's *age* rather than any wait. Exporting it under a pool name would
-be a false claim.
+Note the BPF side also emits an internal "pool exhausted" event for SQLite,
+which this surface deliberately drops: it measures the gap between preparing a
+statement and its first step, not a wait for a connection. Exporting it under
+a pool name would be a false claim. libpq and libmysqlclient have no pool and
+no wait point to hook, so they do not emit it at all.
 
 #### Saturation is always on the event path
 

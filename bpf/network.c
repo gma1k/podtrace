@@ -34,6 +34,7 @@ static __noinline void stash_tcp_peer(struct pt_regs *ctx, u32 pair)
 		return;
 	}
 	peer.stash_ns = bpf_ktime_get_ns();
+	peer.sk = (u64)sk;
 	struct pair_key key = make_pair_key(pair);
 	bpf_map_update_elem(&tcp_target, &key, buf, BPF_ANY);
 	bpf_map_update_elem(&tcp_peer_stash, &key, &peer, BPF_ANY);
@@ -1647,8 +1648,21 @@ int uretprobe_SSL_get_error(struct pt_regs *ctx) {
 	return 0;
 }
 
+static __always_inline void h2_forget_conn(u64 conn);
+
+static __always_inline void ssl_forget_l7(u64 ssl)
+{
+	if (!ssl || !cgroup_allows(bpf_get_current_cgroup_id()))
+		return;
+	u64 conn = process_scoped_id(ssl);
+	bpf_map_delete_elem(&http_reqs, &conn);
+	if (bpf_map_lookup_elem(&h2_conns, &conn))
+		h2_forget_conn(conn);
+}
+
 SEC("uprobe/SSL_free")
 int uprobe_SSL_free(struct pt_regs *ctx) {
+	ssl_forget_l7((u64)PT_REGS_PARM1(ctx));
 	struct ssl_hs_key key = ssl_hs_key_of((u64)PT_REGS_PARM1(ctx));
 	struct ssl_hs_state *st = bpf_map_lookup_elem(&ssl_hs_states, &key);
 	if (!st)

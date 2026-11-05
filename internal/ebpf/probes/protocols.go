@@ -228,10 +228,13 @@ func AttachGRPCProbes(coll *ebpf.Collection) []link.Link {
 
 // AttachHTTPProbes attaches the socket-level HTTP/1.x inspection kprobes: a
 // third kprobe on tcp_sendmsg (request line) plus a kprobe+kretprobe pair on
-// tcp_recvmsg (status line).
+// tcp_recvmsg (status line). A further tcp_sendmsg kprobe parses the rustls
+// plaintext a thread wrote just before it, now that the socket is known; it
+// is a program of its own so its parser has its own verifier budget.
 func AttachHTTPProbes(coll *ebpf.Collection) []link.Link {
 	var links []link.Link
 	links = append(links, attachKprobes(coll, "HTTP/1.x", "tcp_sendmsg", "kprobe_http_tcp_sendmsg", "")...)
+	links = append(links, attachKprobes(coll, "rustls", "tcp_sendmsg", "kprobe_rustls_tcp_sendmsg", "")...)
 	links = append(links, attachKprobes(coll, "HTTP/1.x", "tcp_recvmsg", "kprobe_http_tcp_recvmsg", "kretprobe_http_tcp_recvmsg")...)
 	return links
 }

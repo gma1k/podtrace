@@ -8,6 +8,7 @@
 
 
 #if defined(__TARGET_ARCH_x86) || defined(__x86_64__)
+#define GRPC_GO_RECV(ctx)         ((u64)(ctx)->ax)
 #define GRPC_GO_HF_PTR(ctx)       ((u64)(ctx)->di)
 #define GRPC_GO_HF_LEN(ctx)       ((u64)(ctx)->si)
 #define GRPC_GO_WH_STREAM(ctx)    ((u32)(ctx)->bx)
@@ -15,6 +16,7 @@
 #define GRPC_GO_CLI_FRAME(ctx)    ((u64)(ctx)->bx)
 #define GRPC_GO_SUPPORTED 1
 #elif defined(__TARGET_ARCH_arm64) || defined(__aarch64__)
+#define GRPC_GO_RECV(ctx)         ((u64)(ctx)->regs[0])
 #define GRPC_GO_HF_PTR(ctx)       ((u64)(ctx)->regs[3])
 #define GRPC_GO_HF_LEN(ctx)       ((u64)(ctx)->regs[4])
 #define GRPC_GO_WH_STREAM(ctx)    ((u32)(ctx)->regs[1])
@@ -106,21 +108,53 @@ static long grpc_hf_cb(u32 i, void *vctx)
 	return 0;
 }
 
-static __always_inline int grpc_pair_key_build(struct grpc_pair_key *k, u32 stream)
+#define GRPC_GO_RECV_LOOPY  0
+#define GRPC_GO_RECV_SERVER 1
+#define GRPC_GO_RECV_CLIENT 2
+
+static __always_inline u64 grpc_go_conn_from_tuple(void)
 {
 	struct tcp_peer *p = lookup_tcp_peer(PAIR_TCP_SENDMSG);
 	if (!p)
 		return 0;
+	u64 a6[4];
+	__builtin_memcpy(&a6[0], p->saddr6, 16);
+	__builtin_memcpy(&a6[2], p->daddr6, 16);
+	u64 h = mix64(((u64)p->saddr << 32) | p->daddr);
+	h = mix64(h ^ (((u64)p->sport << 16) | p->dport));
+	h = mix64(h ^ a6[0]);
+	h = mix64(h ^ a6[1]);
+	h = mix64(h ^ a6[2]);
+	h = mix64(h ^ a6[3]);
+	return process_scoped_id(h);
+}
+
+static __always_inline u64 grpc_go_conn(u64 recv, u32 kind)
+{
+	u32 tgid = agent_ns_tgid();
+	struct grpc_go_field_offsets *o = bpf_map_lookup_elem(&grpc_go_offsets, &tgid);
+	if (!o || !recv)
+		return grpc_go_conn_from_tuple();
+	u32 off = kind == GRPC_GO_RECV_LOOPY ? o->loopy_framer :
+		  kind == GRPC_GO_RECV_SERVER ? o->server_framer : o->client_framer;
+	u64 framer = 0;
+	if (bpf_probe_read_user(&framer, sizeof(framer), (void *)(recv + off)) != 0 || !framer)
+		return grpc_go_conn_from_tuple();
+	return process_scoped_id(framer);
+}
+
+static __always_inline int grpc_pair_key_build(struct grpc_pair_key *k, u64 conn, u32 stream)
+{
+	if (!conn)
+		return 0;
 	__builtin_memset(k, 0, sizeof(*k));
-	k->saddr = p->saddr;
-	k->daddr = p->daddr;
-	k->sport = p->sport;
-	k->dport = p->dport;
+	k->conn = conn;
 	k->stream = stream;
 	return 1;
 }
 
-static __always_inline void grpc_go_process(void *ctx, u64 fields, u64 n, u32 stream, u8 inbound)
+static __always_inline void grpc_go_process(void *ctx, u64 fields, u64 n, u32 stream, u8 inbound,
+					    u64 conn)
 {
 	if (!fields || n == 0)
 		return;
@@ -140,7 +174,7 @@ static __always_inline void grpc_go_process(void *ctx, u64 fields, u64 n, u32 st
 	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	struct grpc_pair_key pk;
-	int have_key = grpc_pair_key_build(&pk, stream);
+	int have_key = grpc_pair_key_build(&pk, conn, stream);
 
 	if (s->have_path) {
 		u64 start_ns = bpf_ktime_get_ns();
@@ -207,7 +241,7 @@ static __always_inline u32 grpc_go_stream_from_frame(u64 frame)
 	return sid;
 }
 
-static __always_inline void grpc_go_process_frame(void *ctx, u64 frame, u8 inbound)
+static __always_inline void grpc_go_process_frame(void *ctx, u64 frame, u8 inbound, u64 conn)
 {
 	if (!frame)
 		return;
@@ -216,7 +250,7 @@ static __always_inline void grpc_go_process_frame(void *ctx, u64 frame, u8 inbou
 		return;
 	if (bpf_probe_read_user(&flen, sizeof(flen), (void *)(frame + GRPC_METAFRAME_FIELDS_LEN)) != 0)
 		return;
-	grpc_go_process(ctx, fptr, flen, grpc_go_stream_from_frame(frame), inbound);
+	grpc_go_process(ctx, fptr, flen, grpc_go_stream_from_frame(frame), inbound, conn);
 }
 
 SEC("uprobe/grpc_go_write_header")
@@ -224,7 +258,8 @@ int uprobe_grpc_go_write_header(struct pt_regs *ctx)
 {
 	if (!http_should_trace())
 		return 0;
-	grpc_go_process(ctx, GRPC_GO_HF_PTR(ctx), GRPC_GO_HF_LEN(ctx), GRPC_GO_WH_STREAM(ctx), 0);
+	grpc_go_process(ctx, GRPC_GO_HF_PTR(ctx), GRPC_GO_HF_LEN(ctx), GRPC_GO_WH_STREAM(ctx), 0,
+			grpc_go_conn(GRPC_GO_RECV(ctx), GRPC_GO_RECV_LOOPY));
 	return 0;
 }
 
@@ -233,7 +268,8 @@ int uprobe_grpc_go_server_headers(struct pt_regs *ctx)
 {
 	if (!http_should_trace())
 		return 0;
-	grpc_go_process_frame(ctx, GRPC_GO_SRV_FRAME(ctx), 1);
+	grpc_go_process_frame(ctx, GRPC_GO_SRV_FRAME(ctx), 1,
+			      grpc_go_conn(GRPC_GO_RECV(ctx), GRPC_GO_RECV_SERVER));
 	return 0;
 }
 
@@ -242,7 +278,8 @@ int uprobe_grpc_go_client_headers(struct pt_regs *ctx)
 {
 	if (!http_should_trace())
 		return 0;
-	grpc_go_process_frame(ctx, GRPC_GO_CLI_FRAME(ctx), 1);
+	grpc_go_process_frame(ctx, GRPC_GO_CLI_FRAME(ctx), 1,
+			      grpc_go_conn(GRPC_GO_RECV(ctx), GRPC_GO_RECV_CLIENT));
 	return 0;
 }
 

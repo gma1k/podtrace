@@ -5,6 +5,7 @@ import "testing"
 func TestGroupForProbe_HTTPSocketProbes(t *testing.T) {
 	for _, prog := range []string{
 		"kprobe_http_tcp_sendmsg",
+		"kprobe_rustls_tcp_sendmsg",
 		"kprobe_http_tcp_recvmsg",
 		"kretprobe_http_tcp_recvmsg",
 	} {

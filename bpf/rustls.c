@@ -25,23 +25,22 @@
 #ifdef RUSTLS_SUPPORTED
 
 #define RUSTLS_PEEK 16
+#define RUSTLS_WRITE_STALE_NS 1000000000ULL
 
 static __always_inline u64 rustls_conn_key(u32 dir)
 {
 	u32 prefer = (dir == H2_DIR_EGRESS) ? PAIR_TCP_SENDMSG : PAIR_TCP_RECVMSG;
 	struct tcp_peer *p = lookup_tcp_peer(prefer);
-	if (!p)
+	if (!p || !p->sk)
 		return 0;
-	u64 a6[4];
-	__builtin_memcpy(&a6[0], p->saddr6, 16);
-	__builtin_memcpy(&a6[2], p->daddr6, 16);
-	u64 h = mix64(((u64)p->saddr << 32) | p->daddr);
-	h = mix64(h ^ (((u64)p->sport << 16) | p->dport));
-	h = mix64(h ^ a6[0]);
-	h = mix64(h ^ a6[1]);
-	h = mix64(h ^ a6[2]);
-	h = mix64(h ^ a6[3]);
-	return process_scoped_id(h);
+	return process_scoped_id(p->sk);
+}
+
+static __always_inline u64 rustls_thread_key(void)
+{
+	u32 pid = agent_ns_tgid();
+	u32 tid = (u32)bpf_get_current_pid_tgid();
+	return get_key(pid, tid);
 }
 
 static __always_inline void rustls_dispatch(void *ctx, void *base, u64 len,
@@ -66,13 +65,58 @@ static __always_inline void rustls_dispatch(void *ctx, void *base, u64 len,
 		h2_emit_frames(base, len, conn, dir, HTTP_TRANSPORT_H2_TLS);
 }
 
+static __always_inline void rustls_dispatch_write(void *ctx, u64 key, u64 conn)
+{
+	struct rustls_write_state *st = bpf_map_lookup_elem(&rustls_write_args, &key);
+	if (!st || !st->len)
+		return;
+	u64 buf = st->buf;
+	u64 len = st->len;
+	u64 ts = st->ts;
+	bpf_map_delete_elem(&rustls_write_args, &key);
+	if (bpf_ktime_get_ns() - ts > RUSTLS_WRITE_STALE_NS)
+		return;
+	rustls_dispatch(ctx, (void *)buf, len, conn, H2_DIR_EGRESS);
+}
+
+SEC("kprobe/tcp_sendmsg")
+int kprobe_rustls_tcp_sendmsg(struct pt_regs *ctx)
+{
+	if (!http_should_trace())
+		return 0;
+	u64 sk = (u64)PT_REGS_PARM1(ctx);
+	if (!sk)
+		return 0;
+	rustls_dispatch_write(ctx, rustls_thread_key(), process_scoped_id(sk));
+	return 0;
+}
+
 SEC("uprobe/rustls_write")
 int uprobe_rustls_write(struct pt_regs *ctx)
 {
 	if (!http_should_trace())
 		return 0;
-	rustls_dispatch(ctx, RUSTLS_BUF(ctx), RUSTLS_LEN(ctx),
-			rustls_conn_key(H2_DIR_EGRESS), H2_DIR_EGRESS);
+	u64 key = rustls_thread_key();
+	rustls_dispatch_write(ctx, key, rustls_conn_key(H2_DIR_EGRESS));
+	struct rustls_write_state st = { .buf = (u64)RUSTLS_BUF(ctx) };
+	bpf_map_update_elem(&rustls_write_args, &key, &st, BPF_ANY);
+	return 0;
+}
+
+SEC("uretprobe/rustls_write")
+int uretprobe_rustls_write(struct pt_regs *ctx)
+{
+	u64 key = rustls_thread_key();
+	struct rustls_write_state *st = bpf_map_lookup_elem(&rustls_write_args, &key);
+	if (!st || st->len)
+		return 0;
+	u64 count = RUSTLS_RET_COUNT(ctx);
+	if (!RUSTLS_RET_OK(ctx) || count == 0 || count >= MAX_BYTES_THRESHOLD) {
+		bpf_map_delete_elem(&rustls_write_args, &key);
+		return 0;
+	}
+	st->len = count;
+	st->ts = bpf_ktime_get_ns();
 	return 0;
 }
 
@@ -81,9 +125,7 @@ int uprobe_rustls_read(struct pt_regs *ctx)
 {
 	if (!http_should_trace())
 		return 0;
-	u32 pid = agent_ns_tgid();
-	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	u64 key = rustls_thread_key();
 	struct ssl_read_state st = {
 		.buf = (u64)RUSTLS_BUF(ctx),
 		.conn = rustls_conn_key(H2_DIR_INGRESS),
@@ -95,9 +137,7 @@ int uprobe_rustls_read(struct pt_regs *ctx)
 SEC("uretprobe/rustls_read")
 int uretprobe_rustls_read(struct pt_regs *ctx)
 {
-	u32 pid = agent_ns_tgid();
-	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 key = get_key(pid, tid);
+	u64 key = rustls_thread_key();
 	struct ssl_read_state *st = bpf_map_lookup_elem(&rustls_read_args, &key);
 	if (!st)
 		return 0;
@@ -116,8 +156,14 @@ int uretprobe_rustls_read(struct pt_regs *ctx)
 
 #else
 
+SEC("kprobe/tcp_sendmsg")
+int kprobe_rustls_tcp_sendmsg(struct pt_regs *ctx) { return 0; }
+
 SEC("uprobe/rustls_write")
 int uprobe_rustls_write(struct pt_regs *ctx) { return 0; }
+
+SEC("uretprobe/rustls_write")
+int uretprobe_rustls_write(struct pt_regs *ctx) { return 0; }
 
 SEC("uprobe/rustls_read")
 int uprobe_rustls_read(struct pt_regs *ctx) { return 0; }

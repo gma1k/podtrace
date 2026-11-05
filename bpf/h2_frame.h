@@ -70,4 +70,97 @@ static __always_inline int h2_frame_header_valid(const unsigned char *fh)
 	return 0;
 }
 
+static __always_inline int h2_frame_header_plausible(const unsigned char *fh)
+{
+	unsigned int flen = ((unsigned int)fh[0] << 16) | ((unsigned int)fh[1] << 8) | (unsigned int)fh[2];
+	unsigned char type = fh[3];
+	unsigned char flags = fh[4];
+	if (fh[5] & 0x80)
+		return 0;
+	unsigned int sid = ((unsigned int)fh[5] << 24) | ((unsigned int)fh[6] << 16) |
+			   ((unsigned int)fh[7] << 8) | (unsigned int)fh[8];
+
+	switch (type) {
+	case HTTP2_DATA:
+		return sid != 0 && !(flags & ~(HTTP2_FLAG_END_STREAM | HTTP2_FLAG_PADDED));
+	case HTTP2_HEADERS:
+		return sid != 0 && !(flags & ~(HTTP2_FLAG_END_STREAM | HTTP2_FLAG_END_HEADERS |
+					       HTTP2_FLAG_PADDED | HTTP2_FLAG_PRIORITY));
+	case HTTP2_PUSH_PROMISE:
+		return sid != 0 && flen >= 4 &&
+		       !(flags & ~(HTTP2_FLAG_END_HEADERS | HTTP2_FLAG_PADDED));
+	case HTTP2_CONTINUATION:
+		return sid != 0 && !(flags & ~HTTP2_FLAG_END_HEADERS);
+	case HTTP2_PRIORITY:
+	case HTTP2_RST_STREAM:
+	case HTTP2_SETTINGS:
+	case HTTP2_PING:
+	case HTTP2_GOAWAY:
+	case HTTP2_WINDOW_UPDATE:
+		return h2_frame_header_valid(fh);
+	}
+	return flen <= H2_DEFAULT_MAX_FRAME;
+}
+
+#define HPACK_PATH_SCAN_FIELDS 8
+
+static __always_inline int hpack_literal_path(const unsigned char *blk, unsigned int mask,
+					      unsigned int start, unsigned int end,
+					      unsigned int *vstart, unsigned int *vlen)
+{
+	unsigned int i = start;
+	for (int f = 0; f < HPACK_PATH_SCAN_FIELDS; f++) {
+		if (i >= end)
+			return 0;
+		unsigned char b = blk[i & mask];
+		if (b & 0x80) {
+			if ((b & 0x7f) == 0x7f)
+				return 0;
+			i += 1;
+			continue;
+		}
+		if ((b & 0xe0) == 0x20) {
+			if ((b & 0x1f) == 0x1f)
+				return 0;
+			i += 1;
+			continue;
+		}
+		unsigned int name_idx;
+		if ((b & 0xc0) == 0x40) {
+			name_idx = b & 0x3f;
+			if (name_idx == 0x3f)
+				return 0;
+		} else {
+			name_idx = b & 0x0f;
+			if (name_idx == 0x0f)
+				return 0;
+		}
+		i += 1;
+		if (name_idx == 0) {
+			if (i >= end)
+				return 0;
+			unsigned char nl = blk[i & mask];
+			if ((nl & 0x7f) == 0x7f)
+				return 0;
+			i += 1 + (nl & 0x7f);
+		}
+		if (i >= end)
+			return 0;
+		unsigned char vl = blk[i & mask];
+		unsigned int n = vl & 0x7f;
+		if (n == 0x7f)
+			return 0;
+		i += 1;
+		if (name_idx == 4) {
+			if ((vl & 0x80) || n == 0 || i + n > end)
+				return 0;
+			*vstart = i;
+			*vlen = n;
+			return 1;
+		}
+		i += n;
+	}
+	return 0;
+}
+
 #endif

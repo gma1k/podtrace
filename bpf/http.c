@@ -303,11 +303,15 @@ int kprobe_http_tcp_recvmsg(struct pt_regs *ctx)
 	if (!base)
 		return 0;
 
-	struct ssl_read_state st = { .buf = (u64)base, .conn = (u64)PT_REGS_PARM1(ctx) };
+	struct ssl_read_state st = {
+		.buf = (u64)base,
+		.conn = (u64)PT_REGS_PARM1(ctx),
+		.out_len = avail,
+	};
 	bpf_map_update_elem(&http_recv_base, &key, &st, BPF_ANY);
 	struct ssl_read_state *tls = bpf_map_lookup_elem(&ssl_read_args, &key);
 	if (tls)
-		oncpu_alias_socket(st.conn, tls->conn);
+		oncpu_alias_socket(st.conn, process_scoped_id(tls->conn));
 	return 0;
 }
 
@@ -322,14 +326,18 @@ static __always_inline int http_tcp_recvmsg_return(void *ctx, long rc)
 		return 0;
 	void *base = (void *)st->buf;
 	u64 sk = st->conn;
+	u64 first_seg = st->out_len;
 	bpf_map_delete_elem(&http_recv_base, &key);
 
 	s32 ret = (s32)rc;
 	if (ret <= 0)
 		return 0;
+	u64 n = (u64)ret;
+	if (first_seg < n)
+		n = first_seg;
 	oncpu_note_socket(sk);
-	if (!http_emit_response(ctx, base, (u64)ret, HTTP_TRANSPORT_PLAINTEXT | HTTP_INBOUND, sk))
-		http_emit_request(ctx, base, (u64)ret, HTTP_TRANSPORT_PLAINTEXT | HTTP_INBOUND, sk);
+	if (!http_emit_response(ctx, base, n, HTTP_TRANSPORT_PLAINTEXT | HTTP_INBOUND, sk))
+		http_emit_request(ctx, base, n, HTTP_TRANSPORT_PLAINTEXT | HTTP_INBOUND, sk);
 	return 0;
 }
 
@@ -357,6 +365,7 @@ static __always_inline int ssl_write_dispatch(struct pt_regs *ctx, u64 ssl, void
 {
 	if (!base || num == 0)
 		return 0;
+	ssl = process_scoped_id(ssl);
 	if (oncpu_is_enabled())
 		oncpu_note_thread_conn(ssl);
 
@@ -482,6 +491,7 @@ static __always_inline int ssl_read_complete(struct pt_regs *ctx, void *base, u6
 	ssl_hs_settle(ctx, conn);
 	if (!http_should_trace())
 		return 0;
+	conn = process_scoped_id(conn);
 	if (oncpu_is_enabled())
 		oncpu_note_thread_conn(conn);
 
@@ -585,7 +595,7 @@ int uretprobe_gnutls_record_send(struct pt_regs *ctx)
 	if (!st)
 		return 0;
 	void *base = (void *)st->buf;
-	u64 session = st->conn;
+	u64 session = process_scoped_id(st->conn);
 	bpf_map_delete_elem(&ssl_write_args, &key);
 	if (ret <= 0 || (u64)ret >= MAX_BYTES_THRESHOLD)
 		return 0;
@@ -622,7 +632,7 @@ int uretprobe_gnutls_record_recv(struct pt_regs *ctx)
 	if (!st)
 		return 0;
 	void *base = (void *)st->buf;
-	u64 conn = st->conn;
+	u64 conn = process_scoped_id(st->conn);
 	bpf_map_delete_elem(&ssl_read_args, &key);
 	s64 ret = PT_REGS_RC(ctx);
 	if (ret <= 0)

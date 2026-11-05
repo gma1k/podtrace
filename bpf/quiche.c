@@ -109,6 +109,7 @@ int uprobe_quiche_h3_send_request(struct pt_regs *ctx)
 {
 	if (!http_should_trace())
 		return 0;
+	h3_adapter_mark_client((u64)PT_REGS_PARM1(ctx));
 	struct h3_txn_record *rec =
 		quiche_collect((u64)PT_REGS_PARM3(ctx), (u64)PT_REGS_PARM4(ctx));
 	if (!rec)

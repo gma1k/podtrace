@@ -139,3 +139,20 @@ func TestAReturnProbeIsReleasedWhenItsEntryCannotAttach(t *testing.T) {
 		t.Errorf("FastCGI attached %d links with no return program", len(got))
 	}
 }
+
+func TestHTTPProbesAttachTheRustlsSendProbe(t *testing.T) {
+	coll := placeholderPrograms("kprobe_http_tcp_sendmsg", "kprobe_rustls_tcp_sendmsg", "kprobe_http_tcp_recvmsg", "kretprobe_http_tcp_recvmsg")
+	calls, _ := installFakeKprobes(t, nil)
+	if got := AttachHTTPProbes(coll); len(got) != 4 {
+		t.Fatalf("%d links, want both tcp_sendmsg entries and the tcp_recvmsg pair", len(got))
+	}
+	sends := 0
+	for _, c := range *calls {
+		if c.symbol == "tcp_sendmsg" && !c.ret {
+			sends++
+		}
+	}
+	if sends != 2 {
+		t.Fatalf("%d tcp_sendmsg entries attached, want the HTTP and rustls probes", sends)
+	}
+}

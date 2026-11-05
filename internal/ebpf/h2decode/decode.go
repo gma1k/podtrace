@@ -176,6 +176,7 @@ type pendingReq struct {
 	lastSeen  time.Time
 	grpc      bool
 	held      *events.Event
+	heldDir   uint8
 }
 
 // isGRPCContentType reports whether a content-type header names gRPC.
@@ -490,6 +491,9 @@ func (d *Decoder) decodeBlockLocked(st *dirState, rec *RawRecord, block []byte) 
 			return ev
 		}
 		return d.buildGrpcTrailerLocked(rec, grpcStatus)
+	case d.isHeldTrailersLocked(rec):
+		st.role = roleResponse
+		return d.finishHeldGRPCLocked(rec, "")
 	case !complete:
 		return d.buildAnonymousRequestLocked(st, rec, method, traceparent, extra)
 	default:
@@ -671,10 +675,21 @@ func (d *Decoder) holdGRPCResponseLocked(rec *RawRecord, status, traceparent str
 	}
 	setEventPeer(ev, rec)
 	req.held = ev
+	req.heldDir = rec.Direction
+}
+
+// isHeldTrailersLocked reports whether a block carrying neither a status nor
+// a request is the trailers of a call whose response HEADERS are held: after
+// a final response's HEADERS, the only block the responding side can send on
+// that stream is its trailers.
+func (d *Decoder) isHeldTrailersLocked(rec *RawRecord) bool {
+	req := d.streams[streamKey{conn: rec.ConnID, stream: rec.StreamID}]
+	return req != nil && req.held != nil && req.heldDir == rec.Direction
 }
 
 // finishHeldGRPCLocked completes a held gRPC response with its trailers and
-// returns the one event the call counts as, or nil when nothing was held.
+// returns the one event the call counts as, or nil when nothing was held. An
+// empty grpcStatus is trailers whose grpc-status could not be resolved.
 func (d *Decoder) finishHeldGRPCLocked(rec *RawRecord, grpcStatus string) *events.Event {
 	sk := streamKey{conn: rec.ConnID, stream: rec.StreamID}
 	req, ok := d.streams[sk]
@@ -686,6 +701,9 @@ func (d *Decoder) finishHeldGRPCLocked(rec *RawRecord, grpcStatus string) *event
 	ev.Timestamp = rec.Timestamp
 	if req.startTS > 0 && rec.Timestamp > req.startTS {
 		ev.LatencyNS = rec.Timestamp - req.startTS
+	}
+	if grpcStatus == "" {
+		return ev
 	}
 	ev.Details += "\ngrpc-status: " + grpcStatus
 	if ev.Error == 0 {

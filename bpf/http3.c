@@ -26,14 +26,32 @@ static __always_inline int quic_is_initial(struct __sk_buff *skb, int l4) {
 	return 0;
 }
 
-static __always_inline void quic_ship(struct __sk_buff *skb, u8 is_v6,
-				      u32 addr_off, u32 port_l4_off, int l4, u8 egress) {
+static __always_inline int quic_budget_take(struct quic_flow_key *k)
+{
+	u64 now = bpf_ktime_get_ns();
+	struct quic_flow_budget *b = bpf_map_lookup_elem(&quic_seen, k);
+	if (b && now - b->first_ns <= QUIC_INITIAL_WINDOW_NS) {
+		if (b->count >= QUIC_INITIAL_MAX_PKTS)
+			return 0;
+		b->count += 1;
+		return 1;
+	}
+	struct quic_flow_budget fresh = { .first_ns = now, .count = 1 };
+	bpf_map_update_elem(&quic_seen, k, &fresh, BPF_ANY);
+	return 1;
+}
+
+static __always_inline void quic_ship(struct __sk_buff *skb, u8 is_v6, u32 addr_off,
+				      u32 port_l4_off, u32 lport_l4_off, int l4, u8 egress) {
 	struct quic_flow_key k = {};
 	k.cgroup_id = bpf_skb_cgroup_id(skb);
 	u16 port_be = 0;
 	if (bpf_skb_load_bytes(skb, l4 + port_l4_off, &port_be, sizeof(port_be)) < 0)
 		return;
 	k.dport = bpf_ntohs(port_be);
+	if (bpf_skb_load_bytes(skb, l4 + lport_l4_off, &port_be, sizeof(port_be)) < 0)
+		return;
+	k.lport = bpf_ntohs(port_be);
 	if (is_v6) {
 		if (bpf_skb_load_bytes(skb, addr_off, k.daddr6, 16) < 0)
 			return;
@@ -41,19 +59,12 @@ static __always_inline void quic_ship(struct __sk_buff *skb, u8 is_v6,
 		if (bpf_skb_load_bytes(skb, addr_off, k.daddr6, 4) < 0)
 			return;
 	}
-	u8 *cnt = bpf_map_lookup_elem(&quic_seen, &k);
-	if (cnt) {
-		if (*cnt >= QUIC_INITIAL_MAX_PKTS)
-			return;
-		*cnt += 1;
-	} else {
-		u8 one = 1;
-		bpf_map_update_elem(&quic_seen, &k, &one, BPF_ANY);
-	}
+	if (!quic_budget_take(&k))
+		return;
 
-	u32 zero = 0;
+	u32 slot = egress ? QUIC_SCRATCH_EGRESS : QUIC_SCRATCH_INGRESS;
 	struct quic_initial_record *rec =
-		bpf_map_lookup_elem(&quic_initial_scratch, &zero);
+		bpf_map_lookup_elem(&quic_initial_scratch, &slot);
 	if (!rec)
 		return;
 	rec->timestamp = bpf_ktime_get_ns();
@@ -63,7 +74,7 @@ static __always_inline void quic_ship(struct __sk_buff *skb, u8 is_v6,
 	rec->family = is_v6 ? 10 : 2;
 	rec->_pad = 0;
 	rec->dport = k.dport;
-	rec->_pad2 = 0;
+	rec->lport = k.lport;
 	__builtin_memcpy(rec->daddr6, k.daddr6, 16);
 	u32 off = (u32)l4 + 8;
 	u32 caplen = skb->len > off ? skb->len - off : 0;
@@ -84,7 +95,7 @@ int http3_egress(struct __sk_buff *skb) {
 		return 1;
 	if (!quic_is_initial(skb, l4))
 		return 1;
-	quic_ship(skb, is_v6, is_v6 ? 24 : 16, 2, l4, 1);
+	quic_ship(skb, is_v6, is_v6 ? 24 : 16, 2, 0, l4, 1);
 	return 1;
 }
 
@@ -96,6 +107,6 @@ int http3_ingress(struct __sk_buff *skb) {
 		return 1;
 	if (!quic_is_initial(skb, l4))
 		return 1;
-	quic_ship(skb, is_v6, is_v6 ? 8 : 12, 0, l4, 0);
+	quic_ship(skb, is_v6, is_v6 ? 8 : 12, 0, 2, l4, 0);
 	return 1;
 }
