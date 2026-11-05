@@ -79,9 +79,13 @@ static __always_inline void rustls_dispatch_write(void *ctx, u64 key, u64 conn)
 	rustls_dispatch(ctx, (void *)buf, len, conn, H2_DIR_EGRESS);
 }
 
-__noinline int rustls_flush_pending(struct pt_regs *ctx, u64 sk)
+SEC("kprobe/tcp_sendmsg")
+int kprobe_rustls_tcp_sendmsg(struct pt_regs *ctx)
 {
-	if (!ctx || !sk)
+	if (!http_should_trace())
+		return 0;
+	u64 sk = (u64)PT_REGS_PARM1(ctx);
+	if (!sk)
 		return 0;
 	rustls_dispatch_write(ctx, rustls_thread_key(), process_scoped_id(sk));
 	return 0;
@@ -152,7 +156,8 @@ int uretprobe_rustls_read(struct pt_regs *ctx)
 
 #else
 
-__noinline int rustls_flush_pending(struct pt_regs *ctx, u64 sk) { return 0; }
+SEC("kprobe/tcp_sendmsg")
+int kprobe_rustls_tcp_sendmsg(struct pt_regs *ctx) { return 0; }
 
 SEC("uprobe/rustls_write")
 int uprobe_rustls_write(struct pt_regs *ctx) { return 0; }

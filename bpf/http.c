@@ -272,15 +272,12 @@ static __noinline int http_emit_response(void *ctx, void *base, u64 len,
 	return 1;
 }
 
-__noinline int rustls_flush_pending(struct pt_regs *ctx, u64 sk);
-
 SEC("kprobe/tcp_sendmsg")
 int kprobe_http_tcp_sendmsg(struct pt_regs *ctx)
 {
 	if (!http_should_trace())
 		return 0;
 	u64 sk = (u64)PT_REGS_PARM1(ctx);
-	rustls_flush_pending(ctx, sk);
 	oncpu_note_socket(sk);
 	struct msghdr *msg = (struct msghdr *)PT_REGS_PARM2(ctx);
 	u64 avail = 0;

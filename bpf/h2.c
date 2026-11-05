@@ -128,14 +128,13 @@ static __always_inline void h2_desync(u64 conn, u32 dir)
 		h2_mark_desync(fs, conn, dir);
 }
 
-#define H2_KEEP_PARTIAL(i)							\
-	do {									\
-		if ((i) >= have && (i) < have + avail_here) {			\
-			u8 b = 0;						\
-			bpf_probe_read_user(&b, 1, (u8 *)c->base + off + ((i) - have)); \
-			fs->hdr_partial[i] = b;					\
-		}								\
-	} while (0)
+static __always_inline void h2_keep_partial(struct h2_frame_state *fs, const void *src,
+					   u32 have, u32 n)
+{
+	if (n > HTTP2_FRAME_HDR)
+		n = HTTP2_FRAME_HDR;
+	bpf_probe_read_user(&fs->hdr_partial[have & 15], n, src);
+}
 
 static long h2_frames_cb(u32 idx, void *vctx)
 {
@@ -233,64 +232,38 @@ static long h2_frames_cb(u32 idx, void *vctx)
 		u32 avail_here = c->avail - off;
 		u32 need = HTTP2_FRAME_HDR - have;
 		if (have >= HTTP2_FRAME_HDR) {
-			h2_mark_desync(fs, c->conn_id, c->dir);
-			s->off = c->avail;
+			s->off = c->avail + 1;
 			return 1;
 		}
 		if (avail_here < need) {
-			H2_KEEP_PARTIAL(0);
-			H2_KEEP_PARTIAL(1);
-			H2_KEEP_PARTIAL(2);
-			H2_KEEP_PARTIAL(3);
-			H2_KEEP_PARTIAL(4);
-			H2_KEEP_PARTIAL(5);
-			H2_KEEP_PARTIAL(6);
-			H2_KEEP_PARTIAL(7);
-			H2_KEEP_PARTIAL(8);
+			h2_keep_partial(fs, (u8 *)c->base + off, have, avail_here);
 			fs->hdr_have = (u8)(have + avail_here);
 			s->off = c->avail;
 			return 1;
 		}
-#pragma clang loop unroll(full)
-		for (u32 i = 0; i < HTTP2_FRAME_HDR; i++) {
-			if (i < have) {
-				fh[i] = fs->hdr_partial[i];
-			} else {
-				u8 b = 0;
-				bpf_probe_read_user(&b, 1, (u8 *)c->base + off + (i - have));
-				fh[i] = b;
-			}
-		}
+		h2_keep_partial(fs, (u8 *)c->base + off, have, need);
+		__builtin_memcpy(fh, fs->hdr_partial, HTTP2_FRAME_HDR);
 		off += need;
 		fs->hdr_have = 0;
 	} else {
 		if (off + HTTP2_FRAME_HDR > c->avail) {
 			u32 tail = c->avail - off;
-#pragma clang loop unroll(full)
-			for (u32 i = 0; i < HTTP2_FRAME_HDR; i++) {
-				if (i < tail) {
-					u8 b = 0;
-					bpf_probe_read_user(&b, 1, (u8 *)c->base + off + i);
-					fs->hdr_partial[i] = b;
-				}
-			}
+			h2_keep_partial(fs, (u8 *)c->base + off, 0, tail);
 			fs->hdr_have = (u8)tail;
 			s->off = c->avail;
 			return 1;
 		}
 		if (bpf_probe_read_user(fh, sizeof(fh), (u8 *)c->base + off) != 0) {
-			h2_mark_desync(fs, c->conn_id, c->dir);
-			s->off = c->avail;
+			s->off = c->avail + 1;
 			return 1;
 		}
 		off += HTTP2_FRAME_HDR;
 	}
 	if (!h2_frame_header_plausible(fh)) {
-		h2_mark_desync(fs, c->conn_id, c->dir);
-		s->off = c->avail;
+		s->off = c->avail + 1;
 		return 1;
 	}
-	u32 flen =((u32)fh[0] << 16) | ((u32)fh[1] << 8) | (u32)fh[2];
+	u32 flen = ((u32)fh[0] << 16) | ((u32)fh[1] << 8) | (u32)fh[2];
 	u8 type = fh[3];
 	u8 flags = fh[4];
 	u32 sid = (((u32)fh[5] << 24) | ((u32)fh[6] << 16) |
@@ -311,16 +284,16 @@ static long h2_frames_cb(u32 idx, void *vctx)
 
 #define H2_MAX_FRAME_STEPS 512
 
-static __always_inline void h2_emit_frames(void *base, u64 avail, u64 conn,
-					   u32 dir, u8 transport)
+__noinline int h2_walk_frames(u64 base_addr, u64 avail, u64 conn, u32 dir, u32 transport)
 {
+	void *base = (void *)base_addr;
 	if (!base || avail == 0)
-		return;
+		return 0;
 
 	u8 *known = bpf_map_lookup_elem(&h2_conns, &conn);
 	if (!known) {
 		if (!h2_start_looks_h2(base, avail))
-			return;
+			return 0;
 		u8 one = 1;
 		bpf_map_update_elem(&h2_conns, &conn, &one, BPF_ANY);
 	}
@@ -332,12 +305,12 @@ static __always_inline void h2_emit_frames(void *base, u64 avail, u64 conn,
 		bpf_map_update_elem(&h2_frame_state, &fk, &init, BPF_ANY);
 		fs = bpf_map_lookup_elem(&h2_frame_state, &fk);
 		if (!fs)
-			return;
+			return 0;
 	}
 
 	struct h2_hdr_scratch *s = h2_hdr_scratch_lookup();
 	if (!s)
-		return;
+		return 0;
 
 	u32 start = 0;
 	int pfx = h2_preface_signal(base, avail);
@@ -363,18 +336,18 @@ static __always_inline void h2_emit_frames(void *base, u64 avail, u64 conn,
 		bpf_map_update_elem(&h2_frame_state, &fk, &fresh, BPF_ANY);
 		fs = bpf_map_lookup_elem(&h2_frame_state, &fk);
 		if (!fs)
-			return;
+			return 0;
 
 		if (avail < HTTP2_PREFACE_LEN) {
 			fs->preface_seen = 1;
 			fs->type = HTTP2_SETTINGS;
 			fs->remaining = HTTP2_PREFACE_LEN - (u32)avail;
-			return;
+			return 0;
 		}
 		start = HTTP2_PREFACE_LEN;
 	} else if (fs->desync) {
 		if (!h2_start_looks_h2(base, avail))
-			return;
+			return 0;
 		__builtin_memset(fs, 0, sizeof(*fs));
 	}
 	fs->preface_seen = 1;
@@ -391,8 +364,15 @@ static __always_inline void h2_emit_frames(void *base, u64 avail, u64 conn,
 		.transport = transport,
 	};
 	bpf_loop(H2_MAX_FRAME_STEPS, h2_frames_cb, &c, 0);
-	if (s->off < c.avail)
+	if (s->off != c.avail)
 		h2_desync(conn, dir);
+	return 0;
+}
+
+static __always_inline void h2_emit_frames(void *base, u64 avail, u64 conn,
+					   u32 dir, u8 transport)
+{
+	h2_walk_frames((u64)base, avail, conn, dir, transport);
 }
 
 static __always_inline void h2_forget_conn(u64 conn)

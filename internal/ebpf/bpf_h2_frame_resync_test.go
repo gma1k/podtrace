@@ -99,33 +99,60 @@ func TestH2WalkerValidatesEveryFrameHeader(t *testing.T) {
 		t.Fatal("h2_frames_cb adopts frame headers without validating them, so a desynced walk reads garbage lengths")
 	}
 	branch, ok := braceBody(body, idx)
-	if !ok || !strings.Contains(branch, "h2_mark_desync(") {
-		t.Fatal("an implausible frame header must mark the direction desynced")
+	if !ok || !strings.Contains(branch, "s->off = c->avail + 1;") {
+		t.Fatal("an implausible frame header must stop the walk past the buffer end so the direction is desynced")
+	}
+	if strings.Contains(body, "h2_mark_desync(") {
+		t.Fatal("the bpf_loop callback must only signal a desync; marking it there multiplies the verifier's work")
 	}
 }
 
 func TestH2WalkerDesyncsWhenTheStepBudgetRunsOut(t *testing.T) {
-	body := functionBody(t, bpfSource(t, "h2.c"), "h2_emit_frames")
+	body := functionBody(t, bpfSource(t, "h2.c"), "h2_walk_frames")
 	loop := strings.Index(body, "bpf_loop(H2_MAX_FRAME_STEPS")
 	if loop < 0 {
-		t.Fatal("h2_emit_frames no longer walks frames with bpf_loop")
+		t.Fatal("h2_walk_frames no longer walks frames with bpf_loop")
 	}
 	after := body[loop:]
-	if !strings.Contains(after, "if (s->off < c.avail)") || !strings.Contains(after, "h2_desync(conn, dir)") {
-		t.Fatal("bytes left unparsed after the bpf_loop budget must desync the direction; " +
+	if !strings.Contains(after, "if (s->off != c.avail)") || !strings.Contains(after, "h2_desync(conn, dir)") {
+		t.Fatal("a walk that stopped short of, or was signalled past, the buffer end must desync the direction; " +
 			"otherwise the next buffer is parsed from a non-boundary offset")
 	}
 }
 
+func TestH2FrameWalkIsVerifiedOncePerProgram(t *testing.T) {
+	text := bpfSource(t, "h2.c")
+	if !strings.Contains(text, "__noinline int h2_walk_frames(u64 base_addr, u64 avail, u64 conn, u32 dir, u32 transport)") {
+		t.Fatal("the frame walk must be a global function; inlined once per iovec segment it exceeds the verifier's instruction limit")
+	}
+	if !strings.Contains(functionBody(t, text, "h2_emit_frames"), "h2_walk_frames((u64)base, avail, conn, dir, transport);") {
+		t.Fatal("h2_emit_frames must delegate to the global frame walk")
+	}
+}
+
+func TestH2PartialFrameHeaderIsCopiedWithOneBoundedRead(t *testing.T) {
+	text := bpfSource(t, "h2.c")
+	keep := functionBody(t, text, "h2_keep_partial")
+	if !strings.Contains(keep, "bpf_probe_read_user(&fs->hdr_partial[have & 15], n, src);") {
+		t.Fatal("the partial header must be read with one masked, bounded copy")
+	}
+	if !strings.Contains(bpfSource(t, "maps.h"), "u8  hdr_partial[24];") {
+		t.Fatal("hdr_partial must hold the masked offset plus a full frame header")
+	}
+	if strings.Count(functionBody(t, text, "h2_frames_cb"), "h2_keep_partial(") != 3 {
+		t.Fatal("every partial-header path must use h2_keep_partial instead of per-byte branches")
+	}
+}
+
 func TestH2DesyncedDirectionResumesOnlyAtAFrameBoundary(t *testing.T) {
-	body := functionBody(t, bpfSource(t, "h2.c"), "h2_emit_frames")
+	body := functionBody(t, bpfSource(t, "h2.c"), "h2_walk_frames")
 	idx := strings.Index(body, "else if (fs->desync)")
 	if idx < 0 {
-		t.Fatal("h2_emit_frames ignores the desync flag")
+		t.Fatal("h2_walk_frames ignores the desync flag")
 	}
 	branch, ok := braceBody(body, idx)
 	if !ok || !strings.Contains(branch, "if (!h2_start_looks_h2(base, avail))") ||
-		!strings.Contains(branch, "return;") {
+		!strings.Contains(branch, "return 0;") {
 		t.Fatal("a desynced direction must skip buffers until one starts with a strictly valid frame header")
 	}
 }

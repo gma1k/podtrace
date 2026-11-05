@@ -156,6 +156,7 @@ var probeGroupMap = map[string]ProbeGroup{
 
 	// HTTP/1.x (socket-level request/response line inspection)
 	"kprobe_http_tcp_sendmsg":    GroupNetwork,
+	"kprobe_rustls_tcp_sendmsg":  GroupNetwork,
 	"kprobe_http_tcp_recvmsg":    GroupNetwork,
 	"kretprobe_http_tcp_recvmsg": GroupNetwork,
 

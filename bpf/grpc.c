@@ -8,6 +8,19 @@
 
 #define GRPC_INSPECT_LEN 128
 
+struct grpc_inspect_buf {
+	u8 data[GRPC_INSPECT_LEN];
+};
+
+__noinline int grpc_literal_path(u32 start, u32 end, const struct grpc_inspect_buf *b)
+{
+	if (!b)
+		return 0;
+	u32 vstart = 0, vlen = 0;
+	if (!hpack_literal_path(b->data, GRPC_INSPECT_LEN - 1, start, end, &vstart, &vlen))
+		return 0;
+	return (int)(0x10000 | ((vstart & (GRPC_INSPECT_LEN - 1)) << 8) | (vlen & 0xff));
+}
 
 SEC("kprobe/tcp_sendmsg")
 int kprobe_grpc_tcp_sendmsg(struct pt_regs *ctx)
@@ -31,7 +44,8 @@ int kprobe_grpc_tcp_sendmsg(struct pt_regs *ctx)
 	if (!base || avail < HTTP2_FRAME_HDR)
 		return 0;
 
-	u8 buf[GRPC_INSPECT_LEN] = {};
+	struct grpc_inspect_buf inspect = {};
+	u8 *buf = inspect.data;
 	u32 read_len = (u32)avail;
 	if (read_len > GRPC_INSPECT_LEN)
 		read_len = GRPC_INSPECT_LEN;
@@ -57,9 +71,11 @@ int kprobe_grpc_tcp_sendmsg(struct pt_regs *ctx)
 	if (end > read_len)
 		end = read_len;
 
-	u32 vstart = 0, vlen = 0;
-	if (!hpack_literal_path(buf, GRPC_INSPECT_LEN - 1, start, end, &vstart, &vlen))
+	int found = grpc_literal_path(start, end, &inspect);
+	if (!(found & 0x10000))
 		return 0;
+	u32 vstart = ((u32)found >> 8) & (GRPC_INSPECT_LEN - 1);
+	u32 vlen = (u32)found & 0xff;
 	if (buf[vstart & (GRPC_INSPECT_LEN - 1)] != '/')
 		return 0;
 

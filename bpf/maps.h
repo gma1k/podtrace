@@ -1069,7 +1069,7 @@ struct h2_frame_state {
 	u8  preface_seen;
 	u8  pad;
 	u8  hdr_have;
-	u8  hdr_partial[9];
+	u8  hdr_partial[24];
 	u8  pad_len_pending;
 	u8  pre_skip;
 	u8  sliced;

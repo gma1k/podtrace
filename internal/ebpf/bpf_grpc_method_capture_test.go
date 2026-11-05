@@ -99,7 +99,17 @@ func TestGRPCMethodSniffParsesHPACKAndGatesOnTheTarget(t *testing.T) {
 	if strings.Contains(body, "buf[i] == '/'") {
 		t.Fatal("kprobe_grpc_tcp_sendmsg still scans raw HPACK bytes for '/', which matches inside Huffman-coded values")
 	}
-	if !strings.Contains(body, "hpack_literal_path(") {
+	if !strings.Contains(body, "grpc_literal_path(start, end, &inspect)") {
 		t.Fatal("kprobe_grpc_tcp_sendmsg must locate :path through the HPACK representation")
+	}
+}
+
+func TestGRPCHPACKWalkIsVerifiedOnce(t *testing.T) {
+	text := bpfSource(t, "grpc.c")
+	if !strings.Contains(text, "__noinline int grpc_literal_path(u32 start, u32 end, const struct grpc_inspect_buf *b)") {
+		t.Fatal("the HPACK :path walk must be a global function; inlined, its states multiply the path copy past the verifier's instruction limit")
+	}
+	if !strings.Contains(functionBody(t, text, "grpc_literal_path"), "hpack_literal_path(b->data, GRPC_INSPECT_LEN - 1, start, end, &vstart, &vlen)") {
+		t.Fatal("grpc_literal_path must use the shared HPACK walker")
 	}
 }

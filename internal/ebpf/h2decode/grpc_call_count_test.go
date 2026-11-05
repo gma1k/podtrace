@@ -70,6 +70,51 @@ func TestALateJoinedGRPCCallIsStillOneResponse(t *testing.T) {
 	}
 }
 
+var trailersFromBeforeCapture = []byte{0xff, 0x10}
+
+func TestAGRPCCallEndsAtTrailersWhoseStatusPredatesCapture(t *testing.T) {
+	d := New()
+	be, ibe := newBlockEncoder(), newBlockEncoder()
+	var out []*events.Event
+	out = append(out, d.Ingest(rec(74, DirIngress, 0, 1, be.encode(reqFields("POST", "/pkg.Svc/Do", grpcType)...)))...)
+	out = append(out, d.Ingest(rec(74, DirEgress, 0, 1, ibe.encode(hf(":status", "200"), grpcType)))...)
+	trailers := rec(74, DirEgress, 1, 1, trailersFromBeforeCapture)
+	trailers.Timestamp = 5000
+	out = append(out, d.Ingest(trailers)...)
+
+	resp := responses(out)
+	if len(resp) != 1 {
+		t.Fatalf("%d response events; trailers that cannot be decoded still end the call", len(resp))
+	}
+	ev := resp[0]
+	if ev.Target != "POST /pkg.Svc/Do" || ev.Details != "200" || ev.Error != 0 {
+		t.Errorf("response = %+v", ev)
+	}
+	if ev.LatencyNS != 4000 || ev.Timestamp != 5000 {
+		t.Errorf("latency = %d, timestamp = %d; the call ends at its trailers", ev.LatencyNS, ev.Timestamp)
+	}
+	if IsGRPCResponse(ev) {
+		t.Error("a call whose grpc-status was not decoded must not claim one")
+	}
+	if s := d.Stats(); s.Streams != 0 {
+		t.Errorf("%d streams still tracked after the call ended", s.Streams)
+	}
+}
+
+func TestOnlyTheRespondingSideEndsAHeldGRPCCall(t *testing.T) {
+	d := New()
+	be, ibe := newBlockEncoder(), newBlockEncoder()
+	d.Ingest(rec(75, DirIngress, 0, 1, be.encode(reqFields("POST", "/pkg.Svc/Do", grpcType)...)))
+	d.Ingest(rec(75, DirEgress, 0, 1, ibe.encode(hf(":status", "200"), grpcType)))
+	if evs := d.Ingest(rec(75, DirIngress, 1, 1, trailersFromBeforeCapture)); len(evs) != 0 {
+		t.Fatalf("a block from the requesting side emitted %d events for a held call", len(evs))
+	}
+	ev := singleEvent(t, d.Ingest(rec(75, DirEgress, 1, 1, ibe.encode(hf("grpc-status", "0")))))
+	if ev.Details != "200\ngrpc-status: 0" {
+		t.Errorf("response = %+v", ev)
+	}
+}
+
 func TestAGRPCRequestWithoutAResponseTypeIsStillHeld(t *testing.T) {
 	d := New()
 	be, ibe := newBlockEncoder(), newBlockEncoder()

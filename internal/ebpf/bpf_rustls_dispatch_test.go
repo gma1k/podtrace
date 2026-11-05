@@ -19,12 +19,15 @@ func TestRustlsWritesAreParsedWithTheAcceptedCount(t *testing.T) {
 }
 
 func TestRustlsWritesAreKeyedByTheSocketTheyAreSentOn(t *testing.T) {
-	if !strings.Contains(functionBody(t, bpfSource(t, "http.c"), "kprobe_http_tcp_sendmsg"), "rustls_flush_pending(ctx, sk);") {
+	text := bpfSource(t, "rustls.c")
+	if !strings.Contains(text, "SEC(\"kprobe/tcp_sendmsg\")\nint kprobe_rustls_tcp_sendmsg(struct pt_regs *ctx)") {
 		t.Fatal("a pending rustls write must be parsed at the thread's next tcp_sendmsg, which names its socket")
 	}
-	text := bpfSource(t, "rustls.c")
-	if !strings.Contains(functionBody(t, text, "rustls_flush_pending"), "process_scoped_id(sk)") {
-		t.Fatal("rustls_flush_pending must key the write by the process-scoped socket it is sent on")
+	if !strings.Contains(functionBody(t, text, "kprobe_rustls_tcp_sendmsg"), "rustls_dispatch_write(ctx, rustls_thread_key(), process_scoped_id(sk));") {
+		t.Fatal("kprobe_rustls_tcp_sendmsg must key the write by the process-scoped socket it is sent on")
+	}
+	if strings.Contains(functionBody(t, bpfSource(t, "http.c"), "kprobe_http_tcp_sendmsg"), "rustls") {
+		t.Fatal("the rustls parse must stay out of kprobe_http_tcp_sendmsg; together they exceed the verifier's instruction limit")
 	}
 	dispatch := functionBody(t, text, "rustls_dispatch_write")
 	if !strings.Contains(dispatch, "RUSTLS_WRITE_STALE_NS") {
