@@ -508,9 +508,11 @@ func drainKernelMetrics(ctx context.Context, backend tracer.TracerBackend, sink 
 	drain := func() {
 		rows, err := aggregator.DrainKernelMetrics()
 		if err != nil {
-			logger.Error(err, "draining the kernel aggregation map failed")
+			logger.Error(err, "draining the kernel aggregation map failed", "rowsDrained", len(rows))
 			metrics.RecordKernelDrainFailure()
-			return
+			if len(rows) == 0 {
+				return
+			}
 		}
 		applied := sink.IngestKernel(rows)
 		metrics.RecordKernelDrain(len(rows), applied)

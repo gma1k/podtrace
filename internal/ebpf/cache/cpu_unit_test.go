@@ -48,12 +48,12 @@ func TestGetCPUTime_Cache(t *testing.T) {
 }
 
 func TestMergeCPUSample_Baseline(t *testing.T) {
-	first := mergeCPUSample(ProcessCPUTime{}, false, 3_000_000_000)
+	first := mergeCPUSample(ProcessCPUTime{}, false, 3_000_000_000, 7)
 	if first.TotalNS != 3_000_000_000 || first.BaselineNS != 3_000_000_000 {
 		t.Fatalf("first sample: total=%d baseline=%d, want both 3e9", first.TotalNS, first.BaselineNS)
 	}
 
-	second := mergeCPUSample(first, true, 3_400_000_000)
+	second := mergeCPUSample(first, true, 3_400_000_000, 7)
 	if second.TotalNS != 3_400_000_000 {
 		t.Errorf("TotalNS=%d, want 3.4e9 (latest)", second.TotalNS)
 	}

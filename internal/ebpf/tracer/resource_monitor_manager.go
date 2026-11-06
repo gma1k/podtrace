@@ -2,6 +2,8 @@ package tracer
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"path/filepath"
 	"sync"
 
@@ -153,6 +155,10 @@ func (m *resourceMonitorManager) reconcileLocked() {
 			continue
 		}
 		mon, err := m.startMonitor(path, m.ownerForLocked(path))
+		if errors.Is(err, fs.ErrNotExist) {
+			logger.Debug("Not monitoring resources of a cgroup that is already gone", zap.Error(err), zap.String("cgroup_path", path))
+			continue
+		}
 		if err != nil {
 			logger.Warn("Failed to create resource monitor", zap.Error(err), zap.String("cgroup_path", path))
 			continue

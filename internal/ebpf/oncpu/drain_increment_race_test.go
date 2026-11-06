@@ -10,7 +10,7 @@ func TestADrainCountsIncrementsBetweenReadAndDelete(t *testing.T) {
 		latest: map[Key]uint64{key: 5},
 		stacks: map[uint32][]uint64{1: {0x10}},
 	}
-	d, err := drain(f.io())
+	d, err := drain(f.io(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func TestADrainKeepsStacksThatNewCountsReference(t *testing.T) {
 		stacks: map[uint32][]uint64{1: {0x10}, 2: {0x20}},
 		live:   map[uint32]struct{}{2: {}},
 	}
-	if _, err := drain(f.io()); err != nil {
+	if _, err := drain(f.io(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if f.deletedStacks != 1 {
@@ -46,12 +46,12 @@ func (s *sliceIterator) Next(key, value any) bool {
 	return true
 }
 
-func TestLiveStackIDsCollectsReferencedStacks(t *testing.T) {
-	got := liveStackIDs(&sliceIterator{keys: []Key{{StackID: 3}, {StackID: 3}, {StackID: 9}}})
-	if len(got) != 2 {
-		t.Fatalf("live = %v, want stacks 3 and 9", got)
+func TestLiveCountsCollectsEveryRow(t *testing.T) {
+	got := liveCounts(&sliceIterator{keys: []Key{{StackID: 3}, {StackID: 3}, {StackID: 9}}})
+	if len(got) != 3 {
+		t.Fatalf("live = %v, want all three rows", got)
 	}
-	if _, ok := got[9]; !ok {
-		t.Fatalf("live = %v, missing 9", got)
+	if got[2].key.StackID != 9 || got[2].count != 1 {
+		t.Fatalf("live = %v, want the last row to be stack 9 with its count", got)
 	}
 }

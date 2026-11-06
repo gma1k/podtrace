@@ -8,6 +8,7 @@ import (
 func TestPIDCache_TTLInvalidatesReusedPID(t *testing.T) {
 	origReadFile := readFile
 	defer func() { readFile = origReadFile }()
+	stubStartTicks(t, func(uint32) (uint64, bool) { return 100, true })
 
 	f := NewCgroupFilter()
 	f.SetCgroupPath("/kubepods/podA")
@@ -35,6 +36,7 @@ func TestPIDCache_TTLInvalidatesReusedPID(t *testing.T) {
 func TestPIDCache_WithinTTLServesFromCache(t *testing.T) {
 	origReadFile := readFile
 	defer func() { readFile = origReadFile }()
+	stubStartTicks(t, func(uint32) (uint64, bool) { return 100, true })
 
 	f := NewCgroupFilter()
 	f.SetCgroupPath("/kubepods/podA")

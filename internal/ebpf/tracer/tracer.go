@@ -80,6 +80,7 @@ type ProfilingControllerSetter interface {
 type Tracer struct {
 	cgroupMkdirAttached bool
 	inheritedCache      sync.Map
+	inheritedParents    atomic.Pointer[map[uint64]struct{}]
 	collection          *ebpf.Collection
 	links               []link.Link
 	probeGroupsMu       sync.Mutex
@@ -123,6 +124,7 @@ type Tracer struct {
 	processNameCache              *cache.LRUCache
 	attributionTable              *attribution.Table
 	attributionCorrelatorDisabled bool
+	skipCPUSnapshots              bool
 	resourceMgr                   *resourceMonitorManager
 	lastDNSDrops                  uint64
 	dropReport                    atomic.Pointer[dropReportFn]
@@ -130,9 +132,12 @@ type Tracer struct {
 	useUserspaceCgroupFilter      atomic.Bool
 	denyWhenNoTargets             atomic.Bool
 	targetCgroupIDs               atomic.Pointer[map[uint64]struct{}]
+	cgroupIDsAuthoritative        atomic.Bool
 	cgroupCapacityWarned          atomic.Int64
 	cgroupWriteMu                 sync.Mutex
 	onCPUFlags                    uint32
+	onCPUDrainMu                  sync.Mutex
+	onCPULostSeen                 oncpu.LostTotals
 	piiRedactor                   *redactor.Redactor
 	profilingCtrl                 ProfilingController
 
@@ -974,6 +979,7 @@ func NewTracer(tracerOpts ...Option) (*Tracer, error) {
 		processNameCache:              processCache,
 		attributionTable:              attribution.New(0, 0),
 		attributionCorrelatorDisabled: os.Getenv("PODTRACE_DISABLE_ATTRIBUTION_CORRELATOR") == "1",
+		skipCPUSnapshots:              startup.withoutCPUSnapshots,
 		resourceMgr:                   newResourceMonitorManager(),
 	}
 	t.useUserspaceCgroupFilter.Store(true)
@@ -1004,23 +1010,49 @@ func (t *Tracer) idleDeny() bool {
 		len(t.loadCgroupIDs()) == 0 && !t.filter.HasTargets()
 }
 
-// cgroupAllows reports whether an event passes the active cgroup target gate.
-func (t *Tracer) cgroupAllows(event *events.Event) bool {
+// cgroupGate names the check that decided an event's cgroup admission.
+type cgroupGate int
+
+const (
+	cgroupGateAllowAll cgroupGate = iota
+	cgroupGateID
+	cgroupGateIdleDeny
+	cgroupGatePID
+)
+
+// cgroupIDGateActive reports whether target cgroup ids decide admission for
+// events that carry a cgroup id.
+func (t *Tracer) cgroupIDGateActive(cgroupIDs map[uint64]struct{}) bool {
+	return len(cgroupIDs) > 0 || t.cgroupIDsAuthoritative.Load()
+}
+
+// admitByCgroup is the single cgroup target gate every event path uses.
+//
+// An event without an owning task (PID 0) gets no exemption. Where target
+// cgroup ids are authoritative it is confined on the cgroup id it carries,
+// like any other event.
+func (t *Tracer) admitByCgroup(event *events.Event) (bool, cgroupGate) {
 	cgroupIDs := t.loadCgroupIDs()
 	switch {
-	case len(cgroupIDs) > 0 && event.CgroupID != 0:
+	case t.cgroupIDGateActive(cgroupIDs) && event.CgroupID != 0:
 		if _, ok := cgroupIDs[event.CgroupID]; ok {
-			return true
+			return true, cgroupGateID
 		}
 		_, inherited := t.InheritedCgroupParent(event.CgroupID)
-		return inherited
+		return inherited, cgroupGateID
 	case t.idleDeny():
-		return false
+		return false, cgroupGateIdleDeny
 	case t.useUserspaceCgroupFilter.Load():
-		return t.filter.IsPIDInCgroup(event.PID)
+		return t.filter.IsPIDInCgroup(event.PID), cgroupGatePID
 	default:
-		return true
+		return true, cgroupGateAllowAll
 	}
+}
+
+// cgroupAllows reports whether an event passes the active cgroup target gate.
+func (t *Tracer) cgroupAllows(event *events.Event) bool {
+	allowed, _ := t.admitByCgroup(event)
+	return allowed
 }
 
 // SetCgroups replaces the tracer's entire cgroup filter set with the
@@ -1050,14 +1082,19 @@ func (t *Tracer) SetCgroups(cgroupPaths []string) error {
 		t.cgroupWriteMu.Lock()
 		t.setCgroupPaths(nil)
 		t.storeCgroupIDs(map[uint64]struct{}{})
+		t.cgroupIDsAuthoritative.Store(false)
 		t.filter.SetCgroupPaths(nil)
 		if err := t.syncTargetCgroupMap(); err != nil {
 			logger.Warn("Failed to clear target_cgroup_ids map", zap.Error(err))
 		}
+		t.syncCgroupInheritance(nil)
 		t.cgroupWriteMu.Unlock()
 		t.syncDNSPacketProbes(nil)
 		t.syncHTTP3Probes(nil)
 		t.syncSockOpsProbes(nil)
+		if t.resourceMgr != nil {
+			t.resourceMgr.reconcile(nil)
+		}
 		logger.Debug("Detached all cgroups")
 		return nil
 	}
@@ -1173,10 +1210,14 @@ func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 			}
 		}
 		t.storeCgroupIDs(newIDs)
+		t.cgroupIDsAuthoritative.Store(true)
 		if err := t.syncTargetCgroupMap(); err != nil {
 			logger.Warn("Failed to sync target_cgroup_ids map", zap.Error(err))
 		} else if len(newIDs) > 0 {
 			logger.Debug("Set target cgroup IDs for in-kernel filtering", zap.Int("count", len(newIDs)))
+		} else {
+			logger.Warn("No target cgroup path resolved to a cgroup id; capturing nothing until one does",
+				zap.Strings("cgroup_paths", allPaths))
 		}
 		t.syncCgroupInheritance(allPaths)
 		if len(newIDs) > 0 && os.Getenv("PODTRACE_DISABLE_USERSPACE_CGROUP_FILTER") == "1" {
@@ -1184,6 +1225,7 @@ func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 		}
 	} else {
 		t.storeCgroupIDs(newIDs)
+		t.cgroupIDsAuthoritative.Store(false)
 		logger.Debug("Cgroup v2 not detected, using userspace filtering only", zap.String("cgroup_base", config.CgroupBasePath))
 	}
 	currentPaths := allPaths
@@ -1217,7 +1259,8 @@ func (t *Tracer) syncTargetCgroupMap() error {
 	t.warnOnCgroupCapacity(len(ids), targetMap.MaxEntries())
 
 	if len(ids) == 0 {
-		deny := t.denyWhenNoTargets.Load() && len(t.currentCgroupPaths()) == 0
+		deny := t.cgroupIDsAuthoritative.Load() ||
+			(t.denyWhenNoTargets.Load() && len(t.currentCgroupPaths()) == 0)
 		if err := t.setCgroupFilterEnabled(deny); err != nil {
 			return err
 		}
@@ -1859,7 +1902,9 @@ func (t *Tracer) processAndDispatch(ctx context.Context, event *events.Event,
 
 	t.recordAttributionOutcome(event, attributionSource)
 
-	cache.SnapshotCPUTime(event.PID)
+	if !t.skipCPUSnapshots {
+		cache.SnapshotCPUTime(event.PID)
+	}
 
 	if t.piiRedactor != nil {
 		t.piiRedactor.Redact(event)
@@ -1873,49 +1918,26 @@ func (t *Tracer) processAndDispatch(ctx context.Context, event *events.Event,
 	}
 
 	allowed := true
-	cgroupIDs := t.loadCgroupIDs()
-	if ec.filteringDisabled.Load() {
-		// Fallback mode: allow all events
-		allowed = true
-	} else if len(cgroupIDs) > 0 && event.CgroupID != 0 {
-		_, allowed = cgroupIDs[event.CgroupID]
-		if !allowed {
-			_, allowed = t.InheritedCgroupParent(event.CgroupID)
-		}
+	if !ec.filteringDisabled.Load() {
+		var gate cgroupGate
+		allowed, gate = t.admitByCgroup(event)
 		if !allowed {
 			if ec.filtered.Add(1) <= 5 || time.Now().Unix()%10 == 0 {
-				logger.Debug("Event filtered by cgroup ID mismatch",
-					zap.Uint64("event_cgroup_id", event.CgroupID),
-					zap.Int("target_cgroup_id_count", len(cgroupIDs)),
-					zap.Uint32("pid", event.PID),
-					zap.String("process", event.ProcessName))
+				switch gate {
+				case cgroupGateID:
+					logger.Debug("Event filtered by cgroup ID mismatch",
+						zap.Uint64("event_cgroup_id", event.CgroupID),
+						zap.Int("target_cgroup_id_count", len(t.loadCgroupIDs())),
+						zap.Uint32("pid", event.PID),
+						zap.String("process", event.ProcessName))
+				case cgroupGatePID:
+					logger.Debug("Event filtered by userspace PID cgroup check",
+						zap.Uint32("pid", event.PID),
+						zap.String("process", event.ProcessName),
+						zap.String("cgroup_path", t.primaryCgroupPath()))
+				}
 			}
-		}
-	} else if t.idleDeny() {
-		allowed = false
-		ec.filtered.Add(1)
-	} else if event.PID == 0 && event.CgroupID != 0 {
-		// Some events have no owning task to check. A sock_ops RTT
-		// callback runs from the ACK path, so there is no "current" to
-		// resolve a PID from and IsPIDInCgroup would reject every one of
-		// them. These carry the socket's own cgroup id instead, and the
-		// probe already tested that id against the same target set this
-		// filter enforces, in the kernel, before emitting. Confinement is
-		// not being skipped here, it is being applied on the only key the
-		// event has.
-		allowed = true
-	} else if t.useUserspaceCgroupFilter.Load() {
-		allowed = t.filter.IsPIDInCgroup(event.PID)
-		if !allowed {
-			if ec.filtered.Add(1) <= 5 || time.Now().Unix()%10 == 0 {
-				logger.Debug("Event filtered by userspace PID cgroup check",
-					zap.Uint32("pid", event.PID),
-					zap.String("process", event.ProcessName),
-					zap.String("cgroup_path", t.primaryCgroupPath()))
-			}
-		}
-	} else {
-		if ec.parsed.Load() <= 5 {
+		} else if gate == cgroupGateAllowAll && ec.parsed.Load() <= 5 {
 			logger.Debug("No cgroup filtering active, allowing all events",
 				zap.Uint64("event_cgroup_id", event.CgroupID),
 				zap.Int("target_cgroup_id_count", len(t.loadCgroupIDs())),
@@ -2731,20 +2753,34 @@ func isLikelyTransientComm(name string) bool {
 	return c >= '0' && c <= '9'
 }
 
+// getProcessNameQuick names the process holding pid. Names are cached per
+// process instance, pid plus start time, so a pid the kernel hands to a new
+// process, possibly in another pod, is not labelled with its predecessor's
+// name. A process that has already exited cannot be identified; it is named
+// from the cache only if the entry is as recent as the pid cache's TTL.
 func (t *Tracer) getProcessNameQuick(pid uint32) string {
 	if !validation.ValidatePID(pid) {
 		return ""
 	}
 
-	if name, ok := t.processNameCache.Get(pid); ok {
+	pidStr := fmt.Sprintf("%d", pid)
+
+	rawStat, statReadErr := procfs.ReadFile(pidStr + "/stat")
+	stat, statErr := procfs.ParseProcessStat(rawStat)
+	if statReadErr != nil {
+		statErr = statReadErr
+	}
+	if statErr == nil {
+		if name, ok := t.processNameCache.GetProcess(pid, stat.StartTicks); ok {
+			return name
+		}
+	} else if name, ok := t.processNameCache.GetRecent(pid, time.Duration(config.PIDCacheTTLSeconds)*time.Second); ok {
 		return name
 	}
 
 	metricsexporter.RecordProcessCacheMiss()
 
 	name := ""
-
-	pidStr := fmt.Sprintf("%d", pid)
 
 	if cmdline, err := procfs.ReadFile(pidStr + "/cmdline"); err == nil {
 		parts := strings.Split(string(cmdline), "\x00")
@@ -2756,15 +2792,8 @@ func (t *Tracer) getProcessNameQuick(pid uint32) string {
 		}
 	}
 
-	if name == "" {
-		if data, err := procfs.ReadFile(pidStr + "/stat"); err == nil {
-			statStr := string(data)
-			start := strings.Index(statStr, "(")
-			end := strings.LastIndex(statStr, ")")
-			if start >= 0 && end > start {
-				name = statStr[start+1 : end]
-			}
-		}
+	if name == "" && statReadErr == nil {
+		name, _ = procfs.StatComm(rawStat)
 	}
 
 	if name == "" {
@@ -2774,7 +2803,9 @@ func (t *Tracer) getProcessNameQuick(pid uint32) string {
 	}
 
 	sanitized := validation.SanitizeProcessName(name)
-	t.processNameCache.Set(pid, sanitized)
+	if statErr == nil {
+		t.processNameCache.SetProcess(pid, stat.StartTicks, sanitized)
+	}
 	return sanitized
 }
 
@@ -2974,8 +3005,19 @@ func (t *Tracer) EnableProbeGroup(g probes.ProbeGroup) error {
 type Option func(*tracerOptions)
 
 type tracerOptions struct {
-	initialCategories []string
-	gateAtStartup     bool
+	initialCategories   []string
+	gateAtStartup       bool
+	withoutCPUSnapshots bool
+}
+
+// WithoutProcessCPUSnapshots stops the tracer from reading /proc/<pid>/stat
+// for every event it dispatches. Only the diagnose report's CPU section reads
+// those snapshots, so a process that never builds one, the node agent, skips
+// a procfs read per event.
+func WithoutProcessCPUSnapshots() Option {
+	return func(o *tracerOptions) {
+		o.withoutCPUSnapshots = true
+	}
 }
 
 // WithInitialCategories restricts which probe groups stay attached once the

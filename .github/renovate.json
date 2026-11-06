@@ -134,6 +134,31 @@
       "depNameTemplate": "oras-project/oras",
       "datasourceTemplate": "github-releases",
       "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Track the cosign release cosign-installer installs in the release workflow; the version lives in a workflow env var, which the github-actions manager does not read",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "COSIGN_VERSION: (?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "depNameTemplate": "sigstore/cosign",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "Track the helm release setup-helm installs through the HELM_VERSION workflow env var. Named helm, like the literal setup-helm version inputs the github-actions manager already reads, so every helm pin moves in one PR and the helm hold rule covers all of them",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "HELM_VERSION: (?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "depNameTemplate": "helm",
+      "packageNameTemplate": "helm/helm",
+      "datasourceTemplate": "github-releases"
     }
   ],
   "vulnerabilityAlerts": {

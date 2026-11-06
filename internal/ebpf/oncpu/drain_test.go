@@ -17,13 +17,14 @@ type fakeMaps struct {
 
 	latest                         map[Key]uint64
 	live                           map[uint32]struct{}
+	raced                          []countRow
+	refilled                       map[uint32]struct{}
 	countErr, requestErr           error
 	deleteCountErr, deleteStackErr error
 	deleteRequestErr, readLostErr  error
-	resetLostErr                   error
 	deletedCounts, deletedStacks   int
 	deletedRequests                int
-	reset                          map[uint32][]uint64
+	liveCalls                      int
 }
 
 func (f *fakeMaps) io() drainIO {
@@ -32,7 +33,6 @@ func (f *fakeMaps) io() drainIO {
 	for id := range f.requests {
 		reqIDs = append(reqIDs, id)
 	}
-	f.reset = map[uint32][]uint64{}
 	return drainIO{
 		nextCount: func(key, value any) bool {
 			if ci >= len(f.counts) {
@@ -59,11 +59,24 @@ func (f *fakeMaps) io() drainIO {
 			copy(out[:], s)
 			return nil
 		},
-		deleteStack: func(uint32) error {
+		deleteStack: func(id uint32) error {
 			f.deletedStacks++
+			if _, ok := f.refilled[id]; !ok && f.deleteStackErr == nil {
+				delete(f.stacks, id)
+			}
 			return f.deleteStackErr
 		},
-		liveStackIDs: func() map[uint32]struct{} { return f.live },
+		liveCounts: func() []countRow {
+			f.liveCalls++
+			if f.liveCalls > 1 {
+				return f.raced
+			}
+			rows := make([]countRow, 0, len(f.live))
+			for id := range f.live {
+				rows = append(rows, countRow{key: Key{StackID: id}, count: 1})
+			}
+			return rows
+		},
 		nextRequest: func(key, value any) bool {
 			if ri >= len(reqIDs) {
 				return false
@@ -85,10 +98,6 @@ func (f *fakeMaps) io() drainIO {
 			*out = append([]uint64(nil), f.lost[reason]...)
 			return nil
 		},
-		resetLost: func(reason uint32, zero []uint64) error {
-			f.reset[reason] = zero
-			return f.resetLostErr
-		},
 	}
 }
 
@@ -104,7 +113,7 @@ func TestADrainReturnsEachStackWithItsCountAndClearsTheMaps(t *testing.T) {
 		requests: map[uint64]Done{99: {LatencyNS: 1500, CgroupID: 7}},
 		lost:     map[uint32][]uint64{LostStack: {1, 2}, LostFull: {0, 0}},
 	}
-	d, err := drain(f.io())
+	d, err := drain(f.io(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,12 +135,6 @@ func TestADrainReturnsEachStackWithItsCountAndClearsTheMaps(t *testing.T) {
 		t.Errorf("deleted %d counts, %d stacks, %d requests; every row read must be removed",
 			f.deletedCounts, f.deletedStacks, f.deletedRequests)
 	}
-	if zero, ok := f.reset[LostStack]; !ok || len(zero) != 2 || zero[0] != 0 {
-		t.Errorf("the stack-loss counter was not zeroed per CPU: %v", f.reset)
-	}
-	if _, ok := f.reset[LostFull]; ok {
-		t.Error("a counter already at zero was rewritten")
-	}
 }
 
 func TestASampleWhoseStackIsGoneIsCountedAsUnresolved(t *testing.T) {
@@ -140,7 +143,7 @@ func TestASampleWhoseStackIsGoneIsCountedAsUnresolved(t *testing.T) {
 		values: []uint64{6, 1},
 		stacks: map[uint32][]uint64{5: {0, 0}},
 	}
-	d, err := drain(f.io())
+	d, err := drain(f.io(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +163,7 @@ func TestADeleteOfARowAlreadyGoneIsNotAnError(t *testing.T) {
 		deleteStackErr:   ebpf.ErrKeyNotExist,
 		deleteRequestErr: ebpf.ErrKeyNotExist,
 	}
-	if _, err := drain(f.io()); err != nil {
+	if _, err := drain(f.io(), nil); err != nil {
 		t.Errorf("drain = %v", err)
 	}
 }
@@ -174,7 +177,7 @@ func TestAWalkTheKernelOutpacedKeepsWhatItRead(t *testing.T) {
 		countErr:   ebpf.ErrIterationAborted,
 		requestErr: ebpf.ErrIterationAborted,
 	}
-	d, err := drain(f.io())
+	d, err := drain(f.io(), nil)
 	if err != nil {
 		t.Fatalf("drain = %v; an aborted walk is not a failed drain", err)
 	}
@@ -195,10 +198,9 @@ func TestEveryMapFailureStopsTheDrain(t *testing.T) {
 		"iterate requests": {requestErr: boom},
 		"delete request":   {requests: map[uint64]Done{1: {}}, deleteRequestErr: boom},
 		"read lost":        {readLostErr: boom},
-		"reset lost":       {lost: map[uint32][]uint64{LostFull: {4}}, resetLostErr: boom},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := drain(f.io()); !errors.Is(err, boom) {
+			if _, err := drain(f.io(), nil); !errors.Is(err, boom) {
 				t.Errorf("drain = %v, want the %s failure", err, name)
 			}
 		})

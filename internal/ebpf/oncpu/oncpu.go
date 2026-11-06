@@ -93,6 +93,10 @@ type Drained struct {
 	Unresolved uint64
 }
 
+// LostTotals is the running total of each lost-sample counter as of the last
+// drain.
+type LostTotals [lostReasons]uint64
+
 // Maps is the set of maps a drain reads.
 type Maps struct {
 	Counts   *ebpf.Map
@@ -137,8 +141,9 @@ func SetFlags(m *ebpf.Map, flags uint32) error {
 }
 
 // Drain reads and clears everything the sampler recorded since the last
-// drain.
-func Drain(m Maps) (Drained, error) {
+// drain. seen carries the lost-sample totals between drains of the same maps;
+// a nil seen reports the counters' whole totals.
+func Drain(m Maps, seen *LostTotals) (Drained, error) {
 	counts := m.Counts.Iterate()
 	requests := m.Requests.Iterate()
 	return drain(drainIO{
@@ -149,17 +154,14 @@ func Drain(m Maps) (Drained, error) {
 			return m.Stacks.Lookup(id, out)
 		},
 		deleteStack:   func(id uint32) error { return m.Stacks.Delete(id) },
-		liveStackIDs:  func() map[uint32]struct{} { return liveStackIDs(m.Counts.Iterate()) },
+		liveCounts:    func() []countRow { return liveCounts(m.Counts.Iterate()) },
 		nextRequest:   requests.Next,
 		requestErr:    requests.Err,
 		deleteRequest: func(id *uint64) error { return m.Requests.Delete(id) },
 		readLost: func(reason uint32, out *[]uint64) error {
 			return m.Lost.Lookup(reason, out)
 		},
-		resetLost: func(reason uint32, zero []uint64) error {
-			return m.Lost.Update(reason, zero, ebpf.UpdateExist)
-		},
-	})
+	}, seen)
 }
 
 // stackDepth is MAX_STACK_DEPTH in bpf/common.h.
@@ -173,19 +175,24 @@ type drainIO struct {
 	takeCount     func(key *Key, count *uint64) error
 	lookupStack   func(uint32, *[stackDepth]uint64) error
 	deleteStack   func(uint32) error
-	liveStackIDs  func() map[uint32]struct{}
+	liveCounts    func() []countRow
 	nextRequest   func(key, value any) bool
 	requestErr    func() error
 	deleteRequest func(*uint64) error
 	readLost      func(uint32, *[]uint64) error
-	resetLost     func(uint32, []uint64) error
+}
+
+// countRow is one count row as an iteration saw it.
+type countRow struct {
+	key   Key
+	count uint64
 }
 
 func outpaced(err error) bool {
 	return errors.Is(err, ebpf.ErrIterationAborted)
 }
 
-func drain(io drainIO) (Drained, error) {
+func drain(io drainIO, seen *LostTotals) (Drained, error) {
 	var (
 		out   Drained
 		key   Key
@@ -228,7 +235,11 @@ func drain(io drainIO) (Drained, error) {
 			Count:         rows[i],
 		})
 	}
-	live := io.liveStackIDs()
+	live := map[uint32]struct{}{}
+	for _, r := range io.liveCounts() {
+		live[r.key.StackID] = struct{}{}
+	}
+	deleted := map[uint32]struct{}{}
 	for id := range stacks {
 		if _, referenced := live[id]; referenced {
 			continue
@@ -236,7 +247,13 @@ func drain(io drainIO) (Drained, error) {
 		if err := io.deleteStack(id); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
 			return Drained{}, fmt.Errorf("oncpu: delete stack: %w", err)
 		}
+		deleted[id] = struct{}{}
 	}
+	orphaned, err := takeOrphanedCounts(io, deleted)
+	if err != nil {
+		return Drained{}, err
+	}
+	out.Unresolved += orphaned
 
 	var (
 		id   uint64
@@ -260,6 +277,9 @@ func drain(io drainIO) (Drained, error) {
 		}
 	}
 
+	if seen == nil {
+		seen = &LostTotals{}
+	}
 	for reason := uint32(0); reason < lostReasons; reason++ {
 		var perCPU []uint64
 		if err := io.readLost(reason, &perCPU); err != nil {
@@ -269,15 +289,45 @@ func drain(io drainIO) (Drained, error) {
 		for _, v := range perCPU {
 			total += v
 		}
-		if total == 0 {
-			continue
-		}
-		out.Lost[reason] = total
-		if err := io.resetLost(reason, make([]uint64, len(perCPU))); err != nil {
-			return Drained{}, fmt.Errorf("oncpu: reset lost: %w", err)
-		}
+		out.Lost[reason] = lostSince(seen[reason], total)
+		seen[reason] = total
 	}
 	return out, nil
+}
+
+// lostSince is how much a never-reset counter grew since the last drain. A
+// total below the last one means the maps were recreated, and the whole
+// total is new.
+func lostSince(last, total uint64) uint64 {
+	if total < last {
+		return total
+	}
+	return total - last
+}
+
+// takeOrphanedCounts removes the count rows a sample recorded between the
+// live-stack check and the stack deletions, which reference a stack this
+// drain just deleted.
+func takeOrphanedCounts(io drainIO, deleted map[uint32]struct{}) (uint64, error) {
+	if len(deleted) == 0 {
+		return 0, nil
+	}
+	var lost uint64
+	for _, r := range io.liveCounts() {
+		if _, gone := deleted[r.key.StackID]; !gone {
+			continue
+		}
+		var ips [stackDepth]uint64
+		if io.lookupStack(r.key.StackID, &ips) == nil {
+			continue
+		}
+		key, count := r.key, r.count
+		if err := io.takeCount(&key, &count); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+			return 0, fmt.Errorf("oncpu: delete orphaned count: %w", err)
+		}
+		lost += count
+	}
+	return lost, nil
 }
 
 // trimStack cuts the zero padding bpf_get_stackid leaves after the last frame.
@@ -401,20 +451,22 @@ func parseCPUList(list string) ([]int, error) {
 	return cpus, nil
 }
 
-// countIterator is the part of *ebpf.MapIterator liveStackIDs reads.
+// countIterator is the part of *ebpf.MapIterator liveCounts reads.
 type countIterator interface {
 	Next(key, value any) bool
 }
 
-// liveStackIDs collects the stack ids the counts in it reference.
-func liveStackIDs(it countIterator) map[uint32]struct{} {
-	live := map[uint32]struct{}{}
-	var key Key
-	var count uint64
+// liveCounts collects the count rows the iterator holds now.
+func liveCounts(it countIterator) []countRow {
+	var (
+		rows  []countRow
+		key   Key
+		count uint64
+	)
 	for it.Next(&key, &count) {
-		live[key.StackID] = struct{}{}
+		rows = append(rows, countRow{key: key, count: count})
 	}
-	return live
+	return rows
 }
 
 // countTaker is the part of *ebpf.Map takeCountFrom uses.
