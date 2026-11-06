@@ -2,6 +2,8 @@ package probes
 
 import (
 	"debug/dwarf"
+	"encoding/binary"
+	"math"
 	"strings"
 )
 
@@ -109,7 +111,9 @@ func openDWARF(exePath string, pid uint32) (data *dwarf.Data, cleanup func(), ok
 	return nil, nil, false
 }
 
-// indexDWARFStructs maps struct type names to their DWARF offsets.
+// indexDWARFStructs maps struct type names to the DWARF offsets of their
+// definitions. Declarations carry no members, so they are skipped in favour of
+// the definition wherever it appears.
 func indexDWARFStructs(d *dwarf.Data) map[string]dwarf.Offset {
 	idx := make(map[string]dwarf.Offset)
 	r := d.Reader()
@@ -121,6 +125,9 @@ func indexDWARFStructs(d *dwarf.Data) map[string]dwarf.Offset {
 		if ent.Tag != dwarf.TagStructType {
 			continue
 		}
+		if decl, _ := ent.Val(dwarf.AttrDeclaration).(bool); decl {
+			continue
+		}
 		if name, _ := ent.Val(dwarf.AttrName).(string); name != "" {
 			if _, seen := idx[name]; !seen {
 				idx[name] = ent.Offset
@@ -130,17 +137,111 @@ func indexDWARFStructs(d *dwarf.Data) map[string]dwarf.Offset {
 	return idx
 }
 
-func structByName(d *dwarf.Data, idx map[string]dwarf.Offset, name string) *dwarf.StructType {
+// dwarfStruct is one struct type read straight from DWARF: its name and its
+// direct members, each member's type kept as an offset that is only followed
+// when a caller asks. debug/dwarf's Data.Type instead resolves a type's whole
+// graph by unbounded recursion, so a hostile chain of type references in a
+// traced binary overflows the agent's stack, which recover cannot catch.
+type dwarfStruct struct {
+	StructName string
+	Field      []dwarfMember
+}
+
+type dwarfMember struct {
+	Name       string
+	ByteOffset int64
+	Type       dwarf.Offset
+	HasType    bool
+}
+
+// maxStructMembers bounds how many members readStruct keeps. Real Go structs
+// have at most a few hundred.
+const maxStructMembers = 1 << 14
+
+// dwarfEntry reads the single entry at off.
+func dwarfEntry(d *dwarf.Data, off dwarf.Offset) *dwarf.Entry {
+	r := d.Reader()
+	r.Seek(off)
+	ent, err := r.Next()
+	if err != nil || ent == nil || ent.Offset != off {
+		return nil
+	}
+	return ent
+}
+
+// readStruct reads the struct definition at off and its direct members.
+func readStruct(d *dwarf.Data, off dwarf.Offset) *dwarfStruct {
+	r := d.Reader()
+	r.Seek(off)
+	ent, err := r.Next()
+	if err != nil || ent == nil || ent.Offset != off || ent.Tag != dwarf.TagStructType {
+		return nil
+	}
+	st := &dwarfStruct{}
+	st.StructName, _ = ent.Val(dwarf.AttrName).(string)
+	if !ent.Children {
+		return st
+	}
+	for {
+		kid, err := r.Next()
+		if err != nil || kid == nil {
+			return nil
+		}
+		if kid.Tag == 0 {
+			return st
+		}
+		if kid.Children {
+			r.SkipChildren()
+		}
+		if kid.Tag != dwarf.TagMember {
+			continue
+		}
+		if len(st.Field) >= maxStructMembers {
+			return nil
+		}
+		m := dwarfMember{}
+		m.Name, _ = kid.Val(dwarf.AttrName).(string)
+		m.Type, m.HasType = kid.Val(dwarf.AttrType).(dwarf.Offset)
+		offset, ok := memberLocation(kid)
+		if !ok {
+			return nil
+		}
+		m.ByteOffset = offset
+		st.Field = append(st.Field, m)
+	}
+}
+
+// dwOpPlusUconst is the location opcode older producers use for a member
+// offset instead of a constant.
+const dwOpPlusUconst = 0x23
+
+// memberLocation decodes DW_AT_data_member_location the way debug/dwarf does:
+// a constant, or a DW_OP_plus_uconst expression. A member without one is at
+// offset 0.
+func memberLocation(kid *dwarf.Entry) (int64, bool) {
+	switch loc := kid.Val(dwarf.AttrDataMemberLoc).(type) {
+	case int64:
+		return loc, true
+	case []byte:
+		if len(loc) < 2 || loc[0] != dwOpPlusUconst {
+			return 0, false
+		}
+		v, n := binary.Uvarint(loc[1:])
+		if n <= 0 || v > math.MaxInt64 {
+			return 0, false
+		}
+		return int64(v), true
+	default:
+		return 0, true
+	}
+}
+
+func structByName(d *dwarf.Data, idx map[string]dwarf.Offset, name string) *dwarfStruct {
 	off, ok := idx[name]
 	if !ok {
 		return nil
 	}
-	t, err := d.Type(off)
-	if err != nil {
-		return nil
-	}
-	st, _ := t.(*dwarf.StructType)
-	return st
+	return readStruct(d, off)
 }
 
 // buildH3PeerPath walks from a root receiver struct to net.UDPAddr. prefix is
@@ -158,7 +259,7 @@ func buildH3PeerPath(d *dwarf.Data, idx map[string]dwarf.Offset, rootType string
 
 	var steps []h3PeerStep
 	cur := root
-	for hop := 0; hop < 3 && cur != nil && !hasMember(cur, "conn", isGoInterfaceType); hop++ {
+	for hop := 0; hop < 3 && cur != nil && !hasMember(d, cur, "conn", isGoInterfaceType); hop++ {
 		name := "conn"
 		if hop < len(prefix) {
 			name = prefix[hop]
@@ -170,7 +271,7 @@ func buildH3PeerPath(d *dwarf.Data, idx map[string]dwarf.Offset, rootType string
 		steps = append(steps, step)
 		cur = next
 	}
-	if cur == nil || !hasMember(cur, "conn", isGoInterfaceType) {
+	if cur == nil || !hasMember(d, cur, "conn", isGoInterfaceType) {
 		return h3PeerPath{}, false
 	}
 
@@ -184,8 +285,8 @@ func buildH3PeerPath(d *dwarf.Data, idx map[string]dwarf.Offset, rootType string
 	if udp == nil {
 		return h3PeerPath{}, false
 	}
-	if f := findMember(sconn, "remoteAddrInfo"); f != nil {
-		vOff, inner, ok := atomicPointerInfo(f.Type)
+	if f := findMember(sconn, "remoteAddrInfo"); f != nil && f.HasType {
+		vOff, inner, ok := atomicPointerInfo(d, f.Type)
 		if !ok {
 			return h3PeerPath{}, false
 		}
@@ -199,7 +300,7 @@ func buildH3PeerPath(d *dwarf.Data, idx map[string]dwarf.Offset, rootType string
 			return h3PeerPath{}, false
 		}
 		addr := findMember(rai, "addr")
-		if addr == nil || !isGoInterfaceType(addr.Type) {
+		if addr == nil || !addr.HasType || !isGoInterfaceType(d, addr.Type) {
 			return h3PeerPath{}, false
 		}
 		addrOff, ok := memberOffset32(addr.ByteOffset)
@@ -207,7 +308,7 @@ func buildH3PeerPath(d *dwarf.Data, idx map[string]dwarf.Offset, rootType string
 			return h3PeerPath{}, false
 		}
 		steps = append(steps, h3PeerStep{Off: addrOff, Iface: 1})
-	} else if f := findMember(sconn, "remoteAddr"); f != nil && isGoInterfaceType(f.Type) {
+	} else if f := findMember(sconn, "remoteAddr"); f != nil && f.HasType && isGoInterfaceType(d, f.Type) {
 		fOff, ok := memberOffset32(f.ByteOffset)
 		if !ok {
 			return h3PeerPath{}, false
@@ -246,24 +347,25 @@ func buildH3PeerPath(d *dwarf.Data, idx map[string]dwarf.Offset, rootType string
 // followMember resolves one hop: a pointer member is followed to its target
 // struct; an interface member is followed to the first implementing candidate
 // present in the binary.
-func followMember(d *dwarf.Data, idx map[string]dwarf.Offset, st *dwarf.StructType,
-	name string, implCandidates []string) (*dwarf.StructType, h3PeerStep, bool) {
+func followMember(d *dwarf.Data, idx map[string]dwarf.Offset, st *dwarfStruct,
+	name string, implCandidates []string) (*dwarfStruct, h3PeerStep, bool) {
 	f := findMember(st, name)
-	if f == nil {
+	if f == nil || !f.HasType {
 		return nil, h3PeerStep{}, false
 	}
 	off, ok := memberOffset32(f.ByteOffset)
 	if !ok {
 		return nil, h3PeerStep{}, false
 	}
-	t := stripType(f.Type)
-	if pt, ok := t.(*dwarf.PtrType); ok {
-		if target, ok := stripType(pt.Type).(*dwarf.StructType); ok {
-			return target, h3PeerStep{Off: off}, true
+	if target, ok := pointerTarget(d, f.Type); ok {
+		if ent, targetOff, ok := stripType(d, target); ok && ent.Tag == dwarf.TagStructType {
+			if st := readStruct(d, targetOff); st != nil {
+				return st, h3PeerStep{Off: off}, true
+			}
 		}
 		return nil, h3PeerStep{}, false
 	}
-	if isGoInterfaceType(f.Type) {
+	if isGoInterfaceType(d, f.Type) {
 		for _, cand := range implCandidates {
 			if impl := structByName(d, idx, cand); impl != nil {
 				return impl, h3PeerStep{Off: off, Iface: 1}, true
@@ -273,46 +375,72 @@ func followMember(d *dwarf.Data, idx map[string]dwarf.Offset, st *dwarf.StructTy
 	return nil, h3PeerStep{}, false
 }
 
-func findMember(st *dwarf.StructType, name string) *dwarf.StructField {
-	for _, f := range st.Field {
-		if f.Name == name {
-			return f
+func findMember(st *dwarfStruct, name string) *dwarfMember {
+	for i := range st.Field {
+		if st.Field[i].Name == name {
+			return &st.Field[i]
 		}
 	}
 	return nil
 }
 
-func hasMember(st *dwarf.StructType, name string, typeCheck func(dwarf.Type) bool) bool {
+func hasMember(d *dwarf.Data, st *dwarfStruct, name string, typeCheck func(*dwarf.Data, dwarf.Offset) bool) bool {
 	f := findMember(st, name)
-	return f != nil && (typeCheck == nil || typeCheck(f.Type))
+	return f != nil && (typeCheck == nil || (f.HasType && typeCheck(d, f.Type)))
 }
 
 // maxTypeWrappers bounds how many typedef and qualifier wrappers stripType
-// peels. debug/dwarf caches a typedef before resolving its target, so a
-// typedef that names itself, or a cycle of them, never bottoms out.
+// peels, so a typedef that names itself, or a cycle of them, never spins.
 const maxTypeWrappers = 16
 
-// stripType removes typedef and qualifier wrappers, returning nil when they
-// do not end within maxTypeWrappers.
-func stripType(t dwarf.Type) dwarf.Type {
+// stripType follows typedef and qualifier wrappers from the type at off and
+// returns the entry underneath and its offset, failing when they do not end
+// within maxTypeWrappers.
+func stripType(d *dwarf.Data, off dwarf.Offset) (*dwarf.Entry, dwarf.Offset, bool) {
 	for range maxTypeWrappers {
-		switch v := t.(type) {
-		case *dwarf.TypedefType:
-			t = v.Type
-		case *dwarf.QualType:
-			t = v.Type
+		ent := dwarfEntry(d, off)
+		if ent == nil {
+			return nil, 0, false
+		}
+		switch ent.Tag {
+		case dwarf.TagTypedef, dwarf.TagConstType, dwarf.TagVolatileType, dwarf.TagRestrictType:
+			next, ok := ent.Val(dwarf.AttrType).(dwarf.Offset)
+			if !ok {
+				return nil, 0, false
+			}
+			off = next
 		default:
-			return t
+			return ent, off, true
 		}
 	}
-	return nil
+	return nil, 0, false
+}
+
+// pointerTarget returns the offset of the type a pointer type at off points
+// to.
+func pointerTarget(d *dwarf.Data, off dwarf.Offset) (dwarf.Offset, bool) {
+	ent, _, ok := stripType(d, off)
+	if !ok || ent.Tag != dwarf.TagPointerType {
+		return 0, false
+	}
+	target, ok := ent.Val(dwarf.AttrType).(dwarf.Offset)
+	return target, ok
+}
+
+// strippedStruct reads the struct under any wrappers of the type at off.
+func strippedStruct(d *dwarf.Data, off dwarf.Offset) *dwarfStruct {
+	ent, structOff, ok := stripType(d, off)
+	if !ok || ent.Tag != dwarf.TagStructType {
+		return nil
+	}
+	return readStruct(d, structOff)
 }
 
 // isGoInterfaceType reports whether a member type is a Go interface (iface or
 // eface): a 16-byte two-word struct whose second word is "data".
-func isGoInterfaceType(t dwarf.Type) bool {
-	st, ok := stripType(t).(*dwarf.StructType)
-	if !ok || len(st.Field) != 2 {
+func isGoInterfaceType(d *dwarf.Data, off dwarf.Offset) bool {
+	st := strippedStruct(d, off)
+	if st == nil || len(st.Field) != 2 {
 		return false
 	}
 	return st.Field[1].Name == "data" &&
@@ -321,9 +449,9 @@ func isGoInterfaceType(t dwarf.Type) bool {
 
 // atomicPointerInfo returns the offset of the pointer word inside a
 // sync/atomic.Pointer[T] member and T's type name.
-func atomicPointerInfo(t dwarf.Type) (uint32, string, bool) {
-	st, ok := stripType(t).(*dwarf.StructType)
-	if !ok || !strings.HasPrefix(st.StructName, "sync/atomic.Pointer[") ||
+func atomicPointerInfo(d *dwarf.Data, off dwarf.Offset) (uint32, string, bool) {
+	st := strippedStruct(d, off)
+	if st == nil || !strings.HasPrefix(st.StructName, "sync/atomic.Pointer[") ||
 		!strings.HasSuffix(st.StructName, "]") {
 		return 0, "", false
 	}

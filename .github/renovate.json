@@ -53,6 +53,87 @@
       "depNameTemplate": "golangci/golangci-lint",
       "datasourceTemplate": "github-releases",
       "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Track name:tag@sha256 image pins that no built-in manager reads: chainsaw manifests and the chainsaw preload list, the quickstart sample, examples, docs snippets, scripts and the kind node image in the composite actions. Dockerfiles, compose files and chart templates are left to their own managers so nothing is tracked twice.",
+      "managerFilePatterns": [
+        "/^test/chainsaw/.+\\.ya?ml$/",
+        "/^test/[^/]*pod[^/]*\\.ya?ml$/",
+        "/^\\.github/workflows/chainsaw\\.yml$/",
+        "/^deploy/quickstart-sample\\.yaml$/",
+        "/^examples/.+\\.ya?ml$/",
+        "/^docs/.+\\.md$/",
+        "/\\.sh$/",
+        "/^\\.github/actions/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "(?<depName>(?:[a-z0-9-]+\\.[a-z0-9.-]+(?::\\d+)?/)?[a-z0-9][a-z0-9._-]*(?:/[a-z0-9._-]+)*):(?<currentValue>[A-Za-z0-9][A-Za-z0-9._-]*)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "Track the kind release helm/kind-action installs, so it moves together with the pinned kindest/node image",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "uses: helm/kind-action@[^\\n]+\\n\\s+with:\\n(?:\\s+[a-z_]+: [^\\n]+\\n)*?\\s+version: (?<currentValue>v\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "kubernetes-sigs/kind",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "Track the controller-gen pin in the Makefile; the kubernetes ecosystem group moves it with the k8s.io modules",
+      "managerFilePatterns": [
+        "/(^|/)Makefile$/"
+      ],
+      "matchStrings": [
+        "CONTROLLER_GEN_VERSION \\?= (?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "depNameTemplate": "sigs.k8s.io/controller-tools",
+      "datasourceTemplate": "go"
+    },
+    {
+      "customType": "regex",
+      "description": "Track the client-gen/applyconfiguration-gen pin in the Makefile so the generated clientset follows the k8s.io modules it is built against",
+      "managerFilePatterns": [
+        "/(^|/)Makefile$/"
+      ],
+      "matchStrings": [
+        "CLIENT_GEN_VERSION \\?= (?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "depNameTemplate": "k8s.io/code-generator",
+      "datasourceTemplate": "go"
+    },
+    {
+      "customType": "regex",
+      "description": "Track the chainsaw pin in the Makefile and the checksum-verified chainsaw install in the chainsaw workflow",
+      "managerFilePatterns": [
+        "/(^|/)Makefile$/",
+        "/^\\.github/workflows/chainsaw\\.yml$/"
+      ],
+      "matchStrings": [
+        "CHAINSAW_VERSION \\?= (?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)",
+        "ver=\"(?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)\"\\n(?:.*\\n){0,10}?.*kyverno/chainsaw/releases"
+      ],
+      "depNameTemplate": "kyverno/chainsaw",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "Track the oras CLI version setup-oras installs in the release workflow",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "uses: oras-project/setup-oras@[^\\n]+\\n\\s+with:\\n\\s+version: (?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "depNameTemplate": "oras-project/oras",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
     }
   ],
   "vulnerabilityAlerts": {
@@ -111,14 +192,59 @@
       ]
     },
     {
-      "description": "Label the alpine/k8s hook toolbox digest updates as container images",
+      "description": "Group the pinned images in tests, docs, examples and scripts into one PR instead of one per image",
+      "matchManagers": [
+        "custom.regex"
+      ],
+      "matchFileNames": [
+        "test/**",
+        ".github/workflows/chainsaw.yml",
+        "deploy/quickstart-sample.yaml",
+        "examples/**",
+        "docs/**",
+        "**/*.sh"
+      ],
+      "groupName": "test and docs images",
+      "labels": [
+        "dependencies",
+        "container-image"
+      ]
+    },
+    {
+      "description": "Hold busybox on the 1.36 line: busybox.net still marks 1.37 and 1.38 unstable. Raise the bound when it calls a newer release stable.",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchDepNames": [
+        "busybox"
+      ],
+      "allowedVersions": "<1.37"
+    },
+    {
+      "description": "Keep every alpine/k8s pin (chart hook and the chainsaw preload list) in one PR, labelled as a container image",
       "matchDepNames": [
         "alpine/k8s"
       ],
       "labels": [
         "dependencies",
         "container-image"
-      ]
+      ],
+      "groupName": "alpine/k8s hook toolbox"
+    },
+    {
+      "description": "kind supports only the node image digests listed in its release notes, so the kind release and the kindest/node pin arrive in one PR; check the digest against those notes before merging",
+      "matchDepNames": [
+        "kubernetes-sigs/kind",
+        "kindest/node"
+      ],
+      "groupName": "kind"
+    },
+    {
+      "description": "The chainsaw workflow installs chainsaw only when the tarball matches the sha256 sums pinned next to the version; a bump fails CI until those sums are updated in the same PR",
+      "matchDepNames": [
+        "kyverno/chainsaw"
+      ],
+      "groupName": "chainsaw"
     },
     {
       "description": "Skip helm v4.2.1 only: an intermittent WaitForDelete race affecting before-hook-creation hooks (upstream helm#32214), reverted in v4.2.2 (commit b05881c). v4.2.2+ is allowed by this range.",

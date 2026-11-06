@@ -33,10 +33,10 @@ func grpcGoOffsetsFromDWARF(d *dwarf.Data, idx map[string]dwarf.Offset, pkg stri
 			return 0, false
 		}
 		f := findMember(st, "framer")
-		if f == nil {
+		if f == nil || !f.HasType {
 			return 0, false
 		}
-		if _, isPointer := stripType(f.Type).(*dwarf.PtrType); !isPointer {
+		if ent, _, ok := stripType(d, f.Type); !ok || ent.Tag != dwarf.TagPointerType {
 			return 0, false
 		}
 		return memberOffset32(f.ByteOffset)

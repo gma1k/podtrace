@@ -7,24 +7,27 @@ import (
 )
 
 func TestASelfReferentialTypedefDoesNotSpinForever(t *testing.T) {
-	self := &dwarf.TypedefType{}
-	self.Type = self
-	a, b := &dwarf.TypedefType{}, &dwarf.QualType{}
-	a.Type, b.Type = b, a
+	var b dwarfBuilder
+	self := b.typedef("self", 0)
+	b.dies[self].ref = self
+	first := b.typedef("a", 0)
+	second := b.constType(first)
+	b.dies[first].ref = second
+	d := b.data(t)
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		if got := stripType(self); got != nil {
-			t.Errorf("stripType(self-typedef) = %v, want nil", got)
+		if _, _, ok := stripType(d, b.offset(self)); ok {
+			t.Error("stripType(self-typedef) resolved, want failure")
 		}
-		if got := stripType(a); got != nil {
-			t.Errorf("stripType(typedef cycle) = %v, want nil", got)
+		if _, _, ok := stripType(d, b.offset(first)); ok {
+			t.Error("stripType(typedef cycle) resolved, want failure")
 		}
-		if isGoInterfaceType(self) {
+		if isGoInterfaceType(d, b.offset(self)) {
 			t.Error("a self-referential typedef was taken for an interface")
 		}
-		if _, _, ok := atomicPointerInfo(self); ok {
+		if _, _, ok := atomicPointerInfo(d, b.offset(self)); ok {
 			t.Error("a self-referential typedef was taken for an atomic pointer")
 		}
 	}()
@@ -36,9 +39,13 @@ func TestASelfReferentialTypedefDoesNotSpinForever(t *testing.T) {
 }
 
 func TestStripTypeStillPeelsAnOrdinaryChain(t *testing.T) {
-	base := &dwarf.StructType{StructName: "net.UDPAddr"}
-	chain := &dwarf.TypedefType{Type: &dwarf.QualType{Type: base}}
-	if got := stripType(chain); got != base {
-		t.Errorf("stripType = %v, want the struct under the wrappers", got)
+	var b dwarfBuilder
+	base := b.structType("net.UDPAddr")
+	chain := b.typedef("wrapped", b.constType(base))
+	d := b.data(t)
+
+	ent, off, ok := stripType(d, b.offset(chain))
+	if !ok || off != b.offset(base) || ent.Val(dwarf.AttrName) != "net.UDPAddr" {
+		t.Errorf("stripType = (%v, %d, %v), want the struct under the wrappers", ent, off, ok)
 	}
 }

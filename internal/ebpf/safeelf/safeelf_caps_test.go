@@ -1,7 +1,9 @@
 package safeelf
 
 import (
+	"bytes"
 	"debug/elf"
+	"encoding/binary"
 	"os"
 	"testing"
 )
@@ -176,5 +178,41 @@ func TestASymbolTableOverTheCapIsRejected(t *testing.T) {
 	small := &elf.File{Sections: []*elf.Section{{SectionHeader: elf.SectionHeader{Name: ".symtab", Size: 1024}}}}
 	if !SymbolTablesWithinCap(small) || !SymbolTablesWithinCap(&elf.File{}) {
 		t.Error("a small or absent symbol table was rejected")
+	}
+}
+
+func zdebugHeader(declared uint64) []byte {
+	header := []byte("ZLIB\x00\x00\x00\x00\x00\x00\x00\x00")
+	binary.BigEndian.PutUint64(header[4:], declared)
+	return header
+}
+
+func TestDWARFWithinCap_ZdebugDeclaredSizeCounts(t *testing.T) {
+	f := &elf.File{Sections: []*elf.Section{
+		{SectionHeader: elf.SectionHeader{Name: ".zdebug_info", Size: 600 << 10}, ReaderAt: bytes.NewReader(zdebugHeader(MaxDWARFTotalSize + 1))},
+	}}
+	if DWARFWithinCap(f) {
+		t.Fatal("DWARFWithinCap must count the uncompressed size a .zdebug_* ZLIB header declares")
+	}
+}
+
+func TestDWARFWithinCap_ZdebugDeclaredSizesSumWithoutOverflow(t *testing.T) {
+	f := &elf.File{Sections: []*elf.Section{
+		{SectionHeader: elf.SectionHeader{Name: ".debug_line", Size: 64}},
+		{SectionHeader: elf.SectionHeader{Name: ".zdebug_info", Size: 32}, ReaderAt: bytes.NewReader(zdebugHeader(^uint64(0)))},
+	}}
+	if DWARFWithinCap(f) {
+		t.Fatal("a declared size that wraps the running total must not pass")
+	}
+}
+
+func TestDWARFWithinCap_SmallZdebugAndUnheaderedSectionsPass(t *testing.T) {
+	f := &elf.File{Sections: []*elf.Section{
+		{SectionHeader: elf.SectionHeader{Name: ".zdebug_info", Size: 32}, ReaderAt: bytes.NewReader(zdebugHeader(4096))},
+		{SectionHeader: elf.SectionHeader{Name: ".zdebug_line", Size: 5}, ReaderAt: bytes.NewReader([]byte("plain"))},
+		{SectionHeader: elf.SectionHeader{Name: ".zdebug_str", Type: elf.SHT_NOBITS, Size: 8}},
+	}}
+	if !DWARFWithinCap(f) {
+		t.Fatal("small .zdebug_* sections must stay within the cap")
 	}
 }

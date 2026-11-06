@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: receiver
-          image: python:3.12-alpine
+          image: python:3.15-alpine@sha256:a0f2e268f2ce8f3709611a90054ec6a8ae31f6251f5896b8648b9bb99835e30a
           command:
             - python3
             - -c
@@ -66,7 +66,7 @@ spec:
     spec:
       containers:
         - name: burn
-          image: busybox:1.36
+          image: busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
           command: ["sh", "-c", "while true; do :; done"]
           resources:
             limits:
@@ -94,7 +94,7 @@ spec:
     spec:
       containers:
         - name: burn
-          image: busybox:1.36
+          image: busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
           command: ["sh", "-c", "while true; do :; done"]
           resources:
             limits:

@@ -252,7 +252,16 @@ func TestABinaryWithNeitherSymbolSourceYieldsNoTable(t *testing.T) {
 	}
 }
 
+const cFixtureSource = `#include <stdio.h>
+int compute_checksum(int n) { return n * 7 + 3; }
+int main(void) { printf("%d\n", compute_checksum(5)); return 0; }
+`
+
 func buildCFixture(t *testing.T, stripped bool) string {
+	return buildCProgram(t, cFixtureSource, stripped)
+}
+
+func buildCProgram(t *testing.T, code string, stripped bool) string {
 	t.Helper()
 	cc, err := exec.LookPath("cc")
 	if err != nil {
@@ -262,10 +271,6 @@ func buildCFixture(t *testing.T, stripped bool) string {
 	}
 	dir := t.TempDir()
 	src := filepath.Join(dir, "prog.c")
-	const code = `#include <stdio.h>
-int compute_checksum(int n) { return n * 7 + 3; }
-int main(void) { printf("%d\n", compute_checksum(5)); return 0; }
-`
 	if err := os.WriteFile(src, []byte(code), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}

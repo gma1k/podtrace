@@ -281,7 +281,7 @@ func loadSymbolTable(exePath string) *symbolTable {
 
 	if pclntab := f.Section(".gopclntab"); pclntab != nil {
 		if text := f.Section(".text"); text != nil {
-			if pclnData, derr := safeelf.SectionData(pclntab); derr == nil {
+			if pclnData, derr := safeelf.SectionData(pclntab); derr == nil && safeelf.GoPCLNTabWithinCap(pclnData) {
 				if tbl, terr := gosym.NewTable(nil, gosym.NewLineTable(pclnData, text.Addr)); terr == nil {
 					t.goTable = tbl
 					t.goBytes = goTableBytesPerPCLNByte * int64(len(pclnData))

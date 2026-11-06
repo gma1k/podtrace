@@ -157,7 +157,7 @@ spec:
     spec:
       containers:
         - name: curl
-          image: curlimages/curl:latest
+          image: curlimages/curl:8.23.0@sha256:3fb7e13e5d179a845c97d78204f3f1064d1907037f26a3ebf91710571151fd93
           command: ["sh","-c","while true; do curl -sS -o /dev/null https://example.com || true; sleep 2; done"]
 EOF
 done

@@ -65,9 +65,9 @@ Flags:
       --namespaces string       Comma-separated namespaces for multi-pod tracing
       --pods string             Comma-separated pod references (pod or namespace/pod)
       --pod-selector string     Label selector for target pods
-      --all-in-namespace        Trace all pods in --namespace (or all --namespaces)
+      --all-in-namespace[=true|false]  Trace all pods in --namespace (or all --namespaces)
       --diagnose string         Run in diagnose mode for the specified duration (e.g., 10s, 5m)
-      --metrics                 Enable Prometheus metrics server
+      --metrics[=true|false]    Enable Prometheus metrics server
       --export string           Export format for diagnose report (json, csv)
       --filter string           Filter events by type (dns,net,fs,cpu,proc,crypto)
       --container string        Container name to trace (default: all containers of the pod)

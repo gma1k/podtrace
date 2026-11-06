@@ -207,7 +207,7 @@ spec:
 EOF
 
 	# --- step 5: a tiny target workload the session can select on ------
-	# pause:3.9 is tiny and always reaches Running; we just need pods
+	# pause:3.10.2 is tiny and always reaches Running; we just need pods
 	# that a selector can match so the operator's fan-out path fires.
 	log_info "creating sample target workload (pause pods)"
 	kubectl -n "${SAMPLE_NS}" apply -f - <<EOF
@@ -227,7 +227,7 @@ spec:
     spec:
       containers:
         - name: app
-          image: registry.k8s.io/pause:3.9
+          image: registry.k8s.io/pause:3.10.2@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4
 EOF
 	kubectl -n "${SAMPLE_NS}" rollout status deploy/smoke-target --timeout=60s
 

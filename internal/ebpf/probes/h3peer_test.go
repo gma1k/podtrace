@@ -1,70 +1,60 @@
 package probes
 
 import (
-	"debug/dwarf"
 	"testing"
 )
 
-func ifaceStruct(name string, firstField string) *dwarf.StructType {
-	return &dwarf.StructType{
-		StructName: name,
-		Kind:       "struct",
-		Field: []*dwarf.StructField{
-			{Name: firstField, ByteOffset: 0},
-			{Name: "data", ByteOffset: 8},
-		},
-	}
-}
-
 func TestIsGoInterfaceType(t *testing.T) {
-	iface := ifaceStruct("net.Addr", "tab")
-	if !isGoInterfaceType(iface) {
+	var b dwarfBuilder
+	word := b.base("uintptr")
+	iface := b.structType("net.Addr", member("tab", 0, word), member("data", 8, word))
+	eface := b.structType("interface {}", member("_type", 0, word), member("data", 8, word))
+	td := b.typedef("github.com/quic-go/quic-go.sendConn", iface)
+	plain := b.structType("net.UDPAddr", member("IP", 0, word), member("Port", 24, word))
+	d := b.data(t)
+
+	if !isGoInterfaceType(d, b.offset(iface)) {
 		t.Error("iface (tab/data) not recognized")
 	}
-	eface := ifaceStruct("interface {}", "_type")
-	if !isGoInterfaceType(eface) {
+	if !isGoInterfaceType(d, b.offset(eface)) {
 		t.Error("eface (_type/data) not recognized")
 	}
-	td := &dwarf.TypedefType{Type: iface}
-	td.Name = "github.com/quic-go/quic-go.sendConn"
-	if !isGoInterfaceType(td) {
+	if !isGoInterfaceType(d, b.offset(td)) {
 		t.Error("typedef-wrapped interface not recognized")
 	}
-	plain := &dwarf.StructType{
-		StructName: "net.UDPAddr",
-		Kind:       "struct",
-		Field: []*dwarf.StructField{
-			{Name: "IP", ByteOffset: 0},
-			{Name: "Port", ByteOffset: 24},
-		},
-	}
-	if isGoInterfaceType(plain) {
+	if isGoInterfaceType(d, b.offset(plain)) {
 		t.Error("plain two-field struct misdetected as interface")
+	}
+	if isGoInterfaceType(d, b.offset(word)) {
+		t.Error("base type misdetected as interface")
 	}
 }
 
 func TestAtomicPointerInfo(t *testing.T) {
-	ap := &dwarf.StructType{
-		StructName: "sync/atomic.Pointer[github.com/quic-go/quic-go.remoteAddrInfo]",
-		Kind:       "struct",
-		Field: []*dwarf.StructField{
-			{Name: "_", ByteOffset: 0},
-			{Name: "v", ByteOffset: 0},
-		},
-	}
-	off, inner, ok := atomicPointerInfo(ap)
+	var b dwarfBuilder
+	word := b.base("uintptr")
+	ap := b.structType("sync/atomic.Pointer[github.com/quic-go/quic-go.remoteAddrInfo]",
+		member("_", 0, word), member("v", 0, word))
+	iface := b.structType("net.Addr", member("tab", 0, word), member("data", 8, word))
+	d := b.data(t)
+
+	off, inner, ok := atomicPointerInfo(d, b.offset(ap))
 	if !ok || off != 0 || inner != "github.com/quic-go/quic-go.remoteAddrInfo" {
 		t.Fatalf("atomicPointerInfo = %d %q %v", off, inner, ok)
 	}
-	if _, _, ok := atomicPointerInfo(ifaceStruct("net.Addr", "tab")); ok {
+	if _, _, ok := atomicPointerInfo(d, b.offset(iface)); ok {
 		t.Error("interface struct misdetected as atomic.Pointer")
 	}
 }
 
 func TestStripType(t *testing.T) {
-	base := &dwarf.StructType{StructName: "x", Kind: "struct"}
-	td := &dwarf.TypedefType{Type: base}
-	if stripType(td) != dwarf.Type(base) {
-		t.Error("typedef not stripped")
+	var b dwarfBuilder
+	base := b.structType("x")
+	td := b.typedef("y", base)
+	d := b.data(t)
+
+	ent, off, ok := stripType(d, b.offset(td))
+	if !ok || off != b.offset(base) || ent.Offset != b.offset(base) {
+		t.Errorf("stripType = (%v, %d, %v), want the struct at %d", ent, off, ok, b.offset(base))
 	}
 }
