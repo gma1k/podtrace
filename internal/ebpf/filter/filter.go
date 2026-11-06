@@ -5,18 +5,26 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/metricsexporter"
+	"github.com/gma1k/podtrace/internal/procfs"
 	"github.com/gma1k/podtrace/internal/validation"
 )
 
 var readFile = os.ReadFile
 
+// processStartTicks names the process instance holding a pid; replaceable so
+// tests need no real processes.
+var processStartTicks = procfs.StartTicks
+
 type pidCacheEntry struct {
-	result bool
-	at     time.Time
+	result     bool
+	at         time.Time
+	generation uint64
+	startTicks uint64
 }
 
 type CgroupFilter struct {
@@ -27,6 +35,7 @@ type CgroupFilter struct {
 	pathsMu     sync.RWMutex
 	now         func() time.Time
 	ttl         time.Duration
+	generation  atomic.Uint64
 }
 
 func NewCgroupFilter() *CgroupFilter {
@@ -57,6 +66,7 @@ func (f *CgroupFilter) SetCgroupPath(path string) {
 	if path != "" {
 		f.cgroupPaths[path] = struct{}{}
 	}
+	f.generation.Add(1)
 	f.pathsMu.Unlock()
 	f.pidCacheMu.Lock()
 	f.pidCache = make(map[uint32]pidCacheEntry)
@@ -73,17 +83,17 @@ func (f *CgroupFilter) SetCgroupPaths(paths []string) {
 		}
 		f.cgroupPaths[path] = struct{}{}
 	}
+	f.generation.Add(1)
 	f.pathsMu.Unlock()
 	f.pidCacheMu.Lock()
 	f.pidCache = make(map[uint32]pidCacheEntry)
 	f.pidCacheMu.Unlock()
 }
 
-// snapshotTargets copies the configured target paths under pathsMu. The
-// agent calls SetCgroupPaths on every reconcile while IsPIDInCgroup runs on
-// the event hot path; only pidCache used to be locked, so the map swap raced
-// the iteration below.
-func (f *CgroupFilter) snapshotTargets() []string {
+// snapshotTargets copies the configured target paths, and the generation
+// they belong to, under pathsMu. The agent calls SetCgroupPaths on every
+// reconcile while IsPIDInCgroup runs on the event hot path.
+func (f *CgroupFilter) snapshotTargets() ([]string, uint64) {
 	f.pathsMu.RLock()
 	defer f.pathsMu.RUnlock()
 	targets := make([]string, 0, len(f.cgroupPaths)+1)
@@ -95,7 +105,7 @@ func (f *CgroupFilter) snapshotTargets() []string {
 			targets = append(targets, p)
 		}
 	}
-	return targets
+	return targets, f.generation.Load()
 }
 
 // HasTargets reports whether any cgroup target is configured.
@@ -114,7 +124,7 @@ func (f *CgroupFilter) HasTargets() bool {
 }
 
 func (f *CgroupFilter) IsPIDInCgroup(pid uint32) bool {
-	configuredTargets := f.snapshotTargets()
+	configuredTargets, generation := f.snapshotTargets()
 	if len(configuredTargets) == 0 {
 		return true
 	}
@@ -123,59 +133,26 @@ func (f *CgroupFilter) IsPIDInCgroup(pid uint32) bool {
 		return false
 	}
 
-	f.pidCacheMu.RLock()
-	if cached, ok := f.pidCache[pid]; ok && f.clock().Sub(cached.at) < f.cacheTTL() {
-		f.pidCacheMu.RUnlock()
+	if result, ok := f.cachedResult(pid, generation); ok {
 		metricsexporter.RecordPIDCacheHit()
-		return cached.result
+		return result
 	}
-	f.pidCacheMu.RUnlock()
 	metricsexporter.RecordPIDCacheMiss()
 
 	cgroupFile := fmt.Sprintf("%s/%d/cgroup", config.ProcBasePath, pid)
 	if len(cgroupFile) > config.MaxCgroupFilePathLength {
 		return false
 	}
+	startTicks, startKnown := processStartTicks(pid)
 	data, err := readFile(cgroupFile)
 	if err != nil {
-		f.pidCacheMu.Lock()
-		f.pidCache[pid] = pidCacheEntry{result: false, at: f.clock()}
-		if len(f.pidCache) > config.MaxPIDCacheSize {
-			evictCount := len(f.pidCache) / 10
-			if evictCount < 1 {
-				evictCount = 1
-			}
-			for k := range f.pidCache {
-				delete(f.pidCache, k)
-				evictCount--
-				if evictCount <= 0 {
-					break
-				}
-			}
-		}
-		f.pidCacheMu.Unlock()
+		f.storeResult(pid, pidCacheEntry{result: false, generation: generation})
 		return false
 	}
 
-	cgroupContent := strings.TrimSpace(string(data))
-	pidCgroupPath := ExtractCgroupPathFromProc(cgroupContent)
+	pidCgroupPath := ExtractCgroupPathFromProc(strings.TrimSpace(string(data)))
 	if pidCgroupPath == "" {
-		f.pidCacheMu.Lock()
-		f.pidCache[pid] = pidCacheEntry{result: false, at: f.clock()}
-		if len(f.pidCache) > config.MaxPIDCacheSize {
-			evictCount := len(f.pidCache) / 10
-			if evictCount < 1 {
-				evictCount = 1
-			}
-			for k := range f.pidCache {
-				delete(f.pidCache, k)
-				evictCount--
-				if evictCount <= 0 {
-					break
-				}
-			}
-		}
-		f.pidCacheMu.Unlock()
+		f.storeResult(pid, pidCacheEntry{result: false, generation: generation})
 		return false
 	}
 
@@ -195,7 +172,39 @@ func (f *CgroupFilter) IsPIDInCgroup(pid uint32) bool {
 		}
 	}
 
+	if !result || startKnown {
+		f.storeResult(pid, pidCacheEntry{result: result, generation: generation, startTicks: startTicks})
+	}
+	return result
+}
+
+// cachedResult returns a cached verdict for pid computed against the current
+// target generation.
+func (f *CgroupFilter) cachedResult(pid uint32, generation uint64) (bool, bool) {
+	f.pidCacheMu.RLock()
+	cached, ok := f.pidCache[pid]
+	f.pidCacheMu.RUnlock()
+	if !ok || cached.generation != generation || f.clock().Sub(cached.at) >= f.cacheTTL() {
+		return false, false
+	}
+	if !cached.result {
+		return false, true
+	}
+	if start, known := processStartTicks(pid); known && start == cached.startTicks {
+		return true, true
+	}
+	return false, false
+}
+
+// storeResult caches a verdict unless the target set changed while it was
+// being computed.
+func (f *CgroupFilter) storeResult(pid uint32, entry pidCacheEntry) {
+	entry.at = f.clock()
 	f.pidCacheMu.Lock()
+	defer f.pidCacheMu.Unlock()
+	if f.generation.Load() != entry.generation {
+		return
+	}
 	if len(f.pidCache) >= config.MaxPIDCacheSize {
 		evictTarget := int(float64(config.MaxPIDCacheSize) * config.PIDCacheEvictionRatio)
 		for k := range f.pidCache {
@@ -205,10 +214,7 @@ func (f *CgroupFilter) IsPIDInCgroup(pid uint32) bool {
 			}
 		}
 	}
-	f.pidCache[pid] = pidCacheEntry{result: result, at: f.clock()}
-	f.pidCacheMu.Unlock()
-
-	return result
+	f.pidCache[pid] = entry
 }
 
 func NormalizeCgroupPath(path string) string {

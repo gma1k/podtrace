@@ -1,10 +1,7 @@
 package cache
 
 import (
-	"fmt"
 	"sort"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -14,8 +11,9 @@ import (
 // ProcessCPUTime is a snapshot of /proc/<pid>/stat's utime+stime, captured at
 // event-arrival time when the process is still alive.
 type ProcessCPUTime struct {
-	TotalNS    uint64 // latest (utime + stime) in nanoseconds
+	TotalNS    uint64
 	BaselineNS uint64
+	StartTicks uint64
 }
 
 const maxCPUTimeEntries = 16384
@@ -39,9 +37,7 @@ var (
 )
 
 // SnapshotCPUTime reads /proc/<pid>/stat and stores the result in the
-// per-PID cache, at most once per cpuSampleInterval for each pid. Later
-// samples overwrite the earlier total so accumulated CPU is captured; the
-// first one stays as the baseline.
+// per-PID cache, at most once per cpuSampleInterval for each pid.
 func SnapshotCPUTime(pid uint32) {
 	now := cpuNow()
 	cpuTimeMu.RLock()
@@ -51,32 +47,20 @@ func SnapshotCPUTime(pid uint32) {
 		return
 	}
 
-	data, err := procfs.ReadFile(fmt.Sprintf("%d/stat", pid))
+	stat, err := procfs.ReadProcessStat(pid)
 	if err != nil {
 		return
 	}
-	s := string(data)
-	rp := strings.LastIndex(s, ")")
-	if rp < 0 || rp+2 >= len(s) {
-		return
-	}
-	after := s[rp+2:]
-	fields := strings.Fields(after)
-	if len(fields) < 13 {
-		return
-	}
-	utime, _ := strconv.ParseUint(fields[11], 10, 64)
-	stime, _ := strconv.ParseUint(fields[12], 10, 64)
 
 	ct := loadClockTicks()
-	totalNS := (utime + stime) * (1_000_000_000 / ct)
+	totalNS := (stat.UserTicks + stat.SystemTicks) * (1_000_000_000 / ct)
 
 	cpuTimeMu.Lock()
 	prev, seen = cpuTimes[pid]
 	if !seen && len(cpuTimes) >= maxCPUTimeEntries {
 		evictStalestCPUTimes()
 	}
-	cpuTimes[pid] = cpuTimeEntry{ProcessCPUTime: mergeCPUSample(prev.ProcessCPUTime, seen, totalNS), sampledAt: now}
+	cpuTimes[pid] = cpuTimeEntry{ProcessCPUTime: mergeCPUSample(prev.ProcessCPUTime, seen, totalNS, stat.StartTicks), sampledAt: now}
 	cpuTimeMu.Unlock()
 }
 
@@ -103,12 +87,13 @@ func evictStalestCPUTimes() {
 }
 
 // mergeCPUSample folds a new cumulative CPU sample into the cached snapshot.
-func mergeCPUSample(prev ProcessCPUTime, seen bool, totalNS uint64) ProcessCPUTime {
+// The baseline carries over only while the same process holds the pid.
+func mergeCPUSample(prev ProcessCPUTime, seen bool, totalNS, startTicks uint64) ProcessCPUTime {
 	baseline := totalNS
-	if seen {
+	if seen && prev.StartTicks == startTicks && totalNS >= prev.BaselineNS {
 		baseline = prev.BaselineNS
 	}
-	return ProcessCPUTime{TotalNS: totalNS, BaselineNS: baseline}
+	return ProcessCPUTime{TotalNS: totalNS, BaselineNS: baseline, StartTicks: startTicks}
 }
 
 // GetCPUTime returns the cached snapshot for pid, or zero when nothing has

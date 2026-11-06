@@ -121,8 +121,19 @@ Verify your cluster version with `kubectl version --short`.
 ## Cgroup support
 
 Both cgroup v1 and v2 are supported. Both `systemd` and `cgroupfs` drivers
-work. Cgroup filtering happens in userspace using `/proc/<pid>/cgroup`,
-not via a kernel-side cgroup ID, so the chart sets:
+work.
+
+On cgroup v2, targets are filtered in the kernel by cgroup ID, and
+userspace applies the same set. If no target path resolves to a cgroup
+(for example, the pod has just been deleted), the filter captures nothing
+until one does. It does not fall back to tracing the whole node.
+
+On cgroup v1, filtering happens in userspace using `/proc/<pid>/cgroup`.
+Events that have no owning process, such as passive-side TCP state
+changes, retransmits and RTT samples raised in softirq, cannot be tied to
+a v1 target. They are dropped while targets are set.
+
+For both, the chart sets:
 
 - `PODTRACE_CGROUP_BASE` to the host cgroup root
 - `PODTRACE_PROC_BASE` to the host `/proc` (so the agent sees host PIDs,

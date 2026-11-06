@@ -39,16 +39,29 @@ func dispatchConfined(t *testing.T, tr *Tracer, ev *events.Event) bool {
 	}
 }
 
-func TestAnEventWithNoOwningTaskIsAdmittedOnItsCgroup(t *testing.T) {
+func TestAPIDlessEventIsRefusedWhenOnlyThePIDFilterGuardsTheTargets(t *testing.T) {
 	tr := newConfinedTracer(t)
-	ev := &events.Event{Type: events.EventTCPRTT, PID: 0, CgroupID: 4242, LatencyNS: 140_000}
+	ev := &events.Event{Type: events.EventTCPState, PID: 0, CgroupID: 4242}
+
+	if dispatchConfined(t, tr, ev) {
+		t.Fatal("a PID-less event from an untargeted cgroup passed the userspace PID filter.\n\n" +
+			"With no target cgroup ids the kernel prefilter is off and emits socket events " +
+			"for every pod on the node; the cgroup id such an event carries was never " +
+			"checked against anything.")
+	}
+	if tr.cgroupAllows(ev) {
+		t.Fatal("the dispatch gate and cgroupAllows disagree on a PID-less event")
+	}
+}
+
+func TestAPIDlessEventPassesWhenNothingIsTargeted(t *testing.T) {
+	tr := newDispatchTestTracer()
+	tr.filter = filter.NewCgroupFilter()
+	tr.useUserspaceCgroupFilter.Store(true)
+	ev := &events.Event{Type: events.EventTCPRTT, PID: 0, CgroupID: 4242}
 
 	if !dispatchConfined(t, tr, ev) {
-		t.Fatal("a sock_ops RTT sample carrying its socket's cgroup was dropped.\n\n" +
-			"An RTT callback has no current task, so there is no PID to check and " +
-			"IsPIDInCgroup(0) rejects it. The kernel already tested this exact cgroup id " +
-			"against the target set before emitting; userspace must confine it on that " +
-			"key, not discard it for lacking a different one.")
+		t.Fatal("with no target and no deny mode every event is in scope, PID-less ones included")
 	}
 }
 

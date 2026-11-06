@@ -1283,8 +1283,8 @@ func takeFastFilesystemOps(agg *diagnose.Diagnostician) {
 	fastFilesystemOps = nil
 	rows, err := drain()
 	if err != nil {
-		logger.Warn("Could not read the kernel's filesystem counts; the report counts only operations of 1ms or more", zap.Error(err))
-		return
+		logger.Warn("Could not read all of the kernel's filesystem counts; the report counts only those read and operations of 1ms or more",
+			zap.Error(err), zap.Int("rows_read", len(rows)))
 	}
 	agg.AddFastFilesystemOps(rows)
 }

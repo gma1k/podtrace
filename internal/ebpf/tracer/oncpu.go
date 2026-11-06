@@ -76,7 +76,9 @@ func (t *Tracer) DrainOnCPUSamples() (oncpu.Drained, error) {
 	if err != nil {
 		return oncpu.Drained{}, err
 	}
-	return oncpu.Drain(maps)
+	t.onCPUDrainMu.Lock()
+	defer t.onCPUDrainMu.Unlock()
+	return oncpu.Drain(maps, &t.onCPULostSeen)
 }
 
 // stopOnCPUSampler detaches the sampler. The request hooks stay on while

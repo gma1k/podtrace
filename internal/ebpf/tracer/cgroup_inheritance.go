@@ -53,6 +53,19 @@ func podCgroupParents(paths []string) []string {
 // from whenever the pod watch reports it, which a container that dies within
 // a second never reaches.
 func (t *Tracer) syncCgroupInheritance(paths []string) {
+	want := make(map[uint64]struct{})
+	for _, p := range podCgroupParents(paths) {
+		if id, err := getCgroupIDFromPath(p); err == nil && id != 0 {
+			want[id] = struct{}{}
+		}
+	}
+	t.inheritedParents.Store(&want)
+	t.inheritedCache.Range(func(k, v any) bool {
+		if _, ok := want[v.(uint64)]; !ok {
+			t.inheritedCache.Delete(k)
+		}
+		return true
+	})
 	if t.collection == nil {
 		return
 	}
@@ -61,23 +74,25 @@ func (t *Tracer) syncCgroupInheritance(paths []string) {
 	if parents == nil || inherited == nil {
 		return
 	}
-	want := make(map[uint64]struct{})
-	for _, p := range podCgroupParents(paths) {
-		if id, err := getCgroupIDFromPath(p); err == nil && id != 0 {
-			want[id] = struct{}{}
-		}
-	}
 	if err := syncParentCgroups(parents, inherited, want); err != nil {
 		logger.Warn("Restarted containers will be traced only once the pod watch reports them", zap.Error(err))
 		return
 	}
-	t.inheritedCache.Range(func(k, v any) bool {
-		if _, ok := want[v.(uint64)]; !ok {
-			t.inheritedCache.Delete(k)
-		}
+	if len(want) > 0 {
+		t.ensureCgroupMkdirHook()
+	}
+}
+
+// inheritedParentWanted reports whether parent is still a targeted pod
+// cgroup. Before the first sync there is no set to check against, and only
+// the kernel map, which nothing has populated yet, can answer.
+func (t *Tracer) inheritedParentWanted(parent uint64) bool {
+	want := t.inheritedParents.Load()
+	if want == nil {
 		return true
-	})
-	t.ensureCgroupMkdirHook()
+	}
+	_, ok := (*want)[parent]
+	return ok
 }
 
 func syncParentCgroups(parents, inherited *ebpf.Map, want map[uint64]struct{}) error {
@@ -151,7 +166,12 @@ func (t *Tracer) InheritedCgroupParent(id uint64) (uint64, bool) {
 		return 0, false
 	}
 	if v, ok := t.inheritedCache.Load(id); ok {
-		return v.(uint64), true
+		parent := v.(uint64)
+		if t.inheritedParentWanted(parent) {
+			return parent, true
+		}
+		t.inheritedCache.CompareAndDelete(id, v)
+		return 0, false
 	}
 	if t.collection == nil {
 		return 0, false
@@ -161,7 +181,7 @@ func (t *Tracer) InheritedCgroupParent(id uint64) (uint64, bool) {
 		return 0, false
 	}
 	var parent uint64
-	if err := m.Lookup(&id, &parent); err != nil || parent == 0 {
+	if err := m.Lookup(&id, &parent); err != nil || parent == 0 || !t.inheritedParentWanted(parent) {
 		return 0, false
 	}
 	t.inheritedCache.Store(id, parent)

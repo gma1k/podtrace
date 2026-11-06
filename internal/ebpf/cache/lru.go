@@ -11,10 +11,12 @@ import (
 )
 
 type cacheEntry struct {
-	pid       uint32
-	name      string
-	expiresAt time.Time
-	element   *list.Element
+	pid        uint32
+	name       string
+	startTicks uint64
+	storedAt   time.Time
+	expiresAt  time.Time
+	element    *list.Element
 }
 
 type LRUCache struct {
@@ -39,7 +41,28 @@ func NewLRUCache(maxSize int, ttl time.Duration) *LRUCache {
 	return c
 }
 
+// Get returns the name cached for pid, whichever process it was read from.
 func (c *LRUCache) Get(pid uint32) (string, bool) {
+	return c.lookup(pid, func(*cacheEntry) bool { return true })
+}
+
+// GetProcess returns the name cached for the process instance that started
+// at startTicks.
+func (c *LRUCache) GetProcess(pid uint32, startTicks uint64) (string, bool) {
+	return c.lookup(pid, func(e *cacheEntry) bool {
+		return e.startTicks != 0 && e.startTicks == startTicks
+	})
+}
+
+// GetRecent returns the name cached for pid if it was stored within maxAge.
+// It serves a process that has already exited, which cannot be identified
+// any more, without reaching back to whatever held the pid long ago.
+func (c *LRUCache) GetRecent(pid uint32, maxAge time.Duration) (string, bool) {
+	now := time.Now()
+	return c.lookup(pid, func(e *cacheEntry) bool { return now.Sub(e.storedAt) < maxAge })
+}
+
+func (c *LRUCache) lookup(pid uint32, usable func(*cacheEntry) bool) (string, bool) {
 	if !validation.ValidatePID(pid) {
 		return "", false
 	}
@@ -58,13 +81,22 @@ func (c *LRUCache) Get(pid uint32) (string, bool) {
 		c.list.Remove(elem)
 		return "", false
 	}
+	if !usable(entry) {
+		return "", false
+	}
 
 	c.list.MoveToFront(elem)
 	metricsexporter.RecordProcessCacheHit()
 	return entry.name, true
 }
 
+// Set caches name for pid without naming the process it belongs to.
 func (c *LRUCache) Set(pid uint32, name string) {
+	c.SetProcess(pid, 0, name)
+}
+
+// SetProcess caches name for the process instance (pid, startTicks).
+func (c *LRUCache) SetProcess(pid uint32, startTicks uint64, name string) {
 	if !validation.ValidatePID(pid) {
 		return
 	}
@@ -72,10 +104,13 @@ func (c *LRUCache) Set(pid uint32, name string) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
+	now := time.Now()
 	if elem, ok := c.cache[pid]; ok {
 		entry := elem.Value.(*cacheEntry)
 		entry.name = name
-		entry.expiresAt = time.Now().Add(c.ttl)
+		entry.startTicks = startTicks
+		entry.storedAt = now
+		entry.expiresAt = now.Add(c.ttl)
 		c.list.MoveToFront(elem)
 		return
 	}
@@ -85,9 +120,11 @@ func (c *LRUCache) Set(pid uint32, name string) {
 	}
 
 	entry := &cacheEntry{
-		pid:       pid,
-		name:      name,
-		expiresAt: time.Now().Add(c.ttl),
+		pid:        pid,
+		name:       name,
+		startTicks: startTicks,
+		storedAt:   now,
+		expiresAt:  now.Add(c.ttl),
 	}
 	elem := c.list.PushFront(entry)
 	entry.element = elem

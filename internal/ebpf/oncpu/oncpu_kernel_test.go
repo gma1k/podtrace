@@ -82,7 +82,8 @@ func TestKernelDrainReadsAndClearsRealMaps(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	d, err := Drain(maps)
+	var seen LostTotals
+	d, err := Drain(maps, &seen)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +97,7 @@ func TestKernelDrainReadsAndClearsRealMaps(t *testing.T) {
 		t.Errorf("lost = %v", d.Lost)
 	}
 
-	again, err := Drain(maps)
+	again, err := Drain(maps, &seen)
 	if err != nil {
 		t.Fatal(err)
 	}

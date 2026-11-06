@@ -1,6 +1,6 @@
 # USDT-instrumented workload. Built non-stripped so the .note.stapsdt notes and
 # the .probes semaphore symbol survive for the agent's USDT scanner to discover.
-FROM debian:12-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS build
+FROM debian:13-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2 AS build
 RUN apt-get update && \
     apt-get install -y --no-install-recommends gcc systemtap-sdt-dev libc6-dev && \
     rm -rf /var/lib/apt/lists/*
@@ -10,6 +10,6 @@ COPY main.c ./
 RUN gcc -O2 -o /usdtdemo main.c && \
     readelf -n /usdtdemo | grep -A2 stapsdt
 
-FROM debian:12-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+FROM debian:13-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 COPY --from=build /usdtdemo /usdtdemo
 ENTRYPOINT ["/usdtdemo"]

@@ -180,14 +180,21 @@ func formatCPUTime(sec float64) string {
 // procCPUDeltaNS is the CPU time /proc shows for pid since the tracer first
 // sampled it.
 func procCPUDeltaNS(pid uint32, duration time.Duration) uint64 {
-	totalNS := getProcessCPUTime(pid).totalNS
-	if cached, seen := cache.LookupCPUTime(pid); seen && totalNS >= cached.BaselineNS {
+	current := getProcessCPUTime(pid)
+	totalNS := current.totalNS
+	if cached, seen := cache.LookupCPUTime(pid); seen && sameProcessInstance(cached, current) && totalNS >= cached.BaselineNS {
 		return totalNS - cached.BaselineNS
 	}
 	if startedWithin(pid, duration) {
 		return totalNS
 	}
 	return 0
+}
+
+// sameProcessInstance reports whether the tracer's baseline was taken from
+// the process that holds the pid now.
+func sameProcessInstance(cached cache.ProcessCPUTime, current cpuTimeInfo) bool {
+	return !current.startKnown || cached.StartTicks == current.startTicks
 }
 
 // startedWithin reports whether pid started no longer than window (plus a
@@ -256,6 +263,8 @@ func cpuUnavailable(activity []tracker.PidInfo) string {
 
 type cpuTimeInfo struct {
 	totalNS    uint64
+	startTicks uint64
+	startKnown bool
 	cpuPercent float64
 	cpuTimeSec float64
 	name       string
@@ -284,7 +293,13 @@ func getProcessCPUTime(pid uint32) cpuTimeInfo {
 	stime, _ := strconv.ParseUint(fields[12], 10, 64)
 
 	totalNS := (utime + stime) * (1e9 / clockTicksPerSecond())
-	return cpuTimeInfo{totalNS: totalNS}
+	info := cpuTimeInfo{totalNS: totalNS}
+	if len(fields) >= 20 {
+		if start, err := strconv.ParseUint(fields[19], 10, 64); err == nil {
+			info.startTicks, info.startKnown = start, true
+		}
+	}
+	return info
 }
 
 // clockTicksPerSecond is the unit of /proc/<pid>/stat's times.

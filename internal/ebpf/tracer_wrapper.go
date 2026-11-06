@@ -12,6 +12,8 @@ type Option = tracer.Option
 
 var WithInitialCategories = tracer.WithInitialCategories
 
+var WithoutProcessCPUSnapshots = tracer.WithoutProcessCPUSnapshots
+
 type ContainerProbeTarget = tracer.ContainerProbeTarget
 
 type CgroupOwner = tracer.CgroupOwner

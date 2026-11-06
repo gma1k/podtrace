@@ -180,15 +180,20 @@ func drainRows(
 		return nil, fmt.Errorf("kernelagg: iterate: %w", err)
 	}
 
+	var failed []error
 	for i := range keys {
 		total, err := take(&keys[i])
 		if err != nil {
-			return rows, fmt.Errorf("kernelagg: take: %w", err)
+			failed = append(failed, err)
+			continue
 		}
 		if total.Count == 0 && total.Bytes == 0 {
 			continue
 		}
 		rows = append(rows, Row{Key: keys[i], Value: total})
+	}
+	if len(failed) > 0 {
+		return rows, fmt.Errorf("kernelagg: take failed for %d of %d rows: %w", len(failed), len(keys), errors.Join(failed...))
 	}
 	return rows, nil
 }

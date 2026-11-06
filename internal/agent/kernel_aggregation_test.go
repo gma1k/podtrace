@@ -24,6 +24,7 @@ type fakeAggregator struct {
 	modes    []kernelagg.Mode
 	rows     []kernelagg.Row
 	drainErr error
+	partial  bool
 	modeErr  error
 	drains   int
 }
@@ -42,10 +43,10 @@ func (f *fakeAggregator) DrainKernelMetrics() ([]kernelagg.Row, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.drains++
-	if f.drainErr != nil {
+	if f.drainErr != nil && !f.partial {
 		return nil, f.drainErr
 	}
-	return f.rows, nil
+	return f.rows, f.drainErr
 }
 
 func (f *fakeAggregator) drainCount() int {

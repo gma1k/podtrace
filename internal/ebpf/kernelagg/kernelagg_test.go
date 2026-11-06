@@ -258,3 +258,35 @@ func TestClampBucketBoundsTheIndexBothWays(t *testing.T) {
 		}
 	}
 }
+
+func TestARowThatCannotBeTakenDoesNotDiscardTheRowsAlreadyTaken(t *testing.T) {
+	stuck := Key{CgroupID: 2}
+	f := newFakeMap(
+		Row{Key: Key{CgroupID: 1}, Value: Value{Count: 3}},
+		Row{Key: stuck, Value: Value{Count: 4}},
+		Row{Key: Key{CgroupID: 3}, Value: Value{Count: 5}},
+	)
+	boom := errors.New("take exploded")
+	take := func(k *Key) (Value, error) {
+		if *k == stuck {
+			f.taken = append(f.taken, *k)
+			return Value{}, boom
+		}
+		return f.take(k)
+	}
+
+	rows, err := drainRows(f.next, f.errFn, take)
+	if !errors.Is(err, boom) {
+		t.Fatalf("drainRows error = %v, want the take failure", err)
+	}
+	var reported uint64
+	for _, r := range rows {
+		reported += r.Value.Count
+	}
+	if reported != 8 {
+		t.Errorf("reported %d, want the 8 counts removed from the kernel on either side of the failure", reported)
+	}
+	if _, left := f.rows[stuck]; !left {
+		t.Error("the row that could not be taken must stay for the next drain")
+	}
+}
