@@ -5,6 +5,7 @@ package safeelf
 
 import (
 	"debug/elf"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"strings"
@@ -95,18 +96,37 @@ func SymbolTablesWithinCap(f *elf.File) bool {
 }
 
 // DWARFWithinCap reports whether the combined DWARF sections are within cap,
-// bounding DWARF() memory (including decompression of .zdebug_*).
+// bounding DWARF() memory.
 func DWARFWithinCap(f *elf.File) bool {
 	var total uint64
 	for _, s := range f.Sections {
-		if strings.HasPrefix(s.Name, ".debug_") || strings.HasPrefix(s.Name, ".zdebug_") {
-			total += s.Size
-			if total > MaxDWARFTotalSize {
-				return false
-			}
+		if !strings.HasPrefix(s.Name, ".debug_") && !strings.HasPrefix(s.Name, ".zdebug_") {
+			continue
 		}
+		size := s.Size
+		if strings.HasPrefix(s.Name, ".zdebug") && s.Flags&elf.SHF_COMPRESSED == 0 {
+			size = max(size, zdebugDeclaredSize(s))
+		}
+		if size > MaxDWARFTotalSize-total {
+			return false
+		}
+		total += size
 	}
 	return true
+}
+
+// zdebugDeclaredSize returns the uncompressed size a .zdebug_* section's
+// "ZLIB" header declares. A section without that header is read raw by
+// debug/elf, so its stored size is what it costs.
+func zdebugDeclaredSize(s *elf.Section) uint64 {
+	if s.Type == elf.SHT_NOBITS || s.ReaderAt == nil {
+		return s.Size
+	}
+	var header [12]byte
+	if n, _ := s.ReadAt(header[:], 0); n != len(header) || string(header[:4]) != "ZLIB" {
+		return s.Size
+	}
+	return binary.BigEndian.Uint64(header[4:])
 }
 
 // SafeDebugName reports whether a .gnu_debuglink filename is a plain basename.

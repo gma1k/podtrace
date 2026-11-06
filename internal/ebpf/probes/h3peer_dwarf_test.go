@@ -56,10 +56,10 @@ func TestStructByNameAndMembers(t *testing.T) {
 	if findMember(g, "no_such_member") != nil {
 		t.Error("findMember returned a value for an absent member")
 	}
-	if !hasMember(g, "m", nil) {
+	if !hasMember(d, g, "m", nil) {
 		t.Error("hasMember should report m present")
 	}
-	if hasMember(g, "no_such_member", nil) {
+	if hasMember(d, g, "no_such_member", nil) {
 		t.Error("hasMember should report an absent member as missing")
 	}
 

@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/ebpf/safeelf"
 )
 
 func containerRootfs(t *testing.T, containerID string) string {
@@ -265,10 +266,10 @@ func TestGoBinaryEdges(t *testing.T) {
 	if _, ok := parseGoBinary(garbage); ok {
 		t.Error("parsed a binary whose .gosymtab is garbage")
 	}
-	if !pclnFunctionCountWithinCap([]byte{0xf1, 0xff, 0xff, 0xff, 0, 0, 1, 3}) {
+	if !safeelf.GoPCLNTabWithinCap([]byte{0xf1, 0xff, 0xff, 0xff, 0, 0, 1, 3}) {
 		t.Error("a header with an impossible pointer size was rejected here instead of by gosym")
 	}
-	if !pclnFunctionCountWithinCap([]byte{0xf1, 0xff, 0xff, 0xff, 0, 0, 1, 8, 1, 2}) {
+	if !safeelf.GoPCLNTabWithinCap([]byte{0xf1, 0xff, 0xff, 0xff, 0, 0, 1, 8, 1, 2}) {
 		t.Error("a header too short for its function count was rejected here instead of by gosym")
 	}
 }

@@ -53,7 +53,7 @@ spec:
     spec:
       initContainers:
         - name: gen-cert
-          image: nginx:1.29
+          image: nginx:1.31@sha256:165ddde8751e75a1c907d24ef10d9f6deb08b57e0fe56caf67512486aff76d82
           command:
             - sh
             - -c
@@ -67,7 +67,7 @@ spec:
             - { name: slow, mountPath: /slow }
       containers:
         - name: nginx
-          image: nginx:1.29
+          image: nginx:1.31@sha256:165ddde8751e75a1c907d24ef10d9f6deb08b57e0fe56caf67512486aff76d82
           imagePullPolicy: Never
           volumeMounts:
             - { name: conf, mountPath: /etc/nginx/nginx.conf, subPath: nginx.conf }

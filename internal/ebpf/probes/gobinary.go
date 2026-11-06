@@ -3,7 +3,6 @@ package probes
 import (
 	"debug/elf"
 	"debug/gosym"
-	"encoding/binary"
 	"os"
 	"sync"
 	"syscall"
@@ -12,12 +11,12 @@ import (
 	"github.com/gma1k/podtrace/internal/ebpf/safeelf"
 )
 
-// Bounds on a .gopclntab. debug/gosym allocates around 150 bytes per function
-// the header claims, so the function count, not the section size, is what
-// keeps a hostile binary from exhausting the agent's memory.
+// Bounds on a .gopclntab. debug/gosym allocates per function and per
+// file-table entry the header claims, so those counts, not the section size,
+// are what keep a hostile binary from exhausting the agent's memory.
 const (
 	maxGoPCLNTabSize   = uint64(128) << 20
-	maxGoFunctionCount = uint64(1) << 20
+	maxGoFunctionCount = safeelf.MaxGoFunctionCount
 )
 
 type goBinary struct {
@@ -196,7 +195,7 @@ func parseGoBinary(path string) (*goBinary, bool) {
 		return nil, false
 	}
 	pclnData, err := sectionDataCapped(pcln)
-	if err != nil || !pclnFunctionCountWithinCap(pclnData) {
+	if err != nil || !safeelf.GoPCLNTabWithinCap(pclnData) {
 		return nil, false
 	}
 	symtabData, _ := sectionDataCapped(f.Section(".gosymtab"))
@@ -216,51 +215,4 @@ func parseGoBinary(path string) (*goBinary, bool) {
 		textOffset: text.Offset,
 		textSize:   text.Size,
 	}, true
-}
-
-// pclntab magic numbers, Go 1.2 through 1.20+.
-const (
-	go12PCLNTabMagic  = 0xfffffffb
-	go116PCLNTabMagic = 0xfffffffa
-	go118PCLNTabMagic = 0xfffffff0
-	go120PCLNTabMagic = 0xfffffff1
-)
-
-// pclnFunctionCountWithinCap reads the function count from a pclntab header
-// and reports whether parsing the table stays within maxGoFunctionCount.
-func pclnFunctionCountWithinCap(data []byte) bool {
-	if len(data) < 8 {
-		return true
-	}
-	ptrSize := int(data[7])
-	if ptrSize != 4 && ptrSize != 8 {
-		return true
-	}
-	var order binary.ByteOrder
-	switch {
-	case knownPCLNMagic(binary.LittleEndian.Uint32(data)):
-		order = binary.LittleEndian
-	case knownPCLNMagic(binary.BigEndian.Uint32(data)):
-		order = binary.BigEndian
-	default:
-		return true
-	}
-	if len(data) < 8+ptrSize {
-		return true
-	}
-	var nfunc uint64
-	if ptrSize == 8 {
-		nfunc = order.Uint64(data[8:])
-	} else {
-		nfunc = uint64(order.Uint32(data[8:]))
-	}
-	return nfunc <= maxGoFunctionCount
-}
-
-func knownPCLNMagic(m uint32) bool {
-	switch m {
-	case go12PCLNTabMagic, go116PCLNTabMagic, go118PCLNTabMagic, go120PCLNTabMagic:
-		return true
-	}
-	return false
 }

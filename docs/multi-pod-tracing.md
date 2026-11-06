@@ -105,7 +105,7 @@ kubectl -n podtrace-test exec busybox-test -- sh -c 'for i in $(seq 1 50); do wg
 
 ```bash
 kubectl create ns podtrace-cross
-kubectl -n podtrace-cross run nginx-cross --image=nginx:1.27 --labels app=podtrace-e2e --port 80
+kubectl -n podtrace-cross run nginx-cross --image=nginx:1.31@sha256:165ddde8751e75a1c907d24ef10d9f6deb08b57e0fe56caf67512486aff76d82 --labels app=podtrace-e2e --port 80
 kubectl -n podtrace-cross expose pod nginx-cross --name nginx-cross --port 80
 kubectl -n podtrace-test label pod alpine-test app=podtrace-e2e --overwrite
 kubectl -n podtrace-test label pod busybox-test app=podtrace-e2e --overwrite
@@ -134,7 +134,7 @@ When Podtrace runs with selector or namespace-wide targeting, it updates targets
 Quick check:
 
 ```bash
-kubectl -n podtrace-test run late-joiner --image=busybox --labels app=podtrace-e2e --restart=Never -- sh -c 'sleep 300'
+kubectl -n podtrace-test run late-joiner --image=busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662 --labels app=podtrace-e2e --restart=Never -- sh -c 'sleep 300'
 kubectl -n podtrace-test delete pod late-joiner
 ```
 

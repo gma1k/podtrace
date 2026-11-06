@@ -395,7 +395,7 @@ go test ./test/... -v
 
 1. **Create test pod**:
    ```bash
-   kubectl run test-pod --image=nginx -n default
+   kubectl run test-pod --image=nginx:1.31@sha256:165ddde8751e75a1c907d24ef10d9f6deb08b57e0fe56caf67512486aff76d82 -n default
    ```
 
 2. **Run podtrace**:

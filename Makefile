@@ -308,7 +308,7 @@ coverage: test-unit
 	@echo "Coverage summary (excluding e2e-covered BPF integration code and the generated client):"
 	$(GO) tool cover -func=coverage.unit.out | tail -1
 
-CONTROLLER_GEN_VERSION ?= v0.22.0
+CONTROLLER_GEN_VERSION ?= v0.23.0
 CONTROLLER_GEN ?= $(shell go env GOPATH 2>/dev/null)/bin/controller-gen
 CRD_OUT_DIR ?= deploy/charts/podtrace/templates/crds
 BOILERPLATE ?= hack/boilerplate.go.txt
@@ -327,7 +327,7 @@ operator-tools:
 generate: operator-tools
 	$(CONTROLLER_GEN) object:headerFile=$(BOILERPLATE) paths=./api/v1alpha1/...
 
-CLIENT_GEN_VERSION ?= v0.37.0
+CLIENT_GEN_VERSION ?= v0.37.2
 CLIENT_GEN ?= $(shell go env GOPATH 2>/dev/null)/bin/client-gen
 APPLYCONFIGURATION_GEN ?= $(shell go env GOPATH 2>/dev/null)/bin/applyconfiguration-gen
 
