@@ -4,8 +4,10 @@
 package h3stream
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/gma1k/podtrace/internal/ebpf/qpackdecode"
@@ -78,6 +80,8 @@ const (
 	maxBlockedSections   = 16
 	maxHeadersPayload    = 8192
 
+	maxRetainedBytes = 32 << 20
+
 	connIdleTTL   = 2 * time.Minute
 	sweepInterval = 15 * time.Second
 )
@@ -120,24 +124,59 @@ type connState struct {
 	streams  map[uint64]*streamState
 	blocked  []blockedSection
 	lastSeen time.Time
+	retained int
+}
+
+// measure returns the bytes the connection holds that its peer controls.
+func (cs *connState) measure() int {
+	n := cs.qpack.RetainedBytes()
+	for _, st := range cs.streams {
+		n += cap(st.buf)
+	}
+	for _, b := range cs.blocked {
+		n += cap(b.payload)
+	}
+	return n
 }
 
 // Assembler turns chunks into decoded sections. It is not safe for
-// concurrent use; feed it from a single reader goroutine.
+// concurrent use; feed it from a single reader goroutine. Stats may be read
+// from any goroutine.
 type Assembler struct {
-	onSection func(ConnKey, Section)
-	conns     map[ConnKey]*connState
-	now       func() time.Time
-	lastSweep time.Time
+	onSection   func(ConnKey, Section)
+	conns       map[ConnKey]*connState
+	now         func() time.Time
+	lastSweep   time.Time
+	maxRetained int
+	retained    int
+
+	retainedSnapshot atomic.Int64
+	budgetSheds      atomic.Uint64
+}
+
+// Stats reports the assembler's retained bytes and how many connections it
+// dropped to stay within its memory budget.
+type Stats struct {
+	RetainedBytes int
+	BudgetSheds   uint64
 }
 
 // NewAssembler returns an assembler that calls onSection for every decoded
 // field section.
 func NewAssembler(onSection func(ConnKey, Section)) *Assembler {
 	return &Assembler{
-		onSection: onSection,
-		conns:     make(map[ConnKey]*connState),
-		now:       time.Now,
+		onSection:   onSection,
+		conns:       make(map[ConnKey]*connState),
+		now:         time.Now,
+		maxRetained: maxRetainedBytes,
+	}
+}
+
+// Stats is safe to call concurrently with Feed.
+func (a *Assembler) Stats() Stats {
+	return Stats{
+		RetainedBytes: int(a.retainedSnapshot.Load()),
+		BudgetSheds:   a.budgetSheds.Load(),
 	}
 }
 
@@ -145,7 +184,8 @@ func NewAssembler(onSection func(ConnKey, Section)) *Assembler {
 func (a *Assembler) Feed(c Chunk) {
 	key := ConnKey{TGID: c.TGID, Conn: c.Conn}
 	if c.Flags&ChunkFlagConnClosed != 0 {
-		delete(a.conns, key)
+		a.removeConn(key)
+		a.publishRetained()
 		return
 	}
 	if len(c.Data) == 0 {
@@ -165,6 +205,7 @@ func (a *Assembler) Feed(c Chunk) {
 		a.conns[key] = cs
 	}
 	cs.lastSeen = now
+	defer a.settle(key, cs)
 
 	st := cs.streams[c.StreamID]
 	if st == nil {
@@ -191,6 +232,60 @@ func (a *Assembler) Feed(c Chunk) {
 	if c.CopiedLen < c.StreamLen {
 		st.markBroken()
 	}
+	st.compact()
+}
+
+// compact drops consumed bytes so a partial frame holds only its own size,
+// not the array of every chunk appended before it.
+func (st *streamState) compact() {
+	switch {
+	case len(st.buf) == 0:
+		st.buf = nil
+	case cap(st.buf) > len(st.buf):
+		st.buf = bytes.Clone(st.buf)
+	}
+}
+
+// settle charges a connection's change in retained bytes to the assembler
+// and, above the budget, drops the connections holding the most until it is
+// back under seven eighths of it.
+func (a *Assembler) settle(key ConnKey, cs *connState) {
+	if a.conns[key] == cs {
+		now := cs.measure()
+		a.retained += now - cs.retained
+		cs.retained = now
+	}
+	if a.retained > a.maxRetained {
+		target := a.maxRetained - a.maxRetained/8
+		for a.retained > target && len(a.conns) > 0 {
+			a.removeConn(a.largestConn())
+			a.budgetSheds.Add(1)
+		}
+	}
+	a.publishRetained()
+}
+
+func (a *Assembler) largestConn() ConnKey {
+	var largest ConnKey
+	most := -1
+	for k, cs := range a.conns {
+		if cs.retained > most {
+			largest, most = k, cs.retained
+		}
+	}
+	return largest
+}
+
+// removeConn forgets a connection and returns its bytes to the budget.
+func (a *Assembler) removeConn(key ConnKey) {
+	if cs := a.conns[key]; cs != nil {
+		a.retained -= cs.retained
+		delete(a.conns, key)
+	}
+}
+
+func (a *Assembler) publishRetained() {
+	a.retainedSnapshot.Store(int64(a.retained))
 }
 
 func (st *streamState) markBroken() {
@@ -239,7 +334,7 @@ func (a *Assembler) evictOldest() {
 			first = false
 		}
 	}
-	delete(a.conns, oldestKey)
+	a.removeConn(oldestKey)
 }
 
 // sweepIdle drops connections with no activity for connIdleTTL.
@@ -250,7 +345,7 @@ func (a *Assembler) sweepIdle(now time.Time) {
 	a.lastSweep = now
 	for k, cs := range a.conns {
 		if now.Sub(cs.lastSeen) > connIdleTTL {
-			delete(a.conns, k)
+			a.removeConn(k)
 		}
 	}
 }

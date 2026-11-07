@@ -194,3 +194,22 @@ func TestOnlyADecodedResponseWithAGRPCStatusIsGRPC(t *testing.T) {
 		t.Error("a trailers-only response was not recognised")
 	}
 }
+
+func TestAHeldGRPCResponseEvictedByTheStreamBoundIsStillCounted(t *testing.T) {
+	d := New()
+	d.maxStreams = 1
+	be, ibe := newBlockEncoder(), newBlockEncoder()
+	d.Ingest(rec(82, DirIngress, 0, 1, be.encode(reqFields("POST", "/pkg.Svc/Held", grpcType)...)))
+	if evs := d.Ingest(rec(82, DirEgress, 0, 1, ibe.encode(hf(":status", "200"), grpcType))); len(evs) != 0 {
+		t.Fatalf("the response was emitted before its trailers: %+v", evs)
+	}
+
+	evs := d.Ingest(rec(83, DirIngress, 0, 1, newBlockEncoder().encode(reqFields("GET", "/next")...)))
+	resp := responses(evs)
+	if len(resp) != 1 || resp[0].Target != "POST /pkg.Svc/Held" || resp[0].Details != "200" {
+		t.Fatalf("events = %+v; the evicted call's held response was lost", evs)
+	}
+	if len(evs) != 2 || evs[1].Target != "GET /next" {
+		t.Errorf("events = %+v; the request that evicted it must still be emitted", evs)
+	}
+}

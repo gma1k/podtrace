@@ -2,12 +2,14 @@ package stacktrace
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/procfs"
 )
 
 func fakeMaps(t *testing.T, pid, maps string) {
@@ -124,5 +126,33 @@ func TestAStackStopsAtItsFirstEmptyFrame(t *testing.T) {
 	}
 	if strings.Contains(got, "#1") || strings.Contains(got, "0x7f0000000456") {
 		t.Errorf("frames after the zero terminator were printed:\n%s", got)
+	}
+}
+
+func TestAnAddressIsNamedInAMapsFileLargerThanReadFileAllows(t *testing.T) {
+	dir := "/" + strings.Repeat("d", 3900)
+	var b strings.Builder
+	i := 0
+	var last uint64
+	for ; b.Len() <= procfs.MaxReadFileBytes; i++ {
+		last = 0x1000 * uint64(i+1)
+		fmt.Fprintf(&b, "%x-%x r-xp 00000000 08:01 %d %s/lib%d.so\n", last, last+0x1000, i+1, dir, i%2)
+	}
+	fakeMaps(t, "94", b.String())
+	r := &stackResolver{}
+
+	if name, unmapped := r.otherMappedFile(94, "/bin/app", last+0x10); name != fmt.Sprintf("lib%d.so", (i-1)%2) || unmapped {
+		t.Fatalf("got (%q, %v) for the last mapping", name, unmapped)
+	}
+	ranges := r.allMaps["94|/bin/app"]
+	if len(ranges) != i || ranges[0].name != "lib0.so" || ranges[1].name != "lib1.so" {
+		t.Fatalf("cached %d ranges of %d", len(ranges), i)
+	}
+}
+
+func TestExecutableMappingsWithoutAMapsFileAreEmpty(t *testing.T) {
+	t.Cleanup(pointProcfsAt(t, t.TempDir()))
+	if got := (&stackResolver{}).exeMappings(95, "/bin/app"); got != nil {
+		t.Fatalf("mappings = %+v without a maps file", got)
 	}
 }

@@ -65,36 +65,47 @@ func sameHostFile(a, b string) bool {
 // through yield one attach target.
 func mappedFilesMatching(pid uint32, patterns []string) []string {
 	started, timed := processStartTimeOf(pid)
-	data, err := procfs.ReadFile(fmt.Sprintf("%d/maps", pid))
-	if err != nil {
-		return nil
-	}
 
 	var paths []string
 	seen := make(map[string]struct{})
+	mapped := make(map[mappedFileID]struct{})
 
-	for _, e := range procmaps.Parse(data) {
+	err := procmaps.ScanProcess(pid, func(e procmaps.Entry) bool {
 		if !e.Named() || !containsAnyPattern(e.Path, patterns) {
-			continue
+			return true
+		}
+		if e.Inode != 0 {
+			id := mappedFileID{device: e.Device, inode: e.Inode}
+			if _, dup := mapped[id]; dup {
+				return true
+			}
+			mapped[id] = struct{}{}
 		}
 		resolved := resolveMappedFile(pid, e)
-		if resolved == "" {
-			continue
-		}
 		key := inodeKey(resolved)
 		if key == "" {
-			continue
+			return true
 		}
 		if _, dup := seen[key]; dup {
-			continue
+			return true
 		}
 		seen[key] = struct{}{}
 		paths = append(paths, resolved)
+		return true
+	})
+	if err != nil {
+		return nil
 	}
 	if timed && !sameProcess(pid, started) {
 		return nil
 	}
 	return paths
+}
+
+// mappedFileID is the file a maps line names by its device and inode columns.
+type mappedFileID struct {
+	device string
+	inode  uint64
 }
 
 var processStartTimeOf = processStartTime
