@@ -9,6 +9,30 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.15.3](https://github.com/gma1k/podtrace/compare/v0.15.2...v0.15.3) (2026-11-07)
+
+
+### Bug Fixes
+
+* bound untrusted pclntab and dwarf parsing and pin all images ([#563](https://github.com/gma1k/podtrace/issues/563)) ([7629910](https://github.com/gma1k/podtrace/commit/76299101555586fb98b3343259a81168bb21e0d9))
+* bound userspace decoder memory and harden pii redaction ([#566](https://github.com/gma1k/podtrace/issues/566)) ([20a1002](https://github.com/gma1k/podtrace/commit/20a100228fa190a9c2b43366269a085cc3f5ef73))
+* enforce consent withdrawal and tenant isolation in the operator ([#567](https://github.com/gma1k/podtrace/issues/567)) ([dd4abe8](https://github.com/gma1k/podtrace/commit/dd4abe8126acb5a26279308f862b581d92cda415))
+* gate pipeline events by cgroup and key caches on process identity ([#564](https://github.com/gma1k/podtrace/issues/564)) ([3e15f62](https://github.com/gma1k/podtrace/commit/3e15f62b12affb4c64e43a9f5f5861d54e7af17f))
+* harden bpf l7 parsers and pair requests per connection ([#561](https://github.com/gma1k/podtrace/issues/561)) ([1fc961f](https://github.com/gma1k/podtrace/commit/1fc961f53b103de6a3b725d731dba595164872b8))
+* isolate bpf scratch buffers and stop untargeted map churn ([#559](https://github.com/gma1k/podtrace/issues/559)) ([f5abb3c](https://github.com/gma1k/podtrace/commit/f5abb3c929102998efcca2633fc6d63fac2e7b2c))
+
+
+### CI
+
+* install helm through a checksum-verified composite action ([#565](https://github.com/gma1k/podtrace/issues/565)) ([9de1df5](https://github.com/gma1k/podtrace/commit/9de1df530fc43b8dc7693acd91bbfea78b69e8da))
+
+
+### Maintenance
+
+* **deps:** update github actions and google.golang.org/api to v0.311.0 ([#560](https://github.com/gma1k/podtrace/issues/560)) ([e52cded](https://github.com/gma1k/podtrace/commit/e52cded6a5f6a7e7c08f25809b2e989fec8111d8))
+* **deps:** update go modules (non-major) ([#555](https://github.com/gma1k/podtrace/issues/555)) ([3196f38](https://github.com/gma1k/podtrace/commit/3196f387ef3de488b991ab4c415749bbf1226cba))
+* **deps:** update go modules (non-major) (cloud.google.com/go/auth, github.com/aws/aws-sdk-go-v2/config, github.com/aws/aws-sdk-go-v2/credentials, github.com/aws/aws-sdk-go-v2/service/s3) ([#562](https://github.com/gma1k/podtrace/issues/562)) ([83f4971](https://github.com/gma1k/podtrace/commit/83f4971105acc63d9759045049328b75a9c141da))
+
 ## [0.15.2](https://github.com/gma1k/podtrace/compare/v0.15.1...v0.15.2) (2026-10-28)
 
 
