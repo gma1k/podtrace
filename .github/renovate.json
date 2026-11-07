@@ -149,12 +149,12 @@
     },
     {
       "customType": "regex",
-      "description": "Track the helm release setup-helm installs through the HELM_VERSION workflow env var. Named helm, like the literal setup-helm version inputs the github-actions manager already reads, so every helm pin moves in one PR and the helm hold rule covers all of them",
+      "description": "Track the helm release the install-helm composite action downloads and checksums; every workflow installs helm through it",
       "managerFilePatterns": [
-        "/^\\.github/workflows/.+\\.ya?ml$/"
+        "/^\\.github/actions/install-helm/action\\.ya?ml$/"
       ],
       "matchStrings": [
-        "HELM_VERSION: (?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)"
+        "ver=\"(?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)\"\\n(?:.*\\n){0,10}?.*get\\.helm\\.sh"
       ],
       "depNameTemplate": "helm",
       "packageNameTemplate": "helm/helm",
@@ -270,6 +270,13 @@
         "kyverno/chainsaw"
       ],
       "groupName": "chainsaw"
+    },
+    {
+      "description": "The install-helm action installs helm only when the tarball matches the sha256 sums pinned next to the version; a bump fails CI until those sums are updated in the same PR, from the .sha256sum files on get.helm.sh",
+      "matchDepNames": [
+        "helm"
+      ],
+      "groupName": "helm"
     },
     {
       "description": "Skip helm v4.2.1 only: an intermittent WaitForDelete race affecting before-hook-creation hooks (upstream helm#32214), reverted in v4.2.2 (commit b05881c). v4.2.2+ is allowed by this range.",
