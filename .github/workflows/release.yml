@@ -36,7 +36,6 @@ env:
   CHART_PATH: deploy/charts/podtrace
   CHART_REPO: ghcr.io/gma1k/charts
   COSIGN_VERSION: v3.1.4
-  HELM_VERSION: v4.3.1
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -202,9 +201,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5.0.1
-        with:
-          version: ${{ env.HELM_VERSION }}
+      - uses: ./.github/actions/install-helm
 
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550  # v4.8.0
         with:
@@ -299,9 +296,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5.0.1
-        with:
-          version: ${{ env.HELM_VERSION }}
+      - uses: ./.github/actions/install-helm
 
       - name: Render quickstart manifests
         env:
@@ -476,9 +471,7 @@ jobs:
           ref: refs/tags/${{ env.VERSION }}
           persist-credentials: false
 
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5.0.1
-        with:
-          version: ${{ env.HELM_VERSION }}
+      - uses: ./.github/actions/install-helm
 
       - name: Compute previous version from upstream catalog
         id: prev
