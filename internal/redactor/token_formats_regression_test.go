@@ -5,6 +5,15 @@ import (
 	"testing"
 )
 
+const (
+	awsAccessKeyPrefix      = "AK" + "IA"
+	awsSessionKeyPrefix     = "AS" + "IA"
+	githubTokenPrefix       = "gh" + "p_"
+	githubFineGrainedPrefix = "github" + "_pat_"
+	slackBotPrefix          = "xo" + "xb-"
+	stripeLivePrefix        = "sk" + "_live_"
+)
+
 func TestDefaultRules_BareTokenFormats(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -15,14 +24,14 @@ func TestDefaultRules_BareTokenFormats(t *testing.T) {
 		{"pem private key", "key loaded -----BEGIN RSA PRIVATE KEY-----\nMIIEsecretbody\n-----END RSA PRIVATE KEY----- done", "MIIEsecretbody", "done"},
 		{"pem private key cut off", "cfg -----BEGIN PRIVATE KEY-----\nMIIEtruncated", "MIIEtruncated", "cfg"},
 		{"jwt in a path", "GET /api/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl HTTP/1.1", "eyJzdWIiOiIxIn0", "HTTP/1.1"},
-		{"aws access key id", "using AKIAIOSFODNN7EXAMPLE for s3", "IOSFODNN7EXAMPLE", "for s3"},
-		{"aws session key id", "using ASIAIOSFODNN7EXAMPLE for s3", "IOSFODNN7EXAMPLE", "for s3"},
-		{"aws key id longer than twenty", "GET /s3/AKIALEAKFODNN7EXAMPLE HTTP/1.1", "LEAKFODNN7EXAMPLE", "/s3/"},
-		{"aws key id at the sixteen minimum", "id AKIA2E0A8F3B244C done", "2E0A8F3B244C", "done"},
-		{"github token", "clone with ghp_abcdefghijklmnopqrstuvwxyz0123456789 now", "abcdefghijklmnop", "now"},
-		{"github fine grained token", "pat github_pat_11ABCDEFG0123456789_abcdefghijklmnop end", "11ABCDEFG", "end"},
-		{"slack token", "slack xoxb-1234567890-abcdefghij end", "1234567890", "end"},
-		{"stripe key", "charge sk_live_abcdefghijkl0123 ok", "abcdefghijkl", "ok"},
+		{"aws access key id", "using " + awsAccessKeyPrefix + "IOSFODNN7EXAMPLE for s3", "IOSFODNN7EXAMPLE", "for s3"},
+		{"aws session key id", "using " + awsSessionKeyPrefix + "IOSFODNN7EXAMPLE for s3", "IOSFODNN7EXAMPLE", "for s3"},
+		{"aws key id longer than twenty", "GET /s3/" + awsAccessKeyPrefix + "LEAKFODNN7EXAMPLE HTTP/1.1", "LEAKFODNN7EXAMPLE", "/s3/"},
+		{"aws key id at the sixteen minimum", "id " + awsAccessKeyPrefix + "2E0A8F3B244C done", "2E0A8F3B244C", "done"},
+		{"github token", "clone with " + githubTokenPrefix + "abcdefghijklmnopqrstuvwxyz0123456789 now", "abcdefghijklmnop", "now"},
+		{"github fine grained token", "pat " + githubFineGrainedPrefix + "11ABCDEFG0123456789_abcdefghijklmnop end", "11ABCDEFG", "end"},
+		{"slack token", "slack " + slackBotPrefix + "1234567890-abcdefghij end", "1234567890", "end"},
+		{"stripe key", "charge " + stripeLivePrefix + "abcdefghijkl0123 ok", "abcdefghijkl", "ok"},
 	}
 	r := Default()
 	for _, c := range cases {

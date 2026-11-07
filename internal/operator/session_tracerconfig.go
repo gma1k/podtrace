@@ -10,7 +10,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/fleet"
+	"github.com/gma1k/podtrace/internal/imagepolicy"
 )
 
 // errNoTracerConfig reports that nothing resolved for a node.
@@ -98,7 +100,7 @@ func (r *PodTraceSessionReconciler) resolveSessionTracerConfigs(
 			out.byNode[node] = &pinned
 		}
 		out.namespaces = distinctNamespaces(out.byNode, r.SystemNamespace)
-		return out, refuseInvalidSystemNamespaces(out)
+		return out, refuseUnusableTracerConfigs(out)
 	}
 
 	var configs podtracev1alpha1.TracerConfigList
@@ -141,13 +143,15 @@ func (r *PodTraceSessionReconciler) resolveSessionTracerConfigs(
 	}
 
 	out.namespaces = distinctNamespaces(out.byNode, r.SystemNamespace)
-	return out, refuseInvalidSystemNamespaces(out)
+	return out, refuseUnusableTracerConfigs(out)
 }
 
-// refuseInvalidSystemNamespaces fails resolution when a node's TracerConfig
-// names a system namespace the operator refuses, so no Job, bundle or
-// credential copy is ever placed there.
-func refuseInvalidSystemNamespaces(out sessionTracerConfigs) error {
+// refuseUnusableTracerConfigs fails resolution when a node's TracerConfig is
+// one the TracerConfig reconciler refuses to run agents from: a system
+// namespace the operator refuses, so no Job, bundle or credential copy is ever
+// placed there, or an image outside the allowed repositories, since the
+// session Job runs that image with the same privileges as an agent.
+func refuseUnusableTracerConfigs(out sessionTracerConfigs) error {
 	nodes := make([]string, 0, len(out.byNode))
 	for node := range out.byNode {
 		nodes = append(nodes, node)
@@ -156,6 +160,9 @@ func refuseInvalidSystemNamespaces(out sessionTracerConfigs) error {
 	for _, node := range nodes {
 		tc := out.byNode[node]
 		if err := podtracev1alpha1.ValidateSystemNamespace(tc.Spec.SystemNamespace); err != nil {
+			return &errNoTracerConfig{node: node, refused: true, reason: fmt.Sprintf("TracerConfig %q: %v", tc.Name, err)}
+		}
+		if err := imagepolicy.RepoAllowed(tc.Spec.Image, config.AllowedAgentImageRepos()); err != nil {
 			return &errNoTracerConfig{node: node, refused: true, reason: fmt.Sprintf("TracerConfig %q: %v", tc.Name, err)}
 		}
 	}

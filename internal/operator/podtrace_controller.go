@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -145,8 +146,14 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			r.setCondition(&pt, ConditionPolicyApplied, metav1.ConditionFalse, "BundleInvalid", err.Error())
 			return r.withdrawBundle(ctx, &pt, "BundleInvalid")
 		}
+		if stale, staleErr := r.bundleOutlivesGrant(ctx, &pt, targetNamespaces, bundleNamespaces); staleErr == nil && len(stale) > 0 {
+			r.setCondition(&pt, ConditionDegraded, metav1.ConditionTrue, "BundleSync",
+				fmt.Sprintf("%v; withdrew the bundle because it still targets %v, which no longer grant this PodTrace", err, stale))
+			return r.withdrawBundle(ctx, &pt, "BundleSync")
+		}
 		r.setCondition(&pt, ConditionDegraded, metav1.ConditionTrue, "BundleSync", err.Error())
 		r.setCondition(&pt, ConditionPolicyApplied, metav1.ConditionFalse, "BundleSync", err.Error())
+		r.setCondition(&pt, ConditionReconciled, metav1.ConditionFalse, "BundleSync", "exporter bundle not updated: "+err.Error())
 		_ = r.Status().Update(ctx, &pt)
 		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
 	}
@@ -307,8 +314,47 @@ func (r *PodTraceReconciler) withdrawBundle(ctx context.Context, pt *podtracev1a
 	}
 	pt.Status.TargetNamespaces = nil
 	r.setCondition(pt, ConditionPolicyApplied, metav1.ConditionFalse, reason, "exporter bundle withdrawn")
+	r.setCondition(pt, ConditionReconciled, metav1.ConditionFalse, reason, "exporter bundle withdrawn")
 	_ = r.Status().Update(ctx, pt)
 	return ctrl.Result{}, nil
+}
+
+// bundleOutlivesGrant returns the foreign namespaces that a bundle already
+// written for the PodTrace still lets agents trace but that the freshly
+// resolved targets no longer include.
+func (r *PodTraceReconciler) bundleOutlivesGrant(ctx context.Context, pt *podtracev1alpha1.PodTrace, targetNamespaces, bundleNamespaces []string) ([]string, error) {
+	current := map[string]struct{}{}
+	for _, ns := range targetNamespaces {
+		current[ns] = struct{}{}
+	}
+	stale := map[string]struct{}{}
+	for _, systemNS := range bundleNamespaces {
+		var cm corev1.ConfigMap
+		if err := r.Get(ctx, types.NamespacedName{Namespace: systemNS, Name: ExporterBundleName(pt.UID)}, &cm); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return nil, err
+		}
+		written, ok := cm.Data["target_namespaces"]
+		if !ok || written == "" {
+			continue
+		}
+		for _, ns := range strings.Split(written, ",") {
+			if ns == "" || ns == pt.Namespace {
+				continue
+			}
+			if _, granted := current[ns]; !granted {
+				stale[ns] = struct{}{}
+			}
+		}
+	}
+	out := make([]string, 0, len(stale))
+	for ns := range stale {
+		out = append(out, ns)
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // bundleNamespaces returns the namespaces agents read bundles from: one per

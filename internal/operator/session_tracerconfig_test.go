@@ -36,6 +36,7 @@ func testTracerConfig(name, image, systemNS string, nodeSelector map[string]stri
 
 func sessionResolver(t *testing.T, objs ...client.Object) *PodTraceSessionReconciler {
 	t.Helper()
+	t.Setenv("PODTRACE_ALLOWED_AGENT_IMAGE_REPOS", "img,ghcr.io/gma1k/podtrace")
 	scheme := newOperatorScheme(t)
 	return &PodTraceSessionReconciler{
 		Client:          fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build(),

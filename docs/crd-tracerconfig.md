@@ -211,6 +211,16 @@ and their events are counted twice; see
 reason `NodesUnreadable` means the operator cannot list Nodes, so
 overlap is simply unknown — everything else still reconciles.
 
+A TracerConfig is refused, with `Ready=False` and reason
+`ImageNotAllowed` or `SystemNamespaceInvalid`, when `spec.image` is
+outside the operator's allowed repositories (`agent.allowedImageRepos`)
+or `spec.systemNamespace` is a namespace the operator will not run
+agents in. A refused config creates nothing new, and no session Job is
+built from it either. The agents it deployed before keep running while
+they still comply, so a mistaken edit does not stop tracing. An agent
+DaemonSet that itself runs a disallowed image, for example after the
+allowlist was narrowed, or that sits in a refused namespace is deleted.
+
 ## Common operations
 
 ```bash

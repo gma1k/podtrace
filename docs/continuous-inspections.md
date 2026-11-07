@@ -456,6 +456,16 @@ the first of the workload's pods by name, when the link appears:
 Warning  PodtraceLikelyCause  pod/front-5bf4f4d7d6-znkhm  l7.latency_degraded on corr/front: likely cause db.pool_saturated on corr/backend, through l7.latency_degraded on corr/backend
 ```
 
+The Event lives in the affected namespace, where that namespace's tenants
+read it. A cause in another namespace is named only when that namespace, and
+every namespace on the way to it, grants the affected one through
+`podtrace.io/allow-tracing-from` (see
+[Cross-namespace CR targeting](cross-namespace-cr-targeting.md)). Otherwise
+the Event says only that an active issue in another namespace is a likely
+cause, without naming the issue, namespace or workload. The
+`podtrace_issue_cause` metric and `/correlations` are for cluster
+administrators, not tenants, and always carry the full links.
+
 It carries the same `podtrace.io/issue-id`, `podtrace.io/workload` and
 `podtrace.io/likely-causes` annotations as an issue's Event, but its reason is
 `PodtraceLikelyCause`, not the alert reason, so it never starts a session and

@@ -204,7 +204,7 @@ func TestHarvestReportLocation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := sessionWithObjectStore("")
 			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tc.pod).Build()
-			obs, err := harvestReportLocation(context.Background(), c, s, "podtrace-system")
+			obs, err := harvestReportLocation(context.Background(), c, s, []string{"podtrace-system"})
 			if err != nil {
 				t.Fatalf("harvest: %v", err)
 			}
@@ -249,7 +249,7 @@ func TestHarvestReportLocation_NonObjectStoreIsNoop(t *testing.T) {
 			},
 		},
 	}
-	obs, err := harvestReportLocation(context.Background(), c, s, "podtrace-system")
+	obs, err := harvestReportLocation(context.Background(), c, s, []string{"podtrace-system"})
 	if err != nil || obs.ResolvedURI != "" || obs.Terminated || obs.Succeeded {
 		t.Errorf("expected silent no-op, got %+v err=%v", obs, err)
 	}

@@ -87,7 +87,15 @@ Rules:
 - The check runs at **every reconcile**, so revoking the grant (or
   deleting the annotation) stops an in-flight continuous trace on the
   next reconcile, and grants added after the CR was created take effect
-  without recreating the CR.
+  without recreating the CR. This holds even when the operator cannot
+  rewrite the PodTrace's exporter bundle, for example because the
+  ExporterConfig's credential Secret is gone: a bundle that still
+  targets the withdrawn namespace is withdrawn instead of left in place.
+- A running `PodTraceSession` cannot be narrowed, because its targets
+  are fixed in the session Job's arguments. When a namespace a session
+  Job traces withdraws its grant, the operator stops that Job and fails
+  the session with reason `CrossNamespaceGrantRevoked`. A namespace that
+  is deleted or terminating is not a withdrawal.
 - `spec.podRefs` naming an ungranted foreign namespace are **rejected at
   admission** (the webhook) and dropped at reconcile (the operator).
   `spec.namespaceSelector` matches in ungranted namespaces are

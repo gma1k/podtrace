@@ -62,6 +62,7 @@ func ensureSessionExporterBundle(ctx context.Context, c client.Client, reader cl
 			LabelComponent:      ComponentBundle,
 			LabelSessionName:    s.Name,
 			LabelSessionNS:      s.Namespace,
+			LabelSessionUID:     string(s.UID),
 			LabelExporterConfig: ec.Name,
 		})
 		cm.Annotations = mergeLabels(cm.Annotations, map[string]string{
@@ -96,6 +97,7 @@ func ensureSessionExporterBundle(ctx context.Context, c client.Client, reader cl
 					LabelComponent:      ComponentBundle,
 					LabelSessionName:    s.Name,
 					LabelSessionNS:      s.Namespace,
+					LabelSessionUID:     string(s.UID),
 					LabelExporterConfig: ec.Name,
 				},
 				Annotations: map[string]string{

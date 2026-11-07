@@ -21,13 +21,6 @@ const (
 	defaultReaperGrace    = 10 * time.Minute
 )
 
-// SessionChildReaper is the finalizer-bypass backstop for a PodTraceSession's
-// cross-namespace children (per-node Jobs, exporter bundle, objectStore creds,
-// ServiceAccount, and cross-namespace pod-read RBAC). Those objects live in a
-// namespace the session cannot own via ownerReferences, so if the
-// podtrace.io/cleanup finalizer is stripped or the operator is down at deletion
-// time, nothing garbage-collects them. This Runnable periodically deletes any
-// such child whose owning session no longer exists.
 type SessionChildReaper struct {
 	Client   client.Client
 	Interval time.Duration
@@ -68,6 +61,7 @@ type reapCandidate struct {
 	obj         client.Object
 	sessionNS   string
 	sessionName string
+	sessionUID  string
 }
 
 // reapOrphanSessionChildren lists every operator-managed object that names an
@@ -86,7 +80,7 @@ func reapOrphanSessionChildren(ctx context.Context, c client.Client, now time.Ti
 		if grace > 0 && now.Sub(o.GetCreationTimestamp().Time) < grace {
 			return
 		}
-		candidates = append(candidates, reapCandidate{obj: o, sessionNS: sns, sessionName: sn})
+		candidates = append(candidates, reapCandidate{obj: o, sessionNS: sns, sessionName: sn, sessionUID: labels[LabelSessionUID]})
 	}
 
 	sel := client.MatchingLabels{LabelManagedBy: ManagedByValue}
@@ -135,7 +129,11 @@ func reapOrphanSessionChildren(ctx context.Context, c client.Client, now time.Ti
 	}
 
 	type sessionKey struct{ ns, name string }
-	alive := map[sessionKey]bool{}
+	type liveSession struct {
+		exists bool
+		uid    string
+	}
+	alive := map[sessionKey]liveSession{}
 	deleted := 0
 	for _, cand := range candidates {
 		key := sessionKey{cand.sessionNS, cand.sessionName}
@@ -145,15 +143,15 @@ func reapOrphanSessionChildren(ctx context.Context, c client.Client, now time.Ti
 			err := c.Get(ctx, types.NamespacedName{Namespace: cand.sessionNS, Name: cand.sessionName}, &s)
 			switch {
 			case err == nil:
-				live = true
+				live = liveSession{exists: true, uid: string(s.UID)}
 			case apierrors.IsNotFound(err):
-				live = false
+				live = liveSession{}
 			default:
 				continue
 			}
 			alive[key] = live
 		}
-		if live {
+		if live.exists && (cand.sessionUID == "" || cand.sessionUID == live.uid) {
 			continue
 		}
 		if err := c.Delete(ctx, cand.obj); err != nil && !apierrors.IsNotFound(err) {

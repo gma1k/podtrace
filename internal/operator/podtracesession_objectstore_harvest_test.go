@@ -36,7 +36,7 @@ func TestHarvestReportLocation_ListError(t *testing.T) {
 		},
 	}).Build()
 
-	if _, err := harvestReportLocation(context.Background(), c, sessionWithObjectStore(""), "podtrace-system"); err == nil {
+	if _, err := harvestReportLocation(context.Background(), c, sessionWithObjectStore(""), []string{"podtrace-system"}); err == nil {
 		t.Fatal("expected error when listing session pods fails")
 	}
 }
@@ -68,7 +68,7 @@ func TestHarvestReportLocation_SkipsNonUploaderAndTracksRestarts(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(pod).Build()
 
-	obs, err := harvestReportLocation(context.Background(), c, sessionWithObjectStore(""), "podtrace-system")
+	obs, err := harvestReportLocation(context.Background(), c, sessionWithObjectStore(""), []string{"podtrace-system"})
 	if err != nil {
 		t.Fatalf("harvest: %v", err)
 	}

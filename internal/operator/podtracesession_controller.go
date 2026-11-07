@@ -182,7 +182,18 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 	tc := resolved.primary()
-	systemNS := systemNamespaceForSession(tc, r.SystemNamespace)
+	revoked, err := r.stopRevokedJobs(ctx, &session, resolved.namespaces)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if len(revoked) > 0 {
+		if err := pruneSessionPodReadRBAC(ctx, r.Client, &session, sessionPodNamespaces(&session, targets)); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, r.failSessionTerminally(ctx, &session, "CrossNamespaceGrantRevoked",
+			fmt.Sprintf("namespace(s) %v no longer grant %q through the %s annotation; stopped the session Jobs that traced them",
+				revoked, session.Namespace, podtracev1alpha1.AllowTracingFromAnnotation))
+	}
 	for _, node := range targets.Nodes {
 		if d := effectiveSessionDuration(&session, resolved.forNode(node)); d > config.MaxDiagnoseDuration {
 			return ctrl.Result{}, r.failSessionTerminally(ctx, &session, "DurationTooLong",
@@ -324,7 +335,7 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	r.setCondition(&session, ConditionDegraded, metav1.ConditionFalse, "Reconciled", "")
 	applySessionExportConditions(&session, summaryByNode)
 
-	if obs, err := harvestReportLocation(ctx, r.Client, &session, systemNS); err != nil {
+	if obs, err := harvestReportLocation(ctx, r.Client, &session, resolved.namespaces); err != nil {
 		logger.Error(err, "harvest report location")
 	} else {
 		applyReportUploadStatus(&session, obs)
@@ -590,27 +601,32 @@ func (r *PodTraceSessionReconciler) resolveTracerConfig(ctx context.Context) (*p
 // nodesAtCapacity returns the subset of the candidate node list whose
 // current active-session Job count is >= cap.
 func (r *PodTraceSessionReconciler) nodesAtCapacity(ctx context.Context, candidates []string, cap int32, selfNS, selfName string) ([]string, error) {
-	var allJobs batchv1.JobList
-	if err := r.List(ctx, &allJobs, client.MatchingLabels{
-		LabelManagedBy: ManagedByValue,
-		LabelComponent: ComponentSession,
-	}); err != nil {
-		return nil, fmt.Errorf("list session Jobs: %w", err)
+	namespaces, err := sessionSystemNamespaces(ctx, r.Client, r.SystemNamespace)
+	if err != nil {
+		return nil, err
 	}
-
 	counts := map[string]int32{}
-	for _, j := range allJobs.Items {
-		if j.Status.Succeeded > 0 || j.Status.Failed > 0 {
-			continue
+	for _, ns := range namespaces {
+		var jobs batchv1.JobList
+		if err := r.List(ctx, &jobs, client.InNamespace(ns), client.MatchingLabels{
+			LabelManagedBy: ManagedByValue,
+			LabelComponent: ComponentSession,
+		}); err != nil {
+			return nil, fmt.Errorf("list session Jobs in %s: %w", ns, err)
 		}
-		if j.Labels[LabelSessionName] == selfName && j.Labels[LabelSessionNS] == selfNS {
-			continue
+		for _, j := range jobs.Items {
+			if j.Status.Succeeded > 0 || j.Status.Failed > 0 {
+				continue
+			}
+			if j.Labels[LabelSessionName] == selfName && j.Labels[LabelSessionNS] == selfNS {
+				continue
+			}
+			node, ok := j.Labels[LabelNodeName]
+			if !ok {
+				continue
+			}
+			counts[node]++
 		}
-		node, ok := j.Labels[LabelNodeName]
-		if !ok {
-			continue
-		}
-		counts[node]++
 	}
 
 	var over []string
@@ -620,6 +636,24 @@ func (r *PodTraceSessionReconciler) nodesAtCapacity(ctx context.Context, candida
 		}
 	}
 	return over, nil
+}
+
+// sessionSystemNamespaces returns the namespaces session Jobs and their
+// staging Secrets can legitimately live in: every fleet's system namespace
+// plus the operator's own.
+func sessionSystemNamespaces(ctx context.Context, c client.Reader, operatorNamespace string) ([]string, error) {
+	namespaces, err := fleetSystemNamespaces(ctx, c, operatorNamespace)
+	if err != nil {
+		return nil, err
+	}
+	for _, ns := range namespaces {
+		if ns == operatorNamespace {
+			return namespaces, nil
+		}
+	}
+	namespaces = append(namespaces, operatorNamespace)
+	sort.Strings(namespaces)
+	return namespaces, nil
 }
 
 // effectiveMaxConcurrentSessionsPerNode returns the cap from TracerConfig
@@ -632,13 +666,7 @@ func effectiveMaxConcurrentSessionsPerNode(tc *podtracev1alpha1.TracerConfig) in
 }
 
 // ensureJobs creates-or-updates one Job per target node in the system
-// namespace. The Jobs cannot carry an ownerReference back to the session
-// (Kubernetes forbids cross-namespace owner refs), so their lifecycle is
-// bounded by TTLSecondsAfterFinished, the podtrace.io/cleanup finalizer, and
-// the orphan sweep (see SessionChildReaper) as a finalizer-bypass backstop.
-// ensureJobs creates one Job per target node, each built from the
-// TracerConfig resolved for that node — so a session spanning two node pools
-// runs each Job under its own pool's image and redaction policy.
+// namespace.
 func (r *PodTraceSessionReconciler) ensureJobs(ctx context.Context, s *podtracev1alpha1.PodTraceSession, resolved sessionTracerConfigs, targets sessionTargets, completedNodes map[string]struct{}) ([]batchv1.Job, error) {
 	for _, node := range targets.Nodes {
 		if _, done := completedNodes[node]; done {
@@ -663,6 +691,7 @@ func (r *PodTraceSessionReconciler) ensureJobs(ctx context.Context, s *podtracev
 				LabelComponent:    ComponentSession,
 				LabelSessionName:  s.Name,
 				LabelSessionNS:    s.Namespace,
+				LabelSessionUID:   string(s.UID),
 				LabelNodeName:     node,
 				LabelTracerConfig: nodeConfig.Name,
 			})
@@ -676,8 +705,15 @@ func (r *PodTraceSessionReconciler) ensureJobs(ctx context.Context, s *podtracev
 		}
 	}
 
+	return r.ownedSessionJobs(ctx, s, resolved.namespaces)
+}
+
+// ownedSessionJobs lists this session's Jobs in the given system namespaces.
+// The labels carry only the session's name, which a later session of the same
+// name reuses, so a Job also has to carry the name this session's UID gives it.
+func (r *PodTraceSessionReconciler) ownedSessionJobs(ctx context.Context, s *podtracev1alpha1.PodTraceSession, namespaces []string) ([]batchv1.Job, error) {
 	var owned []batchv1.Job
-	for _, ns := range resolved.namespaces {
+	for _, ns := range namespaces {
 		var inNS batchv1.JobList
 		if err := r.List(ctx, &inNS, client.InNamespace(ns), client.MatchingLabels{
 			LabelManagedBy:   ManagedByValue,
@@ -687,9 +723,115 @@ func (r *PodTraceSessionReconciler) ensureJobs(ctx context.Context, s *podtracev
 		}); err != nil {
 			return nil, fmt.Errorf("list owned Jobs in %s: %w", ns, err)
 		}
-		owned = append(owned, inNS.Items...)
+		for i := range inNS.Items {
+			if inNS.Items[i].Name == SessionJobName(s.UID, inNS.Items[i].Labels[LabelNodeName]) {
+				owned = append(owned, inNS.Items[i])
+			}
+		}
 	}
 	return owned, nil
+}
+
+// stopRevokedJobs deletes every running Job of the session that traces a
+// foreign namespace which no longer grants the session's namespace, and
+// returns those namespaces.
+func (r *PodTraceSessionReconciler) stopRevokedJobs(ctx context.Context, s *podtracev1alpha1.PodTraceSession, namespaces []string) ([]string, error) {
+	jobs, err := r.ownedSessionJobs(ctx, s, namespaces)
+	if err != nil {
+		return nil, err
+	}
+	verdicts := map[string]bool{}
+	revoked := map[string]struct{}{}
+	policy := metav1.DeletePropagationBackground
+	for i := range jobs {
+		job := &jobs[i]
+		if jobSucceeded(job) || jobFailed(job) {
+			continue
+		}
+		var withdrawn []string
+		for _, ns := range sessionJobTracedNamespaces(job) {
+			if ns == s.Namespace {
+				continue
+			}
+			gone, seen := verdicts[ns]
+			if !seen {
+				gone, err = r.namespaceWithdrewGrant(ctx, ns, s.Namespace)
+				if err != nil {
+					return nil, err
+				}
+				verdicts[ns] = gone
+			}
+			if gone {
+				withdrawn = append(withdrawn, ns)
+			}
+		}
+		if len(withdrawn) == 0 {
+			continue
+		}
+		if err := r.Delete(ctx, job, &client.DeleteOptions{PropagationPolicy: &policy}); err != nil && !apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("stop Job %s/%s after a withdrawn grant: %w", job.Namespace, job.Name, err)
+		}
+		for _, ns := range withdrawn {
+			revoked[ns] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(revoked))
+	for ns := range revoked {
+		out = append(out, ns)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// namespaceWithdrewGrant reports whether namespace still exists but no longer
+// lets source trace it.
+func (r *PodTraceSessionReconciler) namespaceWithdrewGrant(ctx context.Context, namespace, source string) (bool, error) {
+	var ns corev1.Namespace
+	if err := r.Get(ctx, types.NamespacedName{Name: namespace}, &ns); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("get namespace %q for grant check: %w", namespace, err)
+	}
+	if ns.DeletionTimestamp != nil {
+		return false, nil
+	}
+	return !podtracev1alpha1.NamespaceAllowsTracingFrom(&ns, source), nil
+}
+
+// sessionJobTracedNamespaces reads, from the arguments a session Job was
+// built with, every namespace whose pods it traces.
+func sessionJobTracedNamespaces(job *batchv1.Job) []string {
+	set := map[string]struct{}{}
+	for _, container := range job.Spec.Template.Spec.Containers {
+		if container.Name != sessionContainerName {
+			continue
+		}
+		args := container.Args
+		for i := 0; i+1 < len(args); i++ {
+			switch args[i] {
+			case "--namespace":
+				set[args[i+1]] = struct{}{}
+			case "--namespaces":
+				for _, ns := range strings.Split(args[i+1], ",") {
+					set[ns] = struct{}{}
+				}
+			case "--pods":
+				for _, ref := range strings.Split(args[i+1], ",") {
+					if ns, _, ok := strings.Cut(ref, "/"); ok {
+						set[ns] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+	delete(set, "")
+	out := make([]string, 0, len(set))
+	for ns := range set {
+		out = append(out, ns)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // publishSecretReport moves a terminal session's staged reports into its
@@ -699,7 +841,10 @@ func (r *PodTraceSessionReconciler) publishSecretReport(ctx context.Context, s *
 	if !reportSinkIsSecret(s) || secretReportSettled(s) {
 		return
 	}
-	err := publishSessionSecretReport(ctx, r.Client, r.reader(), s)
+	namespaces, err := sessionSystemNamespaces(ctx, r.Client, r.SystemNamespace)
+	if err == nil {
+		err = publishSessionSecretReport(ctx, r.Client, r.reader(), s, namespaces)
+	}
 	var conflict *reportObjectConflictError
 	switch {
 	case err == nil:

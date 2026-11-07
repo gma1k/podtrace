@@ -23,6 +23,7 @@ const (
 	LabelPodTraceNS     = "podtrace.io/podtrace-namespace"
 	LabelSessionName    = "podtrace.io/session"
 	LabelSessionNS      = "podtrace.io/session-namespace"
+	LabelSessionUID     = "podtrace.io/session-uid"
 	LabelExporterConfig = "podtrace.io/exporter-config"
 	LabelNodeName       = "podtrace.io/node"
 	LabelSchedule       = "podtrace.io/schedule"

@@ -15,7 +15,10 @@ import (
 	"github.com/gma1k/podtrace/internal/config"
 )
 
-const defaultSessionDeadlineOffset = 90 * time.Second
+const (
+	defaultSessionDeadlineOffset = 90 * time.Second
+	sessionContainerName         = "podtrace"
+)
 
 var sessionClock = time.Now
 
@@ -167,7 +170,7 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 	}
 
 	mainContainer := corev1.Container{
-		Name:                     "podtrace",
+		Name:                     sessionContainerName,
 		Image:                    image,
 		ImagePullPolicy:          imagePullPolicy,
 		Args:                     sessionArgs,
@@ -369,7 +372,8 @@ func buildDiagnoseArgs(s *podtracev1alpha1.PodTraceSession, targets sessionTarge
 		args = append(args, "--tracing-sample-rate", strconv.FormatFloat(float64(*s.Spec.SamplePercent)/100.0, 'f', 2, 64))
 	}
 
-	if s.Spec.Selector != nil {
+	selectorScoped := targets.Namespaces == nil || len(targets.Namespaces) > 0
+	if s.Spec.Selector != nil && selectorScoped {
 		args = append(args, "--pod-selector", labelSelectorToFlag(s.Spec.Selector))
 		args = append(args, "--all-in-namespace")
 		if len(targets.Namespaces) > 0 {
