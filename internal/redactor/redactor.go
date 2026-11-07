@@ -172,16 +172,31 @@ const sensitiveHeaderNames = `cookie|set-cookie|authorization|proxy-authorizatio
 	`www-authenticate|proxy-authenticate|` +
 	`x-auth-token|x-api-key|x-csrf-token|x-xsrf-token`
 
+// Captured payloads are prefixes BPF cut at a fixed size, so a secret's
+// closing quote may never have been captured. Each quoted-value alternative
+// therefore runs to its closing quote or, failing that, to the end of the
+// text: a cut-off secret is masked whole, never left behind.
+const (
+	doubleQuotedValue = `"(?:[^"\\]|\\.)*(?:"|\\?$)`
+	singleQuotedValue = `'[^']*(?:'|$)`
+)
+
 func defaultRules() []Rule {
 	return []Rule{
+		{
+			Name:    "private_key_block",
+			Pattern: regexp.MustCompile(`-----BEGIN ([A-Z0-9 ]*)PRIVATE KEY-----(?s:.*?)(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)`),
+			Replace: "-----BEGIN ${1}PRIVATE KEY-----***-----END ${1}PRIVATE KEY-----",
+		},
 		{
 			Name:    "sensitive_headers",
 			Pattern: regexp.MustCompile(`(?im)^(` + sensitiveHeaderNames + `)[ \t]*:[ \t]*.+$`),
 			Replace: "${1}: ***",
 		},
 		{
-			Name:    "credential_kv",
-			Pattern: regexp.MustCompile(`(?i)(` + credentialKeyNames + `)[ \t]*(?:=|%3D)[ \t]*[^\s&;,]+`),
+			Name: "credential_kv",
+			Pattern: regexp.MustCompile(`(?i)(` + credentialKeyNames + `)[ \t]*(?:=|%3D)[ \t]*` +
+				`(?:` + doubleQuotedValue + `|` + singleQuotedValue + `|[^\s&;,]+)`),
 			Replace: "${1}=***",
 		},
 		{
@@ -210,19 +225,47 @@ func defaultRules() []Rule {
 			Replace: "${1}***@",
 		},
 		{
-			Name:    "credential_json",
-			Pattern: regexp.MustCompile(`(?i)"(` + credentialKeyNames + `)"\s*:\s*"(?:[^"\\]|\\.)*"`),
+			Name:    "jwt",
+			Pattern: regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]*`),
+			Replace: "eyJ***",
+		},
+		{
+			Name:    "aws_access_key_id",
+			Pattern: regexp.MustCompile(`\b(AKIA|ASIA)[0-9A-Z]{12,124}\b`),
+			Replace: "${1}***",
+		},
+		{
+			Name:    "github_token",
+			Pattern: regexp.MustCompile(`\b(gh[pousr]_|github_pat_)[A-Za-z0-9_]{22,255}\b`),
+			Replace: "${1}***",
+		},
+		{
+			Name:    "slack_token",
+			Pattern: regexp.MustCompile(`\b(xox[abposr]-)[A-Za-z0-9-]{10,}`),
+			Replace: "${1}***",
+		},
+		{
+			Name:    "stripe_key",
+			Pattern: regexp.MustCompile(`\b([rs]k_(?:live|test)_)[A-Za-z0-9]{10,}`),
+			Replace: "${1}***",
+		},
+		{
+			Name: "credential_json",
+			Pattern: regexp.MustCompile(`(?i)"(` + credentialKeyNames + `)"\s*:\s*` +
+				`(?:` + doubleQuotedValue + `|[^\s,}\]"{\[]+)`),
 			Replace: `"${1}":"***"`,
 		},
 		{
-			Name:    "credential_escaped_json",
-			Pattern: regexp.MustCompile(`(?i)\\"(` + credentialKeyNames + `)\\"\s*:\s*\\"(?:[^"\\]|\\\\\\\\|\\\\\\"|\\[^"\\])*\\"`),
+			Name: "credential_escaped_json",
+			Pattern: regexp.MustCompile(`(?i)\\"(` + credentialKeyNames + `)\\"\s*:\s*` +
+				`(?:\\"(?:[^"\\]|\\\\\\\\|\\\\\\"|\\[^"\\])*(?:\\"|\\*$)|[^\s,}\]"\\{\[]+)`),
 			Replace: `\"${1}\":\"***\"`,
 		},
 		{
-			Name:    "credential_yaml",
-			Pattern: regexp.MustCompile(`(?i)\b(` + credentialKeyNames + `)\s*:\s*[^\s,}]+`),
-			Replace: "${1}: ***",
+			Name: "credential_yaml",
+			Pattern: regexp.MustCompile(`(?i)(')?\b(` + credentialKeyNames + `)'?\s*:\s*` +
+				`(?:` + doubleQuotedValue + `|` + singleQuotedValue + `|[^\s,}]+)`),
+			Replace: "${1}${2}${1}: ***",
 		},
 		{
 			Name:    "email",

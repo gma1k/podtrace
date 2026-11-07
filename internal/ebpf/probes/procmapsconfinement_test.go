@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/procfs"
 	"github.com/gma1k/podtrace/internal/procmaps"
 )
 
@@ -257,5 +259,60 @@ func TestFindGoBinaryInProcess_RefusesRawHostPath(t *testing.T) {
 
 	if got := findGoBinaryInProcess(f.pid); got != "" {
 		t.Fatalf("got %q, want empty: the target is absent from its own rootfs", got)
+	}
+}
+
+func TestMappedFilesMatching_ManySegmentsOfOneFileInAHugeMapsFile(t *testing.T) {
+	f := newFakeProc(t, 41006)
+
+	lib := f.writeContainerFile(t, "/usr/lib/libssl.so.3", "POD LIBSSL")
+	other := f.writeContainerFile(t, "/opt/libssl.so.1.1", "OTHER LIBSSL")
+	var b strings.Builder
+	for i := 0; b.Len() <= procfs.MaxReadFileBytes; i++ {
+		fmt.Fprintf(&b, "%x-%x r-xp 00000000 08:01 12 /usr/lib/libssl.so.3\n", 0x1000*i, 0x1000*i+0x1000)
+	}
+	b.WriteString("7fff0000-7fff1000 r-xp 00000000 08:01 13 /opt/libssl.so.1.1\n")
+	f.writeMaps(t, b.String())
+
+	got := mappedFilesMatching(f.pid, []string{"libssl"})
+	if len(got) != 2 || got[0] != lib || got[1] != other {
+		t.Fatalf("got %v, want [%s %s]", got, lib, other)
+	}
+}
+
+func TestMappedFilesMatching_DeduplicatesDistinctMapsInodesOfOneFile(t *testing.T) {
+	f := newFakeProc(t, 41007)
+
+	lib := f.writeContainerFile(t, "/usr/lib/libssl.so.3", "POD LIBSSL")
+	f.writeMaps(t, ""+
+		"7f00000-7f01000 r-xp 00000000 08:01 12 /usr/lib/libssl.so.3\n"+
+		"7f01000-7f02000 r-xp 00001000 08:01 13 /usr/lib/libssl.so.3\n")
+
+	got := mappedFilesMatching(f.pid, []string{"libssl.so.3"})
+	if len(got) != 1 || got[0] != lib {
+		t.Fatalf("got %v, want [%s]", got, lib)
+	}
+}
+
+func TestMappedFilesMatching_NoMapsFile(t *testing.T) {
+	f := newFakeProc(t, 41008)
+	if got := mappedFilesMatching(f.pid, []string{"libssl"}); got != nil {
+		t.Fatalf("got %v without a maps file", got)
+	}
+}
+
+func TestFindGoBinaryViaProcessMaps_SkipsSharedLibrariesBeforeTheBinary(t *testing.T) {
+	f := newFakeProc(t, 41012)
+
+	f.writeContainerFile(t, "/usr/lib/libc.so.6", "LIBC")
+	app := f.writeContainerFile(t, "/app/server", "POD BINARY")
+	f.writeMaps(t, ""+
+		"7f00000-7f01000 r-xp 00000000 08:01 20 /usr/lib/libc.so.6\n"+
+		"7ffe000-7fff000 r-xp 00000000 00:00 0 [vdso]\n"+
+		"7f01000-7f02000 r-xp 00000000 08:01 21 /app/server\n"+
+		"7f02000-7f03000 r-xp 00000000 08:01 22 /app/other\n")
+
+	if got := findGoBinaryViaProcessMaps(f.pid); got != app {
+		t.Fatalf("got %q, want %q", got, app)
 	}
 }

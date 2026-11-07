@@ -76,3 +76,65 @@ func TestDroppedRecordsDoNotKeepStateAlive(t *testing.T) {
 		t.Fatalf("idle direction kept alive by dropped records: %+v", s)
 	}
 }
+
+func TestARestartedConnectionDoesNotAnswerTheOldConnectionsRequests(t *testing.T) {
+	d := New()
+	oldReq, oldResp := newBlockEncoder(), newBlockEncoder()
+	d.Ingest(rec(0x54, DirEgress, 0, 1, oldReq.encode(reqFields("GET", "/old/1")...)))
+	d.Ingest(rec(0x54, DirEgress, 1, 3, oldReq.encode(reqFields("GET", "/old/3")...)))
+	d.Ingest(rec(0x54, DirIngress, 0, 1, oldResp.encode(hf(":status", "200"))))
+
+	ev := singleEvent(t, d.Ingest(rec(0x54, DirIngress, 0, 3, newBlockEncoder().encode(hf(":status", "404")))))
+	if ev.Target != "404" || ev.LatencyNS != 0 {
+		t.Fatalf("new connection's response = %+v; it was paired with the old connection's request", ev)
+	}
+	if s := d.Stats(); s.SequenceRestarts != 1 || s.Streams != 0 {
+		t.Fatalf("stats = %+v; the old connection's request must be forgotten", s)
+	}
+}
+
+func TestARestartKeepsTheNewConnectionsOwnRequests(t *testing.T) {
+	d := New()
+	oldReq, oldResp := newBlockEncoder(), newBlockEncoder()
+	d.Ingest(rec(0x55, DirEgress, 0, 1, oldReq.encode(reqFields("GET", "/old/1")...)))
+	d.Ingest(rec(0x55, DirEgress, 1, 3, oldReq.encode(reqFields("GET", "/old/3")...)))
+	d.Ingest(rec(0x55, DirIngress, 0, 1, oldResp.encode(hf(":status", "200"))))
+
+	newReq := newBlockEncoder()
+	d.Ingest(rec(0x55, DirEgress, 0, 1, newReq.encode(reqFields("GET", "/new/1")...)))
+	if s := d.Stats(); s.Streams != 2 {
+		t.Fatalf("streams = %d; the old request may still be answered until the response side restarts", s.Streams)
+	}
+
+	ev := singleEvent(t, d.Ingest(rec(0x55, DirIngress, 0, 1, newBlockEncoder().encode(hf(":status", "201")))))
+	if ev.Target != "GET /new/1" {
+		t.Fatalf("new connection's response target = %q, want its own request", ev.Target)
+	}
+	if s := d.Stats(); s.SequenceRestarts != 2 || s.Streams != 0 {
+		t.Fatalf("stats = %+v; the old connection's unanswered request must be forgotten", s)
+	}
+}
+
+func TestARestartReleasesTheOldConnectionsHeldGRPCResponse(t *testing.T) {
+	d := New()
+	req, resp := newBlockEncoder(), newBlockEncoder()
+	d.Ingest(rec(0x56, DirEgress, 0, 1, req.encode(reqFields("POST", "/pkg.Svc/Old", grpcType)...)))
+	d.Ingest(rec(0x56, DirIngress, 0, 1, resp.encode(hf(":status", "200"), grpcType)))
+
+	evs := d.Ingest(rec(0x56, DirIngress, 0, 3, newBlockEncoder().encode(hf(":status", "200"))))
+	if len(evs) != 2 || evs[0].Target != "POST /pkg.Svc/Old" || evs[0].Details != "200" {
+		t.Fatalf("events = %+v; the old call's held response must be released first", evs)
+	}
+
+	trailers := rec(0x56, DirIngress, 1, 1, newBlockEncoder().encode(hf("grpc-status", "0")))
+	ev := singleEvent(t, d.Ingest(trailers))
+	if ev.Target != "grpc-status 0" {
+		t.Fatalf("new connection's trailers = %+v; they finished the old connection's call", ev)
+	}
+}
+
+func TestAStreamMissingFromTheTableIsNotEndedByARestart(t *testing.T) {
+	if endedByRestart(nil, DirIngress, 1) {
+		t.Fatal("a missing stream was reported as ended")
+	}
+}

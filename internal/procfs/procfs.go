@@ -21,6 +21,7 @@
 package procfs
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -67,11 +68,21 @@ func ResetForTesting() {
 	}
 }
 
+const MaxReadFileBytes = 8 << 20
+
+// ErrFileTooLarge reports a file longer than ReadFile's bound.
+var ErrFileTooLarge = errors.New("procfs: file exceeds read limit")
+
 // ReadFile reads a file under config.ProcBasePath. The path must be
 // expressed relative to the procfs root, e.g. "1234/cmdline" or
 // "self/auxv". Absolute paths and ".." traversals are rejected by the
-// underlying os.Root.
+// underlying os.Root. A file longer than MaxReadFileBytes returns
+// ErrFileTooLarge rather than being read into memory.
 func ReadFile(rel string) ([]byte, error) {
+	return readFileLimit(rel, MaxReadFileBytes)
+}
+
+func readFileLimit(rel string, limit int64) ([]byte, error) {
 	r, err := rootForBase(config.ProcBasePath)
 	if err != nil {
 		return nil, fmt.Errorf("procfs: open %s: %w", config.ProcBasePath, err)
@@ -81,7 +92,14 @@ func ReadFile(rel string) ([]byte, error) {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	return io.ReadAll(f)
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %s is over %d bytes", ErrFileTooLarge, rel, limit)
+	}
+	return data, nil
 }
 
 // Stat returns FileInfo for a path within procfs.

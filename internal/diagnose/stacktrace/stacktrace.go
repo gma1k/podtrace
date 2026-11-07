@@ -52,7 +52,16 @@ type stackResolver struct {
 	cache    map[string]string
 	segments map[string][]loadSegment
 	mappings map[string][]exeMapping
-	allMaps  map[uint32][]procmaps.Entry
+	allMaps  map[string][]namedRange
+}
+
+// namedRange is one maps line reduced to what otherMappedFile reports: its
+// address range and the base name of a file other than the executable, ""
+// for the executable itself or an anonymous mapping.
+type namedRange struct {
+	start uint64
+	end   uint64
+	name  string
 }
 
 // loadSegment is a PT_LOAD program header: the file-offset range it covers and
@@ -196,14 +205,13 @@ func (r *stackResolver) exeMappings(pid uint32, exePath string) []exeMapping {
 
 	want := strings.TrimSuffix(exePath, deletedSuffix)
 	var out []exeMapping
-	data, err := procfs.ReadFile(fmt.Sprintf("%d/maps", pid))
-	if err == nil {
-		for _, e := range procmaps.Parse(data) {
-			if e.Path != want {
-				continue
-			}
+	if err := procmaps.ScanProcess(pid, func(e procmaps.Entry) bool {
+		if e.Path == want {
 			out = append(out, exeMapping{start: e.Start, end: e.End, pgoff: e.Offset})
 		}
+		return true
+	}); err != nil {
+		out = nil
 	}
 	r.mappings[key] = out
 	return out
@@ -216,25 +224,45 @@ const deletedSuffix = " (deleted)"
 // anonymous mapping, or the maps cannot be read.
 func (r *stackResolver) otherMappedFile(pid uint32, exePath string, addr uint64) (name string, unmapped bool) {
 	if r.allMaps == nil {
-		r.allMaps = make(map[uint32][]procmaps.Entry)
+		r.allMaps = make(map[string][]namedRange)
 	}
-	entries, ok := r.allMaps[pid]
+	key := fmt.Sprintf("%d|%s", pid, exePath)
+	ranges, ok := r.allMaps[key]
 	if !ok {
-		if data, err := procfs.ReadFile(fmt.Sprintf("%d/maps", pid)); err == nil {
-			entries = procmaps.Parse(data)
-		}
-		r.allMaps[pid] = entries
+		ranges = mappedRanges(pid, strings.TrimSuffix(exePath, deletedSuffix))
+		r.allMaps[key] = ranges
 	}
-	exe := strings.TrimSuffix(exePath, deletedSuffix)
-	for _, e := range entries {
-		if addr >= e.Start && addr < e.End {
-			if e.Path == "" || e.Path == exe {
-				return "", false
+	for _, m := range ranges {
+		if addr >= m.start && addr < m.end {
+			return m.name, false
+		}
+	}
+	return "", len(ranges) > 0
+}
+
+// mappedRanges reads pid's maps keeping only base names, interned, so the
+// cache holds at most one copy of each name however many lines repeat it.
+func mappedRanges(pid uint32, exe string) []namedRange {
+	var ranges []namedRange
+	names := make(map[string]string)
+	if err := procmaps.ScanProcess(pid, func(e procmaps.Entry) bool {
+		m := namedRange{start: e.Start, end: e.End}
+		if e.Path != "" && e.Path != exe {
+			base := filepath.Base(e.Path)
+			if interned, seen := names[base]; seen {
+				base = interned
+			} else {
+				base = strings.Clone(base)
+				names[base] = base
 			}
-			return filepath.Base(e.Path), false
+			m.name = base
 		}
+		ranges = append(ranges, m)
+		return true
+	}); err != nil {
+		return nil
 	}
-	return "", len(entries) > 0
+	return ranges
 }
 
 // loadSegments returns exePath's PT_LOAD program headers, parsing the ELF once

@@ -2812,6 +2812,7 @@ func (t *Tracer) getProcessNameQuick(pid uint32) string {
 type l7DecoderDropSnapshot struct {
 	h2         h2decode.Stats
 	h3Sections uint64
+	h3Sheds    uint64
 }
 
 // publishL7DecoderStats exports what the userspace L7 decoders discarded and
@@ -2833,6 +2834,12 @@ func (t *Tracer) publishL7DecoderStats() {
 		dropped := t.h3SectionStash.Dropped()
 		metricsexporter.RecordL7DecoderDrops("h3", "section_stash_full", dropped-last.h3Sections)
 		last.h3Sections = dropped
+	}
+	if t.h3Assembler != nil {
+		s := t.h3Assembler.Stats()
+		metricsexporter.RecordL7DecoderDrops("h3", "budget_shed", s.BudgetSheds-last.h3Sheds)
+		metricsexporter.RecordL7DecoderRetainedBytes("h3", s.RetainedBytes)
+		last.h3Sheds = s.BudgetSheds
 	}
 }
 

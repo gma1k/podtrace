@@ -3,6 +3,7 @@
 package qpackdecode
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math"
@@ -72,6 +73,13 @@ func (d *Decoder) InsertCount() uint64 {
 	return d.evicted + uint64(len(d.entries))
 }
 
+// RetainedBytes is the memory the peer's traffic makes this decoder hold:
+// its dynamic table (RFC 9204 entry sizes) plus buffered encoder-stream
+// bytes.
+func (d *Decoder) RetainedBytes() int {
+	return safeconv.Uint64ToInt(d.size) + cap(d.remainder)
+}
+
 // ParseEncoderStream consumes the next chunk of the peer's encoder stream.
 func (d *Decoder) ParseEncoderStream(p []byte) error {
 	if len(d.remainder)+len(p) > maxEncoderRemainder {
@@ -81,6 +89,9 @@ func (d *Decoder) ParseEncoderStream(p []byte) error {
 	for len(d.remainder) > 0 {
 		consumed, err := d.parseEncoderInstruction(d.remainder)
 		if errors.Is(err, errIncomplete) {
+			if cap(d.remainder) > 2*len(d.remainder) {
+				d.remainder = bytes.Clone(d.remainder)
+			}
 			return nil
 		}
 		if err != nil {
