@@ -19,6 +19,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 	"github.com/gma1k/podtrace/internal/alerting"
 	"github.com/gma1k/podtrace/internal/diagnose/detector"
 	"github.com/gma1k/podtrace/internal/inspect"
@@ -205,11 +206,19 @@ func (c *IssueCorrelator) Correlate(ctx context.Context) Correlation {
 // appears.
 func (c *IssueCorrelator) announce(ctx context.Context, result Correlation, pods map[detector.IssueRef]string) {
 	current := map[string]bool{}
+	grants := map[[2]string]bool{}
 	for _, is := range result.Issues {
 		var elsewhere []string
+		withheld := false
 		for _, cause := range is.Causes {
-			if !cause.SameWorkload(is.IssueRef) {
+			if cause.SameWorkload(is.IssueRef) {
+				continue
+			}
+			if c.causeDisclosable(ctx, is.Namespace, cause, grants) {
 				elsewhere = append(elsewhere, cause.String())
+			} else if !withheld {
+				withheld = true
+				elsewhere = append(elsewhere, withheldCause)
 			}
 		}
 		if len(elsewhere) == 0 {
@@ -240,6 +249,35 @@ func (c *IssueCorrelator) announce(ctx context.Context, result Correlation, pods
 			delete(c.announced, key)
 		}
 	}
+}
+
+const withheldCause = "an active issue in another namespace that does not grant this one through " +
+	"the " + podtracev1alpha1.AllowTracingFromAnnotation + " annotation"
+
+// causeDisclosable reports whether every namespace a cause names, the root
+// and each hop on the way to it, is the affected namespace or grants it.
+func (c *IssueCorrelator) causeDisclosable(ctx context.Context, affected string, cause detector.Cause, grants map[[2]string]bool) bool {
+	namespaces := []string{cause.Namespace}
+	for _, via := range cause.Via {
+		namespaces = append(namespaces, via.Namespace)
+	}
+	for _, ns := range namespaces {
+		if ns == affected {
+			continue
+		}
+		key := [2]string{ns, affected}
+		granted, seen := grants[key]
+		if !seen {
+			var target corev1.Namespace
+			granted = c.Client.Get(ctx, client.ObjectKey{Name: ns}, &target) == nil &&
+				podtracev1alpha1.NamespaceAllowsTracingFrom(&target, affected)
+			grants[key] = granted
+		}
+		if !granted {
+			return false
+		}
+	}
+	return true
 }
 
 // namedPod reads the pod an agent named, or nil when it named none or the

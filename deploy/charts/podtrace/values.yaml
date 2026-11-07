@@ -77,8 +77,10 @@ operator:
     endpointAllowlist: []
 
 agent:
-  # Extra repositories a TracerConfig may point the agent image at. The
-  # chart's own image.repository is always allowed. "*" disables the check.
+  # Extra repositories a TracerConfig may point the agent and session Job
+  # image at. The chart's own image.repository is always allowed. "*"
+  # disables the check. Narrowing it stops agents already running an image
+  # it no longer allows.
   allowedImageRepos: []
   resources:
     requests:

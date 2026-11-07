@@ -25,7 +25,7 @@ func ensureSessionServiceAccount(ctx context.Context, c client.Client, s *podtra
 		},
 	}
 	if _, err := controllerutil.CreateOrUpdate(ctx, c, sa, func() error {
-		sa.Labels = mergeLabels(sa.Labels, sessionRBACLabels(s))
+		sa.Labels = mergeLabels(sa.Labels, sessionChildLabels(s))
 		return nil
 	}); err != nil {
 		return fmt.Errorf("ensure session SA: %w", err)
@@ -78,6 +78,7 @@ func ensureSessionReportRBAC(ctx context.Context, c client.Client, s *podtracev1
 			LabelComponent:   ComponentSession,
 			LabelSessionName: s.Name,
 			LabelSessionNS:   s.Namespace,
+			LabelSessionUID:  string(s.UID),
 		})
 		role.Rules = buildSessionReportRules(s.Spec.ReportRef)
 		return controllerutil.SetControllerReference(s, role, scheme)
@@ -94,6 +95,7 @@ func ensureSessionReportRBAC(ctx context.Context, c client.Client, s *podtracev1
 			LabelComponent:   ComponentSession,
 			LabelSessionName: s.Name,
 			LabelSessionNS:   s.Namespace,
+			LabelSessionUID:  string(s.UID),
 		})
 		binding.RoleRef = rbacv1.RoleRef{
 			APIGroup: rbacv1.GroupName,
@@ -125,6 +127,15 @@ func cleanupSessionReportRBAC(ctx context.Context, c client.Client, s *podtracev
 		}
 	}
 	return nil
+}
+
+// sessionChildLabels are the labels written on a session's children: the
+// selector labels plus the session's UID, which tells the children of two
+// sessions that share a name apart.
+func sessionChildLabels(s *podtracev1alpha1.PodTraceSession) map[string]string {
+	labels := sessionRBACLabels(s)
+	labels[LabelSessionUID] = string(s.UID)
+	return labels
 }
 
 // sessionRBACLabels are the labels every per-session RBAC object carries, so
@@ -170,7 +181,7 @@ func ensureSessionPodReadRBAC(ctx context.Context, c client.Client, s *podtracev
 		sameNS := ns == s.Namespace
 		role := &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: SessionPodReadRoleName(s.UID), Namespace: ns}}
 		if _, err := controllerutil.CreateOrUpdate(ctx, c, role, func() error {
-			role.Labels = mergeLabels(role.Labels, sessionRBACLabels(s))
+			role.Labels = mergeLabels(role.Labels, sessionChildLabels(s))
 			role.Rules = []rbacv1.PolicyRule{
 				{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get", "list", "watch"}},
 				{APIGroups: []string{""}, Resources: []string{"events"}, Verbs: []string{"get", "list", "watch"}},
@@ -185,7 +196,7 @@ func ensureSessionPodReadRBAC(ctx context.Context, c client.Client, s *podtracev
 
 		binding := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: SessionPodReadRoleBindingName(s.UID), Namespace: ns}}
 		if _, err := controllerutil.CreateOrUpdate(ctx, c, binding, func() error {
-			binding.Labels = mergeLabels(binding.Labels, sessionRBACLabels(s))
+			binding.Labels = mergeLabels(binding.Labels, sessionChildLabels(s))
 			binding.RoleRef = rbacv1.RoleRef{
 				APIGroup: rbacv1.GroupName,
 				Kind:     "Role",

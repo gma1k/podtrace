@@ -111,7 +111,7 @@ func TestPublishSessionSecretReport_ErrorsSurface(t *testing.T) {
 	for name, funcs := range cases {
 		t.Run(name, func(t *testing.T) {
 			c := stagingClient(t, funcs, stagedReport(s, "n1", "one"))
-			if err := publishSessionSecretReport(context.Background(), c, c, s); err == nil {
+			if err := publishSessionSecretReport(context.Background(), c, c, s, []string{sessMoreSysNS}); err == nil {
 				t.Errorf("a failed %s must be surfaced", name)
 			}
 		})
@@ -129,7 +129,7 @@ func TestPublishSessionSecretReport_SkipsStagingSecretDeletedMeanwhile(t *testin
 		},
 	}, stagedReport(s, "n1", "one"), stagedReport(s, "n2", "two"))
 
-	if err := publishSessionSecretReport(context.Background(), c, c, s); err != nil {
+	if err := publishSessionSecretReport(context.Background(), c, c, s, []string{sessMoreSysNS}); err != nil {
 		t.Fatalf("a staging Secret gone between list and read must be skipped: %v", err)
 	}
 	var report corev1.Secret

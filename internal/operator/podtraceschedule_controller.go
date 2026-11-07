@@ -3,6 +3,7 @@ package operator
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"sort"
 	"strings"
 	"time"
@@ -406,10 +407,21 @@ func (r *PodTraceScheduleReconciler) ensureSessionForRun(ctx context.Context, sc
 func scheduledSessionName(scheduleName string, runTime time.Time) string {
 	raw := fmt.Sprintf(scheduleSessionNameFmt, scheduleName, runTime.Unix())
 	if len(raw) > 63 {
-		trail := fmt.Sprintf("-%d", runTime.Unix())
-		raw = truncateNamePrefix(scheduleName, 63-len(trail)) + trail
+		raw = sessionNameWithSuffix(scheduleName, fmt.Sprintf("-%d", runTime.Unix()))
 	}
 	return raw
+}
+
+// sessionNameWithSuffix appends suffix to the schedule name, keeping the
+// result within 63 characters.
+func sessionNameWithSuffix(scheduleName, suffix string) string {
+	if len(scheduleName)+len(suffix) <= 63 {
+		return truncateNamePrefix(scheduleName, 63-len(suffix)) + suffix
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(scheduleName))
+	tag := fmt.Sprintf("-%08x", h.Sum32())
+	return truncateNamePrefix(scheduleName, 63-len(suffix)-len(tag)) + tag + suffix
 }
 
 // skipDueRuns records every run due by now as skipped, the way a CronJob
@@ -517,9 +529,7 @@ func (r *PodTraceScheduleReconciler) setCondition(sch *podtracev1alpha1.PodTrace
 
 // patchStatus writes the computed status, retrying on optimistic-concurrency
 // conflicts by re-reading the latest object and re-applying the computed
-// status. Conflicts used to be swallowed with no requeue — for a schedule
-// that silently dropped status.lastScheduleTime, and under ReplaceConcurrent
-// the re-derived tick first deleted the session it had just created.
+// status.
 func (r *PodTraceScheduleReconciler) patchStatus(ctx context.Context, sch *podtracev1alpha1.PodTraceSchedule) error {
 	desired := sch.Status.DeepCopy()
 	key := types.NamespacedName{Namespace: sch.Namespace, Name: sch.Name}

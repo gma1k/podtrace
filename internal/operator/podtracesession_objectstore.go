@@ -3,6 +3,7 @@ package operator
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -29,54 +30,96 @@ type reportUploadObservation struct {
 	UploaderDisabled bool
 }
 
-func harvestReportLocation(ctx context.Context, c client.Client, s *podtracev1alpha1.PodTraceSession, systemNS string) (reportUploadObservation, error) {
+// harvestReportLocation reads the uploader sidecar of every node's session
+// pod across the system namespaces the session's Jobs run in.
+func harvestReportLocation(ctx context.Context, c client.Client, s *podtracev1alpha1.PodTraceSession, systemNamespaces []string) (reportUploadObservation, error) {
 	if s == nil || s.Spec.ReportRef == nil || s.Spec.ReportRef.ObjectStore == nil {
 		return reportUploadObservation{}, nil
 	}
 
-	var pods corev1.PodList
-	if err := c.List(ctx, &pods,
-		client.InNamespace(systemNS),
-		client.MatchingLabels{
-			LabelSessionName: s.Name,
-			LabelSessionNS:   s.Namespace,
-		},
-	); err != nil {
-		return reportUploadObservation{}, fmt.Errorf("list session pods: %w", err)
+	latest := map[string]*corev1.Pod{}
+	podCount := 0
+	for _, ns := range systemNamespaces {
+		var pods corev1.PodList
+		if err := c.List(ctx, &pods,
+			client.InNamespace(ns),
+			client.MatchingLabels{
+				LabelSessionName: s.Name,
+				LabelSessionNS:   s.Namespace,
+			},
+		); err != nil {
+			return reportUploadObservation{}, fmt.Errorf("list session pods in %s: %w", ns, err)
+		}
+		for i := range pods.Items {
+			pod := pods.Items[i]
+			podCount++
+			node := pod.Labels[LabelNodeName]
+			if prior, ok := latest[node]; ok && !pod.CreationTimestamp.After(prior.CreationTimestamp.Time) {
+				continue
+			}
+			latest[node] = &pod
+		}
 	}
+
+	nodes := make([]string, 0, len(latest))
+	for node := range latest {
+		nodes = append(nodes, node)
+	}
+	sort.Strings(nodes)
 
 	var obs reportUploadObservation
 	hasUploader := false
-	for i := range pods.Items {
-		pod := &pods.Items[i]
+	allTerminated := true
+	firstURI := ""
+	for _, node := range nodes {
+		pod := latest[node]
+		uploader := false
 		for _, c := range pod.Spec.InitContainers {
 			if c.Name == reportUploaderContainerName {
-				hasUploader = true
+				uploader = true
 			}
 		}
-		for _, cs := range pod.Status.InitContainerStatuses {
-			if cs.Name != reportUploaderContainerName {
-				continue
+		var status *corev1.ContainerStatus
+		for i := range pod.Status.InitContainerStatuses {
+			if pod.Status.InitContainerStatuses[i].Name == reportUploaderContainerName {
+				status = &pod.Status.InitContainerStatuses[i]
+				uploader = true
 			}
-			hasUploader = true
-			if cs.RestartCount > obs.Attempts {
-				obs.Attempts = cs.RestartCount
+		}
+		if !uploader {
+			continue
+		}
+		hasUploader = true
+		if status == nil || status.State.Terminated == nil {
+			allTerminated = false
+			if status != nil && status.RestartCount > obs.Attempts {
+				obs.Attempts = status.RestartCount
 			}
-			if cs.State.Terminated == nil {
-				continue
+			continue
+		}
+		if status.RestartCount > obs.Attempts {
+			obs.Attempts = status.RestartCount
+		}
+		msg := bestTerminationMessage(*status)
+		if status.State.Terminated.ExitCode != 0 || msg == "" {
+			if len(nodes) > 1 {
+				msg = "node " + node + ": " + msg
 			}
-			msg := bestTerminationMessage(cs)
 			obs.Terminated = true
-			if cs.State.Terminated.ExitCode == 0 && msg != "" {
-				obs.ResolvedURI = msg
-				obs.Succeeded = true
-				return obs, nil
-			}
+			obs.Succeeded = false
 			obs.ResolvedURI = msg
 			return obs, nil
 		}
+		if firstURI == "" {
+			firstURI = msg
+		}
 	}
-	obs.UploaderDisabled = len(pods.Items) > 0 && !hasUploader
+	obs.UploaderDisabled = podCount > 0 && !hasUploader
+	if hasUploader && allTerminated {
+		obs.Terminated = true
+		obs.Succeeded = true
+		obs.ResolvedURI = firstURI
+	}
 	return obs, nil
 }
 

@@ -232,7 +232,7 @@ func TestTC_Reconcile_CleanupStaleErrorLoggedNotFatal(t *testing.T) {
 	scheme := newOperatorScheme(t)
 	tc := &podtracev1alpha1.TracerConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: DefaultTracerConfigName},
-		Spec:       podtracev1alpha1.TracerConfigSpec{Image: "img"},
+		Spec:       podtracev1alpha1.TracerConfigSpec{Image: "ghcr.io/gma1k/podtrace:test"},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).
 		WithStatusSubresource(&podtracev1alpha1.TracerConfig{}).

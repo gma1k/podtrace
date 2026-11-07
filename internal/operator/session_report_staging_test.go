@@ -100,7 +100,7 @@ func TestPublishSessionSecretReport_MergesStagedReportsAndCleansUp(t *testing.T)
 	c := fake.NewClientBuilder().WithScheme(newOperatorScheme(t)).
 		WithObjects(stagedReport(s, "n1", "one"), stagedReport(s, "n2", "two"), stagingRole).Build()
 
-	if err := publishSessionSecretReport(context.Background(), c, c, s); err != nil {
+	if err := publishSessionSecretReport(context.Background(), c, c, s, []string{sessMoreSysNS}); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
 	var report corev1.Secret
@@ -135,7 +135,7 @@ func TestPublishSessionSecretReport_RefusesSecretItDidNotCreate(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(newOperatorScheme(t)).
 		WithObjects(foreign, stagedReport(s, "n1", "one")).Build()
 
-	err := publishSessionSecretReport(context.Background(), c, c, s)
+	err := publishSessionSecretReport(context.Background(), c, c, s, []string{sessMoreSysNS})
 	var conflict *reportObjectConflictError
 	if !errors.As(err, &conflict) {
 		t.Fatalf("want a reportObjectConflictError, got %v", err)
@@ -164,7 +164,7 @@ func TestPublishSessionSecretReport_ReplacesEarlierRunOfSameSchedule(t *testing.
 	c := fake.NewClientBuilder().WithScheme(newOperatorScheme(t)).
 		WithObjects(earlier, stagedReport(s, "n1", "new")).Build()
 
-	if err := publishSessionSecretReport(context.Background(), c, c, s); err != nil {
+	if err := publishSessionSecretReport(context.Background(), c, c, s, []string{sessMoreSysNS}); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
 	var got corev1.Secret

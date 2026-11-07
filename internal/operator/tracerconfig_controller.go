@@ -80,22 +80,12 @@ func (r *TracerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	if err := imagepolicy.RepoAllowed(tc.Spec.Image, config.AllowedAgentImageRepos()); err != nil {
 		logger.Info("refusing agent fleet: image not allowed", "image", tc.Spec.Image, "error", err.Error())
-		r.setCondition(&tc, ConditionDegraded, metav1.ConditionTrue, "ImageNotAllowed", err.Error())
-		r.setCondition(&tc, ConditionReady, metav1.ConditionFalse, "ImageNotAllowed", err.Error())
-		if uerr := r.Status().Update(ctx, &tc); uerr != nil && !apierrors.IsConflict(uerr) {
-			return ctrl.Result{}, fmt.Errorf("update status: %w", uerr)
-		}
-		return ctrl.Result{}, nil
+		return r.refuseFleet(ctx, &tc, "ImageNotAllowed", err)
 	}
 
 	if err := podtracev1alpha1.ValidateSystemNamespace(tc.Spec.SystemNamespace); err != nil {
 		logger.Info("refusing agent fleet: system namespace not allowed", "systemNamespace", tc.Spec.SystemNamespace)
-		r.setCondition(&tc, ConditionDegraded, metav1.ConditionTrue, "SystemNamespaceInvalid", err.Error())
-		r.setCondition(&tc, ConditionReady, metav1.ConditionFalse, "SystemNamespaceInvalid", err.Error())
-		if uerr := r.Status().Update(ctx, &tc); uerr != nil && !apierrors.IsConflict(uerr) {
-			return ctrl.Result{}, fmt.Errorf("update status: %w", uerr)
-		}
-		return ctrl.Result{}, nil
+		return r.refuseFleet(ctx, &tc, "SystemNamespaceInvalid", err)
 	}
 
 	systemNS := r.systemNamespaceFor(&tc)
@@ -161,6 +151,69 @@ func (r *TracerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	return ctrl.Result{}, nil
 }
+
+// refuseFleet records why the TracerConfig is refused. The fleet it deployed
+// earlier keeps running while it still complies with policy, so a mistaken
+// edit does not stop tracing; a DaemonSet that itself runs a disallowed image
+// or sits in a refused namespace is deleted, since the refusal exists to keep
+// exactly those agents off the nodes.
+func (r *TracerConfigReconciler) refuseFleet(ctx context.Context, tc *podtracev1alpha1.TracerConfig, reason string, cause error) (ctrl.Result, error) {
+	message := cause.Error()
+	stopped, err := r.stopNoncompliantAgents(ctx, tc)
+	if err != nil {
+		message += "; " + err.Error()
+	} else if len(stopped) > 0 {
+		log.FromContext(ctx).Info("deleted agent DaemonSets that no longer comply with policy",
+			"tracerConfig", tc.Name, "reason", reason, "daemonSets", stopped)
+		message += fmt.Sprintf("; deleted agent DaemonSet(s) %v, which no longer comply with policy", stopped)
+	}
+	r.setCondition(tc, ConditionDegraded, metav1.ConditionTrue, reason, message)
+	r.setCondition(tc, ConditionReady, metav1.ConditionFalse, reason, message)
+	r.setCondition(tc, ConditionReconciled, metav1.ConditionFalse, reason, "TracerConfig refused; no agent infrastructure is reconciled from it")
+	if uerr := r.Status().Update(ctx, tc); uerr != nil && !apierrors.IsConflict(uerr) {
+		return ctrl.Result{}, fmt.Errorf("update status: %w", uerr)
+	}
+	return ctrl.Result{}, err
+}
+
+// stopNoncompliantAgents deletes the TracerConfig's agent DaemonSets whose
+// pod template runs an image outside the allowed repositories or that live in
+// a system namespace the operator refuses, and returns them as namespace/name.
+func (r *TracerConfigReconciler) stopNoncompliantAgents(ctx context.Context, tc *podtracev1alpha1.TracerConfig) ([]string, error) {
+	var stopped []string
+	for _, selector := range staleAgentSelectors(tc.Name) {
+		var list appsv1.DaemonSetList
+		if err := r.List(ctx, &list, selector); err != nil {
+			return stopped, fmt.Errorf("list agent DaemonSets: %w", err)
+		}
+		for i := range list.Items {
+			ds := &list.Items[i]
+			if !metav1.IsControlledBy(ds, tc) || r.agentDaemonSetCompliant(ds) {
+				continue
+			}
+			if err := r.Delete(ctx, ds); err != nil && !apierrors.IsNotFound(err) {
+				return stopped, fmt.Errorf("delete agent DaemonSet %s/%s: %w", ds.Namespace, ds.Name, err)
+			}
+			stopped = append(stopped, ds.Namespace+"/"+ds.Name)
+		}
+	}
+	slices.Sort(stopped)
+	return stopped, nil
+}
+
+func (r *TracerConfigReconciler) agentDaemonSetCompliant(ds *appsv1.DaemonSet) bool {
+	if ds.Namespace != r.SystemNamespace && podtracev1alpha1.ValidateSystemNamespace(ds.Namespace) != nil {
+		return false
+	}
+	for _, container := range ds.Spec.Template.Spec.Containers {
+		if container.Name == agentContainerName && imagepolicy.RepoAllowed(container.Image, config.AllowedAgentImageRepos()) != nil {
+			return false
+		}
+	}
+	return true
+}
+
+const agentContainerName = "agent"
 
 // AnnotationAlertWebhookHash on the agent pod template carries a hash of the
 // alert webhook URL read from webhookURLSecretRef, so changing the Secret

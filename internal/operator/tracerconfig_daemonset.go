@@ -134,7 +134,7 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 				ImagePullSecrets:              tc.Spec.ImagePullSecrets,
 				TerminationGracePeriodSeconds: ptrInt64(agentTerminationGracePeriodSeconds),
 				Containers: []corev1.Container{{
-					Name:            "agent",
+					Name:            agentContainerName,
 					Image:           tc.Spec.Image,
 					ImagePullPolicy: imagePullPolicy,
 					Args:            args,

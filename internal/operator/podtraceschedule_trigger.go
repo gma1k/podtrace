@@ -597,7 +597,7 @@ func triggeredSessionName(scheduleName, namespace, pod string, at time.Time) str
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(namespace + "/" + pod))
 	suffix := fmt.Sprintf("-%08x-%d", h.Sum32(), at.Unix())
-	return truncateNamePrefix(scheduleName, 63-len(suffix)) + suffix
+	return sessionNameWithSuffix(scheduleName, suffix)
 }
 
 func containsString(s []string, v string) bool {

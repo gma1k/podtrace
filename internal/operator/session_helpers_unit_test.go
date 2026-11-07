@@ -72,7 +72,7 @@ func TestSess_NodeAtCapacityRequeues(t *testing.T) {
 	ec := otlpExporter("ec", "team-a")
 	tc := &podtracev1alpha1.TracerConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "default"},
-		Spec:       podtracev1alpha1.TracerConfigSpec{MaxConcurrentSessionsPerNode: 1},
+		Spec:       podtracev1alpha1.TracerConfigSpec{Image: "ghcr.io/gma1k/podtrace:test", MaxConcurrentSessionsPerNode: 1},
 	}
 	otherJob := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{

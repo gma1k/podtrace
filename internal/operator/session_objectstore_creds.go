@@ -54,6 +54,7 @@ func ensureSessionObjectStoreCredentials(ctx context.Context, c client.Client, r
 				LabelComponent:   "objectstore-credentials",
 				LabelSessionName: s.Name,
 				LabelSessionNS:   s.Namespace,
+				LabelSessionUID:  string(s.UID),
 			},
 			Annotations: map[string]string{
 				"podtrace.io/source-ref": s.Namespace + "/" + ref.Name,

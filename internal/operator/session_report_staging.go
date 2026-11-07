@@ -70,6 +70,7 @@ func ensureSessionReportStaging(ctx context.Context, c client.Client, s *podtrac
 			names = append(names, name)
 			labels := reportStagingLabels(s)
 			labels[LabelNodeName] = node
+			labels[LabelSessionUID] = string(s.UID)
 			staging := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: labels},
 				Type:       corev1.SecretTypeOpaque,
@@ -83,7 +84,7 @@ func ensureSessionReportStaging(ctx context.Context, c client.Client, s *podtrac
 		roleName := SessionReportStagingRoleName(s.UID)
 		role := &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: roleName, Namespace: ns}}
 		if _, err := controllerutil.CreateOrUpdate(ctx, c, role, func() error {
-			role.Labels = mergeLabels(role.Labels, sessionRBACLabels(s))
+			role.Labels = mergeLabels(role.Labels, sessionChildLabels(s))
 			role.Rules = []rbacv1.PolicyRule{
 				{APIGroups: []string{""}, Resources: []string{"secrets"}, ResourceNames: names, Verbs: []string{"get", "delete"}},
 				{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"create"}},
@@ -94,7 +95,7 @@ func ensureSessionReportStaging(ctx context.Context, c client.Client, s *podtrac
 		}
 		binding := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: roleName, Namespace: ns}}
 		if _, err := controllerutil.CreateOrUpdate(ctx, c, binding, func() error {
-			binding.Labels = mergeLabels(binding.Labels, sessionRBACLabels(s))
+			binding.Labels = mergeLabels(binding.Labels, sessionChildLabels(s))
 			binding.RoleRef = rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: roleName}
 			binding.Subjects = sessionSubjects(s, []string{ns})
 			return nil
@@ -130,25 +131,39 @@ var errNothingStaged = errors.New("no staged report: the session ended before an
 
 // publishSessionSecretReport merges every staged per-node report into the
 // tenant's reportRef Secret, then deletes the staging Secrets.
-func publishSessionSecretReport(ctx context.Context, c client.Client, reader client.Reader, s *podtracev1alpha1.PodTraceSession) error {
+func publishSessionSecretReport(ctx context.Context, c client.Client, reader client.Reader, s *podtracev1alpha1.PodTraceSession, systemNamespaces []string) error {
 	if err := checkSecretReportTarget(ctx, c, s); err != nil {
 		return err
 	}
-	var staged corev1.SecretList
-	if err := c.List(ctx, &staged, client.MatchingLabels(reportStagingLabels(s))); err != nil {
-		return fmt.Errorf("list report staging Secrets: %w", err)
+	var staged []corev1.Secret
+	for _, ns := range systemNamespaces {
+		var inNS corev1.SecretList
+		if err := c.List(ctx, &inNS, client.InNamespace(ns), client.MatchingLabels(reportStagingLabels(s))); err != nil {
+			return fmt.Errorf("list report staging Secrets in %s: %w", ns, err)
+		}
+		for i := range inNS.Items {
+			if inNS.Items[i].Name == SessionReportStagingName(s.UID, inNS.Items[i].Labels[LabelNodeName]) {
+				staged = append(staged, inNS.Items[i])
+			}
+		}
 	}
-	if len(staged.Items) == 0 {
+	if len(staged) == 0 {
 		return errNothingStaged
 	}
+	sort.Slice(staged, func(i, j int) bool {
+		if staged[i].Namespace != staged[j].Namespace {
+			return staged[i].Namespace < staged[j].Namespace
+		}
+		return staged[i].Name < staged[j].Name
+	})
 	data := map[string][]byte{}
-	for i := range staged.Items {
+	for i := range staged {
 		var full corev1.Secret
-		if err := reader.Get(ctx, client.ObjectKeyFromObject(&staged.Items[i]), &full); err != nil {
+		if err := reader.Get(ctx, client.ObjectKeyFromObject(&staged[i]), &full); err != nil {
 			if apierrors.IsNotFound(err) {
 				continue
 			}
-			return fmt.Errorf("read report staging Secret %s/%s: %w", staged.Items[i].Namespace, staged.Items[i].Name, err)
+			return fmt.Errorf("read report staging Secret %s/%s: %w", staged[i].Namespace, staged[i].Name, err)
 		}
 		for k, v := range full.Data {
 			data[k] = v
@@ -174,8 +189,8 @@ func publishSessionSecretReport(ctx context.Context, c client.Client, reader cli
 	// The staging grant includes an unscoped secrets create; it must not
 	// outlive the report it was for.
 	namespaces := map[string]struct{}{}
-	for i := range staged.Items {
-		namespaces[staged.Items[i].Namespace] = struct{}{}
+	for i := range staged {
+		namespaces[staged[i].Namespace] = struct{}{}
 	}
 	for ns := range namespaces {
 		if err := cleanupSessionReportStaging(ctx, c, s, ns); err != nil {

@@ -29,7 +29,7 @@ func sessionPod(name string, initContainers ...string) *corev1.Pod {
 func TestHarvestReportLocation_PodsWithoutUploaderMeanUploaderDisabled(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(harvestScheme(t)).WithObjects(sessionPod("diag-pod")).Build()
 
-	obs, err := harvestReportLocation(context.Background(), c, sessionWithObjectStore(""), "podtrace-system")
+	obs, err := harvestReportLocation(context.Background(), c, sessionWithObjectStore(""), []string{"podtrace-system"})
 	if err != nil {
 		t.Fatalf("harvest: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestHarvestReportLocation_PodsWithoutUploaderMeanUploaderDisabled(t *testin
 func TestHarvestReportLocation_UploaderInSpecIsNotDisabled(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(harvestScheme(t)).WithObjects(sessionPod("diag-pod", reportUploaderContainerName)).Build()
 
-	obs, err := harvestReportLocation(context.Background(), c, sessionWithObjectStore(""), "podtrace-system")
+	obs, err := harvestReportLocation(context.Background(), c, sessionWithObjectStore(""), []string{"podtrace-system"})
 	if err != nil {
 		t.Fatalf("harvest: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestHarvestReportLocation_UploaderInSpecIsNotDisabled(t *testing.T) {
 func TestHarvestReportLocation_NoPodsYetIsNotDisabled(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(harvestScheme(t)).Build()
 
-	obs, err := harvestReportLocation(context.Background(), c, sessionWithObjectStore(""), "podtrace-system")
+	obs, err := harvestReportLocation(context.Background(), c, sessionWithObjectStore(""), []string{"podtrace-system"})
 	if err != nil {
 		t.Fatalf("harvest: %v", err)
 	}

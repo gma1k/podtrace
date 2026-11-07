@@ -236,7 +236,10 @@ Cluster-wide pod read, cluster-wide secret read, and access to other
 ConfigMaps in the namespace are **not** granted. The session SA cannot
 exfiltrate any sink other than its own. A pod-read grant in another
 namespace is revoked as soon as the session stops targeting it, for
-example when that namespace withdraws its consent.
+example when that namespace withdraws its consent. The Jobs tracing that
+namespace are stopped at the same time and the session fails with reason
+`CrossNamespaceGrantRevoked`; see
+[Cross-namespace CR targeting](cross-namespace-cr-targeting.md).
 
 ## Constraints
 
