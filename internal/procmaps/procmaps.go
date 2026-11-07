@@ -16,8 +16,15 @@
 package procmaps
 
 import (
+	"bufio"
+	"bytes"
+	"errors"
+	"fmt"
+	"io"
 	"strconv"
 	"strings"
+
+	"github.com/gma1k/podtrace/internal/procfs"
 )
 
 // fixedColumns is the number of whitespace-separated columns the kernel writes
@@ -26,6 +33,8 @@ const fixedColumns = 5
 
 // deletedSuffix is appended by the kernel once the backing file is unlinked.
 const deletedSuffix = " (deleted)"
+
+const MaxLineBytes = 8 << 10
 
 // Entry is one parsed line of /proc/<pid>/maps.
 type Entry struct {
@@ -42,6 +51,11 @@ type Entry struct {
 	Path string
 	// Deleted reports that the backing file has been unlinked.
 	Deleted bool
+	// Device is the raw "<major>:<minor>" column and Inode the backing
+	// file's inode number, 0 for an anonymous mapping. Together they name
+	// the mapped file within one maps listing.
+	Device string
+	Inode  uint64
 }
 
 // Executable reports whether the mapping carries the execute bit, i.e. holds
@@ -60,7 +74,7 @@ func ParseLine(line string) (Entry, bool) {
 	var e Entry
 	rest := line
 
-	var offsetField string
+	var offsetField, inodeField string
 	for column := 0; column < fixedColumns; column++ {
 		rest = strings.TrimLeft(rest, " \t")
 		if rest == "" {
@@ -80,6 +94,10 @@ func ParseLine(line string) (Entry, bool) {
 			e.Perms = rest[:width]
 		case 2:
 			offsetField = rest[:width]
+		case 3:
+			e.Device = rest[:width]
+		case 4:
+			inodeField = rest[:width]
 		}
 		rest = rest[width:]
 	}
@@ -96,6 +114,10 @@ func ParseLine(line string) (Entry, bool) {
 	}
 	e.Offset = offset
 
+	if inode, err := strconv.ParseUint(inodeField, 10, 64); err == nil {
+		e.Inode = inode
+	}
+
 	path := strings.TrimLeft(rest, " \t")
 	if strings.HasSuffix(path, deletedSuffix) {
 		e.Deleted = true
@@ -106,17 +128,41 @@ func ParseLine(line string) (Entry, bool) {
 	return e, true
 }
 
-// Parse parses the contents of a /proc/<pid>/maps file, skipping lines that do
-// not have the expected shape.
-func Parse(data []byte) []Entry {
-	lines := strings.Split(string(data), "\n")
-	entries := make([]Entry, 0, len(lines))
-	for _, line := range lines {
-		if e, ok := ParseLine(line); ok {
-			entries = append(entries, e)
+// Scan streams a maps file through visit one line at a time, skipping lines
+// that do not have the expected shape or exceed MaxLineBytes, until visit
+// returns false. Only the entries visit keeps stay in memory, which matters
+// because a traced process controls the length of its own maps file: up to
+// vm.max_map_count lines of up to PATH_MAX each.
+func Scan(r io.Reader, visit func(Entry) bool) error {
+	br := bufio.NewReaderSize(r, MaxLineBytes)
+	for {
+		line, err := br.ReadSlice('\n')
+		if errors.Is(err, bufio.ErrBufferFull) {
+			for errors.Is(err, bufio.ErrBufferFull) {
+				_, err = br.ReadSlice('\n')
+			}
+		} else if len(line) > 0 {
+			if e, ok := ParseLine(string(bytes.TrimSuffix(line, []byte{'\n'}))); ok && !visit(e) {
+				return nil
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
 		}
 	}
-	return entries
+}
+
+// ScanProcess streams /proc/<pid>/maps through visit; see Scan.
+func ScanProcess(pid uint32, visit func(Entry) bool) error {
+	f, err := procfs.Open(fmt.Sprintf("%d/maps", pid))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	return Scan(f, visit)
 }
 
 func parseAddrRange(s string) (uint64, uint64, bool) {

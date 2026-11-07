@@ -122,3 +122,34 @@ func TestParkedH3TransactionsAreCountedWhenTheTracerStops(t *testing.T) {
 		t.Fatalf("%d transactions still parked after stop", len(tr.h3Parked))
 	}
 }
+
+func l7RetainedGauge(t *testing.T, decoder string) float64 {
+	t.Helper()
+	families, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range families {
+		if f.GetName() != "podtrace_l7_decoder_retained_bytes" {
+			continue
+		}
+		for _, m := range f.GetMetric() {
+			for _, l := range m.GetLabel() {
+				if l.GetName() == "decoder" && l.GetValue() == decoder {
+					return m.GetGauge().GetValue()
+				}
+			}
+		}
+	}
+	return 0
+}
+
+func TestPollPublishesH3AssemblerRetainedBytes(t *testing.T) {
+	asm := h3stream.NewAssembler(nil)
+	asm.Feed(h3stream.Chunk{TGID: 1, Conn: 1, StreamID: 0, StreamLen: 4, CopiedLen: 4, Data: []byte{0x01, 0x50, 0x00, 0x00}})
+	tr := &Tracer{h3Assembler: asm}
+	tr.pollBPFMapUtilization()
+	if got := l7RetainedGauge(t, "h3"); got <= 0 || int(got) != asm.Stats().RetainedBytes {
+		t.Fatalf("h3 retained gauge = %v, assembler holds %d", got, asm.Stats().RetainedBytes)
+	}
+}

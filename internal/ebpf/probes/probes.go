@@ -1003,28 +1003,30 @@ func findGoBinaryInProcess(pid uint32) string {
 
 func findGoBinaryViaProcessMaps(pid uint32) string {
 	started, timed := processStartTimeOf(pid)
-	data, err := procfs.ReadFile(fmt.Sprintf("%d/maps", pid))
+	var found procmaps.Entry
+	var resolved string
+	err := procmaps.ScanProcess(pid, func(e procmaps.Entry) bool {
+		if !e.Named() || !e.Executable() {
+			return true
+		}
+		if strings.Contains(e.Path, ".so") || strings.Contains(e.Path, "vdso") || strings.Contains(e.Path, "vsyscall") {
+			return true
+		}
+		if resolved = resolveMappedFile(pid, e); resolved != "" {
+			found = e
+			return false
+		}
+		return true
+	})
 	if err != nil {
 		logger.Debug("Failed to read process maps", zap.Uint32("pid", pid), zap.Error(err))
 		return ""
 	}
-
-	for _, e := range procmaps.Parse(data) {
-		if !e.Named() || !e.Executable() {
-			continue
-		}
-		if strings.Contains(e.Path, ".so") || strings.Contains(e.Path, "vdso") || strings.Contains(e.Path, "vsyscall") {
-			continue
-		}
-		if resolved := resolveMappedFile(pid, e); resolved != "" {
-			if timed && !sameProcess(pid, started) {
-				return ""
-			}
-			logger.Debug("Found binary via process maps", zap.Uint32("pid", pid), zap.String("container_path", e.Path), zap.String("host_path", resolved))
-			return resolved
-		}
+	if resolved == "" || (timed && !sameProcess(pid, started)) {
+		return ""
 	}
-	return ""
+	logger.Debug("Found binary via process maps", zap.Uint32("pid", pid), zap.String("container_path", found.Path), zap.String("host_path", resolved))
+	return resolved
 }
 
 func findGoBinaryInContainer(containerID string, pid uint32) string {

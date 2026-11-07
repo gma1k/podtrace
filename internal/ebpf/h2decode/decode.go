@@ -145,6 +145,8 @@ type dirState struct {
 	skipLow  uint32
 	skipHigh uint32
 	skipped  bool
+
+	generation uint32
 }
 
 // footprint is the memory this direction holds that traffic controls.
@@ -177,6 +179,9 @@ type pendingReq struct {
 	grpc      bool
 	held      *events.Event
 	heldDir   uint8
+
+	requestDir uint8
+	generation uint32
 }
 
 // isGRPCContentType reports whether a content-type header names gRPC.
@@ -210,6 +215,8 @@ type Decoder struct {
 	nowFn func() time.Time
 
 	retainedBytes int
+
+	released []*events.Event
 
 	decodeErrors      uint64
 	gapsSkipped       uint64
@@ -270,10 +277,11 @@ func (d *Decoder) Ingest(rec *RawRecord) []*events.Event {
 	if st == nil {
 		d.evictIfFullLocked()
 		st = &dirState{
-			key:     key,
-			dec:     &lateJoinDecoder{},
-			nextSeq: 0,
-			pending: make(map[uint32]*RawRecord),
+			key:        key,
+			dec:        &lateJoinDecoder{},
+			nextSeq:    0,
+			pending:    make(map[uint32]*RawRecord),
+			generation: d.generationLocked(rec.ConnID, otherDirection(rec.Direction)),
 		}
 		st.elem = d.dirOrder.PushBack(st)
 		d.dirs[key] = st
@@ -287,6 +295,7 @@ func (d *Decoder) Ingest(rec *RawRecord) []*events.Event {
 		}
 		d.sequenceRestarts++
 		restartDir(st, rec.Seq)
+		d.pruneRestartedStreamsLocked(rec.ConnID, rec.Direction, st.generation)
 	}
 	st.lastSeen = d.now()
 	d.dirOrder.MoveToBack(st.elem)
@@ -303,7 +312,55 @@ func (d *Decoder) Ingest(rec *RawRecord) []*events.Event {
 
 	out := d.drainLocked(st)
 	d.settleLocked(st, before)
-	return out
+	return d.withReleasedLocked(out)
+}
+
+// withReleasedLocked prepends the held responses released since the last
+// call; they belong to calls older than anything decoded alongside them.
+func (d *Decoder) withReleasedLocked(out []*events.Event) []*events.Event {
+	if len(d.released) == 0 {
+		return out
+	}
+	all := append(d.released, out...)
+	d.released = nil
+	return all
+}
+
+// generationLocked returns the generation of a direction, 0 when unknown.
+func (d *Decoder) generationLocked(conn uint64, dir uint8) uint32 {
+	if st := d.dirs[connKey{conn: conn, dir: dir}]; st != nil {
+		return st.generation
+	}
+	return 0
+}
+
+// pruneRestartedStreamsLocked forgets stream state of the connection that a
+// sequence restart in dir just ended.
+func (d *Decoder) pruneRestartedStreamsLocked(conn uint64, dir uint8, generation uint32) {
+	for stream := range d.connStreams[conn] {
+		sk := streamKey{conn: conn, stream: stream}
+		if endedByRestart(d.streams[sk], dir, generation) {
+			d.releaseStreamLocked(sk)
+		}
+	}
+}
+
+func endedByRestart(req *pendingReq, dir uint8, generation uint32) bool {
+	if req == nil {
+		return false
+	}
+	heldHere := req.held != nil && req.heldDir == dir
+	answeredHere := req.requestDir == otherDirection(dir) && req.generation != generation
+	return heldHere || answeredHere
+}
+
+// releaseStreamLocked deletes a stream, keeping its held response, if any,
+// as an event: the call happened even though its trailers were not seen.
+func (d *Decoder) releaseStreamLocked(sk streamKey) {
+	if req := d.streams[sk]; req != nil && req.held != nil {
+		d.released = append(d.released, req.held)
+	}
+	d.deleteStreamLocked(sk)
 }
 
 // isSequenceRestart tells a record behind nextSeq apart: one from a range
@@ -329,6 +386,7 @@ func restartDir(st *dirState, seq uint32) {
 	st.stalled = time.Time{}
 	st.discarding = false
 	st.skipped = false
+	st.generation++
 }
 
 // settleLocked charges a direction's change in footprint to the global
@@ -644,7 +702,11 @@ func (d *Decoder) holdGRPCResponseLocked(rec *RawRecord, status, traceparent str
 	sk := streamKey{conn: rec.ConnID, stream: rec.StreamID}
 	req, ok := d.streams[sk]
 	if !ok {
-		req = &pendingReq{transport: rec.Transport}
+		req = &pendingReq{
+			transport:  rec.Transport,
+			requestDir: otherDirection(rec.Direction),
+			generation: d.generationLocked(rec.ConnID, rec.Direction),
+		}
 		d.putStreamLocked(sk, req)
 	}
 	req.grpc = true
@@ -750,21 +812,24 @@ func (d *Decoder) rememberStreamLocked(rec *RawRecord, method, path string) {
 		return
 	}
 	d.putStreamLocked(streamKey{conn: rec.ConnID, stream: rec.StreamID}, &pendingReq{
-		method:    method,
-		path:      path,
-		transport: rec.Transport,
-		startTS:   rec.Timestamp,
-		lastSeen:  d.now(),
+		method:     method,
+		path:       path,
+		transport:  rec.Transport,
+		startTS:    rec.Timestamp,
+		lastSeen:   d.now(),
+		requestDir: rec.Direction,
+		generation: d.generationLocked(rec.ConnID, rec.Direction),
 	})
 }
 
 // putStreamLocked stores req under sk, replacing any previous request on
-// that stream and evicting the least recently used one when full.
+// that stream and evicting the least recently used one when full. A held
+// response on a stream it lets go of is released, not lost.
 func (d *Decoder) putStreamLocked(sk streamKey, req *pendingReq) {
-	d.deleteStreamLocked(sk)
+	d.releaseStreamLocked(sk)
 	if len(d.streams) >= d.maxStreams {
 		if front := d.streamOrder.Front(); front != nil {
-			d.deleteStreamLocked(front.Value.(*pendingReq).key)
+			d.releaseStreamLocked(front.Value.(*pendingReq).key)
 		}
 	}
 	req.key = sk
@@ -795,10 +860,11 @@ func (d *Decoder) deleteStreamLocked(sk streamKey) {
 
 // skipGapLocked advances past the lowest missing seq so a lost fragment cannot
 // stall the connection. Dynamic-table insertions may have happened inside the
-// gap, so the observed-insertion window restarts.
+// gap, so the observed-insertion window restarts. When the awaited record is
+// already buffered there is no gap and nothing is skipped.
 func (d *Decoder) skipGapLocked(st *dirState) {
 	lowest, ok := lowestSeq(st.pending)
-	if !ok {
+	if !ok || lowest == st.nextSeq {
 		return
 	}
 	st.skipLow, st.skipHigh, st.skipped = st.nextSeq, lowest, true
@@ -843,7 +909,7 @@ func (d *Decoder) Sweep() []*events.Event {
 		}
 		d.deleteStreamLocked(req.key)
 	}
-	return out
+	return d.withReleasedLocked(out)
 }
 
 // Evict drops all decode state for a connection (both directions) and its

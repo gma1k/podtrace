@@ -248,7 +248,7 @@ These only affect how much detail the CLI prints. They do not change collection.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `PODTRACE_REDACT_PII` | `false` | Redacts passwords, bearer tokens, emails, card numbers |
+| `PODTRACE_REDACT_PII` | `false` | Redacts credentials, tokens, private keys, emails, card numbers |
 | `PODTRACE_REDACT_CUSTOM_RULES` | unset | Additional redaction patterns |
 | `PODTRACE_REDACT_DNS_NAMES` | `false` | Strip DNS names from captured events. Also set by the operator |
 

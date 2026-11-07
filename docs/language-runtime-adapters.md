@@ -162,7 +162,7 @@ request; the report says how many requests or waits it could not count.
 
 ## PII Redaction
 
-Applies regex rules to `Target` and `Details` fields before events reach any consumer. Built-in rules cover passwords, Bearer tokens, email addresses, and credit card numbers.
+Applies regex rules to `Target` and `Details` fields before events reach any consumer. Built-in rules cover credentials in headers, query strings, form bodies, JSON and YAML, well-known token formats, email addresses, and credit card numbers.
 
 ```bash
 export PODTRACE_REDACT_PII=true
@@ -173,10 +173,20 @@ Built-in redaction rules:
 
 | Pattern | Replacement |
 |---|---|
-| `password=<value>` | `password=***` |
-| `Bearer <token>` | `Bearer ***` |
+| Credential headers (`Cookie`, `Set-Cookie`, `Authorization`, `X-Api-Key`, …) | `<header>: ***` |
+| `password=<value>`, `token=<value>`, … (also percent-encoded `%3D`) | `password=***` |
+| `"password": <value>` in JSON, escaped JSON, and `password: <value>` in YAML or `'password': <value>` | value replaced by `***` |
+| `?sig=`, `?key=`, `?code=` query parameters | `?sig=***` |
+| `Bearer <token>`, `Basic <credentials>` | `Bearer ***`, `Basic ***` |
+| `scheme://user:password@host` | `scheme://***@host` |
+| PEM private key blocks | `-----BEGIN PRIVATE KEY-----***-----END PRIVATE KEY-----` |
+| JWTs, AWS access key ids, GitHub, Slack and Stripe tokens, Google API keys | prefix kept, rest `***` |
 | Email addresses | `***@***` |
-| 16-digit card numbers | `****-****-****-****` |
+| Luhn-valid card numbers | `****-****-****-****` |
+
+Captured payloads are prefixes cut at a fixed size, so a quoted value whose
+closing quote was not captured is masked to the end of the text, and a quoted
+value containing spaces is masked whole.
 
 ### Custom Redaction Rules
 
