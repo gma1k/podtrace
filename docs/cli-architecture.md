@@ -121,6 +121,15 @@ preferred (real Ctrl+C and stdin); the CLI falls back to `pods/log` (read-only)
 when attach is denied and prints a degraded-mode warning. Any user with `view` +
 `pod-exec` already has this — there is nothing to apply.
 
+An attach stream only carries output written after it connects. So the
+spawned podtrace waits until the CLI is attached before it writes anything,
+and its first lines (resolved targets, skipped targets, warnings) are not
+lost. The CLI sends one byte over the attached stdin as the go-ahead, then
+forwards your terminal as before. It checks `pods/attach` with a
+SelfSubjectAccessReview first. When attach is denied there is nothing to
+wait for: the `pods/log` fallback replays the pod's output from its start.
+If the go-ahead never arrives, the child warns and continues after 30s.
+
 ### What the spawn pod needs (zero, by default)
 
 **The spawn pod runs as the namespace's default ServiceAccount and needs no
@@ -142,15 +151,24 @@ The spawn pod is privileged: `hostPID=true`, capabilities `BPF`,
 mounts for `/sys/fs/bpf`, `/sys/kernel/btf`, `/proc`, `/sys/fs/cgroup`,
 `/run/containerd`.
 
-Namespaces that enforce `restricted` or `baseline` will reject the
-spawn pod. The CLI surfaces this with an exact remediation command:
+By default the spawn pod and its credential Secret go to the dedicated
+`podtrace-cli` namespace, never the traced pod's namespace: a tenant with
+`pods/exec` or `secrets get` in their own namespace must not be able to
+reach a node-privileged pod or the exporter credentials. The CLI creates
+`podtrace-cli` with `pod-security.kubernetes.io/enforce=privileged` on
+first use. If you may not create namespaces, it prints the commands an
+admin runs once:
 
 ```bash
-kubectl label ns/<spawn-ns> pod-security.kubernetes.io/enforce=privileged --overwrite
+kubectl create namespace podtrace-cli
+kubectl label ns/podtrace-cli pod-security.kubernetes.io/enforce=privileged
 ```
 
-Or use `--spawn-namespace=<dedicated-ns>` to centralize the
-admission requirement in one namespace.
+`--spawn-namespace=<ns>` picks another namespace. Pointing it at the
+target namespace still works, but the CLI warns, because whoever can exec
+into pods there can then reach the spawn pod. A namespace that enforces
+`restricted` or `baseline` rejects the spawn pod, and the CLI prints the
+exact `kubectl label` remediation.
 
 ## Reaping leaked pods
 

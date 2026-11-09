@@ -71,6 +71,9 @@ func filterGrantedPodRefs(
 	verdicts := map[string]bool{}
 	deniedSet := map[string]struct{}{}
 	for _, ref := range refs {
+		if podtracev1alpha1.ValidatePodRef(ref) != nil {
+			continue
+		}
 		ns := ref.Namespace
 		if ns == "" || ns == sourceNamespace {
 			allowed = append(allowed, ref)

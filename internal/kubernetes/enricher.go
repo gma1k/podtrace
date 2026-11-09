@@ -7,9 +7,11 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
@@ -56,11 +58,13 @@ const negativeCacheTTL = 30 * time.Second
 
 type ContextEnricher struct {
 	clientset       kubernetes.Interface
-	podCache        *sync.Map
+	podCache        *podIPCache
 	podInfo         *PodInfo
 	serviceResolver *ServiceResolver
 	cacheTTL        time.Duration
 	informerCache   *InformerCache
+
+	podListForbidden atomic.Bool
 }
 
 func NewContextEnricher(clientset kubernetes.Interface, podInfo *PodInfo) *ContextEnricher {
@@ -68,7 +72,7 @@ func NewContextEnricher(clientset kubernetes.Interface, podInfo *PodInfo) *Conte
 	ic := NewInformerCache(clientset)
 	return &ContextEnricher{
 		clientset:       clientset,
-		podCache:        &sync.Map{},
+		podCache:        newPodIPCache(maxPodIPCacheEntries),
 		podInfo:         podInfo,
 		serviceResolver: NewServiceResolverWithCache(clientset, ic),
 		cacheTTL:        ttl,
@@ -150,15 +154,21 @@ func (ce *ContextEnricher) resolvePodByIP(ctx context.Context, ip string) *PodMe
 		if pod := ce.informerCache.GetPodByIP(ip); pod != nil {
 			return pod
 		}
+		if ce.informerCache.PodsSynced() {
+			return nil
+		}
 	}
 
-	if cached, ok := ce.podCache.Load(ip); ok {
-		entry := cached.(*cacheEntry)
+	if entry, ok := ce.podCache.Load(ip); ok {
 		if time.Now().Before(entry.expiresAt) {
 			pod, _ := entry.data.(*PodMetadata) // nil for a cached negative result
 			return pod
 		}
 		ce.podCache.Delete(ip)
+	}
+
+	if ce.podListForbidden.Load() {
+		return nil
 	}
 
 	podMeta := ce.fetchPodByIP(ctx, ip)
@@ -174,6 +184,8 @@ func (ce *ContextEnricher) resolvePodByIP(ctx context.Context, ip string) *PodMe
 	return podMeta
 }
 
+// fetchPodByIP is the fallback for when no synced informer answers: a
+// cluster-wide LIST by status.podIP, picking the pod that owns the IP now.
 func (ce *ContextEnricher) fetchPodByIP(ctx context.Context, ip string) *PodMetadata {
 	if ce.clientset == nil {
 		return nil
@@ -183,28 +195,19 @@ func (ce *ContextEnricher) fetchPodByIP(ctx context.Context, ip string) *PodMeta
 		FieldSelector: fmt.Sprintf("status.podIP=%s", ip),
 	})
 	if err != nil {
+		if apierrors.IsForbidden(err) {
+			ce.podListForbidden.Store(true)
+		}
 		return nil
 	}
 
-	for _, pod := range pods.Items {
-		if pod.Status.PodIP != ip {
-			continue
-		}
-		labels := make(map[string]string)
-		if pod.Labels != nil {
-			for k, v := range pod.Labels {
-				labels[k] = v
-			}
-		}
-		return &PodMetadata{
-			Name:      pod.Name,
-			Namespace: pod.Namespace,
-			Labels:    labels,
-			IP:        pod.Status.PodIP,
+	candidates := make([]*corev1.Pod, 0, len(pods.Items))
+	for i := range pods.Items {
+		if podHasIP(&pods.Items[i], ip) {
+			candidates = append(candidates, &pods.Items[i])
 		}
 	}
-
-	return nil
+	return podMetadataFor(pickPodForIP(candidates), ip)
 }
 
 func parseTarget(target string) (string, int) {

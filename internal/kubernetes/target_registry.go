@@ -300,9 +300,10 @@ func (tr *TargetRegistry) handlePodUpsert(ctx context.Context, pod *corev1.Pod) 
 func (tr *TargetRegistry) upsertPod(ctx context.Context, pod *corev1.Pod) bool {
 	if !tr.matchesSelection(pod) {
 		tr.mu.Lock()
+		_, wasTarget := tr.targets[pod.UID]
 		delete(tr.targets, pod.UID)
 		tr.mu.Unlock()
-		return true
+		return wasTarget
 	}
 
 	info, err := resolvePodInfoFromObject(ctx, pod, tr.selection.ContainerName)

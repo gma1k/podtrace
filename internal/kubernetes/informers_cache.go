@@ -73,10 +73,7 @@ func (ic *InformerCache) Start(ctx context.Context) {
 			if !ok || pod == nil {
 				return nil, nil
 			}
-			if pod.Status.PodIP == "" {
-				return nil, nil
-			}
-			return []string{pod.Status.PodIP}, nil
+			return podIPs(pod), nil
 		},
 	})
 
@@ -177,11 +174,99 @@ func (ic *InformerCache) GetPodByIP(ip string) *PodMetadata {
 	if err != nil || len(objs) == 0 {
 		return nil
 	}
-	pod, ok := objs[0].(*corev1.Pod)
-	if !ok || pod == nil {
+	candidates := make([]*corev1.Pod, 0, len(objs))
+	for _, obj := range objs {
+		if pod, ok := obj.(*corev1.Pod); ok && pod != nil {
+			candidates = append(candidates, pod)
+		}
+	}
+	return podMetadataFor(pickPodForIP(candidates), ip)
+}
+
+// PodsSynced reports whether the pod informer holds a complete view of the
+// cluster, so a miss in it is authoritative and no API fallback is needed.
+func (ic *InformerCache) PodsSynced() bool {
+	if ic == nil {
+		return false
+	}
+	ic.mu.RLock()
+	inf := ic.podInf
+	ic.mu.RUnlock()
+	return inf != nil && inf.HasSynced()
+}
+
+// servicesActive reports whether service lookups are answered by the
+// EndpointSlice informer.
+func (ic *InformerCache) servicesActive() bool {
+	return ic != nil && ic.Enabled()
+}
+
+// podIPs lists every address a pod holds: the primary IP and, on a
+// dual-stack cluster, the other family.
+func podIPs(pod *corev1.Pod) []string {
+	var out []string
+	seen := map[string]struct{}{}
+	add := func(ip string) {
+		if ip == "" {
+			return
+		}
+		if _, dup := seen[ip]; dup {
+			return
+		}
+		seen[ip] = struct{}{}
+		out = append(out, ip)
+	}
+	add(pod.Status.PodIP)
+	for _, p := range pod.Status.PodIPs {
+		add(p.IP)
+	}
+	return out
+}
+
+func podHasIP(pod *corev1.Pod, ip string) bool {
+	for _, p := range podIPs(pod) {
+		if p == ip {
+			return true
+		}
+	}
+	return false
+}
+
+func podIsTerminal(pod *corev1.Pod) bool {
+	return pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed
+}
+
+// pickPodForIP chooses which pod an address belongs to when several carry
+// it.
+func pickPodForIP(candidates []*corev1.Pod) *corev1.Pod {
+	var live, hostNetwork, finished []*corev1.Pod
+	for _, p := range candidates {
+		switch {
+		case podIsTerminal(p):
+			finished = append(finished, p)
+		case p.Spec.HostNetwork:
+			hostNetwork = append(hostNetwork, p)
+		default:
+			live = append(live, p)
+		}
+	}
+	for _, tier := range [][]*corev1.Pod{live, hostNetwork, finished} {
+		if len(tier) == 0 {
+			continue
+		}
+		if len(tier) == 1 {
+			return tier[0]
+		}
 		return nil
 	}
-	labels := make(map[string]string)
+	return nil
+}
+
+func podMetadataFor(pod *corev1.Pod, ip string) *PodMetadata {
+	if pod == nil {
+		return nil
+	}
+	labels := make(map[string]string, len(pod.Labels))
 	for k, v := range pod.Labels {
 		labels[k] = v
 	}
@@ -189,7 +274,7 @@ func (ic *InformerCache) GetPodByIP(ip string) *PodMetadata {
 		Name:      pod.Name,
 		Namespace: pod.Namespace,
 		Labels:    labels,
-		IP:        pod.Status.PodIP,
+		IP:        ip,
 	}
 }
 
@@ -251,8 +336,8 @@ func trimPodForCache(obj interface{}) (interface{}, error) {
 	pod.Annotations = nil
 	pod.OwnerReferences = nil
 	pod.Finalizers = nil
-	pod.Spec = corev1.PodSpec{}
-	pod.Status = corev1.PodStatus{PodIP: pod.Status.PodIP, PodIPs: pod.Status.PodIPs}
+	pod.Spec = corev1.PodSpec{HostNetwork: pod.Spec.HostNetwork}
+	pod.Status = corev1.PodStatus{Phase: pod.Status.Phase, PodIP: pod.Status.PodIP, PodIPs: pod.Status.PodIPs}
 	return pod, nil
 }
 

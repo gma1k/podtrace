@@ -54,6 +54,25 @@ func validateSelectorExclusivity(selector *metav1.LabelSelector, podRefs []podtr
 	return nil
 }
 
+// validateTargetShapes rejects targets the operator or agent would only
+// fail on later: a selector or appSelector entry that does not parse, and a
+// podRef that cannot name a pod.
+func validateTargetShapes(selector *metav1.LabelSelector, podRefs []podtracev1alpha1.PodRef, appSelector *podtracev1alpha1.AppSelector) error {
+	if selector != nil {
+		if _, err := metav1.LabelSelectorAsSelector(selector); err != nil {
+			return fmt.Errorf("spec.selector: %w", err)
+		}
+	}
+	if appSelector != nil {
+		for i := range appSelector.MatchSelectors {
+			if _, err := metav1.LabelSelectorAsSelector(&appSelector.MatchSelectors[i]); err != nil {
+				return fmt.Errorf("spec.appSelector.matchSelectors[%d]: %w", i, err)
+			}
+		}
+	}
+	return podtracev1alpha1.ValidatePodRefs("spec.podRefs", podRefs)
+}
+
 // validatePodTraceTargets enforces "exactly one of selector, podRefs, or
 // appSelector" for PodTrace.
 func validatePodTraceTargets(selector *metav1.LabelSelector, podRefs []podtracev1alpha1.PodRef, appSelector *podtracev1alpha1.AppSelector) error {

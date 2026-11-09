@@ -256,6 +256,7 @@ func readKubeletCgroupFlag() string {
 	if err != nil {
 		return ""
 	}
+	nodePIDNamespace, _ := procfs.Readlink("1/ns/pid")
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -272,6 +273,13 @@ func readKubeletCgroupFlag() string {
 		}
 		if strings.TrimSpace(string(comm)) != "kubelet" {
 			continue
+		}
+		if nodePIDNamespace != "" {
+			if ns, err := procfs.Readlink(pid + "/ns/pid"); err == nil && ns != nodePIDNamespace {
+				logger.Debug("Ignoring a kubelet-named process outside the node PID namespace",
+					zap.String("pid", pid))
+				continue
+			}
 		}
 
 		data, err := procfs.ReadFile(pid + "/cmdline")

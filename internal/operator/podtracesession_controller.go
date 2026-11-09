@@ -217,13 +217,26 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if err := validateManagedCRName("ExporterConfig", ec.Name); err != nil {
 		return ctrl.Result{}, r.failSessionTerminally(ctx, &session, "ExporterConfigNameTooLong", err.Error())
 	}
+	refreshBundle := hasExporter
+	var exporterInvalid string
+	if hasExporter {
+		if err := podtracev1alpha1.ValidateExporterConfigVariant(ec.Spec); err != nil {
+			exporterInvalid = fmt.Sprintf("ExporterConfig %s is invalid: %v", ecKey, err)
+			if len(session.Status.Jobs) == 0 {
+				r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "ExporterInvalid", exporterInvalid)
+				_ = r.Status().Update(ctx, &session)
+				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+			}
+			refreshBundle = false
+		}
+	}
 	if err := checkSessionObjectStorePolicy(ctx, r.reader(), &session, objectStoreCredentialPolicy(&session, r.SystemNamespace)); err != nil {
 		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "ObjectStoreCreds", err.Error())
 		_ = r.Status().Update(ctx, &session)
 		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
 	}
 	for _, ns := range resolved.namespaces {
-		if err := ensureSessionExporterBundleIfReferenced(ctx, r.Client, r.reader(), &session, &ec, ns, hasExporter); err != nil {
+		if err := ensureSessionExporterBundleIfReferenced(ctx, r.Client, r.reader(), &session, &ec, ns, refreshBundle); err != nil {
 			r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "BundleSync", err.Error())
 			_ = r.Status().Update(ctx, &session)
 			return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
@@ -332,7 +345,12 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		reconciledMessage += "; " + crossNamespaceDeniedMessage(session.Namespace, targets.DeniedNamespaces)
 	}
 	r.setCondition(&session, ConditionReconciled, metav1.ConditionTrue, "Reconciled", reconciledMessage)
-	r.setCondition(&session, ConditionDegraded, metav1.ConditionFalse, "Reconciled", "")
+	if exporterInvalid != "" {
+		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "ExporterInvalid",
+			exporterInvalid+"; the running session keeps its last valid exporter bundle")
+	} else {
+		r.setCondition(&session, ConditionDegraded, metav1.ConditionFalse, "Reconciled", "")
+	}
 	applySessionExportConditions(&session, summaryByNode)
 
 	if obs, err := harvestReportLocation(ctx, r.Client, &session, resolved.namespaces); err != nil {

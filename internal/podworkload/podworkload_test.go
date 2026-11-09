@@ -1,11 +1,13 @@
 package podworkload
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/rand"
 )
 
 func TestResolveWorkload(t *testing.T) {
@@ -165,6 +167,21 @@ func TestAReplicaSetSuffixOutsideTheAlphabetIsNotAHash(t *testing.T) {
 			t.Errorf("DeploymentFromReplicaSet(checkout-%s) = %q, true; want false. A name that "+
 				"merely contains a dash is not a ReplicaSet suffix, and trimming it would "+
 				"report a workload that does not exist", suffix, name)
+		}
+	}
+}
+
+func TestEveryControllerManagerPodTemplateHashIsRecognised(t *testing.T) {
+	samples := []uint32{10000, 12345, 99999, 1 << 20, 1 << 31, 4294967295}
+	for i := uint32(0); i < 5000; i++ {
+		samples = append(samples, 10000+i*858993)
+	}
+	for _, v := range samples {
+		hash := rand.SafeEncodeString(strconv.FormatUint(uint64(v), 10))
+		rs := "web-" + hash
+		name, ok := DeploymentFromReplicaSet(rs)
+		if !ok || name != "web" {
+			t.Fatalf("DeploymentFromReplicaSet(%q) = %q, %v; want web, true", rs, name, ok)
 		}
 	}
 }

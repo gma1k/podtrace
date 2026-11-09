@@ -170,13 +170,26 @@ func TestTheScanSeesEachKindOfReference(t *testing.T) {
 var natively = regexp.MustCompile(`(^|/)(Dockerfile[^/]*|(docker-)?compose[^/]*\.ya?ml)$|^deploy/charts/.+/(Chart\.yaml|templates/.+\.yaml)$`)
 
 type renovateConfig struct {
+	Extends        []string  `json:"extends"`
+	IgnorePaths    *[]string `json:"ignorePaths"`
 	CustomManagers []struct {
 		ManagerFilePatterns []string `json:"managerFilePatterns"`
 		MatchStrings        []string `json:"matchStrings"`
 	} `json:"customManagers"`
 }
 
-func renovateManagers(t *testing.T) (files []*regexp.Regexp, matches []*regexp.Regexp) {
+var recommendedIgnorePaths = []string{
+	"**/node_modules/**",
+	"**/bower_components/**",
+	"**/vendor/**",
+	"**/examples/**",
+	"**/__tests__/**",
+	"**/test/**",
+	"**/tests/**",
+	"**/__fixtures__/**",
+}
+
+func loadRenovateConfig(t *testing.T) renovateConfig {
 	t.Helper()
 	root, err := os.OpenRoot(repoRoot)
 	if err != nil {
@@ -191,6 +204,62 @@ func renovateManagers(t *testing.T) (files []*regexp.Regexp, matches []*regexp.R
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		t.Fatal(err)
 	}
+	return cfg
+}
+
+func effectiveIgnorePaths(cfg renovateConfig) []string {
+	if cfg.IgnorePaths != nil {
+		return *cfg.IgnorePaths
+	}
+	for _, preset := range cfg.Extends {
+		if preset == "config:recommended" || preset == ":ignoreModulesAndTests" {
+			return recommendedIgnorePaths
+		}
+	}
+	return nil
+}
+
+func globToRegexp(glob string) *regexp.Regexp {
+	var b strings.Builder
+	b.WriteString("^")
+	for i := 0; i < len(glob); i++ {
+		switch {
+		case strings.HasPrefix(glob[i:], "**/"):
+			b.WriteString("(?:.*/)?")
+			i += 2
+		case strings.HasPrefix(glob[i:], "/**") && i+3 == len(glob):
+			b.WriteString("(?:/.*)?")
+			i += 2
+		case glob[i] == '*':
+			b.WriteString("[^/]*")
+		case glob[i] == '?':
+			b.WriteString("[^/]")
+		default:
+			b.WriteString(regexp.QuoteMeta(string(glob[i])))
+		}
+	}
+	b.WriteString("$")
+	return regexp.MustCompile(b.String())
+}
+
+func renovateIgnores(cfg renovateConfig) func(string) bool {
+	var globs []*regexp.Regexp
+	for _, g := range effectiveIgnorePaths(cfg) {
+		globs = append(globs, globToRegexp(g))
+	}
+	return func(path string) bool {
+		for _, rx := range globs {
+			if rx.MatchString(path) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+func renovateManagers(t *testing.T) (files []*regexp.Regexp, matches []*regexp.Regexp) {
+	t.Helper()
+	cfg := loadRenovateConfig(t)
 	for _, m := range cfg.CustomManagers {
 		for _, p := range m.ManagerFilePatterns {
 			rx, err := regexp.Compile(strings.TrimSuffix(strings.TrimPrefix(p, "/"), "/"))
@@ -212,8 +281,13 @@ func renovateManagers(t *testing.T) (files []*regexp.Regexp, matches []*regexp.R
 
 func TestEveryPinnedImageIsTrackedByRenovate(t *testing.T) {
 	filePatterns, matchStrings := renovateManagers(t)
+	ignored := renovateIgnores(loadRenovateConfig(t))
 	for _, f := range imageReferences(t) {
 		rel := f.path
+		if ignored(rel) {
+			t.Errorf("%s:%d: %q is pinned in a path Renovate's ignorePaths skip, so no manager ever reads it", rel, f.line, f.ref)
+			continue
+		}
 		if natively.MatchString(rel) {
 			continue
 		}
@@ -235,5 +309,68 @@ func TestEveryPinnedImageIsTrackedByRenovate(t *testing.T) {
 			t.Errorf("%s:%d: %q is pinned but no Renovate manager reads it (file matched: %v, reference matched: %v), "+
 				"so its digest never moves", rel, f.line, f.ref, fileTracked, refTracked)
 		}
+	}
+}
+
+func TestRenovateScansEveryDependencyManifest(t *testing.T) {
+	ignored := renovateIgnores(loadRenovateConfig(t))
+	manifest := regexp.MustCompile(`(^|/)(go\.mod|Dockerfile[^/]*|requirements[^/]*\.txt|Chart\.yaml)$`)
+	root, err := os.OpenRoot(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	checked := 0
+	err = fs.WalkDir(root.FS(), ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if skippedDirs[d.Name()] {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !manifest.MatchString(path) {
+			return nil
+		}
+		checked++
+		if ignored(path) {
+			t.Errorf("%s is a dependency manifest in a path Renovate's ignorePaths skip; its dependencies never get update PRs", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checked == 0 {
+		t.Fatal("found no dependency manifests; the scan would pass without checking any")
+	}
+}
+
+func TestRecommendedPresetIgnoresTestPathsUnlessOverridden(t *testing.T) {
+	recommended := renovateConfig{Extends: []string{"config:recommended"}}
+	if !renovateIgnores(recommended)("test/chainsaw/tests/x/seaweedfs.yaml") {
+		t.Error("config:recommended without ignorePaths must be modelled as skipping test/")
+	}
+	if !renovateIgnores(recommended)("examples/podtrace.yaml") {
+		t.Error("config:recommended without ignorePaths must be modelled as skipping examples/")
+	}
+	override := []string{"**/vendor/**"}
+	overridden := renovateConfig{Extends: []string{"config:recommended"}, IgnorePaths: &override}
+	if renovateIgnores(overridden)("test/pool-test/go.mod") {
+		t.Error("an explicit ignorePaths replaces the preset's list")
+	}
+	if !renovateIgnores(overridden)("vendor/x/go.mod") || !renovateIgnores(overridden)("a/vendor/go.mod") {
+		t.Error("**/vendor/** must match vendor at any depth")
+	}
+	if renovateIgnores(renovateConfig{})("test/x.yaml") {
+		t.Error("a config without presets or ignorePaths ignores nothing")
+	}
+	if !globToRegexp("docs/*.md").MatchString("docs/a.md") || globToRegexp("docs/*.md").MatchString("docs/x/a.md") {
+		t.Error("a single * must not cross a directory")
+	}
+	if !globToRegexp("a?c").MatchString("abc") {
+		t.Error("? must match one character")
 	}
 }

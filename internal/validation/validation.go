@@ -7,42 +7,45 @@ import (
 	"strings"
 	"time"
 
+	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
+
 	config "github.com/gma1k/podtrace/internal/config"
 )
 
 var (
-	podNameRegex           = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
-	namespaceRegex         = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 	containerNameRegex     = regexp.MustCompile(`^[a-z0-9]([-a-z0-9_.]*[a-z0-9])?$`)
-	maxPodNameLength       = 63
-	maxNamespaceLength     = 253
 	maxContainerNameLength = 63
 	maxExportFormatLength  = 10
 	maxEventFilterLength   = 100
 )
 
+// ValidatePodName accepts what the API server accepts for a pod name: a
+// DNS-1123 subdomain, so dotted static-pod names such as
+// etcd-ip-10-0-1-2.ec2.internal can be traced.
 func ValidatePodName(name string) error {
 	if len(name) == 0 {
 		return fmt.Errorf("pod name cannot be empty")
 	}
-	if len(name) > maxPodNameLength {
-		return fmt.Errorf("pod name exceeds maximum length of %d characters", maxPodNameLength)
+	if len(name) > k8svalidation.DNS1123SubdomainMaxLength {
+		return fmt.Errorf("pod name exceeds maximum length of %d characters", k8svalidation.DNS1123SubdomainMaxLength)
 	}
-	if !podNameRegex.MatchString(name) {
-		return fmt.Errorf("pod name must match RFC 1123 subdomain format (lowercase alphanumeric and hyphens)")
+	if errs := k8svalidation.IsDNS1123Subdomain(name); len(errs) > 0 {
+		return fmt.Errorf("pod name must match RFC 1123 subdomain format (lowercase alphanumeric, hyphens and dots)")
 	}
 	return nil
 }
 
+// ValidateNamespace accepts a DNS-1123 label, the form every namespace
+// name takes.
 func ValidateNamespace(name string) error {
 	if len(name) == 0 {
 		return fmt.Errorf("namespace cannot be empty")
 	}
-	if len(name) > maxNamespaceLength {
-		return fmt.Errorf("namespace exceeds maximum length of %d characters", maxNamespaceLength)
+	if len(name) > k8svalidation.DNS1123LabelMaxLength {
+		return fmt.Errorf("namespace exceeds maximum length of %d characters", k8svalidation.DNS1123LabelMaxLength)
 	}
-	if !namespaceRegex.MatchString(name) {
-		return fmt.Errorf("namespace must match RFC 1123 subdomain format (lowercase alphanumeric and hyphens)")
+	if errs := k8svalidation.IsDNS1123Label(name); len(errs) > 0 {
+		return fmt.Errorf("namespace must match RFC 1123 label format (lowercase alphanumeric and hyphens)")
 	}
 	return nil
 }

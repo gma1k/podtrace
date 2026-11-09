@@ -209,13 +209,59 @@ func TestBuildPodSpec_SecurityFSHostPathHardenedAgainstSilentEmptyMount(t *testi
 	t.Fatal("securityfs volume not found in pod spec")
 }
 
-func TestBuildPodSpec_NodeSelectorPinsToTargetNode(t *testing.T) {
+func TestBuildPodSpec_PinsToTargetNodeByName(t *testing.T) {
 	got, err := BuildPodSpec(baseOpts())
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
-	if got.Spec.NodeSelector["kubernetes.io/hostname"] != "worker-1" {
-		t.Errorf("nodeSelector hostname = %q, want worker-1", got.Spec.NodeSelector["kubernetes.io/hostname"])
+	if len(got.Spec.NodeSelector) != 0 {
+		t.Errorf("nodeSelector = %v, want none: the hostname label need not equal the node name", got.Spec.NodeSelector)
+	}
+	if got := TargetNodeName(got); got != "worker-1" {
+		t.Errorf("TargetNodeName = %q, want worker-1", got)
+	}
+	terms := got.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+	want := []corev1.NodeSelectorTerm{{MatchFields: []corev1.NodeSelectorRequirement{{
+		Key: "metadata.name", Operator: corev1.NodeSelectorOpIn, Values: []string{"worker-1"},
+	}}}}
+	if !reflect.DeepEqual(terms, want) {
+		t.Errorf("node affinity terms = %+v, want %+v", terms, want)
+	}
+}
+
+func TestBuildPodSpec_LongNodeNameStaysAValidLabel(t *testing.T) {
+	opts := baseOpts()
+	opts.NodeName = strings.Repeat("ip-10-0-1-2.", 20) + "internal"
+	got, err := BuildPodSpec(opts)
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if v := got.Labels[LabelNode]; len(v) > 63 || len(v) == 0 {
+		t.Errorf("node label %q has length %d, want 1..63", v, len(v))
+	}
+	if got := TargetNodeName(got); got != opts.NodeName {
+		t.Errorf("TargetNodeName = %q, want the full node name %q", got, opts.NodeName)
+	}
+}
+
+func TestTargetNodeName(t *testing.T) {
+	if got := TargetNodeName(nil); got != "" {
+		t.Errorf("TargetNodeName(nil) = %q, want empty", got)
+	}
+	if got := TargetNodeName(&corev1.Pod{}); got != "" {
+		t.Errorf("TargetNodeName(no affinity) = %q, want empty", got)
+	}
+	bound := &corev1.Pod{Spec: corev1.PodSpec{NodeName: "worker-9", Affinity: pinToNode("worker-1")}}
+	if got := TargetNodeName(bound); got != "worker-9" {
+		t.Errorf("TargetNodeName(bound) = %q, want worker-9", got)
+	}
+	other := &corev1.Pod{Spec: corev1.PodSpec{Affinity: &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{
+		RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+			MatchFields: []corev1.NodeSelectorRequirement{{Key: "metadata.name", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"x"}}},
+		}}},
+	}}}}
+	if got := TargetNodeName(other); got != "" {
+		t.Errorf("TargetNodeName(NotIn) = %q, want empty", got)
 	}
 }
 

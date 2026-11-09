@@ -65,6 +65,8 @@ type PodSpecOptions struct {
 	ServiceAccountName    string
 	OwnerHost             string
 	OwnerPID              int
+
+	AttachHandshake bool
 }
 
 // BuildPodSpec returns a pod with privileged + hostPID set, mounting the host
@@ -127,6 +129,9 @@ func BuildPodSpec(opts PodSpecOptions) (*corev1.Pod, error) {
 				FieldRef: &corev1.ObjectFieldSelector{FieldPath: "spec.nodeName"},
 			},
 		},
+	}
+	if opts.AttachHandshake {
+		env = append(env, corev1.EnvVar{Name: EnvAttachHandshake, Value: "1"})
 	}
 	passthrough := []string{
 		"PODTRACE_BPF_LOG_LEVEL",
@@ -216,7 +221,7 @@ func BuildPodSpec(opts PodSpecOptions) (*corev1.Pod, error) {
 	labels := map[string]string{
 		LabelManagedBy: ManagedByValue,
 		LabelComponent: ComponentValue,
-		LabelNode:      opts.NodeName,
+		LabelNode:      sanitizeLabelValue(opts.NodeName),
 		LabelCreatedAt: createdAt,
 	}
 	if opts.OwnerHost != "" {
@@ -235,7 +240,7 @@ func BuildPodSpec(opts PodSpecOptions) (*corev1.Pod, error) {
 	spec := corev1.PodSpec{
 		RestartPolicy:      corev1.RestartPolicyNever,
 		HostPID:            true,
-		NodeSelector:       map[string]string{"kubernetes.io/hostname": opts.NodeName},
+		Affinity:           pinToNode(opts.NodeName),
 		Tolerations:        opts.Tolerations,
 		ServiceAccountName: opts.ServiceAccountName,
 		ImagePullSecrets:   opts.ImagePullSecrets,
@@ -254,6 +259,48 @@ func BuildPodSpec(opts PodSpecOptions) (*corev1.Pod, error) {
 		},
 		Spec: spec,
 	}, nil
+}
+
+// pinToNode schedules the pod onto the node by its object name. The
+// kubernetes.io/hostname label is not guaranteed to equal the node name, and
+// matching the name through the scheduler keeps taint and resource checks
+// that setting spec.nodeName would bypass.
+func pinToNode(nodeName string) *corev1.Affinity {
+	return &corev1.Affinity{
+		NodeAffinity: &corev1.NodeAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+				NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+					MatchFields: []corev1.NodeSelectorRequirement{{
+						Key:      "metadata.name",
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{nodeName},
+					}},
+				}},
+			},
+		},
+	}
+}
+
+// TargetNodeName returns the node a spawn pod is pinned to.
+func TargetNodeName(pod *corev1.Pod) string {
+	if pod == nil {
+		return ""
+	}
+	if pod.Spec.NodeName != "" {
+		return pod.Spec.NodeName
+	}
+	a := pod.Spec.Affinity
+	if a == nil || a.NodeAffinity == nil || a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		return ""
+	}
+	for _, term := range a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+		for _, req := range term.MatchFields {
+			if req.Key == "metadata.name" && req.Operator == corev1.NodeSelectorOpIn && len(req.Values) == 1 {
+				return req.Values[0]
+			}
+		}
+	}
+	return ""
 }
 
 func podName(nodeName, suffix string) string {

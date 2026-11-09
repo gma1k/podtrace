@@ -60,7 +60,7 @@ func (sr *ServiceResolver) ResolveService(ctx context.Context, ip string, port i
 		return nil
 	}
 
-	if sr.informerCache != nil {
+	if sr.informerCache.servicesActive() {
 		return sr.informerCache.GetServiceByEndpoint(ip, port)
 	}
 

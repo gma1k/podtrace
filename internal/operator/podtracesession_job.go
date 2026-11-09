@@ -385,13 +385,18 @@ func buildDiagnoseArgs(s *podtracev1alpha1.PodTraceSession, targets sessionTarge
 	if len(targets.PodRefs) > 0 {
 		refs := make([]string, 0, len(targets.PodRefs))
 		for _, r := range targets.PodRefs {
+			if podtracev1alpha1.ValidatePodRef(r) != nil {
+				continue
+			}
 			if r.Namespace != "" {
 				refs = append(refs, r.Namespace+"/"+r.Name)
 			} else {
 				refs = append(refs, s.Namespace+"/"+r.Name)
 			}
 		}
-		args = append(args, "--pods", strings.Join(refs, ","))
+		if len(refs) > 0 {
+			args = append(args, "--pods", strings.Join(refs, ","))
+		}
 	}
 	return args
 }

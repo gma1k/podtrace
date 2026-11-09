@@ -166,7 +166,7 @@ func main() {
 	rootCmd.Flags().BoolVar(&enableProfiling, "profiling", false, "Enable performance profiling: pprof endpoint discovery on the target pod, auto-trigger on latency spikes, and CPU/memory correlation in reports")
 	rootCmd.Flags().BoolVar(&localMode, "local", false, "Run eBPF on this workstation instead of spawning a privileged pod on the target node. Use for kind/minikube/docker-desktop where the workstation IS the kubelet host.")
 	rootCmd.Flags().StringVar(&spawnImage, "image", "", "Container image used when spawning on the target node (overrides PODTRACE_IMAGE and the linker default)")
-	rootCmd.Flags().StringVar(&spawnNamespace, "spawn-namespace", "", "Namespace for the ephemeral spawn pod (defaults to the target pod's namespace; overridable via PODTRACE_SPAWN_NAMESPACE)")
+	rootCmd.Flags().StringVar(&spawnNamespace, "spawn-namespace", "", "Namespace for the ephemeral spawn pod (defaults to podtrace-cli, created on first use; overridable via PODTRACE_SPAWN_NAMESPACE)")
 	rootCmd.Flags().BoolVar(&dynamicSpawn, "dynamic-spawn", false, "Continuously poll target selection and spawn additional pods on newly-matched nodes (incompatible with --diagnose; covers new nodes only, not new pods on already-covered nodes)")
 	rootCmd.Flags().BoolVar(&keepSpawnPodOnFailure, "keep-spawn-pod", false, "On failure, leave the spawn pod in place so its logs and state can be inspected (the reaper still cleans it up on the next podtrace invocation)")
 	rootCmd.Flags().StringVar(&spawnBTFFile, "btf-file", "", "Absolute path on the node to a BTF blob, for a kernel built without CONFIG_DEBUG_INFO_BTF. The CLI's equivalent of TracerConfig btfMode=file; see docs/crd-tracerconfig.md for how to produce one. Unnecessary when /sys/kernel/btf/vmlinux exists, which is nearly always")
@@ -195,6 +195,7 @@ func main() {
 		if logLevel != "" {
 			logger.SetLevel(logLevel)
 		}
+		awaitSpawnAttach(os.Stdin)
 	}
 
 	err := rootCmd.Execute()

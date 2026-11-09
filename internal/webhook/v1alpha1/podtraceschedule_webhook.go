@@ -89,6 +89,9 @@ func (v *PodTraceScheduleCustomValidator) validate(ctx context.Context, s *podtr
 	if err := validateSelectorExclusivity(tmpl.Selector, tmpl.PodRefs); err != nil {
 		return nil, fmt.Errorf("spec.sessionTemplate.spec.%w", err)
 	}
+	if err := validateTargetShapes(tmpl.Selector, tmpl.PodRefs, nil); err != nil {
+		return nil, fmt.Errorf("spec.sessionTemplate.%w", err)
+	}
 	if err := validateNamespaceSelector(tmpl.NamespaceSelector); err != nil {
 		return nil, fmt.Errorf("spec.sessionTemplate.%w", err)
 	}

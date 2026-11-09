@@ -502,3 +502,38 @@ func TestPrefixedWriter_PropagatesUnderlyingWriteError(t *testing.T) {
 		t.Errorf("Write returned n=%d, want %d", n, len("hello\n"))
 	}
 }
+
+func TestRun_SpawnPodDefaultsToTheDedicatedNamespaceNotTheTargets(t *testing.T) {
+	cs := fake.NewClientset(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "tenant-a", Name: "api", UID: "u1"},
+		Spec:       corev1.PodSpec{NodeName: "node-1"},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning, ContainerStatuses: []corev1.ContainerStatus{{
+			Name: "app", ContainerID: "containerd://abc",
+			State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+		}}},
+	})
+	var createdIn []string
+	cs.PrependReactor("create", "*", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		if r := a.GetResource().Resource; r != "pods" && r != "secrets" {
+			return false, nil, nil
+		}
+		createdIn = append(createdIn, a.GetResource().Resource+"@"+a.GetNamespace())
+		return true, nil, errors.New("stop here")
+	})
+	_ = Run(context.Background(), RunOptions{
+		Clientset:      cs,
+		RestConfig:     &rest.Config{},
+		Image:          "x",
+		SplunkToken:    "secret-token",
+		BuildChildArgs: func(string, []PodRef) []string { return []string{"--noop"} },
+		Selection:      pkgkube.TargetSelection{DefaultNamespace: "tenant-a", Pods: []string{"api"}},
+	})
+	if len(createdIn) == 0 {
+		t.Fatal("no object was created")
+	}
+	for _, c := range createdIn {
+		if !strings.HasSuffix(c, "@"+DefaultSpawnNamespace) {
+			t.Errorf("created %s, want every spawn object in %s", c, DefaultSpawnNamespace)
+		}
+	}
+}
