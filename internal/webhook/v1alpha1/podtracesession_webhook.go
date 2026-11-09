@@ -56,6 +56,9 @@ func (v *PodTraceSessionCustomValidator) validate(ctx context.Context, s *podtra
 	if err := validateSelectorExclusivity(s.Spec.Selector, s.Spec.PodRefs); err != nil {
 		return nil, err
 	}
+	if err := validateTargetShapes(s.Spec.Selector, s.Spec.PodRefs, nil); err != nil {
+		return nil, err
+	}
 	if err := validateNamespaceSelector(s.Spec.NamespaceSelector); err != nil {
 		return nil, err
 	}

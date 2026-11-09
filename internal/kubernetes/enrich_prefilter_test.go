@@ -33,7 +33,7 @@ func TestEnrichNetworkTarget_ExternalIPSkipsResolversAndCache(t *testing.T) {
 		t.Fatalf("external IP must not trigger any API list/get, got %d", n)
 	}
 	populated := false
-	ce.podCache.Range(func(any, any) bool { populated = true; return false })
+	ce.podCache.Range(func(string, *cacheEntry) bool { populated = true; return false })
 	if populated {
 		t.Fatal("external IP must not leave an entry in the pod cache")
 	}

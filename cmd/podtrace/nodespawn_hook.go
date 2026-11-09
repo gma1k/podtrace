@@ -114,6 +114,12 @@ func maybeSpawnOnNode(ctx context.Context, stop <-chan struct{}, cmd *cobra.Comm
 	if ns == "" {
 		ns = os.Getenv("PODTRACE_SPAWN_NAMESPACE")
 	}
+	if ns == "" {
+		ns = nodespawn.DefaultSpawnNamespace
+		if err := nodespawn.EnsureSpawnNamespace(ctx, clientset, ns); err != nil {
+			return true, err
+		}
+	}
 
 	host := nodespawn.HostnameFromEnv()
 	if _, err := nodespawn.ReapStale(ctx, clientset, ns, host); err != nil {
@@ -170,6 +176,7 @@ func maybeSpawnOnNode(ctx context.Context, stop <-chan struct{}, cmd *cobra.Comm
 	for _, refs := range preResolved.ByNode {
 		allTargetPods = append(allTargetPods, refs...)
 	}
+	warnSpawnInTargetNamespace(ns, allTargetPods)
 	eventsOut := streams.Out
 	if exportFormat != "" {
 		eventsOut = streams.ErrOut
@@ -277,3 +284,22 @@ func errorsAs(err error, target any) bool {
 }
 
 var _ = fmt.Sprintf
+
+// warnSpawnInTargetNamespace flags a spawn namespace that is also a traced
+// namespace: whoever may exec into pods or read Secrets there can reach the
+// node-privileged spawn pod and its exporter credentials.
+func warnSpawnInTargetNamespace(spawnNamespace string, targets []nodespawn.PodRef) {
+	if spawnSharesTargetNamespace(spawnNamespace, targets) {
+		logger.Warn("Spawn pod runs in a traced namespace; anyone with pods/exec or secrets get there can reach a node-privileged pod and its credentials. Prefer a dedicated --spawn-namespace.",
+			zap.String("namespace", spawnNamespace))
+	}
+}
+
+func spawnSharesTargetNamespace(spawnNamespace string, targets []nodespawn.PodRef) bool {
+	for _, t := range targets {
+		if t.Namespace == spawnNamespace {
+			return true
+		}
+	}
+	return false
+}

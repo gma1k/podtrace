@@ -111,7 +111,7 @@ container with a remapped root.
 | `PODTRACE_K8S_API_TIMEOUT` | `500ms` | Per-call API server timeout |
 | `PODTRACE_K8S_CACHE_TTL` | `300` | Pod metadata cache TTL, in seconds |
 | `PODTRACE_MAX_TARGET_PODS` | `256` | Cap on simultaneously targeted pods |
-| `PODTRACE_SPAWN_NAMESPACE` | target pod's namespace | Namespace for the ephemeral spawn pod |
+| `PODTRACE_SPAWN_NAMESPACE` | `podtrace-cli` | Namespace for the ephemeral spawn pod (created with the privileged PodSecurity level on first use) |
 | `PODTRACE_SPAWN_SA` | unset | Service account for the spawn pod |
 | `PODTRACE_NODE_LOCAL` | unset | Sentinel; `1` marks a node-local run |
 | `PODTRACE_BOOTSTRAP_IMAGE` | unset | Image for the bootstrap `TracerConfig` |

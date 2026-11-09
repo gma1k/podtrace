@@ -258,12 +258,34 @@ func AttachToPod(ctx context.Context, restCfg *rest.Config, clientset kubernetes
 		if streamErr == nil {
 			return false, nil
 		}
-		if !apierrors.IsForbidden(streamErr) {
+		if !attachForbidden(streamErr) {
 			return false, streamErr
 		}
 	}
 
 	return true, streamLogs(ctx, clientset, pod, streams.Out)
+}
+
+// degradedStreamWarning tells the user what the pods/log fallback costs.
+const degradedStreamWarning = "podtrace: pods/attach is not allowed here, so output is streamed from the pod log: " +
+	"stdout and stderr arrive merged on stdout, and stdin is not forwarded. Grant pods/attach in the spawn namespace for the full stream."
+
+// streamLogsFromStart is the pods/log path taken when attach is known to be
+// denied.
+var streamLogsFromStart = func(ctx context.Context, clientset kubernetes.Interface, pod *corev1.Pod, streams genericiooptions.IOStreams) error {
+	return streamLogs(ctx, clientset, pod, streams.Out)
+}
+
+// attachForbidden recognises an attach the API server refused. The SPDY
+// upgrade reports the refusal as an untyped "unable to upgrade connection"
+// error carrying the server's message, so a typed Forbidden check alone
+// never matches it.
+func attachForbidden(err error) bool {
+	if apierrors.IsForbidden(err) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unable to upgrade connection") && strings.Contains(msg, "forbidden")
 }
 
 func streamLogs(ctx context.Context, clientset kubernetes.Interface, pod *corev1.Pod, stdout io.Writer) error {

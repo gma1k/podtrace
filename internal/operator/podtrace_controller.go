@@ -124,6 +124,13 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return r.withdrawBundle(ctx, &pt, "ExporterConfigNameTooLong")
 	}
 
+	if err := podtracev1alpha1.ValidateExporterConfigVariant(ec.Spec); err != nil {
+		msg := fmt.Sprintf("ExporterConfig %s is invalid: %v", ecKey, err)
+		r.setCondition(&pt, ConditionDegraded, metav1.ConditionTrue, "ExporterInvalid", msg)
+		r.setCondition(&pt, ConditionReady, metav1.ConditionFalse, "ExporterInvalid", msg)
+		return r.withdrawBundle(ctx, &pt, "ExporterInvalid")
+	}
+
 	// Resolve spec.namespaceSelector against the cluster's Namespace
 	// labels. Tri-state result:
 	//   nil   → selector not set on the CR (agent falls back to own-ns)

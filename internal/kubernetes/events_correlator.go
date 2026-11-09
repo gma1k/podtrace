@@ -8,6 +8,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 )
@@ -24,6 +26,10 @@ type K8sEvent struct {
 // a watch the API server closed.
 var rewatchBackoff = 2 * time.Second
 
+// maxSeenEvents bounds the (uid, resourceVersion) set that keeps a fresh
+// watch, which replays every current Event, from recording them twice.
+const maxSeenEvents = 1024
+
 type EventsCorrelator struct {
 	clientset kubernetes.Interface
 	podName   string
@@ -33,6 +39,7 @@ type EventsCorrelator struct {
 
 	eventWatcher watch.Interface
 	lastRV       string
+	seen         map[types.UID]string
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -44,6 +51,7 @@ func NewEventsCorrelator(clientset kubernetes.Interface, podName, namespace stri
 		podName:   podName,
 		namespace: namespace,
 		events:    make([]*K8sEvent, 0),
+		seen:      map[types.UID]string{},
 		stopCh:    make(chan struct{}),
 	}
 }
@@ -114,6 +122,10 @@ func (ec *EventsCorrelator) watchEvents(ctx context.Context) {
 				continue
 			}
 
+			if event.Type == watch.Error {
+				ec.handleWatchError(event.Object)
+				continue
+			}
 			if k8sEvent, ok := event.Object.(*corev1.Event); ok {
 				ec.mu.Lock()
 				ec.lastRV = k8sEvent.ResourceVersion
@@ -122,6 +134,18 @@ func (ec *EventsCorrelator) watchEvents(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// handleWatchError forgets the resume point when the server reports it has
+// compacted past it.
+func (ec *EventsCorrelator) handleWatchError(obj runtime.Object) {
+	err := apierrors.FromObject(obj)
+	if !apierrors.IsResourceExpired(err) && !apierrors.IsGone(err) {
+		return
+	}
+	ec.mu.Lock()
+	ec.lastRV = ""
+	ec.mu.Unlock()
 }
 
 // rewatch replaces the closed watcher, retrying with backoff until it
@@ -160,6 +184,19 @@ func (ec *EventsCorrelator) addEvent(event *corev1.Event) {
 
 	ec.mu.Lock()
 	defer ec.mu.Unlock()
+
+	if event.UID != "" {
+		if ec.seen[event.UID] == event.ResourceVersion {
+			return
+		}
+		if len(ec.seen) >= maxSeenEvents {
+			clear(ec.seen)
+		}
+		if ec.seen == nil {
+			ec.seen = map[types.UID]string{}
+		}
+		ec.seen[event.UID] = event.ResourceVersion
+	}
 
 	ts := event.FirstTimestamp.Time
 	if ts.IsZero() {

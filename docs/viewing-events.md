@@ -50,24 +50,31 @@ so the CLI loads eBPF *on that node* by way of an ephemeral pod with
 |---|---|---|
 | `--local` | off | Skip the spawn; run eBPF on the workstation. Use for kind/minikube/docker-desktop where the workstation IS the kubelet host. |
 | `--image` | linker default `ghcr.io/gma1k/podtrace:<CLI version>` | Override the image the spawn pod runs. Also settable via `PODTRACE_IMAGE` env. |
-| `--spawn-namespace` | target pod's namespace | Namespace where the spawn pod lives. Also settable via `PODTRACE_SPAWN_NAMESPACE`. |
+| `--spawn-namespace` | `podtrace-cli` (created on first use) | Namespace where the spawn pod and its credential Secret live. Also settable via `PODTRACE_SPAWN_NAMESPACE`. |
 
 ### Required cluster setup
 
 The spawn pod is privileged (`hostPID`, `CAP_BPF`, `CAP_SYS_ADMIN`,
-hostPath mounts). If the target namespace enforces PodSecurity
-"restricted" or "baseline", admission rejects the spawn pod with an
-error the CLI surfaces verbatim, including the one-line remediation:
+hostPath mounts), so it runs in the dedicated `podtrace-cli` namespace
+rather than the traced pod's namespace. There, a tenant's `pods/exec` or
+`secrets get` rights cannot reach it. The CLI creates the namespace with
+`pod-security.kubernetes.io/enforce=privileged` the first time. Without
+permission to create namespaces, ask an admin to run once:
 
 ```bash
-kubectl label ns/<ns> pod-security.kubernetes.io/enforce=privileged --overwrite
+kubectl create namespace podtrace-cli
+kubectl label ns/podtrace-cli pod-security.kubernetes.io/enforce=privileged
 ```
 
-Or use `--spawn-namespace=<centralized-ns>` to point at a namespace
-you've already labelled for privileged workloads.
+Or use `--spawn-namespace=<ns>` to point at a namespace you've already
+labelled for privileged workloads. If that namespace enforces PodSecurity
+"restricted" or "baseline", admission rejects the spawn pod and the CLI
+prints the one-line `kubectl label` remediation.
 
 RBAC needed in **your kubeconfig** (the workstation): `pods` (`create`, `get`,
-`delete`, `list`, `watch`), `pods/log`, `pods/attach`. Falls back to
+`delete`, `list`, `watch`), `pods/log`, `pods/attach`, and `secrets` (`create`,
+`delete`) in the spawn namespace, plus `namespaces` `get`/`create` the first
+time `podtrace-cli` has to be created. Falls back to
 `pods/log` (stream-only, no stdin) if `pods/attach` is denied. **The spawn
 pod itself runs as the default ServiceAccount and needs zero RBAC** — the
 workstation pre-resolves every target's containerID and hands it to the

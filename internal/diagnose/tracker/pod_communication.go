@@ -60,6 +60,9 @@ func (pct *PodCommunicationTracker) ProcessEvent(event *events.Event, k8sContext
 		if ns, ok := ctx["target_namespace"].(string); ok {
 			targetNamespace = ns
 		}
+		if ns, ok := ctx["service_namespace"].(string); ok && targetNamespace == "" && targetService != "" {
+			targetNamespace = ns
+		}
 	}
 
 	if targetPod == "" && targetService == "" {

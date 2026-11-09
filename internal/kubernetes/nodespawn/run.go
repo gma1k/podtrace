@@ -58,6 +58,8 @@ type RunOptions struct {
 
 	KeepSpawnPodOnFailure bool
 
+	attachDenied bool
+
 	ExtraEnv []corev1.EnvVar
 
 	SplunkToken string
@@ -104,6 +106,11 @@ func Run(ctx context.Context, opts RunOptions) error {
 	}
 
 	multiNode := len(nodes.NodeNames) > 1
+	spawnNamespace := opts.SpawnNamespace
+	if spawnNamespace == "" {
+		spawnNamespace = DefaultSpawnNamespace
+	}
+	opts.attachDenied = !CanAttach(ctx, opts.Clientset, spawnNamespace)
 
 	g, gctx := errgroup.WithContext(ctx)
 	var wmu sync.Mutex
@@ -118,10 +125,7 @@ func Run(ctx context.Context, opts RunOptions) error {
 		}
 		covered[node] = true
 		cmu.Unlock()
-		ns := opts.SpawnNamespace
-		if ns == "" {
-			ns = podRefs[0].Namespace
-		}
+		ns := spawnNamespace
 		args := opts.BuildChildArgs(node, podRefs)
 		podSpec, err := BuildPodSpec(PodSpecOptions{
 			NodeName:              node,
@@ -139,6 +143,7 @@ func Run(ctx context.Context, opts RunOptions) error {
 			SplunkToken:           opts.SplunkToken,
 			SecretEnv:             opts.SecretEnv,
 			BTFFile:               opts.BTFFile,
+			AttachHandshake:       !opts.attachDenied,
 		})
 		if err != nil {
 			cmu.Lock()
@@ -263,7 +268,7 @@ func runOneNode(ctx context.Context, opts RunOptions, podSpec *corev1.Pod, multi
 	logger.Debug("Spawn pod created",
 		zap.String("namespace", created.Namespace),
 		zap.String("name", created.Name),
-		zap.String("node", podSpec.Spec.NodeSelector["kubernetes.io/hostname"]))
+		zap.String("node", TargetNodeName(podSpec)))
 
 	cleanupCtx, cancelCleanup := context.WithCancel(context.Background())
 	defer cancelCleanup()
@@ -307,20 +312,34 @@ func runOneNode(ctx context.Context, opts RunOptions, podSpec *corev1.Pod, multi
 
 	streams := opts.Streams
 	if multiNode {
-		host := podSpec.Spec.NodeSelector["kubernetes.io/hostname"]
+		streams.In = nil
+	}
+	handshake := podWaitsForAttach(podSpec)
+	if multiNode {
+		host := TargetNodeName(podSpec)
 		tag := host
 		if nodeLabel != "" {
 			tag = host + ": " + nodeLabel
 		}
 		streams.Out = newPrefixedWriter(streams.Out, "["+tag+"] ", wmu)
 		streams.ErrOut = newPrefixedWriter(streams.ErrOut, "["+tag+"] ", wmu)
-		streams.In = nil
+	}
+	if handshake {
+		streams.In = withHandshake(streams.In)
 	}
 
 	if !stop.markStreaming() {
 		return ErrInterrupted
 	}
-	_, err = attachToPod(ctx, opts.RestConfig, opts.Clientset, running, streams)
+	degraded := opts.attachDenied
+	if opts.attachDenied {
+		err = streamLogsFromStart(ctx, opts.Clientset, running, streams)
+	} else {
+		degraded, err = attachToPod(ctx, opts.RestConfig, opts.Clientset, running, streams)
+	}
+	if degraded {
+		_, _ = fmt.Fprintln(opts.Streams.ErrOut, degradedStreamWarning)
+	}
 	flushPrefixed(streams)
 	if err != nil && stop.requested() && ctx.Err() != nil {
 		return ErrInterrupted
@@ -347,7 +366,7 @@ func runOneNode(ctx context.Context, opts RunOptions, podSpec *corev1.Pod, multi
 		if tail := dumpPodLogs(cleanupCtx, opts.Clientset, running.Namespace, running.Name); tail != "" {
 			_, _ = fmt.Fprintf(opts.Streams.ErrOut, "spawn pod %s/%s tail:\n%s\n", running.Namespace, running.Name, tail)
 		}
-		return &ExitError{Code: int(exit), Node: podSpec.Spec.NodeSelector["kubernetes.io/hostname"]}
+		return &ExitError{Code: int(exit), Node: TargetNodeName(podSpec)}
 	}
 	return nil
 }
@@ -542,4 +561,17 @@ func HostnameFromEnv() string {
 		return h
 	}
 	return Hostname()
+}
+
+// podWaitsForAttach reports whether the spawn pod was built to wait for the
+// attach handshake.
+func podWaitsForAttach(pod *corev1.Pod) bool {
+	for _, c := range pod.Spec.Containers {
+		for _, e := range c.Env {
+			if e.Name == EnvAttachHandshake && e.Value == "1" {
+				return true
+			}
+		}
+	}
+	return false
 }

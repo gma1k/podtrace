@@ -24,6 +24,14 @@ func TestValidatePodName(t *testing.T) {
 		{"uppercase", "MyPod", true},
 		{"with underscore", "my_pod", true},
 		{"max length valid", "a" + strings.Repeat("b", 61), false},
+		{"dotted static pod name", "etcd-ip-10-0-1-2.ec2.internal", false},
+		{"longer than a label", strings.Repeat("a", 100), false},
+		{"subdomain max length", strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 61), false},
+		{"longer than a subdomain", strings.Repeat("a", 254), true},
+		{"leading dot", ".pod", true},
+		{"double dot", "pod..x", true},
+		{"comma", "a,b", true},
+		{"slash", "ns/pod", true},
 	}
 
 	for _, tt := range tests {
@@ -45,11 +53,12 @@ func TestValidateNamespace(t *testing.T) {
 		{"valid namespace", "default", false},
 		{"valid with numbers", "namespace123", false},
 		{"empty", "", true},
-		{"too long", string(make([]byte, 254)), true},
+		{"too long", strings.Repeat("a", 64), true},
 		{"starts with dash", "-namespace", true},
 		{"ends with dash", "namespace-", true},
 		{"uppercase", "Default", true},
-		{"max length valid", "a" + strings.Repeat("b", 251), false},
+		{"max length valid", "a" + strings.Repeat("b", 62), false},
+		{"dot is not allowed in a label", "team.a", true},
 	}
 
 	for _, tt := range tests {

@@ -13,64 +13,25 @@ import (
 	"time"
 
 	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/netguard/blocklist"
 )
 
 var ErrBlocked = errors.New("blocked by the egress guard")
 
-var metadataHosts = []net.IP{
-	net.ParseIP("fd00:ec2::254"),   // AWS IMDS over IPv6
-	net.ParseIP("100.100.100.200"), // Alibaba Cloud metadata
-	net.ParseIP("168.63.129.16"),   // Azure WireServer / host agent
-}
-
-var nat64Prefix = [12]byte{0x00, 0x64, 0xff, 0x9b}
-
 // IsBlockedIP reports whether ip is an address an exporter must never connect
-// to: cloud-metadata / link-local (169.254.0.0/16, fe80::/10), the known
-// metadata hosts outside that range, the unspecified address, and multicast.
-// An IPv4 address embedded in a NAT64 or IPv4-compatible IPv6 address is
-// judged as the IPv4 address it reaches. IPv4-mapped forms are covered by
-// net.IP itself.
+// to: everything blocklist.IsBlocked refuses, plus the private ranges when
+// the operator opted into blocking them.
 func IsBlockedIP(ip net.IP) bool {
-	if ip == nil {
+	if blocklist.IsBlocked(ip) {
 		return true
 	}
-	if v4 := embeddedIPv4(ip); v4 != nil {
-		return IsBlockedIP(v4)
+	if !config.ExporterBlockPrivateRanges() {
+		return false
 	}
-	if ip.IsUnspecified() || ip.IsMulticast() ||
-		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-		return true
+	if v4 := blocklist.EmbeddedIPv4(ip); v4 != nil {
+		ip = v4
 	}
-	for _, m := range metadataHosts {
-		if ip.Equal(m) {
-			return true
-		}
-	}
-	if config.ExporterBlockPrivateRanges() && ip.IsPrivate() {
-		return true
-	}
-	return false
-}
-
-// embeddedIPv4 returns the IPv4 address carried in the low 32 bits of a
-// NAT64 (64:ff9b::/96) or IPv4-compatible (::/96, excluding :: and ::1)
-// IPv6 address, or nil.
-func embeddedIPv4(ip net.IP) net.IP {
-	ip16 := ip.To16()
-	if ip16 == nil || ip.To4() != nil {
-		return nil
-	}
-	switch [12]byte(ip16[:12]) {
-	case nat64Prefix:
-	case [12]byte{}:
-		if ip16[12] == 0 && ip16[13] == 0 && ip16[14] == 0 && ip16[15] <= 1 {
-			return nil
-		}
-	default:
-		return nil
-	}
-	return net.IPv4(ip16[12], ip16[13], ip16[14], ip16[15])
+	return ip.IsPrivate()
 }
 
 // ValidateEndpointHost rejects an endpoint whose host is a literal IP an

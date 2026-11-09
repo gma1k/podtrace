@@ -2,10 +2,39 @@ package v1alpha1
 
 import (
 	"fmt"
-	"net"
 	"net/url"
 	"strings"
+
+	"k8s.io/apimachinery/pkg/util/validation"
+
+	"github.com/gma1k/podtrace/internal/netguard/blocklist"
 )
+
+// ValidatePodRef checks that a podRef names a real pod: the name a DNS-1123
+// subdomain and the namespace, when set, a DNS-1123 label. The CRD schema
+// enforces the same shape; the operator repeats it because a name carrying
+// a ',' or '/' would otherwise be split into extra targets downstream.
+func ValidatePodRef(ref PodRef) error {
+	if errs := validation.IsDNS1123Subdomain(ref.Name); len(errs) > 0 {
+		return fmt.Errorf("podRef name %q: %s", ref.Name, strings.Join(errs, "; "))
+	}
+	if ref.Namespace != "" {
+		if errs := validation.IsDNS1123Label(ref.Namespace); len(errs) > 0 {
+			return fmt.Errorf("podRef namespace %q: %s", ref.Namespace, strings.Join(errs, "; "))
+		}
+	}
+	return nil
+}
+
+// ValidatePodRefs applies ValidatePodRef to every entry of a podRefs list.
+func ValidatePodRefs(field string, refs []PodRef) error {
+	for i, ref := range refs {
+		if err := ValidatePodRef(ref); err != nil {
+			return fmt.Errorf("%s[%d]: %w", field, i, err)
+		}
+	}
+	return nil
+}
 
 // ValidateObjectStoreReference is the admission-time check for
 // spec.reportRef.objectStore.
@@ -134,14 +163,10 @@ func validateEndpointScheme(field, endpoint string) error {
 	return nil
 }
 
-// blockedEndpointHost reports whether host is a literal IP an exporter must
-// never reach: link-local / cloud-metadata (169.254.0.0/16, fe80::/10), the
-// unspecified address, and multicast.
+// blockedEndpointHost reports whether host is an address an exporter must
+// never reach. It is the same blocklist the runtime egress guard dials
+// through, so an endpoint admission accepts is never one every export is
+// then refused for.
 func blockedEndpointHost(host string) bool {
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
-	}
-	return ip.IsUnspecified() || ip.IsMulticast() ||
-		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()
+	return blocklist.IsBlockedHost(host)
 }

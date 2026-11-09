@@ -9,6 +9,11 @@
     "schedule:earlyMondays",
     "helpers:pinGitHubActionDigests"
   ],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/vendor/**"
+  ],
   "labels": [
     "dependencies"
   ],

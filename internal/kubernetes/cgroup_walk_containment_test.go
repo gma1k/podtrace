@@ -142,3 +142,51 @@ func writeFakeKubelet(t *testing.T, procDir, pid, cmdline string) {
 		t.Fatal(err)
 	}
 }
+
+func linkPIDNamespace(t *testing.T, procDir, pid, ns string) {
+	t.Helper()
+	d := filepath.Join(procDir, pid, "ns")
+	if err := os.MkdirAll(d, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(ns, filepath.Join(d, "pid")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReadKubeletCgroupFlag_IgnoresAPodProcessNamedKubelet(t *testing.T) {
+	procDir := t.TempDir()
+	origProc := config.ProcBasePath
+	config.SetProcBasePath(procDir)
+	defer config.SetProcBasePath(origProc)
+
+	if err := os.MkdirAll(filepath.Join(procDir, "1"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	linkPIDNamespace(t, procDir, "1", "pid:[4026531836]")
+	writeFakeKubelet(t, procDir, "1001", "kubelet\x00--cgroup-root\x00tenant-chosen\x00")
+	linkPIDNamespace(t, procDir, "1001", "pid:[4026532999]")
+	writeFakeKubelet(t, procDir, "2345", "kubelet\x00--cgroup-root\x00kubepods\x00")
+	linkPIDNamespace(t, procDir, "2345", "pid:[4026531836]")
+
+	if got := readKubeletCgroupFlag(); got != "kubepods" {
+		t.Fatalf("readKubeletCgroupFlag()=%q, want %q: a kubelet-named process in a pod PID namespace must be ignored", got, "kubepods")
+	}
+}
+
+func TestReadKubeletCgroupFlag_TrustsACandidateWhoseNamespaceIsUnreadable(t *testing.T) {
+	procDir := t.TempDir()
+	origProc := config.ProcBasePath
+	config.SetProcBasePath(procDir)
+	defer config.SetProcBasePath(origProc)
+
+	if err := os.MkdirAll(filepath.Join(procDir, "1"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	linkPIDNamespace(t, procDir, "1", "pid:[4026531836]")
+	writeFakeKubelet(t, procDir, "2345", "kubelet\x00--cgroup-root\x00kubepods\x00")
+
+	if got := readKubeletCgroupFlag(); got != "kubepods" {
+		t.Fatalf("readKubeletCgroupFlag()=%q, want %q", got, "kubepods")
+	}
+}

@@ -57,6 +57,9 @@ func (v *PodTraceCustomValidator) validate(ctx context.Context, pt *podtracev1al
 	if err := validatePodTraceTargets(pt.Spec.Selector, pt.Spec.PodRefs, pt.Spec.AppSelector); err != nil {
 		return nil, err
 	}
+	if err := validateTargetShapes(pt.Spec.Selector, pt.Spec.PodRefs, pt.Spec.AppSelector); err != nil {
+		return nil, err
+	}
 	if err := validateNamespaceSelector(pt.Spec.NamespaceSelector); err != nil {
 		return nil, err
 	}
