@@ -350,6 +350,7 @@ registry changes, so a rename cannot happen by accident.
 | `podtrace_inspections_dropped_total` | instances refused because the budget was full |
 | `podtrace_inspections_untriggerable_total` | activated issues that could not start a session |
 | `podtrace_agent_issue_pod_unresolved_total` | issues for which no pod could be resolved |
+| `podtrace_agent_alerts_rate_limited_total{reason}` | alerts dropped by the per-namespace or per-node alert rate limit (see [Alerting](alerting.md#rate-limiting)) |
 
 Each agent also serves its active issues as JSON at `/issues` on the metrics
 port: id, severity, subject, the time each activated, its message as the

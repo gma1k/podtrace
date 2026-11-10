@@ -70,6 +70,10 @@ func (rs *RetrySender) Send(ctx context.Context, alert *Alert) error {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return err
 		}
+		var statusErr *StatusError
+		if errors.As(err, &statusErr) && !statusErr.Retryable() {
+			return fmt.Errorf("not retried, the receiver answered %d: %w", statusErr.StatusCode, err)
+		}
 	}
 	return fmt.Errorf("failed after %d attempts: %w", rs.maxRetries+1, lastErr)
 }

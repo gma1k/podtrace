@@ -199,8 +199,8 @@ func TestParseSeverity(t *testing.T) {
 		{"critical", SeverityCritical},
 		{"warning", SeverityWarning},
 		{"error", SeverityError},
-		{"unknown", SeverityError},
-		{"", SeverityError},
+		{"unknown", SeverityWarning},
+		{"", SeverityWarning},
 	}
 	for _, tt := range tests {
 		result := ParseSeverity(tt.input)
@@ -217,8 +217,8 @@ func TestSeverityLevel(t *testing.T) {
 	}{
 		{SeverityFatal, 4},
 		{SeverityCritical, 3},
-		{SeverityWarning, 2},
-		{SeverityError, 1},
+		{SeverityError, 2},
+		{SeverityWarning, 1},
 		{AlertSeverity("unknown"), 0},
 	}
 	for _, tt := range tests {

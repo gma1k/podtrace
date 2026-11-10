@@ -28,16 +28,18 @@ func init() {
 }
 
 type Manager struct {
-	senders       []Sender
-	deduplicator  *AlertDeduplicator
-	rateLimiter   *RateLimiter
-	enabled       bool
-	mu            sync.RWMutex
-	cleanupTicker *time.Ticker
-	stopCh        chan struct{}
-	stopOnce      sync.Once
-	shuttingDown  bool
-	wg            sync.WaitGroup
+	senders         []Sender
+	deduplicator    *AlertDeduplicator
+	rateLimiter     *NamespaceRateLimiter
+	nodeRateLimiter *RateLimiter
+	dropObserver    func(reason string)
+	enabled         bool
+	mu              sync.RWMutex
+	cleanupTicker   *time.Ticker
+	stopCh          chan struct{}
+	stopOnce        sync.Once
+	shuttingDown    bool
+	wg              sync.WaitGroup
 }
 
 // deliveryBudget is the per-alert deadline handed to each sender.
@@ -99,11 +101,12 @@ func NewManager() (*Manager, error) {
 		return &Manager{enabled: false}, nil
 	}
 	manager := &Manager{
-		senders:      make([]Sender, 0),
-		deduplicator: NewAlertDeduplicator(config.AlertDeduplicationWindow),
-		rateLimiter:  NewRateLimiter(config.AlertRateLimitPerMinute),
-		enabled:      true,
-		stopCh:       make(chan struct{}),
+		senders:         make([]Sender, 0),
+		deduplicator:    NewAlertDeduplicator(config.AlertDeduplicationWindow),
+		rateLimiter:     NewNamespaceRateLimiter(config.AlertRateLimitPerMinute),
+		nodeRateLimiter: NewRateLimiter(config.AlertNodeRateLimitPerMinute),
+		enabled:         true,
+		stopCh:          make(chan struct{}),
 	}
 	if config.AlertWebhookURL != "" {
 		webhookSender, err := NewWebhookSender(config.AlertWebhookURL, config.AlertHTTPTimeout)
@@ -148,12 +151,41 @@ func NewManager() (*Manager, error) {
 	return manager, nil
 }
 
+// Reasons an alert was dropped by rate limiting, as passed to the observer
+// set with SetDropObserver.
+const (
+	DropReasonNamespaceRateLimit = "namespace_rate_limit"
+	DropReasonNodeRateLimit      = "node_rate_limit"
+)
+
+// NamespaceScopedSender is implemented by a sender whose output stays inside
+// the alert's own namespace, such as the Kubernetes Event sink the flight
+// recorder triggers on. The node-wide ceiling that protects the external
+// receivers does not apply to it, so no tenant can starve another's triggers.
+type NamespaceScopedSender interface {
+	NamespaceScoped() bool
+}
+
+func namespaceScoped(s Sender) bool {
+	scoped, ok := s.(NamespaceScopedSender)
+	return ok && scoped.NamespaceScoped()
+}
+
+// SetDropObserver registers fn to be called, with a DropReason* value, for
+// every alert a rate limit drops, so the loss is countable.
+func (m *Manager) SetDropObserver(fn func(reason string)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.dropObserver = fn
+}
+
 func (m *Manager) SendAlert(alert *Alert) {
 	if alert == nil {
 		return
 	}
 	m.mu.RLock()
 	enabled, deduplicator, rateLimiter := m.enabled, m.deduplicator, m.rateLimiter
+	nodeRateLimiter, dropObserver := m.nodeRateLimiter, m.dropObserver
 	m.mu.RUnlock()
 	if !enabled {
 		return
@@ -164,8 +196,9 @@ func (m *Manager) SendAlert(alert *Alert) {
 	if !deduplicator.ShouldSend(alert) {
 		return
 	}
-	if !rateLimiter.Allow() {
+	if !rateLimiter.Allow(alert.Namespace) {
 		deduplicator.Forget(alert)
+		observeDrop(dropObserver, DropReasonNamespaceRateLimit)
 		return
 	}
 	m.mu.RLock()
@@ -173,12 +206,34 @@ func (m *Manager) SendAlert(alert *Alert) {
 		m.mu.RUnlock()
 		return
 	}
-	senders := make([]Sender, len(m.senders))
-	copy(senders, m.senders)
+	senders := make([]Sender, 0, len(m.senders))
+	external := make([]Sender, 0, len(m.senders))
+	for _, sender := range m.senders {
+		if namespaceScoped(sender) {
+			senders = append(senders, sender)
+		} else {
+			external = append(external, sender)
+		}
+	}
+	nodeLimited := len(external) > 0 && nodeRateLimiter != nil && !nodeRateLimiter.Allow()
+	if !nodeLimited {
+		senders = append(senders, external...)
+	}
+	if len(senders) == 0 {
+		m.mu.RUnlock()
+		deduplicator.Forget(alert)
+		if nodeLimited {
+			observeDrop(dropObserver, DropReasonNodeRateLimit)
+		}
+		return
+	}
 	// wg.Add must happen before RUnlock so Shutdown cannot observe a zero
 	// counter between the shutting-down check and the goroutine spawn.
 	m.wg.Add(len(senders) + 1)
 	m.mu.RUnlock()
+	if nodeLimited {
+		observeDrop(dropObserver, DropReasonNodeRateLimit)
+	}
 
 	// Fan out one goroutine per sender, each with its OWN copy of the
 	// alert: senders mutate it (Sanitize truncates fields), and a shared
@@ -209,9 +264,15 @@ func (m *Manager) SendAlert(alert *Alert) {
 			// Every sender failed: forget the dedup record so the next
 			// occurrence is attempted again instead of being silenced for
 			// the rest of the window.
-			m.deduplicator.Forget(alert)
+			deduplicator.Forget(alert)
 		}
 	}()
+}
+
+func observeDrop(observer func(reason string), reason string) {
+	if observer != nil {
+		observer(reason)
+	}
 }
 
 func (m *Manager) cleanupLoop() {
@@ -222,6 +283,12 @@ func (m *Manager) cleanupLoop() {
 			return
 		case <-m.cleanupTicker.C:
 			m.deduplicator.Cleanup(config.AlertDeduplicationWindow * 2)
+			m.mu.RLock()
+			rateLimiter := m.rateLimiter
+			m.mu.RUnlock()
+			if rateLimiter != nil {
+				rateLimiter.Cleanup()
+			}
 		}
 	}
 }
@@ -280,7 +347,10 @@ func (m *Manager) EnsureEnabledWithSender(sender Sender) {
 			m.deduplicator = NewAlertDeduplicator(config.AlertDeduplicationWindow)
 		}
 		if m.rateLimiter == nil {
-			m.rateLimiter = NewRateLimiter(config.AlertRateLimitPerMinute)
+			m.rateLimiter = NewNamespaceRateLimiter(config.AlertRateLimitPerMinute)
+		}
+		if m.nodeRateLimiter == nil {
+			m.nodeRateLimiter = NewRateLimiter(config.AlertNodeRateLimitPerMinute)
 		}
 		if m.stopCh == nil {
 			m.stopCh = make(chan struct{})

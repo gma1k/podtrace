@@ -102,7 +102,7 @@ func TestEnsureEnabledWithSender_DeliversAlertToRegisteredSender(t *testing.T) {
 
 func TestEnsureEnabledWithSender_PreservesStateOfEnabledManager(t *testing.T) {
 	deduplicator := NewAlertDeduplicator(time.Minute)
-	rateLimiter := NewRateLimiter(10)
+	rateLimiter := NewNamespaceRateLimiter(10)
 	m := &Manager{
 		enabled:      true,
 		deduplicator: deduplicator,

@@ -13,29 +13,30 @@ import (
 )
 
 const (
-	DefaultNamespace             = "default"
-	DefaultErrorRateThreshold    = 10.0
-	DefaultRTTThreshold          = 100.0
-	DefaultFSSlowThreshold       = 10.0
-	DefaultMetricsPort           = 3000
-	DefaultMetricsHost           = "127.0.0.1"
-	DefaultRingBufferSizeKB      = 2048
-	DefaultLogLevel              = "info"
-	DefaultTracingEnabled        = false
-	DefaultSynthesizeSpans       = false
-	DefaultTracingSampleRate     = 1.0
-	DefaultOTLPEndpoint          = "http://localhost:4318"
-	DefaultJaegerEndpoint        = "http://localhost:14268/api/traces"
-	DefaultSplunkEndpoint        = "http://localhost:8088/services/collector"
-	DefaultDataDogEndpoint       = "http://localhost:8126/v0.4/traces"
-	DefaultZipkinEndpoint        = "http://localhost:9411/api/v2/spans"
-	DefaultAlertHTTPTimeout      = 10 * time.Second
-	DefaultAlertDedupWindow      = 5 * time.Minute
-	DefaultAlertRateLimitPerMin  = 10
-	DefaultAlertMaxRetries       = 3
-	MaxAlertRetries              = 20
-	DefaultAlertRetryBackoffBase = 1 * time.Second
-	DefaultAlertMaxPayloadSize   = 1024 * 1024
+	DefaultNamespace                = "default"
+	DefaultErrorRateThreshold       = 10.0
+	DefaultRTTThreshold             = 100.0
+	DefaultFSSlowThreshold          = 10.0
+	DefaultMetricsPort              = 3000
+	DefaultMetricsHost              = "127.0.0.1"
+	DefaultRingBufferSizeKB         = 2048
+	DefaultLogLevel                 = "info"
+	DefaultTracingEnabled           = false
+	DefaultSynthesizeSpans          = false
+	DefaultTracingSampleRate        = 1.0
+	DefaultOTLPEndpoint             = "http://localhost:4318"
+	DefaultJaegerEndpoint           = "http://localhost:14268/api/traces"
+	DefaultSplunkEndpoint           = "http://localhost:8088/services/collector"
+	DefaultDataDogEndpoint          = "http://localhost:8126/v0.4/traces"
+	DefaultZipkinEndpoint           = "http://localhost:9411/api/v2/spans"
+	DefaultAlertHTTPTimeout         = 10 * time.Second
+	DefaultAlertDedupWindow         = 5 * time.Minute
+	DefaultAlertRateLimitPerMin     = 10
+	DefaultAlertMaxRetries          = 3
+	MaxAlertRetries                 = 20
+	DefaultAlertRetryBackoffBase    = 1 * time.Second
+	DefaultAlertMaxPayloadSize      = 1024 * 1024
+	DefaultAlertNodeRateLimitPerMin = 60
 )
 
 const (
@@ -152,6 +153,8 @@ var (
 	ProfileSnapshotTimeout = getDurationEnvOrDefault("PODTRACE_PROFILE_SNAPSHOT_TIMEOUT", 20*time.Second)
 
 	ReportGenerationTimeout = getDurationEnvOrDefault("PODTRACE_REPORT_GENERATION_TIMEOUT", DefaultReportGenerationTimeout)
+
+	AlertNodeRateLimitPerMinute = getIntEnvOrDefault("PODTRACE_ALERT_NODE_RATE_LIMIT", DefaultAlertNodeRateLimitPerMin)
 )
 
 const DefaultWorkloadMetricsBudget = 40000

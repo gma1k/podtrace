@@ -170,7 +170,7 @@ func TestManager_SendAlert_ShuttingDown(t *testing.T) {
 			return nil
 		}}},
 		deduplicator: NewAlertDeduplicator(time.Minute),
-		rateLimiter:  NewRateLimiter(60),
+		rateLimiter:  NewNamespaceRateLimiter(60),
 	}
 	m.SendAlert(&Alert{
 		Severity:  SeverityCritical,

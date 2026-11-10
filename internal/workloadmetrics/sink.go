@@ -272,6 +272,14 @@ func (s *Sink) Reap(maxIdle time.Duration) int {
 
 	cutoff := s.now().Add(-maxIdle)
 
+	if s.sc != nil {
+		s.sc.methodValues.reap(cutoff)
+		s.sc.operationValues.reap(cutoff)
+	}
+	if s.edges != nil {
+		s.edges.targets.reap(cutoff)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -707,12 +715,12 @@ func (s *Sink) recordSemconv(e *events.Event, seconds float64) {
 			appendLabels(id, httpRequestMethod(e), statusCodeLabel(e), networkProtocolName(e)), seconds)
 
 	case events.EventGRPCMethod:
-		method := s.sc.methodValues.bound(firstLine(e.Target))
+		method := s.sc.methodValues.bound(meta.Namespace, firstLine(e.Target), s.now())
 		s.observe(e, s.sc.rpcDuration, semconvRPCDuration,
 			appendLabels(id, rpcSystem(e.Type), method), seconds)
 
 	case events.EventRedisCmd, events.EventMemcachedCmd, events.EventDBQuery:
-		op := s.sc.operationValues.bound(firstLine(e.Details))
+		op := s.sc.operationValues.bound(meta.Namespace, firstLine(e.Details), s.now())
 		s.observe(e, s.sc.dbDuration, semconvDBDuration,
 			appendLabels(id, dbSystem(e.Type), op), seconds)
 	}

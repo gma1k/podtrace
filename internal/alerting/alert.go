@@ -144,30 +144,32 @@ func MapResourceAlertLevel(level uint32) AlertSeverity {
 	}
 }
 
+// ParseSeverity reads a configured severity floor. An unrecognised value
+// falls back to warning, the lowest rung, so a typo never silences alerts.
 func ParseSeverity(severity string) AlertSeverity {
 	switch severity {
 	case "fatal":
 		return SeverityFatal
 	case "critical":
 		return SeverityCritical
-	case "warning":
-		return SeverityWarning
 	case "error":
 		return SeverityError
 	default:
-		return SeverityError
+		return SeverityWarning
 	}
 }
 
+// SeverityLevel is the product's one severity ladder:
+// fatal > critical > error > warning. Unknown severities rank 0.
 func SeverityLevel(severity AlertSeverity) int {
 	switch severity {
 	case SeverityFatal:
 		return 4
 	case SeverityCritical:
 		return 3
-	case SeverityWarning:
-		return 2
 	case SeverityError:
+		return 2
+	case SeverityWarning:
 		return 1
 	default:
 		return 0

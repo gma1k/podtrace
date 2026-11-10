@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -263,24 +264,24 @@ func TestOpenAttributeValuesAreBounded(t *testing.T) {
 func TestBoundedValuesBehaviour(t *testing.T) {
 	b := newBoundedValues(2)
 
-	if got := b.bound(""); got != "unknown" {
+	if got := b.bound("ns", "", time.Time{}); got != "unknown" {
 		t.Errorf("empty = %q, want unknown", got)
 	}
-	if got := b.bound("a"); got != "a" {
+	if got := b.bound("ns", "a", time.Time{}); got != "a" {
 		t.Errorf("first = %q, want a", got)
 	}
-	if got := b.bound("b"); got != "b" {
+	if got := b.bound("ns", "b", time.Time{}); got != "b" {
 		t.Errorf("second = %q, want b", got)
 	}
-	if got := b.bound("c"); got != boundedValuesPlaceholder {
+	if got := b.bound("ns", "c", time.Time{}); got != boundedValuesPlaceholder {
 		t.Errorf("third = %q, want %q", got, boundedValuesPlaceholder)
 	}
-	if got := b.bound("a"); got != "a" {
+	if got := b.bound("ns", "a", time.Time{}); got != "a" {
 		t.Errorf("known value after saturation = %q, want a", got)
 	}
 
 	unbounded := newBoundedValues(-1)
-	if got := unbounded.bound("anything"); got != "anything" {
+	if got := unbounded.bound("ns", "anything", time.Time{}); got != "anything" {
 		t.Errorf("disabled limit = %q, want passthrough", got)
 	}
 }

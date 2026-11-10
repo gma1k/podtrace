@@ -282,7 +282,7 @@ func TestManager_SendAlert_Enabled_PassesRateLimiterAndDeduplicator(t *testing.T
 			},
 		}},
 		deduplicator: NewAlertDeduplicator(10 * time.Minute),
-		rateLimiter:  NewRateLimiter(60),
+		rateLimiter:  NewNamespaceRateLimiter(60),
 	}
 
 	alert := &Alert{
@@ -323,7 +323,7 @@ func TestManager_SendAlert_SeverityBelowThreshold(t *testing.T) {
 			},
 		}},
 		deduplicator: NewAlertDeduplicator(10 * time.Minute),
-		rateLimiter:  NewRateLimiter(60),
+		rateLimiter:  NewNamespaceRateLimiter(60),
 	}
 
 	alert := &Alert{
@@ -355,7 +355,7 @@ func TestManager_SendAlert_RateLimitExhausted(t *testing.T) {
 			},
 		}},
 		deduplicator: NewAlertDeduplicator(10 * time.Minute),
-		rateLimiter:  NewRateLimiter(0), // 0 allows/minute → rate limiter never allows
+		rateLimiter:  NewNamespaceRateLimiter(0), // 0 allows/minute → rate limiter never allows
 	}
 
 	alert := &Alert{
@@ -386,7 +386,7 @@ func TestManager_SendAlert_DeduplicatorFilters(t *testing.T) {
 			},
 		}},
 		deduplicator: NewAlertDeduplicator(10 * time.Minute),
-		rateLimiter:  NewRateLimiter(1000),
+		rateLimiter:  NewNamespaceRateLimiter(1000),
 	}
 
 	alert := &Alert{

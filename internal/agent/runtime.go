@@ -159,6 +159,7 @@ func Run(ctx context.Context, opts Options) error {
 	probeSrv := NewProbeServer(opts.HealthAddr, StallWindowFor(opts.StatusReportInterval))
 	metrics := NewMetrics()
 	metrics.SetIdentity(opts.NodeName, opts.TracerConfigName)
+	countRateLimitedAlerts(alerting.GetGlobalManager(), metrics)
 
 	probes.SetAttachObserver(&attachMetricsObserver{metrics: metrics})
 

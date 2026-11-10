@@ -34,6 +34,11 @@ func newAlertEventSender(c client.Client) *alertEventSender {
 
 func (s *alertEventSender) Name() string { return "kubernetes-event" }
 
+// NamespaceScoped marks the Event sink as writing only into the alert's own
+// namespace, so the node-wide ceiling for external receivers never drops a
+// flight-recorder trigger.
+func (s *alertEventSender) NamespaceScoped() bool { return true }
+
 func (s *alertEventSender) Send(ctx context.Context, alert *alerting.Alert) error {
 	now := s.nowFn()
 	event := alerting.BuildAlertEvent(alert, now)

@@ -178,11 +178,12 @@ func TestAnIssueWithNoEventStillShows(t *testing.T) {
 
 func TestIssuesAreFilteredAndSortedBySeverity(t *testing.T) {
 	m := newAgentMetrics(false)
-	m.raise("a.info", "shop", "cart", "", "info")
+	m.raise("a.warning", "shop", "cart", "", "warning")
 	m.raise("b.critical", "shop", "cart", "", "critical")
 	m.raise("c.warning", "shop", "checkout", "", "warning")
-	m.raise("d.emergency", "shop", "cart", "", "emergency")
+	m.raise("d.fatal", "shop", "cart", "", "fatal")
 	m.raise("e.unknown", "shop", "cart", "", "")
+	m.raise("h.error", "shop", "cart", "", "error")
 	m.raise("f.other", "billing", "cart", "", "critical")
 	m.issues.WithLabelValues("g.cleared", "shop", "cart", "", "", "warning").Set(0)
 
@@ -192,8 +193,26 @@ func TestIssuesAreFilteredAndSortedBySeverity(t *testing.T) {
 	for _, is := range r.Issues {
 		ids = append(ids, is.ID)
 	}
-	if got := strings.Join(ids, ","); got != "d.emergency,b.critical,a.info,e.unknown" {
+	if got := strings.Join(ids, ","); got != "d.fatal,b.critical,h.error,a.warning,e.unknown" {
 		t.Errorf("issues = %s", got)
+	}
+}
+
+func TestAFatalWorkloadOutranksWarningsAndSurvivesTheTopCut(t *testing.T) {
+	m := newAgentMetrics(false)
+	m.raise("l7.latency_degraded", "shop", "a-warned", "", "warning")
+	m.raise("l7.error_rate", "shop", "b-warned", "", "warning")
+	m.raise("l7.error_rate", "shop", "b-warned", "pod", "warning")
+	m.raise("memory.saturation", "shop", "z-fatal", "", "fatal")
+	m.raise("tls.failure_rate", "shop", "y-error", "", "error")
+
+	r := Build([]AgentScrape{{Agent: agent("a", "n1"), Window: window(t, m, func() {})}}, nil, Options{Top: 2}, t0)
+	var got []string
+	for _, wl := range r.Workloads {
+		got = append(got, wl.Workload)
+	}
+	if strings.Join(got, ",") != "z-fatal,y-error" {
+		t.Errorf("top 2 = %v, want the fatal then the error workload ahead of warnings", got)
 	}
 }
 

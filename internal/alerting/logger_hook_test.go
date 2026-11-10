@@ -16,7 +16,7 @@ func TestCreateAlertFromLog_FieldTypes(t *testing.T) {
 		enabled:      true,
 		senders:      []Sender{},
 		deduplicator: NewAlertDeduplicator(10 * time.Minute),
-		rateLimiter:  NewRateLimiter(1000),
+		rateLimiter:  NewNamespaceRateLimiter(1000),
 	}
 	orig := globalManager
 	SetGlobalManager(m)
@@ -55,7 +55,7 @@ func TestCreateAlertFromLog_ErrorType_NilInterface(t *testing.T) {
 		enabled:      true,
 		senders:      []Sender{},
 		deduplicator: NewAlertDeduplicator(10 * time.Minute),
-		rateLimiter:  NewRateLimiter(1000),
+		rateLimiter:  NewNamespaceRateLimiter(1000),
 	}
 	orig := globalManager
 	SetGlobalManager(m)
@@ -80,7 +80,7 @@ func TestCreateAlertFromLog_CodeKeyAlias(t *testing.T) {
 		enabled:      true,
 		senders:      []Sender{},
 		deduplicator: NewAlertDeduplicator(10 * time.Minute),
-		rateLimiter:  NewRateLimiter(1000),
+		rateLimiter:  NewNamespaceRateLimiter(1000),
 	}
 	orig := globalManager
 	SetGlobalManager(m)
@@ -105,7 +105,7 @@ func TestCreateAlertFromLog_Int32Type(t *testing.T) {
 		enabled:      true,
 		senders:      []Sender{},
 		deduplicator: NewAlertDeduplicator(10 * time.Minute),
-		rateLimiter:  NewRateLimiter(1000),
+		rateLimiter:  NewNamespaceRateLimiter(1000),
 	}
 	orig := globalManager
 	SetGlobalManager(m)

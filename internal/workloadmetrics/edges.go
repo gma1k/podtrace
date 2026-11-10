@@ -105,7 +105,7 @@ func (s *Sink) edgeIdentity(e *events.Event) ([]string, bool) {
 		return nil, false
 	}
 
-	target := s.edges.targets.bound(peer.Service)
+	target := s.edges.targets.bound(meta.Namespace, peer.Service, s.now())
 	targetNamespace := peer.Namespace
 	if targetNamespace == "" || target != peer.Service {
 		targetNamespace = "unknown"

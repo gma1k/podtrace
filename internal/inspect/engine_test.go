@@ -539,19 +539,18 @@ func TestATotalGatherFailureDoesNotAdvanceThePreviousSnapshot(t *testing.T) {
 }
 
 func TestSeverityRankOrdersTheWholeVocabulary(t *testing.T) {
-
 	ranks := map[alerting.AlertSeverity]int{
-		alerting.SeverityFatal:    severityRank(alerting.SeverityFatal),
-		alerting.SeverityCritical: severityRank(alerting.SeverityCritical),
-		alerting.SeverityError:    severityRank(alerting.SeverityError),
-		alerting.SeverityWarning:  severityRank(alerting.SeverityWarning),
+		alerting.SeverityFatal:    alerting.SeverityLevel(alerting.SeverityFatal),
+		alerting.SeverityCritical: alerting.SeverityLevel(alerting.SeverityCritical),
+		alerting.SeverityError:    alerting.SeverityLevel(alerting.SeverityError),
+		alerting.SeverityWarning:  alerting.SeverityLevel(alerting.SeverityWarning),
 	}
 	if ranks[alerting.SeverityFatal] <= ranks[alerting.SeverityCritical] ||
 		ranks[alerting.SeverityCritical] <= ranks[alerting.SeverityError] ||
 		ranks[alerting.SeverityError] <= ranks[alerting.SeverityWarning] {
 		t.Errorf("severities do not order fatal > critical > error > warning: %v", ranks)
 	}
-	if got := severityRank(alerting.AlertSeverity("not-a-severity")); got != 0 {
+	if got := alerting.SeverityLevel(alerting.AlertSeverity("not-a-severity")); got != 0 {
 		t.Errorf("an unknown severity ranked %d, want 0 so it cannot outrank a real one", got)
 	}
 }
