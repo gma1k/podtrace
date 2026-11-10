@@ -142,7 +142,7 @@ func TestResolveCgroupIDs_MatchedPodsZeroCgroupsErrors(t *testing.T) {
 		{ObjectMeta: metav1.ObjectMeta{Name: "p2", Namespace: "ns", UID: types.UID("66666666-7777-8888-9999-000000000000")}},
 	}
 
-	got, err := resolveCgroupIDs(pods)
+	got, err := resolveCgroupIDs(pods, "")
 	if err == nil {
 		t.Fatal("matched pods that resolve to zero cgroups must return an error, not a false-healthy success")
 	}
@@ -153,7 +153,7 @@ func TestResolveCgroupIDs_MatchedPodsZeroCgroupsErrors(t *testing.T) {
 		t.Errorf("no kubepods root should yield 0 cgroup IDs, got %d", len(got))
 	}
 
-	empty, err := resolveCgroupIDs(nil)
+	empty, err := resolveCgroupIDs(nil, "")
 	if err != nil || len(empty) != 0 {
 		t.Errorf("nil pods: got (%v, %v), want (empty, nil)", empty, err)
 	}

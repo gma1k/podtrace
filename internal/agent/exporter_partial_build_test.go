@@ -116,7 +116,7 @@ func TestReconcile_PartialExporterBuildRoutesCR(t *testing.T) {
 		ExporterBuilder: func(_ *BundlePayload, _ CRKey) (tracer.Exporter, error) {
 			return exp, errors.New("start OTLP metric export: refused")
 		},
-		CgroupResolver: func(_ []*corev1.Pod) (map[uint64]struct{}, error) {
+		CgroupResolver: func(_ []*corev1.Pod, _ string) (map[uint64]struct{}, error) {
 			return map[uint64]struct{}{42: {}}, nil
 		},
 		exporterCache: map[CRKey]cachedExporter{},

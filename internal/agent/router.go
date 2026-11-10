@@ -28,6 +28,8 @@ type Router struct {
 	parentOf func(uint64) (uint64, bool)
 
 	onRulesChanged func(hasRules bool)
+
+	published bool
 }
 
 // FollowRestartedContainers lets the router hand a CR the events of a
@@ -92,9 +94,7 @@ func (r *Router) Publish(rules []CRRule) *sync.WaitGroup {
 	}
 
 	r.rules = cp
-	// The kernel bypass must lift the moment a diagnostic CR appears, not on
-	// the next drain tick: waiting would lose the opening seconds of a
-	// session, which is exactly the window an operator started it for.
+	r.published = true
 	if r.onRulesChanged != nil {
 		r.onRulesChanged(len(cp) > 0)
 	}
@@ -135,6 +135,14 @@ func (r *Router) FilterUnion() []events.EventType {
 		out = append(out, t)
 	}
 	return out
+}
+
+// Published reports whether a reconcile has published a rule set yet. Until
+// then an empty rule set means "not reconciled", not "nothing matches".
+func (r *Router) Published() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.published
 }
 
 func (r *Router) RulesSnapshot() []CRRule {
@@ -213,12 +221,18 @@ func (r *Router) Close(ctx context.Context) error {
 
 	drain.Wait()
 
+	var closing sync.WaitGroup
 	for _, rule := range rules {
 		if rule.Exporter == nil {
 			continue
 		}
-		_ = rule.Exporter.Close(ctx)
+		closing.Add(1)
+		go func(exporter tracer.Exporter) {
+			defer closing.Done()
+			_ = exporter.Close(ctx)
+		}(rule.Exporter)
 	}
+	closing.Wait()
 	return nil
 }
 

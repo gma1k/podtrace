@@ -49,7 +49,7 @@ type AgentReconciler struct {
 
 	ExporterBuilder func(payload *BundlePayload, crKey CRKey) (tracer.Exporter, error)
 
-	CgroupResolver func(pods []*corev1.Pod) (map[uint64]struct{}, error)
+	CgroupResolver func(pods []*corev1.Pod, containerName string) (map[uint64]struct{}, error)
 
 	PodAttributor func(pods []*corev1.Pod) []PodCgroupEntry
 
@@ -69,6 +69,10 @@ type AgentReconciler struct {
 }
 
 const exporterCloseTimeout = 15 * time.Second
+
+// exporterShutdownBudget bounds how long one exporter may spend flushing its
+// queue on Close before the rest is discarded.
+var exporterShutdownBudget = 10 * time.Second
 
 type cachedExporter struct {
 	bundleRV string
@@ -101,7 +105,7 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
-		For(&podtracev1alpha1.PodTrace{}).
+		For(&podtracev1alpha1.PodTrace{}, builder.WithPredicates(podTraceChangePredicate())).
 		Watches(&corev1.Pod{},
 			handler.EnqueueRequestsFromMapFunc(r.enqueueAllPodTraces),
 			builder.WithPredicates(podChangePredicates()),
@@ -114,6 +118,15 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
 		Complete(r)
+}
+
+// podTraceChangePredicate passes the PodTrace events a rebuild depends on.
+// Reconcile reads only a PodTrace's spec and UID, so a create, a delete or a
+// spec change (a new generation) needs one; without the predicate every
+// agent rebuilt on every status row any agent wrote, and on every label or
+// annotation edit.
+func podTraceChangePredicate() predicate.Predicate {
+	return predicate.GenerationChangedPredicate{}
 }
 
 // Reconcile rebuilds the full router rule set.
@@ -185,7 +198,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 		policy := policySnapshotFromBundle(bundle)
 
-		cgroupIDs, err := r.CgroupResolver(matched)
+		cgroupIDs, err := r.CgroupResolver(matched, pt.Spec.ContainerName)
 		if err != nil {
 			logger.Error(err, "resolve cgroup IDs", "cr", key)
 			rules = append(rules, CRRule{
@@ -361,13 +374,13 @@ func (r *AgentReconciler) closeDisplacedExporters() {
 	if len(displaced) == 0 {
 		return
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), exporterCloseTimeout)
-		defer cancel()
-		for _, e := range displaced {
+	for _, e := range displaced {
+		go func(e tracer.Exporter) {
+			ctx, cancel := context.WithTimeout(context.Background(), exporterCloseTimeout)
+			defer cancel()
 			_ = e.Close(ctx)
-		}
-	}()
+		}(e)
+	}
 }
 
 // reapStaleExporters closes exporters whose CR keys did not appear in
@@ -387,14 +400,23 @@ func (r *AgentReconciler) reapStaleExporters(active map[CRKey]struct{}) {
 }
 
 // resolveCgroupIDs maps each matched pod's cgroup path to its inode
-// number — the value the kernel stamps on every event.
-func resolveCgroupIDs(pods []*corev1.Pod) (map[uint64]struct{}, error) {
+// number — the value the kernel stamps on every event. A non-empty
+// containerName keeps only that container's cgroup: the pod-level cgroup is
+// left out too, since the router admits an event whose cgroup's parent is in
+// the set and every container is a child of the pod cgroup.
+func resolveCgroupIDs(pods []*corev1.Pod, containerName string) (map[uint64]struct{}, error) {
 	entries := scanPodCgroups(pods)
 	out := make(map[uint64]struct{}, len(entries))
 	for _, e := range entries {
+		if containerName != "" && e.ContainerName != containerName {
+			continue
+		}
 		out[e.CgroupID] = struct{}{}
 	}
 	if len(pods) > 0 && len(out) == 0 {
+		if containerName != "" {
+			return out, fmt.Errorf("no cgroups resolved for container %q in %d matched pod(s)", containerName, len(pods))
+		}
 		return out, fmt.Errorf("no cgroups resolved for %d matched pod(s)", len(pods))
 	}
 	return out, nil

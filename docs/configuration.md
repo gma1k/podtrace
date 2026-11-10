@@ -101,6 +101,15 @@ container with a remapped root.
 | `PODTRACE_LDSOCONF_BASE` | `/etc` |
 | `PODTRACE_BINARY_SEARCH_PATHS` | unset | Colon-separated. Unset falls back to `/app/main`, `/app/app`, `/usr/local/bin/app`, `/bin/app` |
 
+## Memory
+
+Every podtrace process sets the Go soft memory limit to 70% of its container's
+memory limit, unless `GOMEMLIMIT` is set. The limit is taken from
+`PODTRACE_MEMORY_LIMIT` (bytes) when present, otherwise from the cgroup at
+`/sys/fs/cgroup`. The operator fills `PODTRACE_MEMORY_LIMIT` from
+`limits.memory` for agents and session Jobs, which mount the host's cgroupfs
+over `/sys/fs/cgroup` and so cannot read their own limit there.
+
 ## Kubernetes integration
 
 | Variable | Default | Notes |

@@ -14,9 +14,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
@@ -175,6 +178,8 @@ func (r *PodTraceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	pt.Status.Policy = resolvePolicyStatus(policyFromPodTrace(&pt), &ec)
 	r.setCondition(&pt, ConditionPolicyApplied, metav1.ConditionTrue, "Reconciled", "policy resolved and written to bundle")
 
+	pt.Status.NodeStatus = r.dropRowsOfDeletedNodes(ctx, pt.Status.NodeStatus)
+
 	if node, msg, reason, ok := firstDegradedNode(pt.Status.NodeStatus); ok {
 		condReason := string(reason)
 		if condReason == "" {
@@ -229,6 +234,11 @@ func (r *PodTraceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&podtracev1alpha1.TracerConfig{},
 			handler.EnqueueRequestsFromMapFunc(r.tracerConfigToPodTraces),
 		).
+		Watches(
+			&corev1.Node{},
+			handler.EnqueueRequestsFromMapFunc(r.deletedNodeToPodTraces),
+			builder.WithPredicates(nodeDeletedPredicate()),
+		).
 		WithOptions(defaultControllerOptions()).
 		Complete(r)
 }
@@ -265,6 +275,57 @@ func (r *PodTraceReconciler) secretToPodTraces(ctx context.Context, obj client.O
 
 // namespaceToPodTraces returns the set of PodTraces that should
 // re-reconcile when any Namespace event fires.
+// nodeDeletedPredicate passes only Node deletions: a node's rows go stale
+// when the Node object is removed, and no other Node event changes them.
+func nodeDeletedPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc:  func(event.CreateEvent) bool { return false },
+		UpdateFunc:  func(event.UpdateEvent) bool { return false },
+		DeleteFunc:  func(event.DeleteEvent) bool { return true },
+		GenericFunc: func(event.GenericEvent) bool { return false },
+	}
+}
+
+// deletedNodeToPodTraces enqueues the PodTraces that still carry a row for a
+// deleted node, so the row is dropped even when no other agent writes the
+// CR's status again (the node was the only one the CR matched on).
+func (r *PodTraceReconciler) deletedNodeToPodTraces(ctx context.Context, obj client.Object) []reconcile.Request {
+	var list podtracev1alpha1.PodTraceList
+	if err := r.List(ctx, &list); err != nil {
+		return nil
+	}
+	var out []reconcile.Request
+	for i := range list.Items {
+		pt := &list.Items[i]
+		for _, row := range pt.Status.NodeStatus {
+			if row.Node == obj.GetName() {
+				out = append(out, reconcile.Request{
+					NamespacedName: client.ObjectKey{Namespace: pt.Namespace, Name: pt.Name},
+				})
+				break
+			}
+		}
+	}
+	return out
+}
+
+// dropRowsOfDeletedNodes removes nodeStatus rows whose Node no longer
+// exists. Only the agent on a node removes its own rows, so a node that is
+// gone (autoscaler scale-down, replaced node) would otherwise keep its row
+// forever: counted in matchedPods and Ready, and holding the CR Degraded if
+// the row was degraded. A row is kept on any error other than NotFound.
+func (r *PodTraceReconciler) dropRowsOfDeletedNodes(ctx context.Context, rows []podtracev1alpha1.PodTraceNodeStatus) []podtracev1alpha1.PodTraceNodeStatus {
+	kept := rows[:0:0]
+	for _, row := range rows {
+		var node corev1.Node
+		if err := r.Get(ctx, client.ObjectKey{Name: row.Node}, &node); apierrors.IsNotFound(err) {
+			continue
+		}
+		kept = append(kept, row)
+	}
+	return kept
+}
+
 func (r *PodTraceReconciler) namespaceToPodTraces(ctx context.Context, _ client.Object) []reconcile.Request {
 	var list podtracev1alpha1.PodTraceList
 	if err := r.List(ctx, &list); err != nil {

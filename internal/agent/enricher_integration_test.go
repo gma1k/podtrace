@@ -59,7 +59,7 @@ func TestEnricher_FullPipeline(t *testing.T) {
 		ExporterBuilder: func(_ *BundlePayload, _ CRKey) (tracer.Exporter, error) {
 			return exp, nil
 		},
-		CgroupResolver: func(pods []*corev1.Pod) (map[uint64]struct{}, error) {
+		CgroupResolver: func(pods []*corev1.Pod, _ string) (map[uint64]struct{}, error) {
 			out := map[uint64]struct{}{}
 			for range pods {
 				out[cgID] = struct{}{}

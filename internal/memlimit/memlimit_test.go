@@ -6,6 +6,8 @@ import (
 	"testing"
 )
 
+var limitEnv string
+
 func withFiles(t *testing.T, v2, v1 string, env string) *int64 {
 	t.Helper()
 	dir := t.TempDir()
@@ -30,8 +32,11 @@ func withFiles(t *testing.T, v2, v1 string, env string) *int64 {
 	*set = -1
 	setLimit = func(n int64) int64 { *set = n; return 0 }
 	getenv = func(key string) string {
-		if key == "GOMEMLIMIT" {
+		switch key {
+		case "GOMEMLIMIT":
 			return env
+		case LimitEnv:
+			return limitEnv
 		}
 		return ""
 	}
@@ -79,6 +84,40 @@ func TestNoCgroupFilesystemSetsNothing(t *testing.T) {
 
 func TestAGOMEMLIMITTheUserSetIsLeftAlone(t *testing.T) {
 	set := withFiles(t, "536870912\n", "", "300MiB")
+	if got := Apply(); got != 0 || *set != -1 {
+		t.Errorf("Apply = %d, set %d; the runtime already applied GOMEMLIMIT", got, *set)
+	}
+}
+
+func withLimitEnv(t *testing.T, value string) {
+	t.Helper()
+	limitEnv = value
+	t.Cleanup(func() { limitEnv = "" })
+}
+
+func TestTheDownwardAPILimitWinsOverTheHostCgroupRoot(t *testing.T) {
+	set := withFiles(t, "", "9223372036854771712\n", "")
+	withLimitEnv(t, "1073741824")
+	if got := Apply(); got != 751619276 || *set != got {
+		t.Errorf("Apply = %d, set %d; want 70%% of the 1 GiB container limit", got, *set)
+	}
+}
+
+func TestAnUnusableLimitEnvFallsBackToTheCgroup(t *testing.T) {
+	for name, value := range map[string]string{"garbage": "lots", "zero": "0", "negative": "-5", "huge": "9223372036854771712"} {
+		t.Run(name, func(t *testing.T) {
+			set := withFiles(t, "536870912\n", "", "")
+			withLimitEnv(t, value)
+			if got := Apply(); got != 375809638 || *set != got {
+				t.Errorf("Apply = %d, set %d; want the cgroup's 512 MiB limit", got, *set)
+			}
+		})
+	}
+}
+
+func TestGOMEMLIMITStillWinsOverTheLimitEnv(t *testing.T) {
+	set := withFiles(t, "", "", "300MiB")
+	withLimitEnv(t, "1073741824")
 	if got := Apply(); got != 0 || *set != -1 {
 		t.Errorf("Apply = %d, set %d; the runtime already applied GOMEMLIMIT", got, *set)
 	}

@@ -91,7 +91,9 @@ func TestReconcile_CategoryGateErrorIsNonFatal(t *testing.T) {
 		Metrics:         NewMetrics(),
 		TargetsCh:       make(chan tracer.TargetSet, 4),
 		ExporterBuilder: func(_ *BundlePayload, _ CRKey) (tracer.Exporter, error) { return &fakeExporter{}, nil },
-		CgroupResolver:  func(pods []*corev1.Pod) (map[uint64]struct{}, error) { return map[uint64]struct{}{7: {}}, nil },
+		CgroupResolver: func(pods []*corev1.Pod, _ string) (map[uint64]struct{}, error) {
+			return map[uint64]struct{}{7: {}}, nil
+		},
 		CategoryGate: func(categories []string) error {
 			gateCalls++
 			return errors.New("backend rejected category set")
@@ -197,7 +199,7 @@ func TestResolveCgroupIDs_MapsScannedEntries(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "ns", UID: types.UID(testPodUID)},
 		Status:     corev1.PodStatus{QOSClass: corev1.PodQOSBestEffort},
 	}
-	ids, err := resolveCgroupIDs([]*corev1.Pod{pod})
+	ids, err := resolveCgroupIDs([]*corev1.Pod{pod}, "")
 	if err != nil {
 		t.Fatalf("resolveCgroupIDs: %v", err)
 	}

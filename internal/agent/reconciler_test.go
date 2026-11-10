@@ -239,7 +239,7 @@ func TestReconcile_HappyPath(t *testing.T) {
 			builds++
 			return exp, nil
 		},
-		CgroupResolver: func(pods []*corev1.Pod) (map[uint64]struct{}, error) {
+		CgroupResolver: func(pods []*corev1.Pod, _ string) (map[uint64]struct{}, error) {
 			out := map[uint64]struct{}{}
 			for range pods {
 				out[42] = struct{}{}
@@ -322,7 +322,7 @@ func TestReconcile_BundleRotationRebuildsExporter(t *testing.T) {
 			}
 			return new1, nil
 		},
-		CgroupResolver: func(_ []*corev1.Pod) (map[uint64]struct{}, error) {
+		CgroupResolver: func(_ []*corev1.Pod, _ string) (map[uint64]struct{}, error) {
 			return map[uint64]struct{}{1: {}}, nil
 		},
 		exporterCache: map[CRKey]cachedExporter{},
@@ -383,7 +383,7 @@ func TestReconcile_PausedCRSkipped(t *testing.T) {
 			calls++
 			return &fakeExporter{}, nil
 		},
-		CgroupResolver: func(_ []*corev1.Pod) (map[uint64]struct{}, error) {
+		CgroupResolver: func(_ []*corev1.Pod, _ string) (map[uint64]struct{}, error) {
 			t.Fatal("CgroupResolver must not be called for paused CRs")
 			return nil, nil
 		},
@@ -423,7 +423,7 @@ func TestReconcile_NoMatchedPodsReleasesExporter(t *testing.T) {
 		ExporterBuilder: func(_ *BundlePayload, _ CRKey) (tracer.Exporter, error) {
 			return &fakeExporter{}, nil
 		},
-		CgroupResolver: func(_ []*corev1.Pod) (map[uint64]struct{}, error) {
+		CgroupResolver: func(_ []*corev1.Pod, _ string) (map[uint64]struct{}, error) {
 			return map[uint64]struct{}{}, nil
 		},
 		exporterCache: map[CRKey]cachedExporter{
@@ -464,7 +464,7 @@ func TestReconcile_BundleNotFoundIsNonFatal(t *testing.T) {
 			t.Fatal("ExporterBuilder must not be called when bundle is missing")
 			return nil, nil
 		},
-		CgroupResolver: func(_ []*corev1.Pod) (map[uint64]struct{}, error) {
+		CgroupResolver: func(_ []*corev1.Pod, _ string) (map[uint64]struct{}, error) {
 			return map[uint64]struct{}{1: {}}, nil
 		},
 		exporterCache: map[CRKey]cachedExporter{},
@@ -507,7 +507,7 @@ func TestReconcile_ExporterBuilderErrorPublishesTombstone(t *testing.T) {
 		ExporterBuilder: func(_ *BundlePayload, _ CRKey) (tracer.Exporter, error) {
 			return nil, errors.New("not yet implemented")
 		},
-		CgroupResolver: func(_ []*corev1.Pod) (map[uint64]struct{}, error) {
+		CgroupResolver: func(_ []*corev1.Pod, _ string) (map[uint64]struct{}, error) {
 			return map[uint64]struct{}{1: {}}, nil
 		},
 		exporterCache: map[CRKey]cachedExporter{},
@@ -571,7 +571,7 @@ func TestReconcile_CgroupResolverErrorPublishesTombstone(t *testing.T) {
 		ExporterBuilder: func(_ *BundlePayload, _ CRKey) (tracer.Exporter, error) {
 			return &fakeExporter{}, nil
 		},
-		CgroupResolver: func(_ []*corev1.Pod) (map[uint64]struct{}, error) {
+		CgroupResolver: func(_ []*corev1.Pod, _ string) (map[uint64]struct{}, error) {
 			return nil, errors.New("synthetic resolver error")
 		},
 		exporterCache: map[CRKey]cachedExporter{},
@@ -631,7 +631,7 @@ func TestReconcile_BundleLoadErrorPublishesTombstone(t *testing.T) {
 			t.Fatal("ExporterBuilder must not be called when bundle parsing fails")
 			return nil, nil
 		},
-		CgroupResolver: func(_ []*corev1.Pod) (map[uint64]struct{}, error) {
+		CgroupResolver: func(_ []*corev1.Pod, _ string) (map[uint64]struct{}, error) {
 			return map[uint64]struct{}{1: {}}, nil
 		},
 		exporterCache: map[CRKey]cachedExporter{},
@@ -681,7 +681,7 @@ func TestReconcile_MatchPodsErrorPublishesTombstone(t *testing.T) {
 			t.Fatal("ExporterBuilder must not be called when match fails")
 			return nil, nil
 		},
-		CgroupResolver: func(_ []*corev1.Pod) (map[uint64]struct{}, error) {
+		CgroupResolver: func(_ []*corev1.Pod, _ string) (map[uint64]struct{}, error) {
 			t.Fatal("CgroupResolver must not be called when match fails")
 			return nil, nil
 		},
@@ -712,7 +712,7 @@ func TestReconcile_ReapsExportersForDeletedCRs(t *testing.T) {
 		ExporterBuilder: func(_ *BundlePayload, _ CRKey) (tracer.Exporter, error) {
 			return &fakeExporter{}, nil
 		},
-		CgroupResolver: func(_ []*corev1.Pod) (map[uint64]struct{}, error) {
+		CgroupResolver: func(_ []*corev1.Pod, _ string) (map[uint64]struct{}, error) {
 			return map[uint64]struct{}{}, nil
 		},
 		exporterCache: map[CRKey]cachedExporter{
@@ -750,7 +750,7 @@ func TestReconcile_TargetsChannelKeepLatest(t *testing.T) {
 		ExporterBuilder: func(_ *BundlePayload, _ CRKey) (tracer.Exporter, error) {
 			return &fakeExporter{}, nil
 		},
-		CgroupResolver: func(_ []*corev1.Pod) (map[uint64]struct{}, error) {
+		CgroupResolver: func(_ []*corev1.Pod, _ string) (map[uint64]struct{}, error) {
 			return map[uint64]struct{}{1: {}}, nil
 		},
 		exporterCache: map[CRKey]cachedExporter{},
@@ -951,7 +951,7 @@ func TestResolveCgroupIDs_SkipsUnresolvable(t *testing.T) {
 			},
 		},
 	}
-	out, err := resolveCgroupIDs(pods)
+	out, err := resolveCgroupIDs(pods, "")
 	if err == nil {
 		t.Fatal("a matched pod that resolves to zero cgroups must error, not report false-healthy success")
 	}

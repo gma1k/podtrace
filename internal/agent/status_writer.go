@@ -34,6 +34,8 @@ type StatusWriter struct {
 	Delivery *deliveryHealth
 
 	reportedKeys map[CRKey]struct{}
+
+	swept bool
 }
 
 func (w *StatusWriter) Run(ctx context.Context) error {
@@ -90,6 +92,8 @@ func (w *StatusWriter) emitOnce(ctx context.Context) error {
 		current[rule.Key] = struct{}{}
 	}
 
+	w.adoptRowsFromEarlierRuns(ctx, current)
+
 	for key := range w.reportedKeys {
 		if _, stillActive := current[key]; stillActive {
 			continue
@@ -103,6 +107,37 @@ func (w *StatusWriter) emitOnce(ctx context.Context) error {
 	}
 	w.reportedKeys = current
 	return firstErr
+}
+
+// adoptRowsFromEarlierRuns finds the PodTraces that still carry a row for
+// this node and adds them to reportedKeys.
+func (w *StatusWriter) adoptRowsFromEarlierRuns(ctx context.Context, current map[CRKey]struct{}) {
+	if w.swept || !w.Router.Published() {
+		return
+	}
+	var list podtracev1alpha1.PodTraceList
+	if err := w.Client.List(ctx, &list); err != nil {
+		log.FromContext(ctx).WithName("status-writer").V(1).Info("list PodTraces for stale-row sweep failed", "error", err)
+		return
+	}
+	w.swept = true
+	for i := range list.Items {
+		pt := &list.Items[i]
+		key := CRKey{Namespace: pt.Namespace, Name: pt.Name}
+		if _, active := current[key]; active {
+			continue
+		}
+		for _, row := range pt.Status.NodeStatus {
+			if row.Node != w.NodeName {
+				continue
+			}
+			if w.reportedKeys == nil {
+				w.reportedKeys = map[CRKey]struct{}{}
+			}
+			w.reportedKeys[key] = struct{}{}
+			break
+		}
+	}
 }
 
 func buildNodeStatusEntry(node string, rule *CRRule, counters crCounters, agentReady bool, backendErr error, now time.Time) podtracev1alpha1.PodTraceNodeStatus {

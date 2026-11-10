@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -19,6 +21,7 @@ import (
 	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/internal/logger"
 	"github.com/gma1k/podtrace/internal/safeconv"
+	"github.com/gma1k/podtrace/internal/sanitize"
 	"github.com/gma1k/podtrace/internal/tracing/extractor"
 	bundlepkg "github.com/gma1k/podtrace/pkg/exporter/bundle"
 	"github.com/gma1k/podtrace/pkg/tracer"
@@ -35,6 +38,9 @@ type sdkEventExporter struct {
 	thresholds *PolicyThresholds
 	metrics    *Metrics
 	extractor  *extractor.HTTPExtractor
+	observed   *deliveryObservingExporter
+
+	shutdownBudget time.Duration
 
 	// releaseMetrics drops this exporter's share of the OTLP metric
 	// pusher. Nil on a zero-value exporter, so Close guards it.
@@ -108,6 +114,7 @@ func newSDKEventExporter(name string, cr CRKey, b *BundlePayload, spanExporter s
 	bsp := sdktrace.NewBatchSpanProcessor(observed,
 		sdktrace.WithMaxExportBatchSize(128),
 		sdktrace.WithBatchTimeout(2*time.Second),
+		sdktrace.WithExportTimeout(config.TracingExporterTimeout),
 	)
 	processor := &countingSpanProcessor{inner: bsp, cr: cr, metrics: cfg.metrics}
 	tp := sdktrace.NewTracerProvider(
@@ -128,6 +135,8 @@ func newSDKEventExporter(name string, cr CRKey, b *BundlePayload, spanExporter s
 		providers:      newWorkloadProviders(tp, processor, sampler, crAttrs),
 		metrics:        cfg.metrics,
 		extractor:      extractor.NewHTTPExtractor(),
+		observed:       observed,
+		shutdownBudget: exporterShutdownBudget,
 		releaseMetrics: noopRelease,
 	}
 	if b != nil && !b.Thresholds.IsZero() {
@@ -194,7 +203,7 @@ func (e *sdkEventExporter) Export(ctx context.Context, batch []*events.Event) er
 		if parent, ok := e.remoteParent(ev); ok {
 			spanCtx = trace.ContextWithSpanContext(ctx, parent)
 		}
-		_, span := tr.Start(spanCtx, eventSpanName(ev), trace.WithTimestamp(startedAt))
+		_, span := tr.Start(spanCtx, sanitize.ValidUTF8(eventSpanName(ev)), trace.WithTimestamp(startedAt))
 		attrs := []attribute.KeyValue{
 			attribute.String("podtrace.event.type", eventTypeString(ev.Type)),
 			attribute.Int64("podtrace.event.pid", int64(ev.PID)),
@@ -231,7 +240,7 @@ func (e *sdkEventExporter) Export(ctx context.Context, batch []*events.Event) er
 		}
 		attrs = appendK8sAttributes(attrs, ev.K8s)
 		attrs = e.appendThresholdAttributes(attrs, ev)
-		span.SetAttributes(attrs...)
+		span.SetAttributes(validUTF8Attributes(attrs)...)
 		span.End(trace.WithTimestamp(endedAt))
 	}
 	return nil
@@ -393,10 +402,33 @@ func (e *sdkEventExporter) Close(ctx context.Context) error {
 	if e.tp == nil {
 		return metricErr
 	}
-	flushCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	budget := e.shutdownBudget
+	if budget <= 0 {
+		budget = exporterShutdownBudget
+	}
+	shutdownCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-	_ = e.tp.ForceFlush(flushCtx)
-	return errors.Join(e.tp.Shutdown(ctx), metricErr)
+	err := e.tp.Shutdown(shutdownCtx)
+	if err != nil && shutdownCtx.Err() != nil && e.observed != nil {
+		e.observed.abort()
+	}
+	return errors.Join(err, metricErr)
+}
+
+// validUTF8Attributes replaces invalid UTF-8 in string attribute values.
+// The values come from raw BPF buffers (a request path cut mid-rune at the
+// capture limit, a non-UTF-8 file name), and a single invalid string makes
+// the OTLP request for the whole batch fail to marshal.
+func validUTF8Attributes(attrs []attribute.KeyValue) []attribute.KeyValue {
+	for i, kv := range attrs {
+		if kv.Value.Type() != attribute.STRING {
+			continue
+		}
+		if v := kv.Value.AsString(); !utf8.ValidString(v) {
+			attrs[i] = attribute.String(string(kv.Key), sanitize.ValidUTF8(v))
+		}
+	}
+	return attrs
 }
 
 var _ tracer.Exporter = (*sdkEventExporter)(nil)
@@ -413,10 +445,36 @@ type deliveryObservingExporter struct {
 
 	mu      sync.Mutex
 	failing bool
+
+	aborted atomic.Bool
+}
+
+// errExporterAborted is returned for every batch the processor still drains
+// after the exporter ran out of shutdown time.
+var errExporterAborted = errors.New("exporter closed before its queue drained")
+
+// abort stops the wrapped exporter, cancelling in-flight requests, and makes
+// every later batch fail at once without touching the network or marking
+// the CR's delivery as failing: the CR is going away.
+func (e *deliveryObservingExporter) abort() {
+	if !e.aborted.CompareAndSwap(false, true) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), exporterCloseTimeout)
+	defer cancel()
+	_ = e.inner.Shutdown(ctx)
 }
 
 func (e *deliveryObservingExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySpan) error {
+	if e.aborted.Load() {
+		e.metrics.ObserveExportDelivery(e.cr, len(spans), errExporterAborted)
+		return errExporterAborted
+	}
 	err := e.inner.ExportSpans(ctx, spans)
+	if err != nil && e.aborted.Load() {
+		e.metrics.ObserveExportDelivery(e.cr, len(spans), err)
+		return err
+	}
 	e.metrics.ObserveExportDelivery(e.cr, len(spans), err)
 	if err != nil {
 		e.delivery.fail(e.cr, e, e.name, err, e.clock())
