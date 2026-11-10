@@ -34,7 +34,7 @@ func deliveryTestManager(senders ...Sender) *Manager {
 	return &Manager{
 		senders:      senders,
 		deduplicator: NewAlertDeduplicator(time.Hour),
-		rateLimiter:  NewRateLimiter(1000),
+		rateLimiter:  NewNamespaceRateLimiter(1000),
 		enabled:      true,
 		stopCh:       make(chan struct{}),
 	}

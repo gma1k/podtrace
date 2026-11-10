@@ -1053,12 +1053,15 @@ func ExportResourceLimitMetricWithContext(e *events.Event, namespace string) {
 		resourceTypeLabel = "unknown"
 	}
 
+	if e.Error < 0 {
+		return
+	}
 	utilization := float64(e.Error)
 
 	usageBytes := float64(e.Bytes)
 
-	var limitBytes float64
-	if utilization > 0 {
+	limitBytes := float64(e.LatencyNS)
+	if limitBytes == 0 && utilization > 0 {
 		limitBytes = (usageBytes * 100.0) / utilization
 	}
 

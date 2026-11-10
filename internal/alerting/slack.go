@@ -63,7 +63,7 @@ func NewSlackSender(webhookURL, channel string, timeout time.Duration) (*SlackSe
 	return &SlackSender{
 		webhookURL: webhookURL,
 		channel:    channel,
-		client:     &http.Client{Timeout: timeout},
+		client:     newAlertHTTPClient(timeout),
 		timeout:    timeout,
 	}, nil
 }
@@ -109,8 +109,7 @@ func (s *SlackSender) Send(ctx context.Context, alert *Alert) error {
 		_ = resp.Body.Close()
 	}()
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, RedactURLsInText(string(bodyBytes)))
+		return statusErrorFrom(resp)
 	}
 	return nil
 }

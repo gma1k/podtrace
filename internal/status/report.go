@@ -389,17 +389,7 @@ func findLive(s AgentScrape, is Issue) (LiveIssue, bool) {
 }
 
 func severityRank(s string) int {
-	switch s {
-	case "emergency":
-		return 4
-	case "critical":
-		return 3
-	case "warning":
-		return 2
-	case "info":
-		return 1
-	}
-	return 0
+	return alerting.SeverityLevel(alerting.AlertSeverity(s))
 }
 
 type workloadTotals struct {

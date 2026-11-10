@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -110,20 +111,20 @@ func (c *semconvCollectors) register(reg prometheus.Registerer) error {
 }
 
 // boundedValues folds an open value space into at most `limit` distinct
-// values plus a shared placeholder.
+// values per namespace plus a shared placeholder.
 type boundedValues struct {
 	mu    sync.Mutex
-	seen  map[string]struct{}
+	seen  map[string]map[string]time.Time
 	limit int
 }
 
 const boundedValuesPlaceholder = "_other"
 
 func newBoundedValues(limit int) *boundedValues {
-	return &boundedValues{seen: make(map[string]struct{}), limit: limit}
+	return &boundedValues{seen: make(map[string]map[string]time.Time), limit: limit}
 }
 
-func (b *boundedValues) bound(v string) string {
+func (b *boundedValues) bound(namespace, v string, now time.Time) string {
 	if v == "" {
 		return "unknown"
 	}
@@ -135,14 +136,40 @@ func (b *boundedValues) bound(v string) string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if _, ok := b.seen[v]; ok {
+	values := b.seen[namespace]
+	if _, ok := values[v]; ok {
+		values[v] = now
 		return v
 	}
-	if len(b.seen) >= b.limit {
+	if len(values) >= b.limit {
 		return boundedValuesPlaceholder
 	}
-	b.seen[v] = struct{}{}
+	if values == nil {
+		values = make(map[string]time.Time)
+		b.seen[namespace] = values
+	}
+	values[v] = now
 	return v
+}
+
+// reap frees every value not seen after cutoff, the rule Sink.Reap applies
+// to the series those values label.
+func (b *boundedValues) reap(cutoff time.Time) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for namespace, values := range b.seen {
+		for v, lastSeen := range values {
+			if !lastSeen.After(cutoff) {
+				delete(values, v)
+			}
+		}
+		if len(values) == 0 {
+			delete(b.seen, namespace)
+		}
+	}
 }
 
 // semconvIdentity projects pod metadata onto the conventional identity

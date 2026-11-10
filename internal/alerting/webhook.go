@@ -39,7 +39,7 @@ func NewWebhookSender(webhookURL string, timeout time.Duration) (*WebhookSender,
 	}
 	return &WebhookSender{
 		url:     webhookURL,
-		client:  &http.Client{Timeout: timeout},
+		client:  newAlertHTTPClient(timeout),
 		timeout: timeout,
 	}, nil
 }
@@ -86,8 +86,7 @@ func (w *WebhookSender) Send(ctx context.Context, alert *Alert) error {
 		_ = resp.Body.Close()
 	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, RedactURLsInText(string(bodyBytes)))
+		return statusErrorFrom(resp)
 	}
 	return nil
 }

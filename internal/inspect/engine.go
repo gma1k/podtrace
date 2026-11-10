@@ -209,7 +209,7 @@ func (e *Engine) Evaluate() ([]detector.Issue, error) {
 		for _, issue := range rule.Eval(window, e.limits) {
 			key := issue.Key()
 			forDuration[key] = hold
-			if existing, ok := firing[key]; ok && severityRank(existing.Severity) >= severityRank(issue.Severity) {
+			if existing, ok := firing[key]; ok && alerting.SeverityLevel(existing.Severity) >= alerting.SeverityLevel(issue.Severity) {
 				continue
 			}
 			firing[key] = issue
@@ -272,7 +272,7 @@ func (e *Engine) applyHoldTime(firing map[string]detector.Issue, forDuration map
 			}
 			e.setInactive(previous)
 			e.setActive(issue)
-			if severityRank(issue.Severity) < severityRank(previous.Severity) {
+			if alerting.SeverityLevel(issue.Severity) < alerting.SeverityLevel(previous.Severity) {
 				continue
 			}
 			e.transitions.WithLabelValues(string(issue.ID), "escalated").Inc()
@@ -341,19 +341,4 @@ func sortedIssueKeys(m map[string]detector.Issue) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func severityRank(s alerting.AlertSeverity) int {
-	switch s {
-	case alerting.SeverityFatal:
-		return 4
-	case alerting.SeverityCritical:
-		return 3
-	case alerting.SeverityError:
-		return 2
-	case alerting.SeverityWarning:
-		return 1
-	default:
-		return 0
-	}
 }

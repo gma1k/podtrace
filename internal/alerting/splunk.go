@@ -52,7 +52,7 @@ func NewSplunkAlertSender(endpoint, token string, timeout time.Duration) (*Splun
 	return &SplunkAlertSender{
 		endpoint: endpoint,
 		token:    token,
-		client:   &http.Client{Timeout: timeout},
+		client:   newAlertHTTPClient(timeout),
 		timeout:  timeout,
 	}, nil
 }
@@ -119,8 +119,7 @@ func (s *SplunkAlertSender) Send(ctx context.Context, alert *Alert) error {
 		_ = resp.Body.Close()
 	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, RedactURLsInText(string(bodyBytes)))
+		return statusErrorFrom(resp)
 	}
 	return nil
 }

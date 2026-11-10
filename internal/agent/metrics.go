@@ -12,6 +12,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
+	"github.com/gma1k/podtrace/internal/alerting"
 	"github.com/gma1k/podtrace/internal/ebpf/oncpu"
 	"github.com/gma1k/podtrace/internal/logger"
 	"github.com/gma1k/podtrace/internal/metricsexporter"
@@ -37,6 +38,7 @@ type Metrics struct {
 	OnCPUDrainFailures    prometheus.Counter
 	IssuePodUnresolved    prometheus.Counter
 	IssueAlertUndelivered prometheus.Counter
+	AlertsRateLimited     *prometheus.CounterVec
 	ActiveCgroups         *prometheus.GaugeVec
 	ActiveCRs             prometheus.Gauge
 	ReconcileTotal        prometheus.Counter
@@ -166,6 +168,11 @@ func NewMetrics() *Metrics {
 			Name:      "issue_alert_undelivered_total",
 			Help:      "Activated inspection issues whose trigger Event could not be written. Non-zero means those issues are graphed but cannot start a session.",
 		}),
+		AlertsRateLimited: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "podtrace_agent",
+			Name:      "alerts_rate_limited_total",
+			Help:      "Alert occurrences dropped by rate limiting. A dropped alert is retried on its next occurrence, so a sustained storm counts every occurrence, not each distinct alert once. reason=namespace_rate_limit is a namespace over its own PODTRACE_ALERT_RATE_LIMIT budget (dropped everywhere); reason=node_rate_limit is the node over PODTRACE_ALERT_NODE_RATE_LIMIT (dropped for the webhook, Slack and Splunk receivers only, the trigger Event is still written).",
+		}, []string{"reason"}),
 		ActiveCgroups: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: "podtrace_agent",
 			Name:      "active_cgroups",
@@ -278,7 +285,7 @@ func NewMetrics() *Metrics {
 		m.EventsExported, m.EventsDropped, m.KernelEventsDropped, m.KernelAggRows,
 		m.KernelDrainedAt, m.KernelDrainInterval,
 		m.OnCPUSamplerCPUs, m.OnCPUSamples, m.OnCPUSamplesLost, m.OnCPUDrainFailures,
-		m.IssuePodUnresolved, m.IssueAlertUndelivered,
+		m.IssuePodUnresolved, m.IssueAlertUndelivered, m.AlertsRateLimited,
 		m.ActiveCgroups, m.ActiveCRs,
 		m.ReconcileTotal, m.BackendDegraded, m.CgroupsAttached, m.CgroupsDetached,
 		m.EnrichmentLookups, m.EnrichmentCacheSize, m.EnrichmentSnapshots,
@@ -560,6 +567,16 @@ func (m *Metrics) RefreshFromEnricher(e *PodEnricher) {
 	m.lastOwnerOrphaned = stats.OwnerOrphaned
 
 	m.EnrichmentCacheSize.Set(float64(stats.CacheSize))
+}
+
+// countRateLimitedAlerts records every alert the manager's rate limits drop.
+func countRateLimitedAlerts(manager *alerting.Manager, metrics *Metrics) {
+	if manager == nil || metrics == nil {
+		return
+	}
+	manager.SetDropObserver(func(reason string) {
+		metrics.AlertsRateLimited.WithLabelValues(reason).Inc()
+	})
 }
 
 func (m *Metrics) Registerer() prometheus.Registerer {

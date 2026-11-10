@@ -179,7 +179,8 @@ See [distributed-tracing.md](distributed-tracing.md) and
 | `PODTRACE_ALERT_SLACK_CHANNEL` | `#alerts` | |
 | `PODTRACE_ALERT_SPLUNK_ENABLED` | `false` | Gates the Splunk endpoint and token |
 | `PODTRACE_ALERT_DEDUP_WINDOW` | `5m` | Suppress repeats inside this window |
-| `PODTRACE_ALERT_RATE_LIMIT` | `10` | Alerts per minute |
+| `PODTRACE_ALERT_RATE_LIMIT` | `10` | Alerts per minute, per namespace |
+| `PODTRACE_ALERT_NODE_RATE_LIMIT` | `60` | Alerts per minute a node sends to the webhook, Slack and Splunk receivers; trigger Events are exempt |
 | `PODTRACE_ALERT_HTTP_TIMEOUT` | `10s` | |
 | `PODTRACE_ALERT_MAX_RETRIES` | `3` | |
 | `PODTRACE_ALERT_MAX_PAYLOAD_SIZE` | `1048576` | 1 MiB |

@@ -12,7 +12,7 @@ func TestCleanupLoop_TickerFires(t *testing.T) {
 	m := &Manager{
 		enabled:       true,
 		deduplicator:  NewAlertDeduplicator(10 * time.Minute),
-		rateLimiter:   NewRateLimiter(1000),
+		rateLimiter:   NewNamespaceRateLimiter(1000),
 		senders:       []Sender{},
 		stopCh:        make(chan struct{}),
 		cleanupTicker: time.NewTicker(1 * time.Millisecond),

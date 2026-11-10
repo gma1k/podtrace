@@ -67,7 +67,7 @@ Multiple channels can be active at the same time — set all relevant variables 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PODTRACE_ALERTING_ENABLED` | `false` | Enable/disable alerting system |
-| `PODTRACE_ALERT_MIN_SEVERITY` | `warning` | Minimum severity to alert (fatal, critical, warning, error) |
+| `PODTRACE_ALERT_MIN_SEVERITY` | `warning` | Minimum severity to alert (fatal, critical, error, warning) |
 
 ### Webhook Configuration
 
@@ -99,7 +99,8 @@ Multiple channels can be active at the same time — set all relevant variables 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PODTRACE_ALERT_DEDUP_WINDOW` | `5m` | Time window for alert deduplication |
-| `PODTRACE_ALERT_RATE_LIMIT` | `10` | Maximum alerts per minute |
+| `PODTRACE_ALERT_RATE_LIMIT` | `10` | Maximum alerts per minute, per namespace |
+| `PODTRACE_ALERT_NODE_RATE_LIMIT` | `60` | Maximum alerts per minute one node sends to the webhook, Slack and Splunk receivers combined |
 | `PODTRACE_ALERT_HTTP_TIMEOUT` | `10s` | HTTP request timeout |
 | `PODTRACE_ALERT_MAX_RETRIES` | `3` | Maximum retry attempts for failed sends |
 | `PODTRACE_ALERT_MAX_PAYLOAD_SIZE` | `1048576` | Maximum payload size in bytes (1MB) |
@@ -110,8 +111,11 @@ Alerts are categorized by severity:
 
 - **Fatal**: Application crashes, system failures requiring immediate attention
 - **Critical**: Resource exhaustion (≥90%), emergency conditions (≥95%)
-- **Warning**: Resource warnings (≥80%), high error rates, exporter failures
 - **Error**: General errors and issues
+- **Warning**: Resource warnings (≥80%), high error rates, exporter failures
+
+From most to least severe: fatal, critical, error, warning. A floor admits its
+own level and everything above it, so the default `warning` sends all four.
 
 Filter alerts by severity using `PODTRACE_ALERT_MIN_SEVERITY`:
 
@@ -237,7 +241,24 @@ export PODTRACE_ALERT_DEDUP_WINDOW=5m
 
 ## Rate Limiting
 
-Rate limiting prevents overwhelming notification systems. By default, a maximum of 10 alerts per minute are sent.
+Rate limiting prevents overwhelming notification systems. It works at two
+levels:
+
+- **Per namespace** (`PODTRACE_ALERT_RATE_LIMIT`, default 10 a minute). Every
+  namespace has its own budget, so an alert storm in one namespace never
+  silences another's. Agent alerts with no namespace share one budget. An alert
+  over this budget is dropped for every sender.
+- **Per node, external receivers only** (`PODTRACE_ALERT_NODE_RATE_LIMIT`,
+  default 60 a minute). Caps what one node sends to the webhook, Slack and
+  Splunk receivers together. The Kubernetes Event that starts a flight-recorder
+  session is exempt, so one namespace can never stop another's sessions.
+
+Every dropped occurrence is counted in
+`podtrace_agent_alerts_rate_limited_total{reason}`, where `reason` is
+`namespace_rate_limit` or `node_rate_limit`. A dropped alert is not
+suppressed: it is tried again the next time it occurs. During a sustained
+storm the counter therefore climbs with every occurrence, so read its rate,
+not its value, as the size of the storm.
 
 Configure rate limiting:
 
