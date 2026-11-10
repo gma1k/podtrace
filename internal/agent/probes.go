@@ -91,20 +91,23 @@ func (s *ProbeServer) IsReady() bool {
 	return s.readyFlag.Load() && s.degraded.Load() == nil
 }
 
+// httpServer builds the probe listener with the same timeouts as the
+// metrics server, so idle keep-alive connections are reaped.
+func (s *ProbeServer) httpServer() *http.Server {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", s.handleHealthz)
+	mux.HandleFunc("/readyz", s.handleReadyz)
+	srv := newMetricsServer(mux)
+	srv.Addr = s.Addr
+	return srv
+}
+
 // Run serves the probe endpoints until ctx is done. Returns nil on
 // graceful shutdown, otherwise the terminal error from http.ListenAndServe.
 func (s *ProbeServer) Run(ctx context.Context) error {
 	logger := log.FromContext(ctx).WithName("probes").WithValues("addr", s.Addr)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", s.handleHealthz)
-	mux.HandleFunc("/readyz", s.handleReadyz)
-
-	srv := &http.Server{
-		Addr:              s.Addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
+	srv := s.httpServer()
 
 	shutdownDone := make(chan struct{})
 	go func() {

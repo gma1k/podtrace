@@ -24,6 +24,8 @@ const (
 	cgroupV1Limit = "memory/memory.limit_in_bytes"
 )
 
+const LimitEnv = "PODTRACE_MEMORY_LIMIT"
+
 var (
 	cgroupRoot = "/sys/fs/cgroup"
 	setLimit   = debug.SetMemoryLimit
@@ -31,19 +33,35 @@ var (
 )
 
 // Apply sets Go's soft memory limit to a share of the container's memory
-// limit and returns it. It sets nothing, and returns 0, when GOMEMLIMIT is
-// set, which the runtime has already applied, or when there is no limit.
+// limit, from LimitEnv or else the cgroup, and returns it.
 func Apply() int64 {
 	if getenv("GOMEMLIMIT") != "" {
 		return 0
 	}
-	limit, ok := containerLimit()
+	limit, ok := limitFromEnv()
+	if !ok {
+		limit, ok = containerLimit()
+	}
 	if !ok {
 		return 0
 	}
 	soft := int64(float64(limit) * share)
 	setLimit(soft)
 	return soft
+}
+
+// limitFromEnv reads the limit, in bytes, that the downward API put in
+// LimitEnv.
+func limitFromEnv() (int64, bool) {
+	raw := strings.TrimSpace(getenv(LimitEnv))
+	if raw == "" {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || n <= 0 || n >= unlimitedV1 {
+		return 0, false
+	}
+	return n, true
 }
 
 // containerLimit reads the memory limit of the cgroup the process runs in,

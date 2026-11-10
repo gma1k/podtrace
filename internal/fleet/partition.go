@@ -184,7 +184,7 @@ func IsClusterWide(spec *podtracev1alpha1.TracerConfigSpec) bool {
 // have to agree, exactly as they do for the real DaemonSet controller.
 func NodeTargetedBy(node *corev1.Node, tc *podtracev1alpha1.TracerConfig) bool {
 	for k, v := range tc.Spec.NodeSelector {
-		if node.Labels[k] != v {
+		if got, ok := node.Labels[k]; !ok || got != v {
 			return false
 		}
 	}

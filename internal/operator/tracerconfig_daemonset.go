@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
+	"github.com/gma1k/podtrace/internal/memlimit"
 )
 
 // buildAgentDaemonSetSpec renders the DaemonSet.Spec for the agent
@@ -61,6 +62,7 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 			},
 		},
 		{Name: "PODTRACE_PROC_BASE", Value: "/host/proc"},
+		memoryLimitEnv(),
 	}
 
 	if lvl := tc.Spec.Agent.LogLevel; lvl != "" {
@@ -177,6 +179,20 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 					{Name: "tracefs", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/kernel/tracing", Type: &hostPathType}}},
 				}, btfVolume...),
 			},
+		},
+	}
+}
+
+// memoryLimitEnv hands the container its own limits.memory, in bytes, so the
+// Go runtime can set its soft memory limit from it. The agent and session
+// Jobs cannot read it from /sys/fs/cgroup: the host's cgroupfs is mounted
+// there. With no limit set the downward API gives the node's allocatable
+// memory, which only makes the soft limit a node-sized one.
+func memoryLimitEnv() corev1.EnvVar {
+	return corev1.EnvVar{
+		Name: memlimit.LimitEnv,
+		ValueFrom: &corev1.EnvVarSource{
+			ResourceFieldRef: &corev1.ResourceFieldSelector{Resource: "limits.memory"},
 		},
 	}
 }

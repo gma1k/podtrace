@@ -37,6 +37,8 @@ func TestNodeTargetedByNodeSelector(t *testing.T) {
 		{"single label mismatches", map[string]string{"pool": "a"}, map[string]string{"pool": "b"}, false},
 		{"missing label", map[string]string{"pool": "a"}, nil, false},
 		{"all labels must match", map[string]string{"pool": "a", "arch": "arm64"}, map[string]string{"pool": "a"}, false},
+		{"empty value requires the label to be present", map[string]string{"edge": ""}, map[string]string{"pool": "a"}, false},
+		{"empty value matches a present empty label", map[string]string{"edge": ""}, map[string]string{"edge": ""}, true},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {

@@ -47,6 +47,9 @@ func MatchPodTraceAgainstPods(pt *podtracev1alpha1.PodTrace, pods []*corev1.Pod,
 		if !inNamespaceScope(pt, p, allowlist) {
 			continue
 		}
+		if pt.Spec.ContainerName != "" && !podDeclaresContainer(p, pt.Spec.ContainerName) {
+			continue
+		}
 		switch {
 		case len(sels) > 0 && matchesAny(sels, p):
 			matched = append(matched, p)
@@ -150,4 +153,25 @@ func inNamespaceScope(pt *podtracev1alpha1.PodTrace, p *corev1.Pod, allowlist []
 // no container processes yet and terminated pods have none left.
 func isEligiblePod(p *corev1.Pod) bool {
 	return p.Status.Phase == corev1.PodRunning
+}
+
+// podDeclaresContainer reports whether the pod has a container, init
+// container or ephemeral container called name.
+func podDeclaresContainer(p *corev1.Pod, name string) bool {
+	for _, c := range p.Spec.Containers {
+		if c.Name == name {
+			return true
+		}
+	}
+	for _, c := range p.Spec.InitContainers {
+		if c.Name == name {
+			return true
+		}
+	}
+	for _, c := range p.Spec.EphemeralContainers {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/gma1k/podtrace/internal/diagnose/tracker"
 	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/internal/safeconv"
+	"github.com/gma1k/podtrace/internal/sanitize"
 )
 
 type OTLPExporter struct {
@@ -182,7 +183,7 @@ func (e *OTLPExporter) spanSnapshot(span *tracker.Span) (sdktrace.ReadOnlySpan, 
 	}
 
 	stub := tracetest.SpanStub{
-		Name: span.Operation,
+		Name: sanitize.ValidUTF8(span.Operation),
 		SpanContext: trace.NewSpanContext(trace.SpanContextConfig{
 			TraceID:    traceID,
 			SpanID:     spanID,
@@ -210,7 +211,7 @@ func (e *OTLPExporter) spanSnapshot(span *tracker.Span) (sdktrace.ReadOnlySpan, 
 
 	attrs := make([]attribute.KeyValue, 0, len(span.Attributes))
 	for k, v := range span.Attributes {
-		attrs = append(attrs, attribute.String(k, v))
+		attrs = append(attrs, attribute.String(sanitize.ValidUTF8(k), sanitize.ValidUTF8(v)))
 	}
 	stub.Attributes = attrs
 
@@ -220,17 +221,17 @@ func (e *OTLPExporter) spanSnapshot(span *tracker.Span) (sdktrace.ReadOnlySpan, 
 
 	for _, event := range span.Events {
 		attrs := []attribute.KeyValue{
-			attribute.String("target", event.Target),
+			attribute.String("target", sanitize.ValidUTF8(event.Target)),
 			attribute.Int64("latency_ns", safeconv.Uint64ToInt64(event.LatencyNS)),
 		}
 		if event.Type == events.EventDNS {
 			attrs = append(attrs,
-				attribute.String("dns.question.name", event.Target),
+				attribute.String("dns.question.name", sanitize.ValidUTF8(event.Target)),
 				attribute.Int("dns.question.type", int(event.TCPState)),
 				attribute.Int("dns.response.code", int(event.Error)),
 			)
 			if event.Details != "" {
-				attrs = append(attrs, attribute.String("dns.resolved", event.Details))
+				attrs = append(attrs, attribute.String("dns.resolved", sanitize.ValidUTF8(event.Details)))
 				attrs = append(attrs, attribute.Int("dns.answer.count",
 					strings.Count(event.Details, ",")+1))
 			}

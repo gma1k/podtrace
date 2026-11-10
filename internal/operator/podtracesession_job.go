@@ -136,6 +136,7 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 				FieldRef: &corev1.ObjectFieldSelector{FieldPath: "spec.nodeName"},
 			},
 		},
+		memoryLimitEnv(),
 		{
 			Name:  "PODTRACE_EXPORTER_CREDENTIAL_FILE",
 			Value: "/etc/podtrace/exporter-credential/credential",

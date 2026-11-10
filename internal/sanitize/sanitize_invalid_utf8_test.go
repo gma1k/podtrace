@@ -15,3 +15,18 @@ func TestAStrayC1ByteIsReplaced(t *testing.T) {
 		}
 	}
 }
+
+func TestValidUTF8ReplacesOnlyInvalidBytes(t *testing.T) {
+	for in, want := range map[string]string{
+		"/data/caf\xc3":  "/data/caf�",
+		"x\xffy":         "x�y",
+		"münchen":        "münchen",
+		"tab\tand\nline": "tab\tand\nline",
+		"\x1b[31mred":    "\x1b[31mred",
+		"":               "",
+	} {
+		if got := ValidUTF8(in); got != want {
+			t.Errorf("ValidUTF8(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

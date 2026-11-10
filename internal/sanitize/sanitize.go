@@ -38,6 +38,17 @@ func Terminal(s string) string {
 	return b.String()
 }
 
+// ValidUTF8 returns s with every byte sequence that is not valid UTF-8
+// replaced by Replacement, leaving everything else untouched. Protobuf
+// refuses a string field holding invalid UTF-8, so one such value in an OTLP
+// export request fails the whole request.
+func ValidUTF8(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	return strings.ToValidUTF8(s, string(Replacement))
+}
+
 // clean reports whether s needs no replacement.
 func clean(s string) bool {
 	for i := 0; i < len(s); {

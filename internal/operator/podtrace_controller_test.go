@@ -251,6 +251,11 @@ func TestPodTraceReconciler_DegradedRollupFromNodeStatus(t *testing.T) {
 				WithDroppedEvents(0).
 				WithMessage("build exporter: exporter type \"jaeger\" not yet implemented in agent mode").
 				WithLastHeartbeat(metav1.Now())))
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "broken-1"}}
+	if err := c.Create(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Delete(context.Background(), node) })
 	if err := c.Status().Apply(ctx, agentPatch,
 		client.FieldOwner("podtrace-agent-broken-1"),
 		client.ForceOwnership,

@@ -110,7 +110,7 @@ func TestAgentEnvtest_TwoOverlappingCRs_ProduceScopedStreams(t *testing.T) {
 		recorders[key] = rec
 		return rec, nil
 	}
-	resolveCg := func(pods []*corev1.Pod) (map[uint64]struct{}, error) {
+	resolveCg := func(pods []*corev1.Pod, _ string) (map[uint64]struct{}, error) {
 		out := map[uint64]struct{}{}
 		for _, p := range pods {
 			if id, ok := cgroupIDByPod[p.Name]; ok {
@@ -285,7 +285,7 @@ func TestAgentEnvtest_EngineNoopBackendDispatch(t *testing.T) {
 		Router:          router,
 		TargetsCh:       targetsCh,
 		ExporterBuilder: func(_ *BundlePayload, _ CRKey) (tracer.Exporter, error) { return rec, nil },
-		CgroupResolver: func(pods []*corev1.Pod) (map[uint64]struct{}, error) {
+		CgroupResolver: func(pods []*corev1.Pod, _ string) (map[uint64]struct{}, error) {
 			out := map[uint64]struct{}{}
 			for range pods {
 				out[cgID] = struct{}{}
@@ -371,7 +371,7 @@ func TestAgentEnvtest_TombstoneSurfacesOnNodeStatus(t *testing.T) {
 			}
 			return &recordingExporter{name: "fixed"}, nil
 		},
-		CgroupResolver: func(pods []*corev1.Pod) (map[uint64]struct{}, error) {
+		CgroupResolver: func(pods []*corev1.Pod, _ string) (map[uint64]struct{}, error) {
 			out := map[uint64]struct{}{}
 			for range pods {
 				out[100] = struct{}{}

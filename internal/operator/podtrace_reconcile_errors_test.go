@@ -166,7 +166,7 @@ func TestPodTraceReconcile_DegradedNodeStatus(t *testing.T) {
 	})
 	c := fake.NewClientBuilder().WithScheme(scheme).
 		WithStatusSubresource(&podtracev1alpha1.PodTrace{}).
-		WithObjects(pt, ptMoreExporterConfig()).Build()
+		WithObjects(pt, ptMoreExporterConfig(), &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "n1"}}).Build()
 	r := &PodTraceReconciler{Client: c, Scheme: scheme, SystemNamespace: ptMoreSysNS}
 	if _, err := ptMoreReconcile(t, r); err != nil {
 		t.Fatalf("Reconcile: %v", err)
