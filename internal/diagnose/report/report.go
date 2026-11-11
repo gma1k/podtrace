@@ -31,6 +31,47 @@ type Diagnostician interface {
 	FastFilesystemOps() analyzer.FSKernelCounts
 }
 
+// sourceIdentifier is a Diagnostician that knows the pod it diagnoses.
+type sourceIdentifier interface {
+	SourcePod() string
+	SourceNamespace() string
+}
+
+// alertSubject names the pod an issue alert is about: the diagnosed pod when
+// the Diagnostician knows it, else whatever the issue itself carries.
+func alertSubject(d Diagnostician, issue detector.Issue) (pod, namespace string) {
+	pod, namespace = issue.Subject.Pod, issue.Subject.Namespace
+	if src, ok := d.(sourceIdentifier); ok {
+		if p := src.SourcePod(); p != "" {
+			pod = p
+		}
+		if ns := src.SourceNamespace(); ns != "" {
+			namespace = ns
+		}
+	}
+	return pod, namespace
+}
+
+// fsTotaler is a Diagnostician that counted every filesystem event, so its
+// File System section can weigh a sampled buffer correctly.
+type fsTotaler interface {
+	FilesystemEventTotals() analyzer.FSEventTotals
+}
+
+// fsTotalsOf returns d's filesystem event totals, nil when it keeps none.
+func fsTotalsOf(d Diagnostician) analyzer.FSEventTotals {
+	if t, ok := d.(fsTotaler); ok {
+		return t.FilesystemEventTotals()
+	}
+	return nil
+}
+
+// capacityReporter is a Diagnostician whose buffer may hold fewer events than
+// config.MaxEvents.
+type capacityReporter interface {
+	EventCapacity() int
+}
+
 // bufferSampler is a Diagnostician whose event buffer may have filled and
 // started sampling.
 type bufferSampler interface {
@@ -49,6 +90,10 @@ func GenerateSummarySection(d Diagnostician, duration time.Duration) string {
 		if out := s.EventsSampledOut(); out > 0 {
 			report += fmt.Sprintf("  Events seen: %d; the buffer filled and sampled out %d, so the counts below "+
 				"are a sample (ratios within each event type still hold)\n", s.EventsSeen(), out)
+			if c, ok := d.(capacityReporter); ok && c.EventCapacity() < config.MaxEvents {
+				report += fmt.Sprintf("  The buffer held %d events rather than %d, to stay within the container's "+
+					"memory limit\n", c.EventCapacity(), config.MaxEvents)
+			}
 		}
 	}
 	report += fmt.Sprintf("  Events per second: %.1f\n", eventsPerSec)
@@ -205,7 +250,7 @@ func GenerateTCPSection(d Diagnostician, duration time.Duration) string {
 		report += fmt.Sprintf("  Average RTT: %.2fms\n", avgRTT)
 		report += fmt.Sprintf("  Max RTT: %.2fms\n", maxRTT)
 		report += formatter.Percentiles(p50, p95, p99)
-		report += fmt.Sprintf("  RTT spikes (>%dms): %d\n", config.RTTSpikeThresholdMS, spikes)
+		report += fmt.Sprintf("  RTT spikes (>%sms): %d\n", strconv.FormatFloat(d.RTTSpikeThreshold(), 'f', -1, 64), spikes)
 		report += formatter.ErrorRate(errors, len(allTCP))
 		if totalBytes > 0 {
 			report += formatter.BytesSection(totalBytes, avgBytes, calculateThroughput(totalBytes, duration))
@@ -273,7 +318,7 @@ func GenerateFileSystemSection(d Diagnostician, duration time.Duration) string {
 	readEvents := d.FilterEvents(events.EventRead)
 	fsyncEvents := d.FilterEvents(events.EventFsync)
 	allFS := append(append(writeEvents, readEvents...), fsyncEvents...)
-	st := analyzer.AnalyzeFSWithKernelCounts(allFS, d.FastFilesystemOps(), d.FSSlowThreshold())
+	st := analyzer.AnalyzeFSSampled(allFS, fsTotalsOf(d), d.FastFilesystemOps(), d.FSSlowThreshold())
 	if st.Ops() == 0 {
 		return ""
 	}
@@ -361,7 +406,7 @@ func analyzeUDPEvents(allUDP []*events.Event) ([]float64, float64, int, uint64, 
 		latencyMs := float64(e.LatencyNS) / float64(config.NSPerMS)
 		latencies = append(latencies, latencyMs)
 		totalLatency += latencyMs
-		if e.Error < 0 {
+		if e.TransferFailed() {
 			errors++
 		}
 		if e.Bytes > 0 && e.Bytes < safeconv.Int64ToUint64(config.MaxBytesForBandwidth) {
@@ -748,6 +793,7 @@ func GenerateIssuesSection(d Diagnostician) string {
 	manager := alerting.GetGlobalManager()
 	if manager != nil {
 		for _, issue := range issues {
+			pod, namespace := alertSubject(d, issue)
 			recommendations := []string{issue.Remediation}
 			context := map[string]interface{}{"issue_id": string(issue.ID)}
 			for _, ev := range issue.Evidence {
@@ -759,8 +805,8 @@ func GenerateIssuesSection(d Diagnostician) string {
 				Message:         issue.Message,
 				Timestamp:       time.Now(),
 				Source:          alerting.AlertSourceIssue,
-				PodName:         issue.Subject.Workload,
-				Namespace:       issue.Subject.Namespace,
+				PodName:         pod,
+				Namespace:       namespace,
 				Context:         context,
 				Recommendations: recommendations,
 			}
@@ -769,7 +815,7 @@ func GenerateIssuesSection(d Diagnostician) string {
 	}
 
 	var report string
-	report += formatter.SectionHeader("Potential Issues Detected")
+	report += "Potential Issues Detected:\n"
 	for _, issue := range issues {
 		report += fmt.Sprintf("  %s\n", issue)
 	}

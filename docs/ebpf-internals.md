@@ -179,6 +179,13 @@ built twice from one body, so both report the same thing.
   tracepoints, the fd resolved to its file through the task's descriptor
   table. Current kernels inline the work into `do_fsync`, so a probe on
   `vfs_fsync` never runs for `fsync(2)`.
+- `readv` / `writev` / `preadv` / `pwritev` / `preadv2` / `pwritev2`: the
+  same syscall tracepoints, since the kernel serves vectored I/O through
+  `vfs_readv`/`vfs_writev` and never reaches `vfs_read`/`vfs_write`. musl
+  implements `pwrite` with `pwritev2`, so without them an Alpine-based
+  container's positional writes went uncounted. While one of these calls
+  is in flight the `vfs_read`/`vfs_write` probes skip the task, so a call
+  is counted once on any kernel.
 - `do_sys_openat2`, `vfs_unlink`, `vfs_rename`: entry and return probes,
   untargeted cgroups skipped on entry, counted in kernel aggregation
 - `file_close_fd` (Linux 6.7+), else `close_fd`: a regular file's close

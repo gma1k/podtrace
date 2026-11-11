@@ -36,9 +36,6 @@ func TestTheLazyIndexNamesEveryFunctionExactlyAsGosymDoes(t *testing.T) {
 	if table == nil || table.pcln == nil {
 		t.Fatal("a Go 1.18+ binary did not get a lazy pclntab index")
 	}
-	if table.goTable != nil {
-		t.Error("the full gosym table was built as well, which is the cost the index exists to avoid")
-	}
 
 	funcs := gosymTable(t, bin).Funcs
 	if len(funcs) < 100 {
@@ -99,7 +96,7 @@ func TestAnAddressPastTheGoFunctionsFallsBackToELFSymbols(t *testing.T) {
 	bin := symFixture(t)
 	table := loadSymbolTable(bin)
 
-	past := table.pcln.textStart + table.pcln.entry(table.pcln.nfunc) + 1
+	past := table.pcln.pcBase + table.pcln.entry(table.pcln.nfunc) + 1
 	table.lookup(past)
 	if !table.elfLoaded {
 		t.Error("an address outside every Go function did not consult the ELF symbols; " +
@@ -153,7 +150,7 @@ func TestEveryResolverSharesOneTableCache(t *testing.T) {
 }
 
 func TestTheByteBudgetEvictsButAlwaysKeepsTheNewest(t *testing.T) {
-	heavy := func() *symbolTable { return &symbolTable{goBytes: 40} }
+	heavy := func() *symbolTable { return &symbolTable{pcln: &pclnIndex{functab: make([]byte, 40)}} }
 	ids := map[string]fileID{}
 	for i, p := range []string{"/a", "/b", "/c"} {
 		ids[p] = fileID{dev: 1, ino: uint64(i + 1)}
@@ -285,9 +282,9 @@ func TestASyntheticPclntabResolvesInEitherByteOrderAndWordSize(t *testing.T) {
 	}
 }
 
-func TestMalformedPclntabHeadersAreLeftToGosym(t *testing.T) {
+func TestMalformedPclntabHeadersAreRejected(t *testing.T) {
 	cases := map[string]func(*pclnHeader){
-		"old magic":         func(h *pclnHeader) { h.magic = 0xfffffffa },
+		"unknown magic":     func(h *pclnHeader) { h.magic = 0x12345678 },
 		"nonzero padding":   func(h *pclnHeader) { h.pad[0] = 1 },
 		"bad quantum":       func(h *pclnHeader) { h.quantum = 3 },
 		"bad pointer size":  func(h *pclnHeader) { h.ptrSize = 2 },
@@ -386,26 +383,18 @@ func TestANonELFFileGetsNoIndex(t *testing.T) {
 	}
 }
 
-func TestAnOlderGoBinaryFallsBackToTheFullGosymTable(t *testing.T) {
+func TestAPclntabTheIndexRefusesLeavesTheELFSymbols(t *testing.T) {
 	bin := symFixture(t)
 	indexPCLN = func(*elf.File) (*pclnIndex, bool) { return nil, false }
 	t.Cleanup(func() { indexPCLN = loadPCLNIndex })
 
 	table := loadSymbolTable(bin)
-	if table == nil || table.goTable == nil {
-		t.Fatal("with no lazy index the table did not fall back to debug/gosym; a Go " +
-			"binary older than 1.18 would resolve nothing")
+	if table == nil || table.pcln != nil {
+		t.Fatalf("table = %+v, want ELF symbols only", table)
 	}
-	if table.pcln != nil {
-		t.Error("the fallback table still carries an index")
-	}
-	if table.goBytes == 0 || table.approxBytes() < table.goBytes {
-		t.Error("the fallback table's size was not counted; the byte budget exists for " +
-			"exactly these tables")
-	}
-	fn := table.goTable.LookupFunc("main.TargetFunction")
+	fn := gosymTable(t, bin).LookupFunc("main.TargetFunction")
 	if got := table.lookup(fn.Entry); got != "main.TargetFunction" {
-		t.Errorf("lookup through the gosym fallback = %q", got)
+		t.Errorf("lookup through the ELF symbols = %q", got)
 	}
 }
 

@@ -28,6 +28,8 @@ type Trace struct {
 	exportedSpans map[string]int
 	lastUpdate    time.Time
 	recency       *list.Element
+
+	source *Trace
 }
 
 type Span struct {
@@ -312,7 +314,7 @@ func (tt *TraceTracker) CommitExport(exported []*Trace, exporter string) {
 	defer tt.mu.RUnlock()
 	for _, snap := range exported {
 		live := tt.traces[snap.TraceID]
-		if live == nil {
+		if live == nil || (snap.source != nil && live != snap.source) {
 			continue
 		}
 		live.mu.Lock()
@@ -363,6 +365,7 @@ func settledPrefix(spans []*Span, from int, now time.Time) int {
 // [fromSpan, toSpan).
 func cloneTraceLocked(trace *Trace, fromSpan, toSpan int) *Trace {
 	out := &Trace{
+		source:    trace,
 		TraceID:   trace.TraceID,
 		StartTime: trace.StartTime,
 		EndTime:   trace.EndTime,

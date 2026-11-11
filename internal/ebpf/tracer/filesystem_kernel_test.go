@@ -16,6 +16,7 @@ import (
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/rlimit"
+	"golang.org/x/sys/unix"
 
 	"github.com/gma1k/podtrace/internal/ebpf/kernelagg"
 	"github.com/gma1k/podtrace/internal/events"
@@ -30,7 +31,25 @@ const (
 	fsOther       = 100
 	fsBlock       = 4096
 	fsOtherLength = 333
+	fsPositional  = 25
 )
+
+func mustIO(t *testing.T, want int) func(int, error) {
+	return func(n int, err error) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != want {
+			t.Fatalf("transferred %d bytes, want %d", n, want)
+		}
+	}
+}
+
+func seekStart(t *testing.T, fd int) {
+	if _, err := unix.Seek(fd, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestKernelFSWorker(t *testing.T) {
 	mode := os.Getenv(fsWorkerEnv)
@@ -104,6 +123,21 @@ func TestKernelFSWorker(t *testing.T) {
 			if _, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600); err == nil {
 				t.Fatal("exclusively created a file that exists")
 			}
+		}
+	case "positional":
+		fd := int(f.Fd())
+		halves := [][]byte{block[:fsBlock/2], block[fsBlock/2:]}
+		for i := 0; i < fsPositional; i++ {
+			mustIO(t, fsBlock)(unix.Pread(fd, block, 0))
+			mustIO(t, fsBlock)(unix.Pwrite(fd, block, 0))
+			seekStart(t, fd)
+			mustIO(t, fsBlock)(unix.Readv(fd, halves))
+			seekStart(t, fd)
+			mustIO(t, fsBlock)(unix.Writev(fd, halves))
+			mustIO(t, fsBlock)(unix.Preadv(fd, halves, 0))
+			mustIO(t, fsBlock)(unix.Pwritev(fd, halves, 0))
+			mustIO(t, fsBlock)(unix.Preadv2(fd, halves, 0, 0))
+			mustIO(t, fsBlock)(unix.Pwritev2(fd, halves, 0, 0))
 		}
 	case "reads":
 		for i := 0; i < fsReads; i++ {
@@ -427,4 +461,29 @@ func TestKernelAFastOpsSwitchThatCannotBeSetIsReported(t *testing.T) {
 	if err := tr.CountFastFilesystemOps(); err == nil {
 		t.Error("CountFastFilesystemOps reported a switch the map refused as set")
 	}
+}
+
+func TestKernelPositionalAndVectoredIOIsCountedOnce(t *testing.T) {
+	forEachMechanism(t, func(t *testing.T, mechanism string) {
+		w := newFSWorker(t, "positional-"+mechanism)
+		tr := fsTracer(t, mechanism, w)
+		if err := tr.SetKernelAggregationMode(kernelagg.ModeBypass); err != nil {
+			t.Fatal(err)
+		}
+		w.run(t, "positional")
+		rows, err := tr.DrainKernelMetrics()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := fsRows(rows, w.id)
+		want := uint64(4 * fsPositional)
+		if r := got[events.EventRead]; r.Count != want || r.Bytes != want*fsBlock {
+			t.Errorf("reads = %d of %d bytes, want %d of %d: pread, readv, preadv and preadv2 each once",
+				r.Count, r.Bytes, want, want*fsBlock)
+		}
+		if wr := got[events.EventWrite]; wr.Count != want || wr.Bytes != want*fsBlock {
+			t.Errorf("writes = %d of %d bytes, want %d of %d: pwrite, writev, pwritev and pwritev2 each once",
+				wr.Count, wr.Bytes, want, want*fsBlock)
+		}
+	})
 }

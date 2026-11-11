@@ -2,7 +2,6 @@ package stacktrace
 
 import (
 	"debug/elf"
-	"debug/gosym"
 	"os"
 	"sort"
 	"sync"
@@ -19,9 +18,7 @@ type symbolTable struct {
 	id   fileID
 	path string
 
-	pcln    *pclnIndex
-	goTable *gosym.Table
-	goBytes int64
+	pcln *pclnIndex
 
 	elfMu     sync.Mutex
 	elfLazy   bool
@@ -48,11 +45,6 @@ func (t *symbolTable) lookupAt(path string, addr uint64) string {
 	if t.pcln != nil && t.pcln.covers(addr) {
 		if name := t.pclnName(path, addr); name != "" {
 			return name
-		}
-	}
-	if t.goTable != nil {
-		if fn := t.goTable.PCToFunc(addr); fn != nil && fn.Name != "" {
-			return fn.Name
 		}
 	}
 	return elfSymbolAt(t.elfSymbols(path), addr)
@@ -119,7 +111,7 @@ func (t *symbolTable) approxBytes() int64 {
 	if t == nil {
 		return 0
 	}
-	n := t.goBytes
+	var n int64
 	if t.pcln != nil {
 		n += int64(len(t.pcln.functab))
 	}
@@ -133,9 +125,8 @@ func (t *symbolTable) approxBytes() int64 {
 
 // Bounds of the process-wide table cache.
 const (
-	maxCachedSymbolTables   = 16
-	maxCachedSymbolBytes    = 64 << 20
-	goTableBytesPerPCLNByte = 2
+	maxCachedSymbolTables = 16
+	maxCachedSymbolBytes  = 64 << 20
 )
 
 // sharedSymbolTables is the cache every Resolver uses.
@@ -279,20 +270,9 @@ func loadSymbolTable(exePath string) *symbolTable {
 		return t
 	}
 
-	if pclntab := f.Section(".gopclntab"); pclntab != nil {
-		if text := f.Section(".text"); text != nil {
-			if pclnData, derr := safeelf.SectionData(pclntab); derr == nil && safeelf.GoPCLNTabWithinCap(pclnData) {
-				if tbl, terr := gosym.NewTable(nil, gosym.NewLineTable(pclnData, text.Addr)); terr == nil {
-					t.goTable = tbl
-					t.goBytes = goTableBytesPerPCLNByte * int64(len(pclnData))
-				}
-			}
-		}
-	}
-
 	t.elfSyms = functionSymbols(f)
 
-	if t.goTable == nil && len(t.elfSyms) == 0 {
+	if len(t.elfSyms) == 0 {
 		return nil
 	}
 	return t

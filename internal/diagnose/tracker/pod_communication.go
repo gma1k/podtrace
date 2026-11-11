@@ -99,9 +99,18 @@ func (pct *PodCommunicationTracker) ProcessEvent(event *events.Event, k8sContext
 		comm.TotalLatency += event.Latency()
 	}
 
-	if event.Error != 0 {
+	if communicationFailed(event) {
 		comm.ErrorCount++
 	}
+}
+
+// communicationFailed decides whether event counts as an error between the
+// pods, by the same rules the TCP, UDP and Connections sections use.
+func communicationFailed(event *events.Event) bool {
+	if event.Type == events.EventConnect {
+		return event.IsError()
+	}
+	return event.TransferFailed()
 }
 
 func (pct *PodCommunicationTracker) getKey(targetPod, targetService, namespace string) string {

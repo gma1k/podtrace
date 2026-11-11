@@ -69,7 +69,11 @@ func TestAddEvent_EvictsBeyondRetentionCap(t *testing.T) {
 			Timestamp: ts,
 		}, nil)
 	}
+	if len(ec.errors) > maxRetainedErrors+trimSlack {
+		t.Errorf("error buffer = %d, want it bounded at %d", len(ec.errors), maxRetainedErrors+trimSlack)
+	}
+	ec.GetChains()
 	if len(ec.errors) != maxRetainedErrors {
-		t.Errorf("error buffer = %d, want it bounded at %d", len(ec.errors), maxRetainedErrors)
+		t.Errorf("error buffer read as %d, want the most recent %d", len(ec.errors), maxRetainedErrors)
 	}
 }

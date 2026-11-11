@@ -6,9 +6,17 @@
 #include "helpers.h"
 #include "filesystem.h"
 
+static __always_inline int fs_syscall_inflight(void)
+{
+	struct pair_key key = make_pair_key(PAIR_FS_SYSCALL);
+	return bpf_map_lookup_elem(&fs_inflight, &key) != NULL;
+}
+
 static __always_inline int fs_enter(u32 pair, struct file *file)
 {
 	if (!fs_traced() || !fs_is_regular(file))
+		return 0;
+	if ((pair == PAIR_VFS_READ || pair == PAIR_VFS_WRITE) && fs_syscall_inflight())
 		return 0;
 	struct pair_key key = make_pair_key(pair);
 	struct fs_inflight in = {
@@ -61,7 +69,7 @@ static __always_inline int fs_exit(void *ctx, u32 pair, u32 type, s64 ret, int h
 
 static __always_inline int fs_task_enter(u32 slot, struct file *file)
 {
-	if (!fs_traced() || !fs_is_regular(file))
+	if (!fs_traced() || !fs_is_regular(file) || fs_syscall_inflight())
 		return 0;
 	struct fs_task_starts *st = bpf_task_storage_get(&fs_task_inflight,
 		bpf_get_current_task_btf(), 0, 1 /* BPF_LOCAL_STORAGE_GET_F_CREATE */);
@@ -166,4 +174,22 @@ SEC("tp/syscalls/sys_exit_fdatasync")
 int tracepoint_sys_exit_fdatasync(struct fs_sys_exit *ctx)
 {
 	return fs_exit(ctx, PAIR_VFS_FSYNC, EVENT_FSYNC, ctx->ret, 0);
+}
+
+SEC("tp/syscalls/sys_enter_pwritev2")
+int tracepoint_sys_enter_fs_rw(struct fs_sys_enter *ctx)
+{
+	return fs_enter(PAIR_FS_SYSCALL, fs_file_of_fd((unsigned int)ctx->fd));
+}
+
+SEC("tp/syscalls/sys_exit_preadv")
+int tracepoint_sys_exit_fs_read(struct fs_sys_exit *ctx)
+{
+	return fs_exit(ctx, PAIR_FS_SYSCALL, EVENT_READ, ctx->ret, 1);
+}
+
+SEC("tp/syscalls/sys_exit_pwritev2")
+int tracepoint_sys_exit_fs_write(struct fs_sys_exit *ctx)
+{
+	return fs_exit(ctx, PAIR_FS_SYSCALL, EVENT_WRITE, ctx->ret, 1);
 }

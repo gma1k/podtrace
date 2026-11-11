@@ -49,6 +49,7 @@ enum probe_pair {
 	PAIR_KAFKA_PRODUCE,
 	PAIR_KAFKA_POLL,
 	PAIR_GETHOSTBYNAME,
+	PAIR_FS_SYSCALL,
 };
 
 struct pair_key {

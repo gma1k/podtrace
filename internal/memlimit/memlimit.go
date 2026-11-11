@@ -50,6 +50,15 @@ func Apply() int64 {
 	return soft
 }
 
+// ContainerLimit returns the memory limit of the container this process runs
+// in, in bytes, from LimitEnv or else the cgroup; false when there is none.
+func ContainerLimit() (int64, bool) {
+	if limit, ok := limitFromEnv(); ok {
+		return limit, true
+	}
+	return containerLimit()
+}
+
 // limitFromEnv reads the limit, in bytes, that the downward API put in
 // LimitEnv.
 func limitFromEnv() (int64, bool) {

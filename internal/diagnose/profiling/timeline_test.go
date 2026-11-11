@@ -352,6 +352,7 @@ func TestAnalyzeIOPattern_Extended(t *testing.T) {
 }
 
 func TestIsKernelThread(t *testing.T) {
+	emptyProc(t)
 	tests := []struct {
 		name     string
 		pid      uint32
@@ -764,8 +765,9 @@ func TestGenerateCPUUsageReport_WithEvents(t *testing.T) {
 	_ = os.MkdirAll(fmt.Sprintf("%s/%d", dir, pid3), 0755)
 
 	statContent := "1234 (test) S 1 1234 1234 0 -1 4194304 100 0 0 0 100 200 0 0 20 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
+	kernelStatContent := "5678 (kworker/0:0) I 2 0 0 0 -1 69238880 100 0 0 0 100 200 0 0 20 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
 	_ = os.WriteFile(stat1Path, []byte(statContent), 0644)
-	_ = os.WriteFile(stat2Path, []byte(statContent), 0644)
+	_ = os.WriteFile(stat2Path, []byte(kernelStatContent), 0o600)
 	_ = os.WriteFile(stat3Path, []byte(statContent), 0644)
 
 	events := []*events.Event{
@@ -842,7 +844,7 @@ func TestGenerateCPUUsageReport_ManyKernelProcesses(t *testing.T) {
 	config.ProcBasePath = dir
 	_ = os.WriteFile(dir+"/uptime", []byte("5.00 1.00\n"), 0644)
 
-	statContent := "1234 (test) S 1 1234 1234 0 -1 4194304 100 0 0 0 100 200 0 0 20 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
+	statContent := "1234 (kworker) I 2 0 0 0 -1 69238880 100 0 0 0 100 200 0 0 20 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
 
 	var evs []*events.Event
 	for i := 0; i < config.TopProcessesLimit+5; i++ {
@@ -961,6 +963,7 @@ func TestGetProcessCPUTime_AuxvError(t *testing.T) {
 }
 
 func TestIsKernelThread_AdditionalPrefixes(t *testing.T) {
+	emptyProc(t)
 	tests := []struct {
 		name     string
 		pid      uint32

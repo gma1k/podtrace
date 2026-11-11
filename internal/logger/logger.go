@@ -3,6 +3,7 @@ package logger
 import (
 	"context"
 	"os"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -15,7 +16,26 @@ import (
 var (
 	log         *zap.Logger
 	atomicLevel zap.AtomicLevel
+
+	subjectMu        sync.RWMutex
+	subjectPod       string
+	subjectNamespace string
 )
+
+// SetAlertSubject names the pod that alerts raised from log messages are
+// about. A CLI or session tracing one pod sets it; a process whose messages
+// concern many pods leaves it unset, and its alerts name none.
+func SetAlertSubject(pod, namespace string) {
+	subjectMu.Lock()
+	defer subjectMu.Unlock()
+	subjectPod, subjectNamespace = pod, namespace
+}
+
+func alertSubject() (pod, namespace string) {
+	subjectMu.RLock()
+	defer subjectMu.RUnlock()
+	return subjectPod, subjectNamespace
+}
 
 func init() {
 	level := getLogLevel()
@@ -53,7 +73,8 @@ func Warn(msg string, fields ...zap.Field) {
 	log.Warn(msg, fields...)
 	manager := alerting.GetGlobalManager()
 	if manager != nil {
-		if alert := alerting.CreateAlertFromLog(zapcore.WarnLevel, msg, fields, "", ""); alert != nil {
+		pod, namespace := alertSubject()
+		if alert := alerting.CreateAlertFromLog(zapcore.WarnLevel, msg, fields, pod, namespace); alert != nil {
 			manager.SendAlert(alert)
 		}
 	}
@@ -63,7 +84,8 @@ func Error(msg string, fields ...zap.Field) {
 	log.Error(msg, fields...)
 	manager := alerting.GetGlobalManager()
 	if manager != nil {
-		if alert := alerting.CreateAlertFromLog(zapcore.ErrorLevel, msg, fields, "", ""); alert != nil {
+		pod, namespace := alertSubject()
+		if alert := alerting.CreateAlertFromLog(zapcore.ErrorLevel, msg, fields, pod, namespace); alert != nil {
 			manager.SendAlert(alert)
 		}
 	}
@@ -72,7 +94,8 @@ func Error(msg string, fields ...zap.Field) {
 func Fatal(msg string, fields ...zap.Field) {
 	manager := alerting.GetGlobalManager()
 	if manager != nil {
-		if alert := alerting.CreateAlertFromLog(zapcore.FatalLevel, msg, fields, "", ""); alert != nil {
+		pod, namespace := alertSubject()
+		if alert := alerting.CreateAlertFromLog(zapcore.FatalLevel, msg, fields, pod, namespace); alert != nil {
 			manager.SendAlert(alert)
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			_ = manager.Shutdown(ctx)

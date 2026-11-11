@@ -28,6 +28,7 @@ import (
 	"github.com/gma1k/podtrace/internal/alerting"
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/diagnose"
+	"github.com/gma1k/podtrace/internal/diagnose/analyzer"
 	diagnosereport "github.com/gma1k/podtrace/internal/diagnose/report"
 	"github.com/gma1k/podtrace/internal/ebpf"
 	"github.com/gma1k/podtrace/internal/ebpf/kernelagg"
@@ -536,6 +537,8 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	if len(targetInfos) > 1 {
 		logger.Info("Tracing multiple target pods on this node",
 			zap.Int("total_targets", len(targetInfos)))
+	} else {
+		logger.SetAlertSubject(podInfo.PodName, podInfo.Namespace)
 	}
 
 	for _, p := range targetInfos {
@@ -1246,11 +1249,7 @@ func attachSourcePod(e *events.Event, resolve func(*events.Event) *kubernetes.Po
 		return
 	}
 	if src := resolve(e); src != nil && src.PodName != "" {
-		e.K8s = &events.K8sMetadata{
-			Namespace:     src.Namespace,
-			PodName:       src.PodName,
-			ContainerName: src.ContainerName,
-		}
+		e.K8s = k8sContexts.podMetadata(src.Namespace, src.PodName, src.ContainerName)
 	}
 }
 
@@ -1400,6 +1399,7 @@ func diagnosisByPod(agg *diagnose.Diagnostician) string {
 	}
 
 	sort.Strings(order)
+	fsTotals, fsKept := agg.FilesystemEventTotals(), analyzer.Kept(allEvents)
 	var sb strings.Builder
 	for _, key := range order {
 		b := buckets[key]
@@ -1407,6 +1407,7 @@ func diagnosisByPod(agg *diagnose.Diagnostician) string {
 			b.podName, b.namespace, errorRateThreshold, rttSpikeThreshold, fsSlowThreshold)
 		child.SetTimeWindow(agg.StartTime(), agg.EndTime())
 		child.AddFastFilesystemOps(agg.FastFilesystemRows())
+		child.InheritFilesystemEventTotals(fsTotals.Share(b.events, fsKept))
 		child.AddProcessCPU(agg.ProcessCPU())
 		for i, e := range b.events {
 			child.AddEventWithContext(e, b.contexts[i])
@@ -1429,14 +1430,22 @@ func buildK8sContextMap(enriched *kubernetes.EnrichedEvent, source *kubernetes.P
 	if source != nil && source.Namespace != "" {
 		sourceNamespace = source.Namespace
 	}
+	key := newContextKey(enriched.KubernetesContext, sourceNamespace, source)
+	return k8sContexts.context(key, func() map[string]interface{} {
+		return newK8sContextMap(enriched.KubernetesContext, sourceNamespace, source)
+	})
+}
+
+// newK8sContextMap builds the context map an event's enrichment describes.
+func newK8sContextMap(kc *kubernetes.KubernetesContext, sourceNamespace string, source *kubernetes.PodInfo) map[string]interface{} {
 	ctx := map[string]interface{}{
 		"namespace":         sourceNamespace,
-		"target_pod":        enriched.KubernetesContext.TargetPodName,
-		"target_service":    enriched.KubernetesContext.ServiceName,
-		"target_namespace":  enriched.KubernetesContext.TargetNamespace,
-		"target_labels":     enriched.KubernetesContext.TargetLabels,
-		"service_namespace": enriched.KubernetesContext.ServiceNamespace,
-		"is_external":       enriched.KubernetesContext.IsExternal,
+		"target_pod":        kc.TargetPodName,
+		"target_service":    kc.ServiceName,
+		"target_namespace":  kc.TargetNamespace,
+		"target_labels":     kc.TargetLabels,
+		"service_namespace": kc.ServiceNamespace,
+		"is_external":       kc.IsExternal,
 	}
 	if source != nil {
 		ctx["source_pod"] = source.PodName
@@ -1445,8 +1454,8 @@ func buildK8sContextMap(enriched *kubernetes.EnrichedEvent, source *kubernetes.P
 		ctx["source_workload_kind"] = source.OwnerKind
 		ctx["source_workload_name"] = source.OwnerName
 	}
-	if enriched.KubernetesContext.TargetLabels != nil {
-		if v := detectServiceMesh(enriched.KubernetesContext.TargetLabels); v != "" {
+	if kc.TargetLabels != nil {
+		if v := detectServiceMesh(kc.TargetLabels); v != "" {
 			ctx["target_mesh"] = v
 		}
 	}
