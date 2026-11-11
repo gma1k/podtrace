@@ -59,7 +59,6 @@ func TestResourceMonitorManager_ActivateStartsRealMonitorsOnlyForReadableCgroups
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	m.activate(ctx, make(chan *events.Event, 1), &ebpf.Map{}, &ebpf.Map{}, &ebpf.Map{})
-	defer m.stopAll()
 
 	if got := m.runningCount(); got != 1 {
 		t.Fatalf("running monitors = %d, want 1 (the unreadable cgroup must be skipped)", got)

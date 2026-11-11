@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/diagnose"
 )
 
@@ -31,7 +32,9 @@ func TestFinalizeDiagnoseOutputs_AllEmptyIsNoOp(t *testing.T) {
 	reportTo = ""
 
 	d := diagnose.NewDiagnostician()
-	finalizeDiagnoseOutputs(context.Background(), "report text", d)
+	if err := finalizeDiagnoseOutputs(context.Background(), "report text", d); err != nil {
+		t.Fatalf("finalizeDiagnoseOutputs: %v", err)
+	}
 }
 
 func TestFinalizeDiagnoseOutputs_WritesSummaryFile(t *testing.T) {
@@ -46,7 +49,9 @@ func TestFinalizeDiagnoseOutputs_WritesSummaryFile(t *testing.T) {
 	t.Setenv("NODE_NAME", "node-under-test")
 
 	d := diagnose.NewDiagnostician()
-	finalizeDiagnoseOutputs(context.Background(), "report text", d)
+	if err := finalizeDiagnoseOutputs(context.Background(), "report text", d); err != nil {
+		t.Fatalf("finalizeDiagnoseOutputs: %v", err)
+	}
 
 	raw, err := os.ReadFile(summaryPath)
 	if err != nil {
@@ -74,7 +79,9 @@ func TestFinalizeDiagnoseOutputs_WritesTerminationMessage(t *testing.T) {
 	reportTo = ""
 
 	d := diagnose.NewDiagnostician()
-	finalizeDiagnoseOutputs(context.Background(), "report text", d)
+	if err := finalizeDiagnoseOutputs(context.Background(), "report text", d); err != nil {
+		t.Fatalf("finalizeDiagnoseOutputs: %v", err)
+	}
 
 	raw, err := os.ReadFile(termPath)
 	if err != nil {
@@ -95,9 +102,12 @@ func TestFinalizeDiagnoseOutputs_LocalAndObjectStoreSink(t *testing.T) {
 	summaryFile = summaryPath
 	terminationMessagePath = termPath
 	reportTo = "s3://bucket/key"
+	t.Setenv(config.EnvArtifactBaseDir, "")
 
 	d := diagnose.NewDiagnostician()
-	finalizeDiagnoseOutputs(context.Background(), "report text", d)
+	if err := finalizeDiagnoseOutputs(context.Background(), "report text", d); err == nil {
+		t.Error("an object-store sink outside a session Job must be reported as undelivered")
+	}
 
 	if _, err := os.Stat(summaryPath); err != nil {
 		t.Errorf("summary file missing: %v", err)

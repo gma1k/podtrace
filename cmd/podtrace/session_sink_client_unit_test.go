@@ -79,6 +79,7 @@ users:
 
 func TestUploadReport_ObjectStoreWritesHandoffFile(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv(config.EnvArtifactBaseDir, dir)
 	orig := objectStoreReportFile
 	objectStoreReportFile = filepath.Join(dir, "report.txt")
 	t.Cleanup(func() { objectStoreReportFile = orig })

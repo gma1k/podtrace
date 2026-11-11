@@ -125,9 +125,9 @@ func checkSecretReportTarget(ctx context.Context, c client.Client, s *podtracev1
 	return &reportObjectConflictError{namespace: s.Namespace, name: name, resource: "secrets"}
 }
 
-// errNothingStaged reports a session that ended before any Job had a
-// staging Secret, so there is no report to publish.
-var errNothingStaged = errors.New("no staged report: the session ended before any Job ran")
+// errNothingStaged reports a session with no report to publish: it ended
+// before any Job had a staging Secret, or no Job delivered its report.
+var errNothingStaged = errors.New("no staged report")
 
 // publishSessionSecretReport merges every staged per-node report into the
 // tenant's reportRef Secret, then deletes the staging Secrets.
@@ -148,7 +148,7 @@ func publishSessionSecretReport(ctx context.Context, c client.Client, reader cli
 		}
 	}
 	if len(staged) == 0 {
-		return errNothingStaged
+		return fmt.Errorf("%w: the session ended before any Job ran", errNothingStaged)
 	}
 	sort.Slice(staged, func(i, j int) bool {
 		if staged[i].Namespace != staged[j].Namespace {
@@ -169,6 +169,12 @@ func publishSessionSecretReport(ctx context.Context, c client.Client, reader cli
 			data[k] = v
 		}
 	}
+	if len(data) == 0 {
+		if err := cleanupStagingNamespaces(ctx, c, s, staged); err != nil {
+			return err
+		}
+		return fmt.Errorf("%w: no Job delivered its report to a staging Secret", errNothingStaged)
+	}
 
 	_, name := reportRefResource(s.Spec.ReportRef)
 	labels := sessionRBACLabels(s)
@@ -186,8 +192,13 @@ func publishSessionSecretReport(ctx context.Context, c client.Client, reader cli
 		return fmt.Errorf("publish session report Secret %s/%s: %w", s.Namespace, name, err)
 	}
 
-	// The staging grant includes an unscoped secrets create; it must not
-	// outlive the report it was for.
+	return cleanupStagingNamespaces(ctx, c, s, staged)
+}
+
+// cleanupStagingNamespaces removes the staging Secrets and grant from every
+// namespace a staging Secret was found in. The staging grant includes an
+// unscoped secrets create; it must not outlive the report it was for.
+func cleanupStagingNamespaces(ctx context.Context, c client.Client, s *podtracev1alpha1.PodTraceSession, staged []corev1.Secret) error {
 	namespaces := map[string]struct{}{}
 	for i := range staged {
 		namespaces[staged[i].Namespace] = struct{}{}

@@ -5,10 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/gma1k/podtrace/internal/config"
 )
 
 func TestUploadReport_ReportFileIsSidecarReadable(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv(config.EnvArtifactBaseDir, dir)
 	orig := objectStoreReportFile
 	objectStoreReportFile = filepath.Join(dir, "report.txt")
 	t.Cleanup(func() { objectStoreReportFile = orig })

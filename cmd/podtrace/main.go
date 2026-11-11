@@ -320,6 +320,10 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if err := validateReportTo(reportTo); err != nil {
+		return err
+	}
+
 	if exporterFromFile != "" {
 		if err := applyExporterFromFile(exporterFromFile); err != nil {
 			return fmt.Errorf("load --exporter-from-file: %w", err)
@@ -548,18 +552,12 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 			zap.Int("containers", len(podContainerTargets(p))),
 			zap.String("container_id", p.ContainerID),
 			zap.String("cgroup_path", p.CgroupPath))
-		if os.Getenv("PODTRACE_ALLOW_BROAD_CGROUP") == "1" {
+		if broadCgroupAllowed() {
 			continue
 		}
 		for _, c := range podContainerTargets(p) {
-			if c.CgroupPath == "" {
-				continue
-			}
-			short := c.ID
-			if len(short) > 12 {
-				short = short[:12]
-			}
-			if !strings.Contains(c.CgroupPath, c.ID) && (short == "" || !strings.Contains(c.CgroupPath, short)) {
+			if !cgroupPathNamesContainer(c) {
+				short := shortContainerID(c.ID)
 				return fmt.Errorf(
 					"resolved cgroup path %q does not contain container id %q; refusing to run.\n\n"+
 						"This safety check prevents accidentally tracing the wrong container.\n\n"+
@@ -919,12 +917,12 @@ func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Eve
 			if profilingReporter != nil {
 				report += profilingReporter.GenerateSection(diagnostician.GetEvents(), duration)
 			}
-			finalizeDiagnoseOutputs(ctx, report, diagnostician)
+			artifactErr := finalizeDiagnoseOutputs(ctx, report, diagnostician)
 			if exportFormat != "" {
-				return exportReport(report, exportFormat, diagnostician)
+				return errors.Join(exportReport(report, exportFormat, diagnostician), artifactErr)
 			}
 			fmt.Println(report)
-			return nil
+			return artifactErr
 		case <-ctx.Done():
 			flushBatch()
 			diagnostician.Finish()
@@ -932,14 +930,14 @@ func runDiagnoseModeWithSource(ctx context.Context, eventChan <-chan *events.Eve
 			if profilingReporter != nil {
 				report += profilingReporter.GenerateSection(diagnostician.GetEvents(), duration)
 			}
-			finalizeDiagnoseOutputs(ctx, report, diagnostician)
+			artifactErr := finalizeDiagnoseOutputs(ctx, report, diagnostician)
 			if exportFormat != "" {
-				return exportReport(report, exportFormat, diagnostician)
+				return errors.Join(exportReport(report, exportFormat, diagnostician), artifactErr)
 			}
 			fmt.Println("\n=== Final Diagnostic Report ===")
 			fmt.Println()
 			fmt.Println(report)
-			return nil
+			return artifactErr
 		}
 	}
 }
@@ -1161,9 +1159,66 @@ func applyTargetUpdates(ctx context.Context, updates <-chan []*kubernetes.PodInf
 	}
 }
 
+// broadCgroupAllowed reports whether the user opted out of the check that a
+// traced cgroup path names its container.
+func broadCgroupAllowed() bool {
+	return os.Getenv("PODTRACE_ALLOW_BROAD_CGROUP") == "1"
+}
+
+func shortContainerID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
+}
+
+// cgroupPathNamesContainer reports whether a container's resolved cgroup path
+// contains its container ID. A path that does not is usually a parent slice
+// shared with other containers or pods.
+func cgroupPathNamesContainer(c kubernetes.ContainerTarget) bool {
+	if c.CgroupPath == "" {
+		return true
+	}
+	short := shortContainerID(c.ID)
+	return strings.Contains(c.CgroupPath, c.ID) || (short != "" && strings.Contains(c.CgroupPath, short))
+}
+
+// withoutBroadCgroups drops, from a target registry update, every container
+// whose cgroup path does not name it, the check startup enforces. A pod left
+// with no container is dropped.
+func withoutBroadCgroups(snapshot []*kubernetes.PodInfo) []*kubernetes.PodInfo {
+	if broadCgroupAllowed() {
+		return snapshot
+	}
+	kept := make([]*kubernetes.PodInfo, 0, len(snapshot))
+	for _, p := range snapshot {
+		targets := podContainerTargets(p)
+		narrow := make([]kubernetes.ContainerTarget, 0, len(targets))
+		for _, c := range targets {
+			if cgroupPathNamesContainer(c) {
+				narrow = append(narrow, c)
+				continue
+			}
+			logger.Warn("Not tracing a container whose cgroup path does not contain its container id; it may be a parent slice shared with other workloads (set PODTRACE_ALLOW_BROAD_CGROUP=1 to allow)",
+				zap.String("namespace", p.Namespace), zap.String("pod", p.PodName),
+				zap.String("container", c.Name), zap.String("cgroup_path", c.CgroupPath))
+		}
+		switch {
+		case len(narrow) == len(targets):
+			kept = append(kept, p)
+		case len(narrow) > 0:
+			narrowed := *p
+			narrowed.Containers = narrow
+			kept = append(kept, &narrowed)
+		}
+	}
+	return kept
+}
+
 // applyDynamicTargetSnapshot retargets the tracer and the source index to a
 // target registry update, keeping the previous filters when it is empty.
 func applyDynamicTargetSnapshot(tracer ebpf.TracerInterface, sourceIndex *sourcePodIndex, snapshot []*kubernetes.PodInfo) {
+	snapshot = withoutBroadCgroups(snapshot)
 	if len(snapshot) == 0 {
 		logger.Warn("Target registry currently empty; retaining previous cgroup filters")
 		return

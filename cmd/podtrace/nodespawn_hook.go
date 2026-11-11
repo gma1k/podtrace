@@ -101,6 +101,14 @@ func maybeSpawnOnNode(ctx context.Context, stop <-chan struct{}, cmd *cobra.Comm
 		return false, nil
 	}
 
+	sa := spawnServiceAccount
+	if sa == "" {
+		sa = os.Getenv("PODTRACE_SPAWN_SA")
+	}
+	if err := checkSpawnOutputFlags(cmd, sa); err != nil {
+		return true, err
+	}
+
 	image, warnDev := nodespawn.ResolveImage(nodespawn.ResolveImageOptions{
 		Override: spawnImage,
 		Version:  config.GetVersion(),
@@ -167,11 +175,6 @@ func maybeSpawnOnNode(ctx context.Context, stop <-chan struct{}, cmd *cobra.Comm
 		dynamic = false
 	}
 
-	sa := spawnServiceAccount
-	if sa == "" {
-		sa = os.Getenv("PODTRACE_SPAWN_SA")
-	}
-
 	var allTargetPods []nodespawn.PodRef
 	for _, refs := range preResolved.ByNode {
 		allTargetPods = append(allTargetPods, refs...)
@@ -211,6 +214,31 @@ func maybeSpawnOnNode(ctx context.Context, stop <-chan struct{}, cmd *cobra.Comm
 		return true, err
 	}
 	return true, nil
+}
+
+// podLocalFileFlags name files the tracing process itself reads or writes.
+// In spawn mode that process runs in an ephemeral pod on the node, so the
+// path resolves inside that pod and never reaches the workstation.
+var podLocalFileFlags = []struct{ name, reason string }{
+	{"summary-file", "is written inside the spawned pod, which is deleted when the trace ends"},
+	{"termination-message-path", "is written inside the spawned pod, which is deleted when the trace ends"},
+	{"exporter-from-file", "is read inside the spawned pod, where the workstation's file does not exist"},
+}
+
+// checkSpawnOutputFlags refuses flags whose file would be lost in the spawn
+// pod. --report-to still works there when the spawn ServiceAccount may
+// write the target, so it only warns when no ServiceAccount was chosen.
+func checkSpawnOutputFlags(cmd *cobra.Command, serviceAccount string) error {
+	for _, f := range podLocalFileFlags {
+		if cmd.Flags().Changed(f.name) {
+			return fmt.Errorf("--%s %s; rerun with --local to trace from this machine, or use a PodTraceSession with spec.reportRef", f.name, f.reason)
+		}
+	}
+	if cmd.Flags().Changed("report-to") && serviceAccount == "" {
+		logger.Warn("--report-to is uploaded by the spawned pod using its ServiceAccount; without --service-account that is the namespace default, which usually may not write ConfigMaps or Secrets",
+			zap.String("report_to", reportTo))
+	}
+	return nil
 }
 
 // clusterHandles pulls the kube clientset and rest.Config from the resolver.

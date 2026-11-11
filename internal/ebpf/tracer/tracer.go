@@ -2732,16 +2732,16 @@ func (t *Tracer) stop() {
 
 	t.readerWG.Wait()
 
+	if t.resourceMgr != nil {
+		t.resourceMgr.stopAll()
+	}
+
 	if t.collection != nil {
 		t.collection.Close()
 	}
 
 	if t.processNameCache != nil {
 		t.processNameCache.Close()
-	}
-
-	if t.resourceMgr != nil {
-		t.resourceMgr.stopAll()
 	}
 }
 
