@@ -42,6 +42,7 @@ func (rm *ResourceMonitor) syncCPUQuota() error {
 		return nil
 	}
 	if quota == 0 || period == 0 {
+		rm.setCPUQuotaInBPF(false)
 		if err := quotaMap.Delete(inode); err != nil && !isBenignMapDeleteError(err) {
 			return fmt.Errorf("clear CPU quota: %w", err)
 		}
@@ -49,15 +50,25 @@ func (rm *ResourceMonitor) syncCPUQuota() error {
 	}
 	value := cpuQuotaValue{QuotaMicros: quota, PeriodMicros: period}
 	if err := quotaMap.Put(inode, value); err != nil {
-		return fmt.Errorf("put CPU quota: %w", err)
+		rm.setCPUQuotaInBPF(false)
+		return fmt.Errorf("put CPU quota (CPU alerts fall back to the user-space check): %w", err)
 	}
+	rm.setCPUQuotaInBPF(true)
 	return nil
+}
+
+// setCPUQuotaInBPF records whether the in-kernel sampler holds this cgroup's
+// quota.
+func (rm *ResourceMonitor) setCPUQuotaInBPF(inBPF bool) {
+	rm.mu.Lock()
+	rm.cpuQuotaInBPF = inBPF
+	rm.mu.Unlock()
 }
 
 func (rm *ResourceMonitor) checkBPFCPUAlerts() {
 	rm.mu.RLock()
 	alertsMap := rm.cpuAlertsReadMap
-	on := rm.cpuSamplerOn
+	on := rm.cpuSamplerOn && rm.cpuQuotaInBPF
 	inode := rm.cgroupInode
 	quota := rm.cpuQuotaMicros
 	period := rm.cpuPeriodMicros

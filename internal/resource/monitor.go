@@ -97,10 +97,44 @@ type ResourceMonitor struct {
 	cpuPeriodMicros uint64
 	previousSamples map[uint32]resourceSample
 
+	ioLimits        map[ioChannel]uint64
+	ioPrevious      map[ioChannel]uint64
+	ioPreviousNS    uint64
+	ioUtilization   float64
+	ioUtilizationOK bool
+
+	publishedTypes map[uint32]struct{}
+
 	cpuQuotaMap      bpfLimitMap
 	cpuAlertsReadMap bpfAlertReadMap
 	cpuSamplerOn     bool
+	cpuQuotaInBPF    bool
 }
+
+// ioChannel is one direction of one block device. cgroup IO limits are set
+// per device and per direction, so utilization is only meaningful against
+// the limit of the same channel.
+type ioChannel struct {
+	device string
+	write  bool
+}
+
+// limitSet is one reading of a cgroup's configured limits.
+type limitSet struct {
+	cpuQuotaMicros  uint64
+	cpuPeriodMicros uint64
+	memoryBytes     uint64
+	io              map[ioChannel]uint64
+}
+
+// knownResourceTypes are the resource types a monitor can publish, released
+// from the BPF maps when the monitor stops.
+var knownResourceTypes = []uint32{ResourceCPU, ResourceMemory, ResourceIO}
+
+// unlimitedMemoryThreshold: cgroup v1 reports "no limit" as PAGE_COUNTER_MAX
+// pages (0x7FFFFFFFFFFFF000 with 4K pages), not "max". No real limit is near
+// 2^62 bytes.
+const unlimitedMemoryThreshold = uint64(1) << 62
 
 type bpfAlertReadMap interface {
 	Lookup(key, valueOut interface{}) error
@@ -118,6 +152,7 @@ func NewResourceMonitor(cgroupPath string, limitsMap, alertsMap *ebpf.Map, event
 		eventChan:       eventChan,
 		limits:          make(map[uint32]*ResourceLimit),
 		previousSamples: make(map[uint32]resourceSample),
+		publishedTypes:  make(map[uint32]struct{}),
 		checkInterval:   config.ResourceMonitorInterval,
 		stopCh:          make(chan struct{}),
 		namespace:       namespace,
@@ -174,9 +209,41 @@ func (rm *ResourceMonitor) Start(ctx context.Context) {
 	go rm.monitorLoop(ctx)
 }
 
+// Stop ends the monitor loop and removes every entry the monitor wrote to
+// the shared BPF maps. The maps are plain hashes shared by all monitors, so
+// entries left behind by departed cgroups would fill them under pod churn.
 func (rm *ResourceMonitor) Stop() {
 	close(rm.stopCh)
 	rm.wg.Wait()
+	rm.releaseBPFEntries()
+}
+
+// releaseBPFEntries deletes the CPU quota first so the in-kernel sampler
+// stops writing alerts for this cgroup before its alert keys are removed.
+func (rm *ResourceMonitor) releaseBPFEntries() {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	if rm.cpuQuotaMap != nil {
+		logMapDelete(rm.cpuQuotaMap, rm.cgroupInode, "cgroup_cpu_quota")
+		rm.cpuQuotaInBPF = false
+	}
+	for _, resourceType := range knownResourceTypes {
+		key := resourceMapKey{CgroupID: rm.cgroupInode, ResourceType: resourceType}
+		if rm.limitsMap != nil {
+			logMapDelete(rm.limitsMap, key, "cgroup_limits")
+		}
+		if rm.alertsMap != nil {
+			logMapDelete(rm.alertsMap, key, "cgroup_alerts")
+		}
+	}
+	clear(rm.publishedTypes)
+}
+
+func logMapDelete(m bpfLimitMap, key interface{}, mapName string) {
+	if err := m.Delete(key); err != nil && !isBenignMapDeleteError(err) {
+		logger.Debug("Failed to delete resource monitor map entry", zap.String("map", mapName), zap.Error(err))
+	}
 }
 
 func (rm *ResourceMonitor) monitorLoop(ctx context.Context) {
@@ -192,6 +259,7 @@ func (rm *ResourceMonitor) monitorLoop(ctx context.Context) {
 		case <-rm.stopCh:
 			return
 		case <-ticker.C:
+			rm.refreshLimits()
 			if err := rm.updateResourceUsage(); err != nil {
 				logger.Debug("Failed to update resource usage", zap.Error(err))
 			}
@@ -201,6 +269,7 @@ func (rm *ResourceMonitor) monitorLoop(ctx context.Context) {
 	}
 }
 
+// readLimits reads the configured limits and publishes them to BPF.
 func (rm *ResourceMonitor) readLimits() error {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
@@ -211,58 +280,54 @@ func (rm *ResourceMonitor) readLimits() error {
 	return rm.readLimitsV1()
 }
 
+// refreshLimits re-reads the limits every tick so an in-place pod resize, or
+// a limit added or removed, is picked up without restarting the monitor.
+func (rm *ResourceMonitor) refreshLimits() {
+	rm.mu.Lock()
+	quotaChanged := rm.applyLimitSet(rm.readLimitSet())
+	sampler := rm.cpuQuotaMap != nil
+	rm.mu.Unlock()
+
+	if quotaChanged && sampler {
+		if err := rm.syncCPUQuota(); err != nil {
+			logger.Warn("Failed to sync CPU quota to BPF sampler", zap.Error(err))
+		}
+	}
+}
+
 func (rm *ResourceMonitor) readLimitsV2() error {
-	logger.Debug("Reading cgroup v2 limits", zap.String("cgroup_path", rm.cgroupPath))
-	cpuMaxPath := filepath.Join(rm.cgroupPath, "cpu.max")
-	cpuMax, err := readCgroupFile(cpuMaxPath)
-	if err == nil {
+	rm.applyLimitSet(rm.readLimitSetV2())
+	return rm.syncToBPF()
+}
+
+func (rm *ResourceMonitor) readLimitsV1() error {
+	rm.applyLimitSet(rm.readLimitSetV1())
+	return rm.syncToBPF()
+}
+
+func (rm *ResourceMonitor) readLimitSet() limitSet {
+	if isCgroupV2(rm.cgroupPath) {
+		return rm.readLimitSetV2()
+	}
+	return rm.readLimitSetV1()
+}
+
+func (rm *ResourceMonitor) readLimitSetV2() limitSet {
+	var set limitSet
+	if cpuMax, err := readCgroupFile(filepath.Join(rm.cgroupPath, "cpu.max")); err == nil {
 		quota, period, unlimited := parseCPUMax(cpuMax)
 		if !unlimited && quota > 0 && period > 0 {
-			rm.cpuQuotaMicros = quota
-			rm.cpuPeriodMicros = period
-			rm.limits[ResourceCPU] = &ResourceLimit{
-				LimitBytes:   quota,
-				ResourceType: ResourceCPU,
-			}
-			logger.Debug("CPU limit read", zap.Uint64("quota", quota), zap.Uint64("period", period))
-		} else {
-			logger.Debug("CPU limit is unlimited or zero", zap.String("cpu_max", cpuMax))
-		}
-	} else {
-		logger.Debug("Failed to read CPU limit", zap.String("path", cpuMaxPath), zap.Error(err))
-	}
-
-	memMaxPath := filepath.Join(rm.cgroupPath, "memory.max")
-	memMax, err := readCgroupFile(memMaxPath)
-	if err == nil {
-		limit := parseMemoryMax(memMax)
-		if limit > 0 && limit != ^uint64(0) {
-			rm.limits[ResourceMemory] = &ResourceLimit{
-				LimitBytes:   limit,
-				ResourceType: ResourceMemory,
-				LastUpdateNS: uint64(time.Now().UnixNano()),
-			}
-			logger.Debug("Memory limit read", zap.Uint64("limit", limit))
-		} else {
-			logger.Debug("Memory limit is unlimited or zero", zap.String("mem_max", memMax))
-		}
-	} else {
-		logger.Debug("Failed to read memory limit", zap.String("path", memMaxPath), zap.Error(err))
-	}
-
-	ioMax, err := readCgroupFile(filepath.Join(rm.cgroupPath, "io.max"))
-	if err == nil {
-		limit := parseIOMax(ioMax)
-		if limit > 0 {
-			rm.limits[ResourceIO] = &ResourceLimit{
-				LimitBytes:   limit,
-				ResourceType: ResourceIO,
-				LastUpdateNS: uint64(time.Now().UnixNano()),
-			}
+			set.cpuQuotaMicros = quota
+			set.cpuPeriodMicros = period
 		}
 	}
-
-	return rm.syncToBPF()
+	if memMax, err := readCgroupFile(filepath.Join(rm.cgroupPath, "memory.max")); err == nil {
+		set.memoryBytes = finiteMemoryLimit(parseMemoryMax(memMax))
+	}
+	if ioMax, err := readCgroupFile(filepath.Join(rm.cgroupPath, "io.max")); err == nil {
+		set.io = parseIOMaxChannels(ioMax)
+	}
+	return set
 }
 
 // cgroup v1 controller mount directory candidates, relative to
@@ -309,12 +374,13 @@ func readV1ControllerFile(controllers []string, subpath, file string) (string, e
 	return "", lastErr
 }
 
-func (rm *ResourceMonitor) readLimitsV1() error {
+func (rm *ResourceMonitor) readLimitSetV1() limitSet {
+	var set limitSet
 	subpath, ok := cgroupV1Subpath(rm.cgroupPath)
 	if !ok {
 		logger.Debug("cgroup v1: cannot derive controller subpath from cgroup path",
 			zap.String("cgroup_path", rm.cgroupPath))
-		return rm.syncToBPF()
+		return set
 	}
 
 	cpuQuota, _ := readV1ControllerFile(cgroupV1CPUDirs, subpath, "cpu.cfs_quota_us")
@@ -323,50 +389,103 @@ func (rm *ResourceMonitor) readLimitsV1() error {
 		quota, _ := strconv.ParseUint(strings.TrimSpace(cpuQuota), 10, 64)
 		period, _ := strconv.ParseUint(strings.TrimSpace(cpuPeriod), 10, 64)
 		if quota > 0 && period > 0 {
-			rm.cpuQuotaMicros = quota
-			rm.cpuPeriodMicros = period
-			rm.limits[ResourceCPU] = &ResourceLimit{
-				LimitBytes:   quota,
-				ResourceType: ResourceCPU,
-			}
+			set.cpuQuotaMicros = quota
+			set.cpuPeriodMicros = period
 		}
 	}
 
-	memLimit, err := readV1ControllerFile(cgroupV1MemoryDirs, subpath, "memory.limit_in_bytes")
-	if err == nil {
-		limit := parseMemoryMax(memLimit)
-		if limit > 0 {
-			rm.limits[ResourceMemory] = &ResourceLimit{
-				LimitBytes:   limit,
-				ResourceType: ResourceMemory,
-				LastUpdateNS: uint64(time.Now().UnixNano()),
-			}
-		}
+	if memLimit, err := readV1ControllerFile(cgroupV1MemoryDirs, subpath, "memory.limit_in_bytes"); err == nil {
+		set.memoryBytes = finiteMemoryLimit(parseMemoryMax(memLimit))
 	}
 
 	ioRead, _ := readV1ControllerFile(cgroupV1BlkioDirs, subpath, "blkio.throttle.read_bps_device")
 	ioWrite, _ := readV1ControllerFile(cgroupV1BlkioDirs, subpath, "blkio.throttle.write_bps_device")
-	limit := parseBlkioThrottleBps(ioRead)
-	if w := parseBlkioThrottleBps(ioWrite); w > limit {
-		limit = w
+	set.io = make(map[ioChannel]uint64)
+	for device, bps := range parseBlkioThrottleDevices(ioRead) {
+		set.io[ioChannel{device: device}] = bps
 	}
-	if limit > 0 {
-		rm.limits[ResourceIO] = &ResourceLimit{
-			LimitBytes:   limit,
-			ResourceType: ResourceIO,
-			LastUpdateNS: uint64(time.Now().UnixNano()),
+	for device, bps := range parseBlkioThrottleDevices(ioWrite) {
+		set.io[ioChannel{device: device, write: true}] = bps
+	}
+	return set
+}
+
+// finiteMemoryLimit maps the "no limit" encodings of both cgroup versions
+// to 0.
+func finiteMemoryLimit(limit uint64) uint64 {
+	if limit >= unlimitedMemoryThreshold {
+		return 0
+	}
+	return limit
+}
+
+// applyLimitSet makes set the monitor's limits, keeping the usage already
+// sampled for a resource whose limit is unchanged or only resized, and
+// reports whether the CPU quota changed. Caller holds rm.mu.
+func (rm *ResourceMonitor) applyLimitSet(set limitSet) bool {
+	quotaChanged := set.cpuQuotaMicros != rm.cpuQuotaMicros || set.cpuPeriodMicros != rm.cpuPeriodMicros
+	rm.cpuQuotaMicros = set.cpuQuotaMicros
+	rm.cpuPeriodMicros = set.cpuPeriodMicros
+
+	rm.ioLimits = nil
+	var ioLimit uint64
+	for ch, bps := range set.io {
+		if bps == 0 {
+			continue
 		}
+		if rm.ioLimits == nil {
+			rm.ioLimits = make(map[ioChannel]uint64)
+		}
+		rm.ioLimits[ch] = bps
+		ioLimit = max(ioLimit, bps)
+	}
+	if ioLimit == 0 {
+		rm.ioPrevious = nil
+		rm.ioPreviousNS = 0
+		rm.ioUtilizationOK = false
 	}
 
-	return rm.syncToBPF()
+	var cpuLimit uint64
+	if set.cpuQuotaMicros > 0 && set.cpuPeriodMicros > 0 {
+		cpuLimit = set.cpuQuotaMicros
+	}
+	rm.setLimit(ResourceCPU, cpuLimit)
+	rm.setLimit(ResourceMemory, set.memoryBytes)
+	rm.setLimit(ResourceIO, ioLimit)
+	return quotaChanged
+}
+
+func (rm *ResourceMonitor) setLimit(resourceType uint32, limitBytes uint64) {
+	existing, ok := rm.limits[resourceType]
+	if limitBytes == 0 {
+		if ok {
+			delete(rm.limits, resourceType)
+			delete(rm.previousSamples, resourceType)
+			logger.Debug("Resource limit removed", zap.String("cgroup_path", rm.cgroupPath), zap.Uint32("type", resourceType))
+		}
+		return
+	}
+	if ok {
+		if existing.LimitBytes != limitBytes {
+			logger.Debug("Resource limit changed", zap.String("cgroup_path", rm.cgroupPath),
+				zap.Uint32("type", resourceType), zap.Uint64("from", existing.LimitBytes), zap.Uint64("to", limitBytes))
+			existing.LimitBytes = limitBytes
+		}
+		return
+	}
+	limit := &ResourceLimit{LimitBytes: limitBytes, ResourceType: resourceType}
+	if resourceType != ResourceCPU {
+		limit.LastUpdateNS = uint64(time.Now().UnixNano())
+	}
+	rm.limits[resourceType] = limit
+	logger.Debug("Resource limit read", zap.String("cgroup_path", rm.cgroupPath),
+		zap.Uint32("type", resourceType), zap.Uint64("limit", limitBytes))
 }
 
 func (rm *ResourceMonitor) updateResourceUsage() error {
 	rm.mu.Lock()
-	for _, resourceType := range []uint32{ResourceCPU, ResourceIO} {
-		if limit, ok := rm.limits[resourceType]; ok && limit.LastUpdateNS != 0 {
-			rm.previousSamples[resourceType] = resourceSample{usage: limit.UsageBytes, wallNS: limit.LastUpdateNS}
-		}
+	if limit, ok := rm.limits[ResourceCPU]; ok && limit.LastUpdateNS != 0 {
+		rm.previousSamples[ResourceCPU] = resourceSample{usage: limit.UsageBytes, wallNS: limit.LastUpdateNS}
 	}
 	defer rm.mu.Unlock()
 
@@ -395,12 +514,9 @@ func (rm *ResourceMonitor) updateUsageV2() error {
 		}
 	}
 
-	ioStat, err := readCgroupFile(filepath.Join(rm.cgroupPath, "io.stat"))
-	if err == nil {
-		usage := parseIOStat(ioStat)
-		if limit, ok := rm.limits[ResourceIO]; ok {
-			limit.UsageBytes = usage
-			limit.LastUpdateNS = uint64(time.Now().UnixNano())
+	if _, ok := rm.limits[ResourceIO]; ok {
+		if ioStat, err := readCgroupFile(filepath.Join(rm.cgroupPath, "io.stat")); err == nil {
+			rm.recordIOSample(parseIOStatChannels(ioStat), uint64(time.Now().UnixNano()))
 		}
 	}
 
@@ -431,19 +547,61 @@ func (rm *ResourceMonitor) updateUsageV1() error {
 		}
 	}
 
-	ioBytes, err := readV1ControllerFile(cgroupV1BlkioDirs, subpath, "blkio.io_service_bytes")
-	if err == nil {
-		usage := parseBlkioServiceBytes(ioBytes)
-		if limit, ok := rm.limits[ResourceIO]; ok {
-			limit.UsageBytes = usage
-			limit.LastUpdateNS = uint64(time.Now().UnixNano())
+	if _, ok := rm.limits[ResourceIO]; ok {
+		if ioBytes, err := readV1ControllerFile(cgroupV1BlkioDirs, subpath, "blkio.io_service_bytes"); err == nil {
+			rm.recordIOSample(parseBlkioServiceChannels(ioBytes), uint64(time.Now().UnixNano()))
 		}
 	}
 
 	return rm.syncToBPF()
 }
 
+// recordIOSample stores the cumulative per-channel byte counters and derives
+// IO utilization as the busiest limited channel's rate against that
+// channel's own limit. Caller holds rm.mu.
+func (rm *ResourceMonitor) recordIOSample(usage map[ioChannel]uint64, nowNS uint64) {
+	if limit, ok := rm.limits[ResourceIO]; ok {
+		var total uint64
+		for _, b := range usage {
+			total += b
+		}
+		limit.UsageBytes = total
+		limit.LastUpdateNS = nowNS
+	}
+	rm.ioUtilization, rm.ioUtilizationOK = 0, false
+	if rm.ioPrevious != nil && nowNS > rm.ioPreviousNS {
+		rm.ioUtilization, rm.ioUtilizationOK = ioChannelUtilization(rm.ioLimits, rm.ioPrevious, usage, nowNS-rm.ioPreviousNS)
+	}
+	rm.ioPrevious = usage
+	rm.ioPreviousNS = nowNS
+}
+
+// ioChannelUtilization returns the highest rate/limit percentage over the
+// limited channels. A channel absent from io.stat has moved no bytes.
+func ioChannelUtilization(limits, previous, current map[ioChannel]uint64, elapsedNS uint64) (float64, bool) {
+	seconds := float64(elapsedNS) / 1e9
+	busiest, ok := 0.0, false
+	for ch, limit := range limits {
+		before, after := previous[ch], current[ch]
+		if limit == 0 || after < before {
+			continue
+		}
+		percent := float64(after-before) / seconds / float64(limit) * 100
+		if !ok || percent > busiest {
+			busiest, ok = percent, true
+		}
+	}
+	return busiest, ok
+}
+
 func (rm *ResourceMonitor) syncToBPF() error {
+	rm.unpublishRemovedTypes()
+	if rm.publishedTypes == nil {
+		rm.publishedTypes = make(map[uint32]struct{})
+	}
+	for resourceType := range rm.limits {
+		rm.publishedTypes[resourceType] = struct{}{}
+	}
 	if rm.limitsMap == nil {
 		return nil
 	}
@@ -466,6 +624,25 @@ func (rm *ResourceMonitor) syncToBPF() error {
 	}
 
 	return nil
+}
+
+// unpublishRemovedTypes deletes the limit and alert entries of resource
+// types whose limit was removed since they were published. Caller holds
+// rm.mu.
+func (rm *ResourceMonitor) unpublishRemovedTypes() {
+	for resourceType := range rm.publishedTypes {
+		if _, ok := rm.limits[resourceType]; ok {
+			continue
+		}
+		key := resourceMapKey{CgroupID: rm.cgroupInode, ResourceType: resourceType}
+		if rm.limitsMap != nil {
+			logMapDelete(rm.limitsMap, key, "cgroup_limits")
+		}
+		if rm.alertsMap != nil {
+			logMapDelete(rm.alertsMap, key, "cgroup_alerts")
+		}
+		delete(rm.publishedTypes, resourceType)
+	}
 }
 
 func isBenignMapDeleteError(err error) bool {
@@ -505,13 +682,10 @@ func (rm *ResourceMonitor) utilizationPercent(resourceType uint32, limit *Resour
 		return clamp(usedMicros / wallMicros / allowedCPUs * 100)
 
 	case ResourceIO:
-		previous, ok := rm.previousSamples[ResourceIO]
-		if !ok || limit.LastUpdateNS <= previous.wallNS || limit.UsageBytes < previous.usage {
+		if !rm.ioUtilizationOK {
 			return 0, false
 		}
-		bytesPerSecond := float64(limit.UsageBytes-previous.usage) /
-			(float64(limit.LastUpdateNS-previous.wallNS) / 1e9)
-		return clamp(bytesPerSecond / float64(limit.LimitBytes) * 100)
+		return clamp(rm.ioUtilization)
 
 	default:
 		return clamp(float64(limit.UsageBytes) * 100 / float64(limit.LimitBytes))
@@ -537,7 +711,7 @@ func (rm *ResourceMonitor) checkAlerts() {
 			continue
 		}
 
-		if resourceType == ResourceCPU && rm.cpuSamplerOn {
+		if resourceType == ResourceCPU && rm.cpuSamplerOn && rm.cpuQuotaInBPF {
 			continue
 		}
 
@@ -748,56 +922,104 @@ func parseMemoryMax(memMax string) uint64 {
 	return val
 }
 
+// parseIOMax returns the largest single-channel bandwidth limit in io.max,
+// the value exported as the IO limit metric.
 func parseIOMax(ioMax string) uint64 {
 	var maxBytes uint64
-	parts := strings.Fields(ioMax)
-	for _, part := range parts {
-		if strings.HasPrefix(part, "rbps=") {
-			val, _ := strconv.ParseUint(strings.TrimPrefix(part, "rbps="), 10, 64)
-			if val > maxBytes {
-				maxBytes = val
-			}
-		}
-		if strings.HasPrefix(part, "wbps=") {
-			val, _ := strconv.ParseUint(strings.TrimPrefix(part, "wbps="), 10, 64)
-			if val > maxBytes {
-				maxBytes = val
-			}
-		}
+	for _, bps := range parseIOMaxChannels(ioMax) {
+		maxBytes = max(maxBytes, bps)
 	}
 	return maxBytes
 }
 
-// parseBlkioThrottleBps parses blkio.throttle.{read,write}_bps_device,
-// whose real format is two fields per line ("MAJ:MIN bytes_per_sec").
+// parseIOMaxChannels parses io.max ("MAJ:MIN rbps=N wbps=N riops=max ...")
+// into per-device, per-direction byte limits. "max" means unlimited and is
+// left out.
+func parseIOMaxChannels(ioMax string) map[ioChannel]uint64 {
+	return parseIODeviceFields(ioMax, "rbps", "wbps")
+}
+
+// parseIOStatChannels parses io.stat ("MAJ:MIN rbytes=N wbytes=N ...") into
+// cumulative per-device, per-direction byte counters.
+func parseIOStatChannels(ioStat string) map[ioChannel]uint64 {
+	return parseIODeviceFields(ioStat, "rbytes", "wbytes")
+}
+
+// parseIODeviceFields reads the readKey/writeKey values of every device in
+// a cgroup v2 io file. A field without "=" names the device the following
+// key=value fields belong to.
+func parseIODeviceFields(data, readKey, writeKey string) map[ioChannel]uint64 {
+	out := make(map[ioChannel]uint64)
+	device := ""
+	for _, field := range strings.Fields(data) {
+		key, value, isPair := strings.Cut(field, "=")
+		if !isPair {
+			device = field
+			continue
+		}
+		if key != readKey && key != writeKey {
+			continue
+		}
+		n, err := strconv.ParseUint(value, 10, 64)
+		if err != nil {
+			continue
+		}
+		out[ioChannel{device: device, write: key == writeKey}] = n
+	}
+	return out
+}
+
+// parseBlkioThrottleBps returns the largest per-device limit in
+// blkio.throttle.{read,write}_bps_device.
 func parseBlkioThrottleBps(ioData string) uint64 {
 	var maxBps uint64
-	scanner := bufio.NewScanner(strings.NewReader(ioData))
-	for scanner.Scan() {
-		parts := strings.Fields(scanner.Text())
-		if len(parts) == 2 && strings.Contains(parts[0], ":") {
-			if val, err := strconv.ParseUint(parts[1], 10, 64); err == nil && val > maxBps {
-				maxBps = val
-			}
-		}
+	for _, bps := range parseBlkioThrottleDevices(ioData) {
+		maxBps = max(maxBps, bps)
 	}
 	return maxBps
 }
 
+// parseBlkioThrottleDevices parses blkio.throttle.{read,write}_bps_device,
+// whose real format is two fields per line ("MAJ:MIN bytes_per_sec").
+func parseBlkioThrottleDevices(ioData string) map[string]uint64 {
+	out := make(map[string]uint64)
+	scanner := bufio.NewScanner(strings.NewReader(ioData))
+	for scanner.Scan() {
+		parts := strings.Fields(scanner.Text())
+		if len(parts) == 2 && strings.Contains(parts[0], ":") {
+			if val, err := strconv.ParseUint(parts[1], 10, 64); err == nil && val > 0 {
+				out[parts[0]] = val
+			}
+		}
+	}
+	return out
+}
+
 // parseBlkioServiceBytes sums the Read and Write rows of
-// blkio.io_service_bytes ("MAJ:MIN Read N").
+// blkio.io_service_bytes.
 func parseBlkioServiceBytes(ioData string) uint64 {
 	var total uint64
+	for _, b := range parseBlkioServiceChannels(ioData) {
+		total += b
+	}
+	return total
+}
+
+// parseBlkioServiceChannels parses the Read and Write rows of
+// blkio.io_service_bytes ("MAJ:MIN Read N") per device and direction,
+// skipping the Sync/Async/Total aggregate rows.
+func parseBlkioServiceChannels(ioData string) map[ioChannel]uint64 {
+	out := make(map[ioChannel]uint64)
 	scanner := bufio.NewScanner(strings.NewReader(ioData))
 	for scanner.Scan() {
 		parts := strings.Fields(scanner.Text())
 		if len(parts) == 3 && (parts[1] == "Read" || parts[1] == "Write") {
 			if val, err := strconv.ParseUint(parts[2], 10, 64); err == nil {
-				total += val
+				out[ioChannel{device: parts[0], write: parts[1] == "Write"}] = val
 			}
 		}
 	}
-	return total
+	return out
 }
 
 func parseCPUStat(cpuStat string) uint64 {
@@ -815,22 +1037,11 @@ func parseCPUStat(cpuStat string) uint64 {
 	return 0
 }
 
+// parseIOStat sums every device's read and write bytes in io.stat.
 func parseIOStat(ioStat string) uint64 {
 	var totalBytes uint64
-	scanner := bufio.NewScanner(strings.NewReader(ioStat))
-	for scanner.Scan() {
-		line := scanner.Text()
-		parts := strings.Fields(line)
-		for _, part := range parts {
-			if strings.HasPrefix(part, "rbytes=") {
-				val, _ := strconv.ParseUint(strings.TrimPrefix(part, "rbytes="), 10, 64)
-				totalBytes += val
-			}
-			if strings.HasPrefix(part, "wbytes=") {
-				val, _ := strconv.ParseUint(strings.TrimPrefix(part, "wbytes="), 10, 64)
-				totalBytes += val
-			}
-		}
+	for _, b := range parseIOStatChannels(ioStat) {
+		totalBytes += b
 	}
 	return totalBytes
 }

@@ -5,11 +5,6 @@ import (
 	"time"
 )
 
-// TestUtilizationPercent_CPURateNotCumulative is a regression test: CPU
-// "utilization" used to divide the CUMULATIVE usage counter (cpu.stat
-// usage_usec) by the per-period quota, so after ~0.1 CPU-seconds of total
-// runtime it saturated at 100% and fired AlertEmergency on every tick
-// forever. Utilization must reflect the consumption RATE between samples.
 func TestUtilizationPercent_CPURateNotCumulative(t *testing.T) {
 	rm := &ResourceMonitor{
 		cpuQuotaMicros:  100000, // 1 full CPU:
@@ -42,8 +37,6 @@ func TestUtilizationPercent_CPURateNotCumulative(t *testing.T) {
 	}
 }
 
-// TestUtilizationPercent_FirstSampleReportsNoData: rate-based types need two
-// samples; the first tick must not alert.
 func TestUtilizationPercent_FirstSampleReportsNoData(t *testing.T) {
 	rm := &ResourceMonitor{
 		cpuQuotaMicros:  100000,
@@ -61,27 +54,22 @@ func TestUtilizationPercent_FirstSampleReportsNoData(t *testing.T) {
 	}
 }
 
-// TestUtilizationPercent_IORate: IO limits are bytes/second; usage is a
-// cumulative byte counter — same rate treatment as CPU.
 func TestUtilizationPercent_IORate(t *testing.T) {
-	rm := &ResourceMonitor{previousSamples: map[uint32]resourceSample{}}
-	now := uint64(time.Now().UnixNano())
-
-	rm.previousSamples[ResourceIO] = resourceSample{usage: 10_000_000_000, wallNS: now - uint64(time.Second)}
-	limit := &ResourceLimit{
-		LimitBytes:   1_000_000, // 1 MB/s throttle
-		UsageBytes:   10_000_000_000 + 500_000,
-		LastUpdateNS: now,
-		ResourceType: ResourceIO,
+	rm := &ResourceMonitor{
+		previousSamples: map[uint32]resourceSample{},
+		limits:          map[uint32]*ResourceLimit{ResourceIO: {LimitBytes: 1_000_000, ResourceType: ResourceIO}},
+		ioLimits:        map[ioChannel]uint64{{device: "8:0", write: true}: 1_000_000},
 	}
-	utilization, ok := rm.utilizationPercent(ResourceIO, limit)
+	now := uint64(time.Now().UnixNano())
+	rm.recordIOSample(map[ioChannel]uint64{{device: "8:0", write: true}: 10_000_000_000}, now-uint64(time.Second))
+	rm.recordIOSample(map[ioChannel]uint64{{device: "8:0", write: true}: 10_000_500_000}, now)
+
+	utilization, ok := rm.utilizationPercent(ResourceIO, rm.limits[ResourceIO])
 	if !ok || utilization < 45 || utilization > 55 {
 		t.Errorf("utilization = %d%% (ok=%v), want ~50%% for 0.5 MB/s against a 1 MB/s limit", utilization, ok)
 	}
 }
 
-// TestUtilizationPercent_MemoryStaysDirect: memory compares current bytes
-// against the byte limit, no rate involved.
 func TestUtilizationPercent_MemoryStaysDirect(t *testing.T) {
 	rm := &ResourceMonitor{previousSamples: map[uint32]resourceSample{}}
 	limit := &ResourceLimit{LimitBytes: 1000, UsageBytes: 960, ResourceType: ResourceMemory}

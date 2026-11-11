@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/util/retry"
@@ -24,9 +25,12 @@ import (
 	"go.uber.org/zap"
 )
 
-func finalizeDiagnoseOutputs(ctx context.Context, report string, d *diagnose.Diagnostician) {
+// finalizeDiagnoseOutputs writes every requested artifact and returns the
+// delivery failures, so a session Job whose report never arrived fails
+// instead of completing with a missing or empty report.
+func finalizeDiagnoseOutputs(ctx context.Context, report string, d *diagnose.Diagnostician) error {
 	if summaryFile == "" && terminationMessagePath == "" && reportTo == "" {
-		return
+		return nil
 	}
 	finalizeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeGracePeriod)
 	defer cancel()
@@ -34,8 +38,10 @@ func finalizeDiagnoseOutputs(ctx context.Context, report string, d *diagnose.Dia
 	summary := computeSessionSummary(d, node)
 	summary.Exports = collectSessionExports()
 	if err := emitSessionArtifacts(finalizeCtx, summary, report); err != nil {
-		logger.Warn("emit session artifacts", zap.Error(err))
+		logger.Error("Diagnose artifacts were not delivered", zap.Error(err))
+		return err
 	}
+	return nil
 }
 
 // finalizeGracePeriod bounds report/summary delivery after shutdown began so
@@ -243,7 +249,32 @@ func redactReportText(reportText string) string {
 	return red.RedactText(reportText)
 }
 
+// validateReportTo rejects a --report-to this process cannot deliver, so a
+// bad sink fails before the trace instead of after it.
+func validateReportTo(spec string) error {
+	if spec == "" {
+		return nil
+	}
+	if strings.Contains(spec, "://") {
+		if config.ArtifactBaseDir() == "" {
+			return fmt.Errorf("--report-to %q: object-store reports are uploaded by a session Job's report-uploader sidecar; use a PodTraceSession with spec.reportRef.objectStore, or configmap|secret/<namespace>/<name>", spec)
+		}
+		return nil
+	}
+	kind, _, _, err := parseReportToSpec(spec)
+	if err != nil {
+		return err
+	}
+	if kind != "configmap" && kind != "secret" {
+		return fmt.Errorf("unsupported report-to kind %q (want configmap|secret)", kind)
+	}
+	return nil
+}
+
 func uploadReport(ctx context.Context, spec, reportText string) error {
+	if err := validateReportTo(spec); err != nil {
+		return err
+	}
 	reportText = redactReportText(reportText)
 	if strings.Contains(spec, "://") {
 
@@ -252,10 +283,7 @@ func uploadReport(ctx context.Context, spec, reportText string) error {
 		}
 		return nil
 	}
-	kind, namespace, name, err := parseReportToSpec(spec)
-	if err != nil {
-		return err
-	}
+	kind, namespace, name, _ := parseReportToSpec(spec)
 
 	client, err := buildInClusterClient()
 	if err != nil {
@@ -269,10 +297,8 @@ func uploadReport(ctx context.Context, spec, reportText string) error {
 	switch kind {
 	case "configmap":
 		return upsertReportConfigMap(writeCtx, client, namespace, name, key, reportText)
-	case "secret":
-		return upsertReportSecret(writeCtx, client, namespace, name, key, reportText)
 	default:
-		return fmt.Errorf("unsupported report-to kind %q (want configmap|secret)", kind)
+		return upsertReportSecret(writeCtx, client, namespace, name, key, reportText)
 	}
 }
 
@@ -414,11 +440,33 @@ func replaceReportSecret(ctx context.Context, secrets typedcorev1.SecretInterfac
 		Type: existing.Type,
 		Data: existing.Data,
 	}
-	_, err := secrets.Create(ctx, replacement, metav1.CreateOptions{})
+	err := retry.OnError(replaceCreateBackoff, func(err error) bool {
+		return ctx.Err() == nil && retriableCreateError(err)
+	}, func() error {
+		_, err := secrets.Create(ctx, replacement, metav1.CreateOptions{})
+		return err
+	})
 	if apierrors.IsAlreadyExists(err) {
 		return apierrors.NewConflict(corev1.Resource("secrets"), existing.Name, err)
 	}
-	return err
+	if err != nil {
+		return fmt.Errorf("recreate report Secret %s/%s after deleting it (staged reports in it are lost): %w", existing.Namespace, existing.Name, err)
+	}
+	return nil
+}
+
+var replaceCreateBackoff = wait.Backoff{Steps: 6, Duration: 200 * time.Millisecond, Factor: 2, Jitter: 0.1}
+
+// retriableCreateError reports whether a Secret create may succeed when
+// repeated. AlreadyExists is a lost race the caller resolves by re-reading.
+func retriableCreateError(err error) bool {
+	switch {
+	case apierrors.IsAlreadyExists(err), apierrors.IsForbidden(err), apierrors.IsUnauthorized(err),
+		apierrors.IsInvalid(err), apierrors.IsBadRequest(err), apierrors.IsNotFound(err),
+		apierrors.IsMethodNotSupported(err), apierrors.IsRequestEntityTooLargeError(err):
+		return false
+	}
+	return true
 }
 
 // buildInClusterClient constructs a kubernetes.Interface for the report

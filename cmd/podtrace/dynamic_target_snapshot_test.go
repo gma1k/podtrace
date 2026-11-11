@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,7 +16,10 @@ import (
 
 func snapshotPod(t *testing.T) (*kubernetes.PodInfo, uint64) {
 	t.Helper()
-	cgroup := t.TempDir()
+	cgroup := filepath.Join(t.TempDir(), "cri-containerd-c-new.scope")
+	if err := os.Mkdir(cgroup, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	id, err := cgroupIDFromPath(cgroup)
 	if err != nil {
 		t.Fatalf("cgroupIDFromPath: %v", err)
