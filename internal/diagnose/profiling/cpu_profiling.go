@@ -87,15 +87,25 @@ func GenerateProcessCPUReport(allEvents []*events.Event, duration time.Duration,
 		return kernelProcesses[i].cpuPercent > kernelProcesses[j].cpuPercent
 	})
 
-	if len(podProcesses) > config.TopProcessesLimit*2 {
-		podProcesses = podProcesses[:config.TopProcessesLimit*2]
+	podCPUPercent, kernelCPUPercent := 0.0, 0.0
+	for _, info := range podProcesses {
+		podCPUPercent += info.cpuPercent
+	}
+	for _, info := range kernelProcesses {
+		kernelCPUPercent += info.cpuPercent
+	}
+	totalCPUPercent = podCPUPercent + kernelCPUPercent
+
+	shownPod := podProcesses
+	if len(shownPod) > config.TopProcessesLimit*2 {
+		shownPod = shownPod[:config.TopProcessesLimit*2]
 	}
 	shownKernel := kernelProcesses
 	if len(shownKernel) > config.TopProcessesLimit {
 		shownKernel = shownKernel[:config.TopProcessesLimit]
 	}
 	labelWidth, percentWidth := 0, 0
-	for _, rows := range [][]cpuUsageInfo{podProcesses, shownKernel} {
+	for _, rows := range [][]cpuUsageInfo{shownPod, shownKernel} {
 		for _, info := range rows {
 			labelWidth = max(labelWidth, len(processLabel(info.pid, info.name)))
 			percentWidth = max(percentWidth, len(formatCPUPercent(info.cpuPercent)))
@@ -108,30 +118,26 @@ func GenerateProcessCPUReport(allEvents []*events.Event, duration time.Duration,
 			formatCPUTime(info.cpuTimeSec), durationSec)
 	}
 
-	podCPUPercent := 0.0
 	if len(podProcesses) > 0 {
 		report += "  Pod Processes:\n"
-		for _, info := range podProcesses {
+		for _, info := range shownPod {
 			report += row(info)
-			podCPUPercent += info.cpuPercent
+		}
+		if extra := len(podProcesses) - len(shownPod); extra > 0 {
+			report += fmt.Sprintf("    ... and %d more pod processes\n", extra)
 		}
 		report += "\n"
 	}
 
 	if len(kernelProcesses) > 0 {
-		kernelCPUPercent := 0.0
 		report += "  System/Kernel Processes:\n"
 		for _, info := range shownKernel {
 			report += row(info)
-			kernelCPUPercent += info.cpuPercent
 		}
-		if extra := len(kernelProcesses) - config.TopProcessesLimit; extra > 0 {
+		if extra := len(kernelProcesses) - len(shownKernel); extra > 0 {
 			report += fmt.Sprintf("    ... and %d more system processes\n", extra)
 		}
 		report += "\n"
-		totalCPUPercent = podCPUPercent + kernelCPUPercent
-	} else {
-		totalCPUPercent = podCPUPercent
 	}
 
 	idlePercent := 100.0 - totalCPUPercent
@@ -307,8 +313,42 @@ func clockTicksPerSecond() uint64 {
 	return cache.ClockTicks()
 }
 
-func IsKernelThread(pid uint32, name string) bool {
+// pfKernelThread is PF_KTHREAD in the flags field of /proc/<pid>/stat.
+const pfKernelThread = 0x00200000
 
+// IsKernelThread reports whether pid is a kernel thread. The kernel's own
+// flag decides while /proc still has the process.
+func IsKernelThread(pid uint32, name string) bool {
+	if flags, ok := processFlags(pid); ok {
+		return flags&pfKernelThread != 0
+	}
+	return kernelThreadName(name)
+}
+
+// processFlags reads the flags field of /proc/<pid>/stat.
+func processFlags(pid uint32) (uint64, bool) {
+	stat, err := procfs.ReadFile(fmt.Sprintf("%d/stat", pid))
+	if err != nil {
+		return 0, false
+	}
+	raw := string(stat)
+	rparen := strings.LastIndex(raw, ")")
+	if rparen < 0 {
+		return 0, false
+	}
+	fields := strings.Fields(raw[rparen+1:])
+	if len(fields) < 7 {
+		return 0, false
+	}
+	flags, err := strconv.ParseUint(fields[6], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return flags, true
+}
+
+// kernelThreadName reports whether name looks like a kernel thread's.
+func kernelThreadName(name string) bool {
 	kernelPrefixes := []string{
 		"kworker",
 		"irq/",
@@ -333,11 +373,7 @@ func IsKernelThread(pid uint32, name string) bool {
 		}
 	}
 
-	if strings.HasPrefix(name, "[") && strings.HasSuffix(name, "]") {
-		return true
-	}
-
-	return false
+	return strings.HasPrefix(name, "[") && strings.HasSuffix(name, "]")
 }
 
 func GenerateCPUUsageFromProc(duration time.Duration) string {

@@ -236,6 +236,34 @@ var tracepointProbes = []tracepointSpec{
 	{"tracepoint_sys_enter_fdatasync", "syscalls", "sys_enter_fdatasync", "fdatasync tracking unavailable", false},
 }
 
+// vectoredIO are the read and write syscalls that never reach vfs_read or
+// vfs_write: the kernel serves them through vfs_readv and vfs_writev.
+var vectoredIO = []struct {
+	syscall string
+	write   bool
+}{
+	{"readv", false},
+	{"preadv", false},
+	{"preadv2", false},
+	{"writev", true},
+	{"pwritev", true},
+	{"pwritev2", true},
+}
+
+func init() {
+	for _, io := range vectoredIO {
+		exit := "tracepoint_sys_exit_fs_read"
+		if io.write {
+			exit = "tracepoint_sys_exit_fs_write"
+		}
+		msg := io.syscall + " tracking unavailable"
+		tracepointProbes = append(tracepointProbes,
+			tracepointSpec{exit, "syscalls", "sys_exit_" + io.syscall, msg, false},
+			tracepointSpec{"tracepoint_sys_enter_fs_rw", "syscalls", "sys_enter_" + io.syscall, msg, false},
+		)
+	}
+}
+
 // attachTracepointSpec attaches one tracepoint, returning (link, true) on
 // success or (nil, false) if the program is absent or the attach fails
 // (logged, non-fatal — tracepoints are best-effort).

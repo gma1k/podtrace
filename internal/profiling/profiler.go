@@ -3,6 +3,7 @@ package profiling
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
@@ -24,6 +25,11 @@ import (
 
 // maxCPUProfileBytes caps how much of a target pod's CPU profile is read.
 const maxCPUProfileBytes = 32 * 1024 * 1024
+
+// maxDecompressedCPUProfileBytes caps a gzipped CPU profile once inflated.
+// The target pod serves the body, and a few hundred kilobytes of gzip can
+// inflate to gigabytes; a real profile inflates to a few times its size.
+const maxDecompressedCPUProfileBytes = 64 * 1024 * 1024
 
 // maxTopFunctions caps how many functions a parsed profile keeps.
 const maxTopFunctions = 20
@@ -296,7 +302,11 @@ func (p *PodProfiler) FetchCPUProfile(ctx context.Context, duration time.Duratio
 // parseCPUProfile returns the functions with the most flat CPU time in a
 // pprof CPU profile, highest first.
 func parseCPUProfile(raw []byte) ([]CPUFunctionSample, error) {
-	prof, err := profile.Parse(bytes.NewReader(raw))
+	plain, err := inflateProfile(raw, maxDecompressedCPUProfileBytes)
+	if err != nil {
+		return nil, err
+	}
+	prof, err := profile.ParseData(plain)
 	if err != nil {
 		return nil, err
 	}
@@ -346,6 +356,27 @@ func parseCPUProfile(raw []byte) ([]CPUFunctionSample, error) {
 		out = out[:maxTopFunctions]
 	}
 	return out, nil
+}
+
+// inflateProfile returns raw decompressed when it is gzip, refusing one that
+// inflates past limit. profile.ParseData would inflate it with no bound.
+func inflateProfile(raw []byte, limit int64) ([]byte, error) {
+	if len(raw) < 2 || raw[0] != 0x1f || raw[1] != 0x8b {
+		return raw, nil
+	}
+	gz, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		return nil, fmt.Errorf("decompressing profile: %w", err)
+	}
+	defer func() { _ = gz.Close() }()
+	plain, err := io.ReadAll(io.LimitReader(gz, limit+1))
+	if err != nil {
+		return nil, fmt.Errorf("decompressing profile: %w", err)
+	}
+	if int64(len(plain)) > limit {
+		return nil, fmt.Errorf("profile inflates past %d bytes", limit)
+	}
+	return plain, nil
 }
 
 // leafFunctionName names the innermost function at loc, falling back to the
@@ -449,14 +480,12 @@ func parseHeapText(text string) []FunctionSample {
 	for _, r := range aggregated {
 		samples = append(samples, FunctionSample{Function: r.fn, Bytes: r.bytes, Count: r.count})
 	}
-	// Sort by bytes descending.
-	for i := 0; i < len(samples)-1; i++ {
-		for j := i + 1; j < len(samples); j++ {
-			if samples[j].Bytes > samples[i].Bytes {
-				samples[i], samples[j] = samples[j], samples[i]
-			}
+	sort.Slice(samples, func(i, j int) bool {
+		if samples[i].Bytes != samples[j].Bytes {
+			return samples[i].Bytes > samples[j].Bytes
 		}
-	}
+		return samples[i].Function < samples[j].Function
+	})
 	if len(samples) > maxTopFunctions {
 		samples = samples[:maxTopFunctions]
 	}

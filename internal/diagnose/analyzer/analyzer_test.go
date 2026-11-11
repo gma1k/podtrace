@@ -382,8 +382,16 @@ func BenchmarkAnalyzeCPU(b *testing.B) {
 }
 
 func TestAPercentileBeyondTheWeightsIsTheSlowestValue(t *testing.T) {
-	got := weightedPercentile([]weighted{{1, 2}, {3, 3}}, 10, 99)
-	if got != 3 {
-		t.Errorf("weightedPercentile with a total above its weights = %v, want the slowest value", got)
+	if got := weightedPercentile([]weighted{{1, 2}, {3, 3}}, 99); got != 3 {
+		t.Errorf("weightedPercentile(99) = %v, want the slowest value", got)
+	}
+	if got := weightedPercentile([]weighted{{1, 2}, {3, 3}}, 100); got != 3 {
+		t.Errorf("weightedPercentile(100) = %v, want the slowest value", got)
+	}
+	if got := weightedPercentile([]weighted{{1, 2}, {3, 3}}, 40); got != 1 {
+		t.Errorf("weightedPercentile(40) = %v, want 1", got)
+	}
+	if got := weightedPercentile(nil, 50); got != 0 {
+		t.Errorf("weightedPercentile of nothing = %v, want 0", got)
 	}
 }

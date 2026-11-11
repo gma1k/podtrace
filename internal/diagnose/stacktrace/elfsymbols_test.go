@@ -292,7 +292,7 @@ func TestARealCBinaryResolvesThroughELFSymbols(t *testing.T) {
 	if table == nil {
 		t.Fatal("no symbol table from an unstripped C binary")
 	}
-	if table.goTable != nil || table.pcln != nil {
+	if table.pcln != nil {
 		t.Error("a C binary produced a Go symbol table")
 	}
 

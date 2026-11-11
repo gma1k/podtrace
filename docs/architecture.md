@@ -75,6 +75,7 @@ The eBPF programs run in the kernel and trace system calls and kernel events. Th
   - `do_sys_openat2` - File open operations
   - `file_close_fd` / `close_fd` - Regular-file closes
 - **Tracepoints** `syscalls:sys_{enter,exit}_{fsync,fdatasync}` - fsync
+- **Tracepoints** `syscalls:sys_{enter,exit}_{readv,writev,preadv,pwritev,preadv2,pwritev2}` - vectored reads and writes
   - `do_execveat_common` - Process execution
 
 - **Uprobes**: Attach to user-space functions

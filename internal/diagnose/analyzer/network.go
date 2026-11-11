@@ -27,7 +27,7 @@ func AnalyzeTCP(events []*events.Event, rttSpikeThreshold float64) (avgRTT, maxR
 		if rttMs > rttSpikeThreshold {
 			spikes++
 		}
-		if e.Error < 0 && e.Error != -config.EAGAIN {
+		if e.TransferFailed() {
 			errors++
 		}
 		if e.Bytes > 0 && e.Bytes < safeconv.Int64ToUint64(config.MaxBytesForBandwidth) {

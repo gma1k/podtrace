@@ -27,7 +27,10 @@ type ErrorEvent struct {
 }
 
 // maxRetainedErrors bounds the correlator's error buffer.
-const maxRetainedErrors = 10000
+const (
+	maxRetainedErrors = 10000
+	trimSlack         = maxRetainedErrors / 4
+)
 
 type ErrorCorrelator struct {
 	mu         sync.Mutex
@@ -80,16 +83,23 @@ func (ec *ErrorCorrelator) AddEvent(event *events.Event, k8sContext interface{})
 
 	ec.seen++
 	ec.errors = append(ec.errors, errorEvent)
-	if len(ec.errors) > maxRetainedErrors {
-		drop := len(ec.errors) - maxRetainedErrors
-		ec.errors = ec.errors[:copy(ec.errors, ec.errors[drop:])]
+	if len(ec.errors) > maxRetainedErrors+trimSlack {
+		ec.trimLocked()
 	}
 	ec.dirty = true
+}
+
+// trimLocked keeps the most recent maxRetainedErrors errors.
+func (ec *ErrorCorrelator) trimLocked() {
+	if drop := len(ec.errors) - maxRetainedErrors; drop > 0 {
+		ec.errors = ec.errors[:copy(ec.errors, ec.errors[drop:])]
+	}
 }
 
 // ensureChains rebuilds the chain set if errors changed since the last
 // build.
 func (ec *ErrorCorrelator) ensureChains() {
+	ec.trimLocked()
 	if ec.dirty {
 		ec.buildChains()
 		ec.dirty = false

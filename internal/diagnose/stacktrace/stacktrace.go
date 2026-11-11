@@ -25,10 +25,19 @@ type Diagnostician interface {
 }
 
 type stackSummary struct {
-	Key        string
-	Count      int
-	Sample     *events.Event
-	FirstFrame string
+	Key            string
+	Count          int
+	TotalLatencyNS uint64
+	Sample         *events.Event
+	FirstFrame     string
+}
+
+// avgLatencyMs is the mean latency of every event grouped under the stack.
+func (s *stackSummary) avgLatencyMs() float64 {
+	if s.Count == 0 {
+		return 0
+	}
+	return float64(s.TotalLatencyNS) / float64(s.Count) / float64(config.NSPerMS)
 }
 
 type Resolver struct {
@@ -53,6 +62,56 @@ type stackResolver struct {
 	segments map[string][]loadSegment
 	mappings map[string][]exeMapping
 	allMaps  map[string][]namedRange
+
+	addr2lineRuns  int
+	addr2lineFiles map[fileID]addr2lineRecord
+}
+
+// Bounds on addr2line, which runs once per address the in-process tables
+// cannot name. A stripped binary sends every one of its addresses there, so
+// without them one report could start thousands of processes on the traced
+// pod's executable.
+const (
+	maxAddr2lineRunsPerReport = 64
+	maxAddr2lineMissesPerFile = 4
+)
+
+// addr2lineRecord is what addr2line made of one executable so far.
+type addr2lineRecord struct {
+	resolved int
+	missed   int
+}
+
+// addr2lineAllowed reports whether addr2line may be run on the executable
+// identified by id: the report has runs left, and the file has either
+// answered before or not yet failed maxAddr2lineMissesPerFile times.
+func (r *stackResolver) addr2lineAllowed(id fileID, known bool) bool {
+	if r.addr2lineRuns >= maxAddr2lineRunsPerReport {
+		return false
+	}
+	if !known {
+		return true
+	}
+	rec := r.addr2lineFiles[id]
+	return rec.resolved > 0 || rec.missed < maxAddr2lineMissesPerFile
+}
+
+// recordAddr2line counts one run and whether it named the address.
+func (r *stackResolver) recordAddr2line(id fileID, known, resolved bool) {
+	r.addr2lineRuns++
+	if !known {
+		return
+	}
+	if r.addr2lineFiles == nil {
+		r.addr2lineFiles = make(map[fileID]addr2lineRecord)
+	}
+	rec := r.addr2lineFiles[id]
+	if resolved {
+		rec.resolved++
+	} else {
+		rec.missed++
+	}
+	r.addr2lineFiles[id] = rec
 }
 
 // namedRange is one maps line reduced to what otherMappedFile reports: its
@@ -127,27 +186,29 @@ func (r *stackResolver) resolve(ctx context.Context, pid uint32, addr uint64) st
 		return name
 	}
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, config.DefaultAddr2lineTimeout)
-	defer cancel()
+	unresolved := fmt.Sprintf("%s@0x%x", filepath.Base(mapsPath), addr)
+	id, known := statFileID(exePath)
+	if !r.addr2lineAllowed(id, known) {
+		r.cache[key] = unresolved
+		return unresolved
+	}
 	addr2lineBin, err := exec.LookPath("addr2line")
 	if err != nil {
-		v := fmt.Sprintf("%s@0x%x", filepath.Base(mapsPath), addr)
-		r.cache[key] = v
-		return v
+		r.cache[key] = unresolved
+		return unresolved
 	}
+	timeoutCtx, cancel := context.WithTimeout(ctx, config.DefaultAddr2lineTimeout)
+	defer cancel()
 	cmd := exec.CommandContext(timeoutCtx, addr2lineBin, "-e", exePath, fmt.Sprintf("%#x", symAddrForTable)) // #nosec G204 -- LookPath-resolved binary; exePath is the fixed /proc/<pid>/exe link; address is %#x-formatted
 	out, err := cmd.Output()
-	if err != nil {
-		v := fmt.Sprintf("%s@0x%x", filepath.Base(mapsPath), addr)
-		r.cache[key] = v
-		return v
-	}
 	line := strings.TrimSpace(string(out))
-	if line == "" || line == "??:0" || line == "??:?" {
-		line = fmt.Sprintf("%s@0x%x", filepath.Base(mapsPath), addr)
-	} else {
-		line = filepath.Base(mapsPath) + ":" + line
+	if err != nil || line == "" || line == "??:0" || line == "??:?" {
+		r.recordAddr2line(id, known, false)
+		r.cache[key] = unresolved
+		return unresolved
 	}
+	r.recordAddr2line(id, known, true)
+	line = filepath.Base(mapsPath) + ":" + line
 	r.cache[key] = line
 	return line
 }
@@ -331,12 +392,14 @@ func GenerateStackTraceSectionWithContext(d Diagnostician, ctx context.Context) 
 		key := fmt.Sprintf("%s|%d", frame, e.Type)
 		if entry, ok := stackMap[key]; ok {
 			entry.Count++
+			entry.TotalLatencyNS += e.LatencyNS
 		} else {
 			stackMap[key] = &stackSummary{
-				Key:        key,
-				Count:      1,
-				Sample:     e,
-				FirstFrame: frame,
+				Key:            key,
+				Count:          1,
+				TotalLatencyNS: e.LatencyNS,
+				Sample:         e,
+				FirstFrame:     frame,
 			}
 		}
 	}
@@ -350,7 +413,13 @@ func GenerateStackTraceSectionWithContext(d Diagnostician, ctx context.Context) 
 		summaries = append(summaries, v)
 	}
 	sort.Slice(summaries, func(i, j int) bool {
-		return summaries[i].Count > summaries[j].Count
+		if summaries[i].Count != summaries[j].Count {
+			return summaries[i].Count > summaries[j].Count
+		}
+		if summaries[i].TotalLatencyNS != summaries[j].TotalLatencyNS {
+			return summaries[i].TotalLatencyNS > summaries[j].TotalLatencyNS
+		}
+		return summaries[i].Key < summaries[j].Key
 	})
 
 	var report string
@@ -363,9 +432,9 @@ func GenerateStackTraceSectionWithContext(d Diagnostician, ctx context.Context) 
 		s := summaries[i]
 		e := s.Sample
 		if e.Target != "" {
-			report += fmt.Sprintf("  Hot stack %d: %d events, type=%s, target=%s, avg latency=%.2fms\n", i+1, s.Count, e.TypeString(), sanitize.Terminal(e.Target), float64(e.LatencyNS)/float64(config.NSPerMS))
+			report += fmt.Sprintf("  Hot stack %d: %d events, type=%s, target=%s, avg latency=%.2fms\n", i+1, s.Count, e.TypeString(), sanitize.Terminal(e.Target), s.avgLatencyMs())
 		} else {
-			report += fmt.Sprintf("  Hot stack %d: %d events, type=%s, avg latency=%.2fms\n", i+1, s.Count, e.TypeString(), float64(e.LatencyNS)/float64(config.NSPerMS))
+			report += fmt.Sprintf("  Hot stack %d: %d events, type=%s, avg latency=%.2fms\n", i+1, s.Count, e.TypeString(), s.avgLatencyMs())
 		}
 		maxFrames := config.MaxStackFramesLimit
 		if len(e.Stack) < maxFrames {

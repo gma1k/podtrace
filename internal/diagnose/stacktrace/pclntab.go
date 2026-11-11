@@ -10,9 +10,11 @@ import (
 	"github.com/gma1k/podtrace/internal/safeconv"
 )
 
-// Magic numbers of the Go 1.18 and Go 1.20 pclntab layouts, which are the
-// same on disk as far as a function-name lookup is concerned.
+// Magic numbers of the pclntab layouts debug/gosym reads. Go 1.20 changed
+// nothing a function-name lookup depends on, so it reads as Go 1.18.
 const (
+	go12PCLnTabMagic  = 0xfffffffb
+	go116PCLnTabMagic = 0xfffffffa
 	go118PCLnTabMagic = 0xfffffff0
 	go120PCLnTabMagic = 0xfffffff1
 )
@@ -27,23 +29,56 @@ const (
 )
 
 // pclnIndex resolves a Go function name straight from the executable, holding
-// only the function table in memory.
+// only the function table in memory, whatever the size of the rest.
 type pclnIndex struct {
 	order binary.ByteOrder
 
 	sectionOffset uint64
 	sectionSize   uint64
 
-	textStart uint64
+	// pcBase is added to every function-table entry: .text's address from
+	// Go 1.18 on, whose entries are offsets into it, and 0 before, whose
+	// entries are absolute addresses.
+	pcBase uint64
 
 	funcnametab uint64
 	funcdata    uint64
+
+	// fieldSize is the width of a function-table field, and of the entry
+	// field that starts each function's record: 4 bytes from Go 1.18 on, a
+	// pointer before.
+	fieldSize uint64
 
 	nfunc   int
 	functab []byte
 }
 
-// loadPCLNIndex reads the header and function table of a Go 1.18+ pclntab.
+// pclnLayout is where one pclntab version keeps what a name lookup reads, as
+// header words or fixed offsets.
+type pclnLayout struct {
+	words       uint64
+	nameTabWord uint64
+	funcWord    uint64
+	hasOffsets  bool
+	pcRelative  bool
+	ptrFields   bool
+}
+
+// pclnLayoutFor returns the layout of the pclntab with magic m, read the way
+// debug/gosym reads each version.
+func pclnLayoutFor(m uint32) (pclnLayout, bool) {
+	switch m {
+	case go118PCLnTabMagic, go120PCLnTabMagic:
+		return pclnLayout{words: 8, nameTabWord: 3, funcWord: 7, hasOffsets: true, pcRelative: true}, true
+	case go116PCLnTabMagic:
+		return pclnLayout{words: 7, nameTabWord: 2, funcWord: 6, hasOffsets: true, ptrFields: true}, true
+	case go12PCLnTabMagic:
+		return pclnLayout{words: 1, ptrFields: true}, true
+	}
+	return pclnLayout{}, false
+}
+
+// loadPCLNIndex reads the header and function table of a Go 1.2+ pclntab.
 func loadPCLNIndex(f *elf.File) (*pclnIndex, bool) {
 	sect := f.Section(".gopclntab")
 	text := f.Section(".text")
@@ -74,17 +109,16 @@ func parsePCLNIndex(sect io.ReaderAt, sectionOffset, size, textStart uint64) (*p
 		return nil, false
 	}
 
-	var order binary.ByteOrder
-	switch {
-	case isGo118Magic(binary.LittleEndian.Uint32(head[:])):
-		order = binary.LittleEndian
-	case isGo118Magic(binary.BigEndian.Uint32(head[:])):
+	var order binary.ByteOrder = binary.LittleEndian
+	layout, ok := pclnLayoutFor(order.Uint32(head[:]))
+	if !ok {
 		order = binary.BigEndian
-	default:
-		return nil, false
+		if layout, ok = pclnLayoutFor(order.Uint32(head[:])); !ok {
+			return nil, false
+		}
 	}
 
-	words := make([]byte, 8*ptrSize)
+	words := make([]byte, layout.words*ptrSize)
 	if _, err := sect.ReadAt(words, 8); err != nil {
 		return nil, false
 	}
@@ -96,53 +130,64 @@ func parsePCLNIndex(sect io.ReaderAt, sectionOffset, size, textStart uint64) (*p
 		return uint64(order.Uint32(b))
 	}
 
-	nfunc := word(0)
-	funcnametab := word(3)
-	funcdata := word(7)
-	if nfunc == 0 || nfunc > size/8 || nfunc > maxPCLNFunctions || funcnametab >= size || funcdata >= size {
-		return nil, false
-	}
-	functabLen := (2*nfunc + 1) * 4
-	if funcdata+functabLen > size {
-		return nil, false
-	}
-
-	functab := make([]byte, functabLen)
-	if _, err := sect.ReadAt(functab, safeconv.Uint64ToInt64(funcdata)); err != nil {
-		return nil, false
-	}
-
-	return &pclnIndex{
+	idx := &pclnIndex{
 		order:         order,
 		sectionOffset: sectionOffset,
 		sectionSize:   size,
-		textStart:     textStart,
-		funcnametab:   funcnametab,
-		funcdata:      funcdata,
-		nfunc:         int(safeconv.Uint64ToUint32(nfunc)),
-		functab:       functab,
-	}, true
+		fieldSize:     4,
+	}
+	nfunc := word(0)
+	functabAt := 8 + ptrSize
+	if layout.hasOffsets {
+		idx.funcnametab = word(layout.nameTabWord)
+		idx.funcdata = word(layout.funcWord)
+		functabAt = idx.funcdata
+	}
+	if layout.pcRelative {
+		idx.pcBase = textStart
+	}
+	if layout.ptrFields {
+		idx.fieldSize = ptrSize
+	}
+	if nfunc == 0 || nfunc > size/8 || nfunc > maxPCLNFunctions || idx.funcnametab >= size || idx.funcdata >= size {
+		return nil, false
+	}
+	functabLen := (2*nfunc + 1) * idx.fieldSize
+	if functabAt > size || size-functabAt < functabLen {
+		return nil, false
+	}
+
+	idx.functab = make([]byte, functabLen)
+	if _, err := sect.ReadAt(idx.functab, safeconv.Uint64ToInt64(functabAt)); err != nil {
+		return nil, false
+	}
+	idx.nfunc = int(safeconv.Uint64ToUint32(nfunc))
+	return idx, true
 }
 
-func isGo118Magic(m uint32) bool {
-	return m == go118PCLnTabMagic || m == go120PCLnTabMagic
+func (p *pclnIndex) field(i uint64) uint64 {
+	b := p.functab[i*p.fieldSize:]
+	if p.fieldSize == 8 {
+		return p.order.Uint64(b)
+	}
+	return uint64(p.order.Uint32(b))
 }
 
 func (p *pclnIndex) entry(i int) uint64 {
-	return uint64(p.order.Uint32(p.functab[8*i:]))
+	return p.field(2 * safeconv.IntToUint64(i))
 }
 
 func (p *pclnIndex) funcOff(i int) uint64 {
-	return uint64(p.order.Uint32(p.functab[8*i+4:]))
+	return p.field(2*safeconv.IntToUint64(i) + 1)
 }
 
 // covers reports whether pc falls inside the Go functions this table
 // describes.
 func (p *pclnIndex) covers(pc uint64) bool {
-	if pc < p.textStart {
+	if pc < p.pcBase {
 		return false
 	}
-	rel := pc - p.textStart
+	rel := pc - p.pcBase
 	return rel >= p.entry(0) && rel < p.entry(p.nfunc)
 }
 
@@ -152,13 +197,14 @@ func (p *pclnIndex) name(r io.ReaderAt, pc uint64) string {
 	if !p.covers(pc) {
 		return ""
 	}
-	rel := pc - p.textStart
+	rel := pc - p.pcBase
 	i := sort.Search(p.nfunc, func(i int) bool { return p.entry(i) > rel }) - 1
 
-	nameOffAt := p.funcdata + p.funcOff(i) + 4
-	if nameOffAt+4 > p.sectionSize {
+	off := p.funcOff(i)
+	if off >= p.sectionSize || p.funcdata+off+p.fieldSize+4 > p.sectionSize {
 		return ""
 	}
+	nameOffAt := p.funcdata + off + p.fieldSize
 	var raw [4]byte
 	if _, err := r.ReadAt(raw[:], safeconv.Uint64ToInt64(p.sectionOffset+nameOffAt)); err != nil {
 		return ""

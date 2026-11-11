@@ -106,7 +106,13 @@ func ExportJSON(d Diagnostician) ExportData {
 	}
 
 	allFS := append(append(d.FilterEvents(events.EventWrite), d.FilterEvents(events.EventRead)...), d.FilterEvents(events.EventFsync)...)
-	if st := analyzer.AnalyzeFSWithKernelCounts(allFS, d.FastFilesystemOps(), d.FSSlowThreshold()); st.Ops() > 0 {
+	var fsTotals analyzer.FSEventTotals
+	if t, ok := d.(interface {
+		FilesystemEventTotals() analyzer.FSEventTotals
+	}); ok {
+		fsTotals = t.FilesystemEventTotals()
+	}
+	if st := analyzer.AnalyzeFSSampled(allFS, fsTotals, d.FastFilesystemOps(), d.FSSlowThreshold()); st.Ops() > 0 {
 		data.FileSystem = buildFSExportData(st)
 	}
 

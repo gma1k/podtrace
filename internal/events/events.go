@@ -174,6 +174,13 @@ func (e *Event) IsError() bool {
 	}
 }
 
+// TransferFailed reports whether a socket send or receive failed: a negative
+// return other than EAGAIN, which a non-blocking socket returns whenever
+// nothing is ready, or a kernel-internal ERESTART* code no application sees.
+func (e *Event) TransferFailed() bool {
+	return e.Error < 0 && e.Error != -errnoEAGAIN && !kernelRestartCode(e.Error)
+}
+
 // IsL7Response reports whether t is a decoded application-protocol response:
 // one event per request, the unit an L7 request or error rate counts.
 func IsL7Response(t EventType) bool {

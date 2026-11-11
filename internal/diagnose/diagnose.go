@@ -8,8 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/gma1k/podtrace/internal/analysis/criticalpath"
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/diagnose/analyzer"
@@ -21,7 +19,6 @@ import (
 	"github.com/gma1k/podtrace/internal/diagnose/tracker"
 	"github.com/gma1k/podtrace/internal/ebpf/kernelagg"
 	"github.com/gma1k/podtrace/internal/events"
-	"github.com/gma1k/podtrace/internal/logger"
 )
 
 func (d *Diagnostician) ExportJSON() ExportData {
@@ -54,9 +51,13 @@ type Diagnostician struct {
 	errorCorrelator    *correlator.ErrorCorrelator
 	criticalPath       *criticalpath.Collector
 	fsKernelRows       []kernelagg.Row
+	fsEventTotals      analyzer.FSEventTotals
+	fsTotalsInherited  bool
 	processCPUNS       map[uint32]uint64
 	sourcePod          string
 	sourceNamespace    string
+	lastSamplingNotice time.Time
+	now                func() time.Time
 }
 
 func NewDiagnostician() *Diagnostician {
@@ -67,7 +68,7 @@ func NewDiagnostician() *Diagnostician {
 		errorRateThreshold: config.DefaultErrorRateThreshold,
 		rttSpikeThreshold:  config.DefaultRTTThreshold,
 		fsSlowThreshold:    config.DefaultFSSlowThreshold,
-		maxEvents:          config.MaxEvents,
+		maxEvents:          defaultEventCapacity(),
 		errorCorrelator:    correlator.NewErrorCorrelator(30 * time.Second),
 		criticalPath:       criticalpath.New(),
 	}
@@ -81,7 +82,7 @@ func NewDiagnosticianWithThresholds(errorRate, rttSpike, fsSlow float64) *Diagno
 		errorRateThreshold: errorRate,
 		rttSpikeThreshold:  rttSpike,
 		fsSlowThreshold:    fsSlow,
-		maxEvents:          config.MaxEvents,
+		maxEvents:          defaultEventCapacity(),
 		errorCorrelator:    correlator.NewErrorCorrelator(30 * time.Second),
 		criticalPath:       criticalpath.New(),
 	}
@@ -116,6 +117,12 @@ func (d *Diagnostician) AddEventWithContext(event *events.Event, k8sContext map[
 	defer d.mu.Unlock()
 
 	d.eventCount++
+	if !d.fsTotalsInherited && analyzer.IsFSEvent(event.Type) {
+		if d.fsEventTotals == nil {
+			d.fsEventTotals = analyzer.FSEventTotals{}
+		}
+		d.fsEventTotals.Add(event, d.fsSlowThreshold)
+	}
 
 	if d.podCommTracker != nil && k8sContext != nil {
 		d.podCommTracker.ProcessEvent(event, k8sContext)
@@ -137,11 +144,7 @@ func (d *Diagnostician) AddEventWithContext(event *events.Event, k8sContext map[
 	}
 	if !shouldSampleEvent(event, intn) {
 		d.droppedEvents++
-		if d.droppedEvents == 1 || d.droppedEvents%config.DroppedEventsLogRate == 0 {
-			logger.Warn("Event buffer at capacity; sampling and evicting oldest events",
-				zap.Int("max_events", d.maxEvents),
-				zap.Int("dropped", d.droppedEvents))
-		}
+		d.logSamplingLocked()
 		return
 	}
 	d.events[d.evHead] = event
@@ -170,6 +173,34 @@ func (d *Diagnostician) AddFastFilesystemOps(rows []kernelagg.Row) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.fsKernelRows = append(d.fsKernelRows, rows...)
+}
+
+// FilesystemEventTotals returns what every filesystem event this
+// diagnostician saw added up to, including those its buffer sampled out.
+func (d *Diagnostician) FilesystemEventTotals() analyzer.FSEventTotals {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if len(d.fsEventTotals) == 0 {
+		return nil
+	}
+	out := make(analyzer.FSEventTotals, len(d.fsEventTotals))
+	for k, v := range d.fsEventTotals {
+		out[k] = v
+	}
+	return out
+}
+
+// InheritFilesystemEventTotals makes totals this diagnostician's filesystem
+// totals, in place of counting the events it is given, which are a sample.
+// Call it before adding events.
+func (d *Diagnostician) InheritFilesystemEventTotals(totals analyzer.FSEventTotals) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.fsEventTotals = make(analyzer.FSEventTotals, len(totals))
+	for k, v := range totals {
+		d.fsEventTotals[k] = v
+	}
+	d.fsTotalsInherited = true
 }
 
 // AddProcessCPU keeps the kernel's on-CPU nanoseconds per process ID.
@@ -359,6 +390,16 @@ func (d *Diagnostician) ErrorRateThreshold() float64 {
 
 func (d *Diagnostician) RTTSpikeThreshold() float64 {
 	return d.rttSpikeThreshold
+}
+
+// SourcePod is the pod this diagnostician diagnoses, "" when not known.
+func (d *Diagnostician) SourcePod() string {
+	return d.sourcePod
+}
+
+// SourceNamespace is the namespace of the pod this diagnostician diagnoses.
+func (d *Diagnostician) SourceNamespace() string {
+	return d.sourceNamespace
 }
 
 func (d *Diagnostician) FSSlowThreshold() float64 {
