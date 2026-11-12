@@ -9,6 +9,24 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.15.4](https://github.com/gma1k/podtrace/compare/v0.15.3...v0.15.4) (2026-11-12)
+
+
+### Bug Fixes
+
+* guard release publishing, chart values and ci gates ([#576](https://github.com/gma1k/podtrace/issues/576)) ([4166113](https://github.com/gma1k/podtrace/commit/41661130dcab18185760896ca0c31dce8bc61396))
+* harden agent span export, shutdown, status rows and memory limit ([#571](https://github.com/gma1k/podtrace/issues/571)) ([97000e1](https://github.com/gma1k/podtrace/commit/97000e1f4ae3118efefcbdd6eb1cd40f5a6c1c50))
+* harden alerting tenancy, delivery and metrics plane labels ([#572](https://github.com/gma1k/podtrace/issues/572)) ([c577654](https://github.com/gma1k/podtrace/commit/c57765495047c1b2544f3846e637e3f4a2c7dc37))
+* harden cli spawn, crd validation, enrichment and dependencies ([#569](https://github.com/gma1k/podtrace/issues/569)) ([2b14a51](https://github.com/gma1k/podtrace/commit/2b14a5122ceff5992669859e556bf111a798d919))
+* harden diagnose reports, profiling and filesystem tracing ([#573](https://github.com/gma1k/podtrace/issues/573)) ([87e67da](https://github.com/gma1k/podtrace/commit/87e67da3357800991e65160b79917f1e888b99a6))
+* harden trace export, report sinks and ci workflows ([#575](https://github.com/gma1k/podtrace/issues/575)) ([42fe419](https://github.com/gma1k/podtrace/commit/42fe4192c58fdd3a673cdd2998c38fd3bf064d50))
+* release resource monitor maps and fail undelivered reports ([#574](https://github.com/gma1k/podtrace/issues/574)) ([2c086a2](https://github.com/gma1k/podtrace/commit/2c086a2c72fffd14f2877512ca4e3c56b845cc60))
+
+
+### Maintenance
+
+* **deps:** update dependency semgrep to v1.185.0 ([#577](https://github.com/gma1k/podtrace/issues/577)) ([4d93c19](https://github.com/gma1k/podtrace/commit/4d93c19f06888e5b636682582fec4259f4b180ff))
+
 ## [0.15.3](https://github.com/gma1k/podtrace/compare/v0.15.2...v0.15.3) (2026-11-07)
 
 
