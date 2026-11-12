@@ -53,21 +53,32 @@ func NewDataDogExporter(endpoint, apiKey string, sampleRate float64) (*DataDogEx
 }
 
 func (e *DataDogExporter) ExportTraces(traces []*tracker.Trace) error {
+	return e.ExportTracesContext(context.Background(), traces)
+}
+
+// ExportTracesContext sends the sampled traces as size-bounded v0.4
+// payloads (an array of traces, each an array of spans); ctx bounds the
+// whole export.
+func (e *DataDogExporter) ExportTracesContext(ctx context.Context, traces []*tracker.Trace) error {
 	if !e.enabled || len(traces) == 0 {
 		return nil
 	}
 
 	var outcome exportOutcome
+	encoded := make([]encodedTrace, 0, len(traces))
 	for _, t := range traces {
-		if !e.shouldSample(t) {
+		if !e.shouldSample(t) || len(t.Spans) == 0 {
 			continue
 		}
-
-		if err := e.exportTrace(t); err != nil {
-			outcome.record(fmt.Errorf("trace %s: %w", t.TraceID, err), t.TraceID)
+		spans := datadogSpans(t)
+		payload, err := marshalJSON(spans)
+		if err != nil {
+			outcome.record(permanent(fmt.Errorf("trace %s: failed to marshal datadog payload: %w", t.TraceID, err)))
+			continue
 		}
+		encoded = append(encoded, encodedTrace{traceID: t.TraceID, elements: []encodedElement{{body: payload, spans: len(spans)}}})
 	}
-
+	sendTraceBatches(ctx, &outcome, encoded, maxBatchBytes, jsonArrayFrame, e.post)
 	return outcome.err()
 }
 
@@ -75,11 +86,7 @@ func (e *DataDogExporter) shouldSample(t *tracker.Trace) bool {
 	return sampleTrace(t.TraceID, e.sampleRate)
 }
 
-func (e *DataDogExporter) exportTrace(t *tracker.Trace) error {
-	if len(t.Spans) == 0 {
-		return nil
-	}
-
+func datadogSpans(t *tracker.Trace) []datadogSpan {
 	ddSpans := make([]datadogSpan, 0, len(t.Spans))
 
 	for _, span := range t.Spans {
@@ -119,14 +126,11 @@ func (e *DataDogExporter) exportTrace(t *tracker.Trace) error {
 
 		ddSpans = append(ddSpans, ddSpan)
 	}
+	return ddSpans
+}
 
-	// v0.4 payload: array of traces, each trace is an array of spans.
-	payload, err := marshalJSON([][]datadogSpan{ddSpans})
-	if err != nil {
-		return permanent(fmt.Errorf("failed to marshal datadog payload: %w", err))
-	}
-
-	req, err := http.NewRequestWithContext(context.Background(), "POST", e.endpoint, bytes.NewReader(payload))
+func (e *DataDogExporter) post(ctx context.Context, payload []byte) error {
+	req, err := http.NewRequestWithContext(ctx, "POST", e.endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}

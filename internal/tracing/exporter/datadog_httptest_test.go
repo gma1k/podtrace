@@ -38,7 +38,7 @@ func TestDataDogExporter_exportTrace_HTTPSuccess(t *testing.T) {
 		t.Fatalf("NewDataDogExporter() error: %v", err)
 	}
 
-	err = exporter.exportTrace(newTestDataDogTrace())
+	err = exporter.ExportTraces([]*tracker.Trace{newTestDataDogTrace()})
 	if err != nil {
 		t.Errorf("exportTrace() unexpected error: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestDataDogExporter_exportTrace_HTTPAccepted(t *testing.T) {
 		t.Fatalf("NewDataDogExporter() error: %v", err)
 	}
 
-	err = exporter.exportTrace(newTestDataDogTrace())
+	err = exporter.ExportTraces([]*tracker.Trace{newTestDataDogTrace()})
 	if err != nil {
 		t.Errorf("exportTrace() unexpected error for 202: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestDataDogExporter_exportTrace_HTTPError(t *testing.T) {
 		t.Fatalf("NewDataDogExporter() error: %v", err)
 	}
 
-	err = exporter.exportTrace(newTestDataDogTrace())
+	err = exporter.ExportTraces([]*tracker.Trace{newTestDataDogTrace()})
 	if err == nil {
 		t.Error("expected error for 400 Bad Request, got nil")
 	}
@@ -108,7 +108,7 @@ func TestDataDogExporter_exportTrace_SendsAPIKey(t *testing.T) {
 		t.Fatalf("NewDataDogExporter() error: %v", err)
 	}
 
-	err = exporter.exportTrace(newTestDataDogTrace())
+	err = exporter.ExportTraces([]*tracker.Trace{newTestDataDogTrace()})
 	if err != nil {
 		t.Fatalf("exportTrace() unexpected error: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestDataDogExporter_exportTrace_NoAPIKeyHeader(t *testing.T) {
 		t.Fatalf("NewDataDogExporter() error: %v", err)
 	}
 
-	err = exporter.exportTrace(newTestDataDogTrace())
+	err = exporter.ExportTraces([]*tracker.Trace{newTestDataDogTrace()})
 	if err != nil {
 		t.Fatalf("exportTrace() unexpected error: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestDataDogExporter_exportTrace_PayloadFormat(t *testing.T) {
 		t.Fatalf("NewDataDogExporter() error: %v", err)
 	}
 
-	err = exporter.exportTrace(newTestDataDogTrace())
+	err = exporter.ExportTraces([]*tracker.Trace{newTestDataDogTrace()})
 	if err != nil {
 		t.Fatalf("exportTrace() unexpected error: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestDataDogExporter_exportTrace_ErrorFlagInPayload(t *testing.T) {
 		},
 	}
 
-	err = exporter.exportTrace(trace)
+	err = exporter.ExportTraces([]*tracker.Trace{trace})
 	if err != nil {
 		t.Fatalf("exportTrace() unexpected error: %v", err)
 	}

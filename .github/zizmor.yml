@@ -1,0 +1,6 @@
+rules:
+  self-repository:
+    disable: true
+  superfluous-actions:
+    ignore:
+      - release.yml

@@ -2,6 +2,7 @@ package tracing
 
 import (
 	"container/list"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"strconv"
@@ -11,22 +12,39 @@ import (
 	"github.com/gma1k/podtrace/internal/events"
 )
 
-// correlationKey identifies one L7 request across its request and response
-// events.
-func correlationKey(e *events.Event) string {
-	return strconv.FormatUint(e.CorrelationID, 10)
+// correlationMaxAge is how long a request's trace context waits for its
+// response before it is dropped.
+const correlationMaxAge = 2 * time.Minute
+
+// idSalt makes the ids derived in this process distinct from those derived
+// by every other process.
+var idSalt = newIDSalt()
+
+func newIDSalt() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return string(b)
 }
 
-// deriveSpanID produces a stable 8-byte span id from a correlation key.
+// correlationKey identifies one L7 request across its request and response
+// events: the request's start time, scoped to the cgroup that served it so
+// two containers starting a request in the same nanosecond stay apart.
+func correlationKey(e *events.Event) string {
+	return strconv.FormatUint(e.CgroupID, 10) + ":" + strconv.FormatUint(e.CorrelationID, 10)
+}
+
+// deriveSpanID produces an 8-byte span id that is stable for a key within
+// this process.
 func deriveSpanID(key string) string {
-	sum := sha256.Sum256([]byte("span\x00" + key))
+	sum := sha256.Sum256([]byte("span\x00" + idSalt + "\x00" + key))
 	return hex.EncodeToString(sum[:8])
 }
 
-// deriveTraceID produces a stable 16-byte trace id from a correlation key,
-// used only when synthesizing a trace for context-less traffic.
+// deriveTraceID produces a 16-byte trace id that is stable for a key within
+// this process, used only when synthesizing a trace for context-less
+// traffic.
 func deriveTraceID(key string) string {
-	sum := sha256.Sum256([]byte("trace\x00" + key))
+	sum := sha256.Sum256([]byte("trace\x00" + idSalt + "\x00" + key))
 	return hex.EncodeToString(sum[:16])
 }
 
@@ -61,10 +79,16 @@ func newCorrelationCache(maxEntries int) *correlationCache {
 	return &correlationCache{m: make(map[string]*list.Element), order: list.New(), maxEntries: maxEntries}
 }
 
+// store records a request's trace context. It first drops the entries that
+// outlived correlationMaxAge, so a cache nobody sweeps on a timer (the
+// agent's) does not hold contexts of abandoned requests until LRU pressure
+// evicts the pending ones instead.
 func (c *correlationCache) store(key string, e correlationEntry) {
+	now := time.Now().UnixNano()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	e.storedNS = time.Now().UnixNano()
+	c.sweepLocked(now - int64(correlationMaxAge))
+	e.storedNS = now
 	if el, ok := c.m[key]; ok {
 		el.Value.(*correlationItem).entry = e
 		c.order.MoveToFront(el)
@@ -94,6 +118,10 @@ func (c *correlationCache) sweep(maxAge time.Duration) {
 	cutoff := time.Now().Add(-maxAge).UnixNano()
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.sweepLocked(cutoff)
+}
+
+func (c *correlationCache) sweepLocked(cutoff int64) {
 	for el := c.order.Back(); el != nil; el = c.order.Back() {
 		if el.Value.(*correlationItem).entry.storedNS >= cutoff {
 			return

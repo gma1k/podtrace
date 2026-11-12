@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gma1k/podtrace/internal/tracing"
 )
@@ -90,11 +92,13 @@ func TestTerminationMessageWithEveryExporterFailingFitsTheLimit(t *testing.T) {
 }
 
 type recordingExportSource struct {
-	calls []string
+	calls         []string
+	flushDeadline time.Time
 }
 
-func (r *recordingExportSource) Flush() {
+func (r *recordingExportSource) Flush(ctx context.Context) {
 	r.calls = append(r.calls, "flush")
+	r.flushDeadline, _ = ctx.Deadline()
 }
 
 func (r *recordingExportSource) ExportStatus() []tracing.ExporterStatus {
@@ -112,5 +116,19 @@ func TestFlushingExportStatusFlushesBeforeReadingStatus(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Exporter != "otlp" || got[0].SucceededBatches != 2 {
 		t.Errorf("status = %+v, want the source's otlp record", got)
+	}
+}
+
+func TestFlushingExportStatusBoundsTheFlush(t *testing.T) {
+	src := &recordingExportSource{}
+	start := time.Now()
+
+	flushingExportStatus(src)()
+
+	if src.flushDeadline.IsZero() {
+		t.Fatal("the session flush has no deadline; an unreachable collector would hold the Job until it is killed")
+	}
+	if limit := start.Add(sessionExportFlushTimeout + time.Second); src.flushDeadline.After(limit) {
+		t.Errorf("flush deadline %s is later than %s", src.flushDeadline, limit)
 	}
 }

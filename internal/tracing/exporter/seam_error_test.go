@@ -9,6 +9,8 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/sdk/resource"
+
+	"github.com/gma1k/podtrace/internal/diagnose/tracker"
 )
 
 func TestExportTrace_MarshalError(t *testing.T) {
@@ -20,7 +22,7 @@ func TestExportTrace_MarshalError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := dd.exportTrace(newTestTrace()); err == nil || !strings.Contains(err.Error(), "marshal") {
+	if err := dd.ExportTraces([]*tracker.Trace{newTestTrace()}); err == nil || !strings.Contains(err.Error(), "marshal") {
 		t.Errorf("datadog exportTrace: err=%v, want marshal error", err)
 	}
 
@@ -28,7 +30,7 @@ func TestExportTrace_MarshalError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sp.sendBatch(sp.buildEvents(newTestTrace())); err == nil || !strings.Contains(err.Error(), "marshal") {
+	if err := sp.ExportTraces([]*tracker.Trace{newTestTrace()}); err == nil || !strings.Contains(err.Error(), "marshal") {
 		t.Errorf("splunk sendBatch: err=%v, want marshal error", err)
 	}
 
@@ -36,7 +38,7 @@ func TestExportTrace_MarshalError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := zp.exportTrace(newTestTrace()); err == nil || !strings.Contains(err.Error(), "marshal") {
+	if err := zp.ExportTraces([]*tracker.Trace{newTestTrace()}); err == nil || !strings.Contains(err.Error(), "marshal") {
 		t.Errorf("zipkin exportTrace: err=%v, want marshal error", err)
 	}
 }

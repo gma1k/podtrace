@@ -132,7 +132,7 @@ func TestDataDogDoesNotRetryATraceTheAgentRejects(t *testing.T) {
 	}
 }
 
-func TestSplunkRetriesTheTracesOfAFailedBatch(t *testing.T) {
+func TestSplunkRetriesOnlyTheTraceThatFailedTransiently(t *testing.T) {
 	srv, _ := failingFor(badTraceID, http.StatusBadGateway)
 	t.Cleanup(srv.Close)
 	exp, err := NewSplunkExporter(srv.URL, "", 1.0)
@@ -144,8 +144,11 @@ func TestSplunkRetriesTheTracesOfAFailedBatch(t *testing.T) {
 		traceWithIDs(goodTraceID, "1122334455667788"),
 		traceWithIDs(badTraceID, "8877665544332211"),
 	}))
-	if !partial.Retry(goodTraceID) || !partial.Retry(badTraceID) {
-		t.Errorf("both traces shared the failed batch and must be retried; failed=%v", partial.FailedTraces)
+	if partial.Retry(goodTraceID) {
+		t.Errorf("the good trace shared a failed HEC request but was delivered on its own; failed=%v", partial.FailedTraces)
+	}
+	if !partial.Retry(badTraceID) {
+		t.Error("the transiently failed trace must be retried")
 	}
 }
 

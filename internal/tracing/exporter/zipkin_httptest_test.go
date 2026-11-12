@@ -38,7 +38,7 @@ func TestZipkinExporter_exportTrace_HTTPSuccess(t *testing.T) {
 		t.Fatalf("NewZipkinExporter() error: %v", err)
 	}
 
-	err = exporter.exportTrace(newTestZipkinTrace())
+	err = exporter.ExportTraces([]*tracker.Trace{newTestZipkinTrace()})
 	if err != nil {
 		t.Errorf("exportTrace() unexpected error: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestZipkinExporter_exportTrace_HTTPAccepted(t *testing.T) {
 		t.Fatalf("NewZipkinExporter() error: %v", err)
 	}
 
-	err = exporter.exportTrace(newTestZipkinTrace())
+	err = exporter.ExportTraces([]*tracker.Trace{newTestZipkinTrace()})
 	if err != nil {
 		t.Errorf("exportTrace() unexpected error for 202: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestZipkinExporter_exportTrace_HTTPNoContent(t *testing.T) {
 		t.Fatalf("NewZipkinExporter() error: %v", err)
 	}
 
-	err = exporter.exportTrace(newTestZipkinTrace())
+	err = exporter.ExportTraces([]*tracker.Trace{newTestZipkinTrace()})
 	if err != nil {
 		t.Errorf("exportTrace() unexpected error for 204: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestZipkinExporter_exportTrace_HTTPError(t *testing.T) {
 		t.Fatalf("NewZipkinExporter() error: %v", err)
 	}
 
-	err = exporter.exportTrace(newTestZipkinTrace())
+	err = exporter.ExportTraces([]*tracker.Trace{newTestZipkinTrace()})
 	if err == nil {
 		t.Error("expected error for 400 Bad Request, got nil")
 	}
@@ -125,7 +125,7 @@ func TestZipkinExporter_exportTrace_PayloadFormat(t *testing.T) {
 		t.Fatalf("NewZipkinExporter() error: %v", err)
 	}
 
-	err = exporter.exportTrace(newTestZipkinTrace())
+	err = exporter.ExportTraces([]*tracker.Trace{newTestZipkinTrace()})
 	if err != nil {
 		t.Fatalf("exportTrace() unexpected error: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestZipkinExporter_exportTrace_ErrorTagInPayload(t *testing.T) {
 		},
 	}
 
-	err = exporter.exportTrace(trace)
+	err = exporter.ExportTraces([]*tracker.Trace{trace})
 	if err != nil {
 		t.Fatalf("exportTrace() unexpected error: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestZipkinExporter_exportTrace_ContentTypeHeader(t *testing.T) {
 		t.Fatalf("NewZipkinExporter() error: %v", err)
 	}
 
-	err = exporter.exportTrace(newTestZipkinTrace())
+	err = exporter.ExportTraces([]*tracker.Trace{newTestZipkinTrace()})
 	if err != nil {
 		t.Fatalf("exportTrace() unexpected error: %v", err)
 	}

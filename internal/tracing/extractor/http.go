@@ -15,16 +15,14 @@ const (
 )
 
 type HTTPExtractor struct {
-	extractW3C    bool
-	extractB3     bool
-	extractSplunk bool
+	extractW3C bool
+	extractB3  bool
 }
 
 func NewHTTPExtractor() *HTTPExtractor {
 	return &HTTPExtractor{
-		extractW3C:    true,
-		extractB3:     true,
-		extractSplunk: true,
+		extractW3C: true,
+		extractB3:  true,
 	}
 }
 
@@ -67,16 +65,6 @@ func (e *HTTPExtractor) ExtractFromHeaders(headers map[string]string) *context.T
 			}
 		}
 		if tc := context.ParseB3TraceContext(b3Headers); tc != nil {
-			return tc
-		}
-	}
-
-	if e.extractSplunk {
-		if requestID, ok := normalized["x-splunk-requestid"]; ok {
-			tc := context.NewTraceContextFromSeed(requestID)
-			if len(requestID) <= config.MaxTraceStateLength {
-				tc.State = requestID
-			}
 			return tc
 		}
 	}

@@ -293,7 +293,7 @@ func TestManager_ExportTraces_Empty(t *testing.T) {
 		traceTracker: tracker.NewTraceTracker(),
 	}
 
-	manager.exportTraces(true)
+	manager.exportTraces(context.Background(), true)
 }
 
 func TestManager_ExportTraces_WithOTLPExporter(t *testing.T) {
@@ -317,7 +317,7 @@ func TestManager_ExportTraces_WithOTLPExporter(t *testing.T) {
 		SpanID:  "test-span",
 	}, nil)
 
-	manager.exportTraces(true)
+	manager.exportTraces(context.Background(), true)
 }
 
 func TestManager_ExportTraces_WithJaegerExporter(t *testing.T) {
@@ -341,7 +341,7 @@ func TestManager_ExportTraces_WithJaegerExporter(t *testing.T) {
 		SpanID:  "test-span",
 	}, nil)
 
-	manager.exportTraces(true)
+	manager.exportTraces(context.Background(), true)
 }
 
 func TestManager_ExportTraces_WithSplunkExporter(t *testing.T) {
@@ -365,7 +365,7 @@ func TestManager_ExportTraces_WithSplunkExporter(t *testing.T) {
 		SpanID:  "test-span",
 	}, nil)
 
-	manager.exportTraces(true)
+	manager.exportTraces(context.Background(), true)
 }
 
 func TestManager_ExportTraces_AllExporters(t *testing.T) {
@@ -395,7 +395,7 @@ func TestManager_ExportTraces_AllExporters(t *testing.T) {
 		SpanID:  "test-span",
 	}, nil)
 
-	manager.exportTraces(true)
+	manager.exportTraces(context.Background(), true)
 }
 
 func TestManager_ExportTraces_OTLPError(t *testing.T) {
@@ -425,7 +425,7 @@ func TestManager_ExportTraces_OTLPError(t *testing.T) {
 		SpanID:  "test-span",
 	}, nil)
 
-	manager.exportTraces(true)
+	manager.exportTraces(context.Background(), true)
 }
 
 func TestManager_ExportTraces_JaegerError(t *testing.T) {
@@ -455,7 +455,7 @@ func TestManager_ExportTraces_JaegerError(t *testing.T) {
 		SpanID:  "test-span",
 	}, nil)
 
-	manager.exportTraces(true)
+	manager.exportTraces(context.Background(), true)
 }
 
 func TestManager_ExportTraces_SplunkError_AlertingDisabled(t *testing.T) {
@@ -488,7 +488,7 @@ func TestManager_ExportTraces_SplunkError_AlertingDisabled(t *testing.T) {
 		SpanID:  "test-span",
 	}, nil)
 
-	manager.exportTraces(true)
+	manager.exportTraces(context.Background(), true)
 }
 
 func TestManager_ExportTraces_SplunkError_NoAlertManager(t *testing.T) {
@@ -517,7 +517,7 @@ func TestManager_ExportTraces_SplunkError_NoAlertManager(t *testing.T) {
 		SpanID:  "test-span",
 	}, nil)
 
-	manager.exportTraces(true)
+	manager.exportTraces(context.Background(), true)
 }
 
 func TestManager_ExportTraces_OTLPError_NoAlertManager(t *testing.T) {
@@ -543,7 +543,7 @@ func TestManager_ExportTraces_OTLPError_NoAlertManager(t *testing.T) {
 		SpanID:  "test-span",
 	}, nil)
 
-	manager.exportTraces(true)
+	manager.exportTraces(context.Background(), true)
 }
 
 func TestManager_ExportTraces_JaegerError_NoAlertManager(t *testing.T) {
@@ -569,7 +569,7 @@ func TestManager_ExportTraces_JaegerError_NoAlertManager(t *testing.T) {
 		SpanID:  "test-span",
 	}, nil)
 
-	manager.exportTraces(true)
+	manager.exportTraces(context.Background(), true)
 }
 
 func TestManager_Shutdown_WithExporters(t *testing.T) {
@@ -788,7 +788,7 @@ func TestManager_ExportTraces_SplunkError_AlertingEnabled(t *testing.T) {
 		SpanID:  "test-span",
 	}, nil)
 
-	manager.exportTraces(true)
+	manager.exportTraces(context.Background(), true)
 }
 
 func TestManager_ExportTraces_SuccessfulExport(t *testing.T) {
@@ -812,7 +812,7 @@ func TestManager_ExportTraces_SuccessfulExport(t *testing.T) {
 		SpanID:  "test-span",
 	}, nil)
 
-	manager.exportTraces(true)
+	manager.exportTraces(context.Background(), true)
 }
 
 func TestManager_Shutdown_WithStartedManager(t *testing.T) {
@@ -917,7 +917,7 @@ func TestManager_ExportTraces_OTLPExporterNil(t *testing.T) {
 		SpanID:  "test-span",
 	}, nil)
 
-	manager.exportTraces(true)
+	manager.exportTraces(context.Background(), true)
 }
 
 func TestManager_ExportTraces_JaegerExporterNil(t *testing.T) {
@@ -933,7 +933,7 @@ func TestManager_ExportTraces_JaegerExporterNil(t *testing.T) {
 		SpanID:  "test-span",
 	}, nil)
 
-	manager.exportTraces(true)
+	manager.exportTraces(context.Background(), true)
 }
 
 func TestManager_ExportTraces_SplunkExporterNil(t *testing.T) {
@@ -949,5 +949,5 @@ func TestManager_ExportTraces_SplunkExporterNil(t *testing.T) {
 		SpanID:  "test-span",
 	}, nil)
 
-	manager.exportTraces(true)
+	manager.exportTraces(context.Background(), true)
 }

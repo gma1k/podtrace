@@ -1,6 +1,8 @@
 package tracing
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -76,14 +78,58 @@ func TestADeliveredTraceIsNotResentWhenAnotherTraceInTheBatchFails(t *testing.T)
 	trackSpan(m, delivered, "1122334455667788")
 	trackSpan(m, refused, "8877665544332211")
 
-	m.exportTraces(true)
-	m.exportTraces(true)
+	m.exportTraces(context.Background(), true)
+	m.exportTraces(context.Background(), true)
 
-	if got := log.count(delivered); got != 1 {
-		t.Errorf("delivered trace posted %d times, want 1", got)
+	accepted := 0
+	for _, body := range log.bodies {
+		if strings.Contains(body, delivered) && !strings.Contains(body, refused) {
+			accepted++
+		}
 	}
-	if got := log.count(refused); got != 2 {
-		t.Errorf("refused trace posted %d times, want 2 (retried)", got)
+	if accepted != 1 {
+		t.Errorf("collector accepted the delivered trace %d times, want 1", accepted)
+	}
+	if got := log.count(refused); got != 3 {
+		t.Errorf("refused trace posted %d times, want 3 (shared batch, isolated alone, retried on the next export)", got)
+	}
+	if last := log.bodies[len(log.bodies)-1]; strings.Contains(last, delivered) {
+		t.Error("the retry on the next export carried the delivered trace again")
+	}
+}
+
+func TestSpansDeliveredBeforeAFailedBatchAreNotResent(t *testing.T) {
+	const traceID = "aabbccddeeff00112233445566778899"
+	srv, log := recordingServer(t, `"span-last"`)
+	m := managerWithOnly(t, func() { config.SplunkEndpoint = srv.URL })
+	blob := strings.Repeat("x", 8000)
+	for i := range 100 {
+		target := fmt.Sprintf("span-%02d", i)
+		if i == 99 {
+			target = "span-last"
+		}
+		m.traceTracker.ProcessEvent(&events.Event{
+			Type:    events.EventDNS,
+			TraceID: traceID,
+			SpanID:  fmt.Sprintf("%016x", i+1),
+			Target:  target,
+			Details: blob,
+		}, nil)
+	}
+
+	m.exportTraces(context.Background(), true)
+	m.exportTraces(context.Background(), true)
+
+	for _, span := range []string{`"span-00"`, `"span-30"`} {
+		if got := log.count(span); got != 1 {
+			t.Errorf("%s was delivered in the first batch but posted %d times, want 1", span, got)
+		}
+	}
+	if got := log.count(`"span-last"`); got != 2 {
+		t.Errorf("the span of the failed batch was posted %d times, want 2 (retried)", got)
+	}
+	if got := len(log.bodies); got != 3 {
+		t.Errorf("collector received %d posts, want 3 (two batches, then only the failed one again)", got)
 	}
 }
 
@@ -94,7 +140,7 @@ func TestAnUnexportableSpanIsDroppedInsteadOfResentEveryTick(t *testing.T) {
 	trackSpan(m, "not-a-hex-trace-id", "1122334455667788")
 
 	for range 3 {
-		m.exportTraces(true)
+		m.exportTraces(context.Background(), true)
 	}
 
 	if got := log.count(""); got != 1 {

@@ -78,8 +78,10 @@ const maxExportErrorBytes = 300
 
 var sessionExportStatus func() []tracing.ExporterStatus
 
+const sessionExportFlushTimeout = 30 * time.Second
+
 type exportStatusSource interface {
-	Flush()
+	Flush(ctx context.Context)
 	ExportStatus() []tracing.ExporterStatus
 }
 
@@ -87,7 +89,9 @@ type exportStatusSource interface {
 // pending spans first so the status covers the final batch.
 func flushingExportStatus(src exportStatusSource) func() []tracing.ExporterStatus {
 	return func() []tracing.ExporterStatus {
-		src.Flush()
+		ctx, cancel := context.WithTimeout(context.Background(), sessionExportFlushTimeout)
+		defer cancel()
+		src.Flush(ctx)
 		return src.ExportStatus()
 	}
 }
@@ -219,7 +223,7 @@ func writeSummaryFile(path string, summary SessionSummary) error {
 	if err != nil {
 		return err
 	}
-	return writeArtifactFile(path, data, 0o600)
+	return writeArtifactFile(path, data, 0o644)
 }
 
 // writeTerminationMessage writes a compact JSON encoding of the summary

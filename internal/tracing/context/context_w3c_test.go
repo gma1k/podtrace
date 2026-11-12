@@ -32,25 +32,3 @@ func TestParseW3CTraceParent_AcceptsValid(t *testing.T) {
 		t.Fatalf("parsed context = %+v, unexpected fields", tc)
 	}
 }
-
-func TestNewTraceContextFromSeed_Deterministic(t *testing.T) {
-	a := NewTraceContextFromSeed("req-123")
-	b := NewTraceContextFromSeed("req-123")
-	c := NewTraceContextFromSeed("req-999")
-
-	if a.TraceID != b.TraceID {
-		t.Fatalf("same seed produced different trace IDs: %s vs %s", a.TraceID, b.TraceID)
-	}
-	if a.TraceID == c.TraceID {
-		t.Fatalf("distinct seeds collided on trace ID %s", a.TraceID)
-	}
-	if len(a.TraceID) != 32 || !isLowerHex(a.TraceID) {
-		t.Fatalf("derived trace ID %q is not a 32-char lowercase hex string", a.TraceID)
-	}
-	if a.SpanID == b.SpanID {
-		t.Fatalf("span IDs must be unique per event, got %s twice", a.SpanID)
-	}
-	if !a.IsValid() {
-		t.Fatal("derived context must be valid")
-	}
-}

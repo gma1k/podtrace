@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"time"
 
 	"cloud.google.com/go/auth/credentials"
 	"cloud.google.com/go/storage"
@@ -19,6 +20,10 @@ const (
 	gcsSecretKeyServiceAccountJSON = "service_account_json"
 	gcsSecretKeyEndpoint           = "endpoint"
 )
+
+// gcsTokenTimeout bounds one OAuth2 token request, matching the timeout
+// the auth library's own default client applies.
+const gcsTokenTimeout = 30 * time.Second
 
 // gcsScopes lists the OAuth2 scopes the storage client needs. Hardcoding
 // them keeps the credentials-construction path explicit.
@@ -41,6 +46,7 @@ func newGCSSink(ctx context.Context, cfg Config, d destination) (Sink, error) {
 	if saJSON != "" {
 		ac, err := credentials.NewCredentialsFromJSON(credentials.ServiceAccount, []byte(saJSON), &credentials.DetectOptions{
 			Scopes: gcsScopes,
+			Client: netguard.HardenedClient(gcsTokenTimeout),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("gcs: load service account JSON: %w", err)

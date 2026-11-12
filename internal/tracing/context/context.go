@@ -2,7 +2,6 @@ package context
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -69,17 +68,6 @@ func generateSpanID() string {
 		return ""
 	}
 	return hex.EncodeToString(b)
-}
-
-// NewTraceContextFromSeed derives a TraceContext whose TraceID is a stable
-// function of seed.
-func NewTraceContextFromSeed(seed string) *TraceContext {
-	sum := sha256.Sum256([]byte(seed))
-	return &TraceContext{
-		TraceID: hex.EncodeToString(sum[:16]),
-		SpanID:  generateSpanID(),
-		Flags:   0x01,
-	}
 }
 
 // isLowerHex reports whether s is non-empty and composed solely of lowercase

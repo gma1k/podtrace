@@ -49,22 +49,34 @@ func NewSplunkExporter(endpoint, token string, sampleRate float64) (*SplunkExpor
 }
 
 func (e *SplunkExporter) ExportTraces(traces []*tracker.Trace) error {
+	return e.ExportTracesContext(context.Background(), traces)
+}
+
+// ExportTracesContext delivers the sampled traces as HEC batches: event
+// JSON objects concatenated into one request body (the format Splunk HEC
+// accepts), each body bounded by splunkMaxBatchBytes. When a trace's events
+// straddle a failed request, only the events not yet delivered are offered
+// again. ctx bounds the whole export.
+func (e *SplunkExporter) ExportTracesContext(ctx context.Context, traces []*tracker.Trace) error {
 	if !e.enabled || len(traces) == 0 {
 		return nil
 	}
 
-	events := make([]SplunkEvent, 0)
+	var outcome exportOutcome
+	encoded := make([]encodedTrace, 0, len(traces))
 	for _, t := range traces {
-		if !e.shouldSample(t) {
+		if !e.shouldSample(t) || len(t.Spans) == 0 {
 			continue
 		}
-		events = append(events, e.buildEvents(t)...)
+		elements, err := encodeSpans(e.buildEvents(t))
+		if err != nil {
+			outcome.record(permanent(fmt.Errorf("trace %s: marshal event: %w", t.TraceID, err)))
+			continue
+		}
+		encoded = append(encoded, encodedTrace{traceID: t.TraceID, elements: elements})
 	}
-	if len(events) == 0 {
-		return nil
-	}
-
-	return e.sendBatch(events)
+	sendTraceBatches(ctx, &outcome, encoded, splunkMaxBatchBytes, hecFrame, e.postBatch)
+	return outcome.err()
 }
 
 func (e *SplunkExporter) shouldSample(t *tracker.Trace) bool {
@@ -104,50 +116,8 @@ func (e *SplunkExporter) buildEvents(t *tracker.Trace) []SplunkEvent {
 	return events
 }
 
-// sendBatch delivers events as HEC batches: JSON objects are concatenated into
-// one request body (the format Splunk HEC accepts) and flushed once the body
-// would exceed splunkMaxBatchBytes, so a whole export is a few sized POSTs
-// instead of one request per span.
-func (e *SplunkExporter) sendBatch(events []SplunkEvent) error {
-	var outcome exportOutcome
-	var body bytes.Buffer
-	var batchTraces []string
-	inBatch := map[string]struct{}{}
-
-	flush := func() {
-		if body.Len() == 0 {
-			return
-		}
-		outcome.record(e.postBatch(body.Bytes()), batchTraces...)
-		body.Reset()
-		batchTraces = batchTraces[:0]
-		clear(inBatch)
-	}
-
-	for _, event := range events {
-		traceID, _ := event.Event["trace_id"].(string)
-		payload, err := marshalJSON(event)
-		if err != nil {
-			outcome.record(permanent(fmt.Errorf("marshal event: %w", err)))
-			continue
-		}
-		if body.Len() > 0 && body.Len()+len(payload)+1 > splunkMaxBatchBytes {
-			flush()
-		}
-		body.Write(payload)
-		body.WriteByte('\n')
-		if _, seen := inBatch[traceID]; !seen {
-			inBatch[traceID] = struct{}{}
-			batchTraces = append(batchTraces, traceID)
-		}
-	}
-	flush()
-
-	return outcome.err()
-}
-
-func (e *SplunkExporter) postBatch(payload []byte) error {
-	req, err := http.NewRequestWithContext(context.Background(), "POST", e.endpoint, bytes.NewReader(payload))
+func (e *SplunkExporter) postBatch(ctx context.Context, payload []byte) error {
+	req, err := http.NewRequestWithContext(ctx, "POST", e.endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}

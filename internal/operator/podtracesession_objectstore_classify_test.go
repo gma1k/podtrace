@@ -187,3 +187,14 @@ func TestApplyReportUploadStatus_AttemptsAndReason(t *testing.T) {
 		}
 	})
 }
+
+func TestClassifyUploadFailureEgressGuardRefusalIsAccessDenied(t *testing.T) {
+	for _, msg := range []string{
+		`auth: cannot fetch token: Post "http://x/stolen": netguard: refusing redirect to http://x/stolen: exporter endpoints must not redirect (credential-exfiltration guard): blocked by the egress guard`,
+		`auth: cannot fetch token: Post "http://169.254.169.254/token": dial tcp 169.254.169.254:80: netguard: refusing exporter connection to blocked address "169.254.169.254:80": blocked by the egress guard`,
+	} {
+		if got := classifyUploadFailure(msg); got != podtracev1alpha1.ReportFailureReasonAccessDenied {
+			t.Errorf("classifyUploadFailure(%q) = %s, want AccessDenied", msg, got)
+		}
+	}
+}
