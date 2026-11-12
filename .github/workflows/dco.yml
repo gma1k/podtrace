@@ -29,6 +29,8 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
 
@@ -37,12 +39,19 @@ jobs:
             exit 0
           fi
 
-          case "${HEAD_REF}" in
-            release-please--*)
-              echo "release-please branch, DCO not applicable."
-              exit 0
-              ;;
-          esac
+          same_repo=0
+          if [ "${HEAD_REPO}" = "${BASE_REPO}" ]; then
+            same_repo=1
+          fi
+
+          if [ "${same_repo}" -eq 1 ]; then
+            case "${HEAD_REF}" in
+              release-please--*)
+                echo "release-please branch, DCO not applicable."
+                exit 0
+                ;;
+            esac
+          fi
 
           failed=0
 
@@ -51,12 +60,14 @@ jobs:
             subject=$(git show -s --format='%s' "${sha}")
             author=$(git show -s --format='%ae' "${sha}" | tr '[:upper:]' '[:lower:]')
 
-            case "${author}" in
-              *'[bot]@users.noreply.github.com')
-                echo "skip     ${short}  ${subject}"
-                continue
-                ;;
-            esac
+            if [ "${same_repo}" -eq 1 ]; then
+              case "${author}" in
+                *'[bot]@users.noreply.github.com')
+                  echo "skip     ${short}  ${subject}"
+                  continue
+                  ;;
+              esac
+            fi
 
             matched=0
             trailers=$(git show -s --format='%B' "${sha}" |

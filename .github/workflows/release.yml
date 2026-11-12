@@ -56,6 +56,13 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
+      - name: Refuse to release from a branch
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          echo "::error::Release runs from a tag, not ${REF}. Pick the release tag under \"Use workflow from\", or set olm_bundle_only to re-submit the OLM bundle."
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
@@ -99,7 +106,7 @@ jobs:
 
   image:
     needs: bpf-objects
-    if: (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') && !inputs.olm_bundle_only
+    if: startsWith(github.ref, 'refs/tags/v') && !inputs.olm_bundle_only
     runs-on: ubuntu-26.04
     permissions:
       contents: read
@@ -189,7 +196,7 @@ jobs:
           push-to-registry: true
 
   chart:
-    if: (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') && !inputs.olm_bundle_only
+    if: startsWith(github.ref, 'refs/tags/v') && !inputs.olm_bundle_only
     runs-on: ubuntu-26.04
     needs: image
     permissions:
@@ -248,6 +255,10 @@ jobs:
           helm package ${{ env.CHART_PATH }} -d dist/
           tgz=$(find dist -maxdepth 1 -name 'podtrace-*.tgz' | sort | head -n1)
           version=$(helm show chart ${{ env.CHART_PATH }} | awk '/^version:/{print $2}')
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::Chart.yaml version ${version} does not match the tag ${GITHUB_REF_NAME}; refusing to push over another release's chart"
+            exit 1
+          fi
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           helm push "$tgz" oci://${{ env.CHART_REPO }} 2>&1 | tee push.log
           digest=$(grep '^Digest:' push.log | awk '{print $2}')
@@ -289,7 +300,7 @@ jobs:
             artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml
 
   quickstart:
-    if: (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') && !inputs.olm_bundle_only
+    if: startsWith(github.ref, 'refs/tags/v') && !inputs.olm_bundle_only
     runs-on: ubuntu-26.04
     needs: [image, chart]
     permissions:
@@ -354,7 +365,7 @@ jobs:
 
   cli:
     needs: bpf-objects
-    if: ${{ !inputs.olm_bundle_only }}
+    if: startsWith(github.ref, 'refs/tags/') && !inputs.olm_bundle_only
     runs-on: ubuntu-26.04
     permissions:
       contents: write

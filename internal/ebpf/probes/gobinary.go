@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gma1k/podtrace/internal/ebpf/safeelf"
+	"github.com/gma1k/podtrace/internal/safeconv"
 )
 
 // Bounds on a .gopclntab. debug/gosym allocates per function and per
@@ -54,7 +55,7 @@ func (b *goBinary) readText(path string, start, end uint64) ([]byte, bool) {
 		return nil, false
 	}
 	code := make([]byte, end-start)
-	if _, err := f.ReadAt(code, int64(b.textOffset+(start-b.textAddr))); err != nil {
+	if _, err := f.ReadAt(code, safeconv.Uint64ToInt64(b.textOffset+(start-b.textAddr))); err != nil {
 		return nil, false
 	}
 	return code, true

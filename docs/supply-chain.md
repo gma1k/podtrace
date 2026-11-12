@@ -54,6 +54,10 @@ All commands below need the [GitHub CLI][gh-cli] (`gh`). Each one fails
 non-zero if verification does not pass, so they are safe to use in a script
 with `set -e`.
 
+They match the signing identity against the release workflow running on a
+`vX.Y.Z` tag, not just against the workflow file: the same workflow also
+runs for `test*` tags, and those artifacts must not pass as a release.
+
 [gh-cli]: https://cli.github.com/
 
 ### Container image
@@ -61,7 +65,7 @@ with `set -e`.
 ```bash
 gh attestation verify oci://ghcr.io/gma1k/podtrace:latest \
   --repo gma1k/podtrace \
-  --signer-workflow gma1k/podtrace/.github/workflows/release.yml
+  --cert-identity-regex '^https://github\.com/gma1k/podtrace/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'
 ```
 
 Add `--bundle-from-oci` to read the attestation from GHCR instead of the
@@ -73,7 +77,7 @@ github.com. You must already be authenticated to the registry.
 ```bash
 gh attestation verify oci://ghcr.io/gma1k/charts/podtrace:latest \
   --repo gma1k/podtrace \
-  --signer-workflow gma1k/podtrace/.github/workflows/release.yml
+  --cert-identity-regex '^https://github\.com/gma1k/podtrace/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'
 ```
 
 Run this before `helm install`. An admission controller cannot do it for you:
@@ -88,7 +92,7 @@ curl -fsSLO https://github.com/gma1k/podtrace/releases/latest/download/podtrace_
 
 gh attestation verify podtrace_linux_amd64.tar.gz \
   --repo gma1k/podtrace \
-  --signer-workflow gma1k/podtrace/.github/workflows/release.yml
+  --cert-identity-regex '^https://github\.com/gma1k/podtrace/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'
 ```
 
 This checks the tarball directly. The older `cosign verify-blob` route through
@@ -112,7 +116,7 @@ done
 gh attestation verify quickstart.yaml \
   --bundle quickstart.sigstore.json \
   --repo gma1k/podtrace \
-  --signer-workflow gma1k/podtrace/.github/workflows/release.yml
+  --cert-identity-regex '^https://github\.com/gma1k/podtrace/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'
 ```
 
 ### Inspecting what the provenance says

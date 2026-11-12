@@ -62,7 +62,7 @@ jobs:
       - name: Run gosec security scanner
         if: matrix.language == 'go'
         run: |
-          go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.30.0
           gosec -fmt sarif -out gosec-results.sarif -exclude-dir=test ./... || true
           python3 - <<'EOF'
           import json, sys
@@ -117,7 +117,7 @@ jobs:
           cache: true
 
       - name: Run govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
   workflow-lint:
     name: workflow lint
@@ -178,7 +178,7 @@ jobs:
           persist-credentials: false
 
       - name: Install semgrep
-        run: pipx install semgrep==1.173.0
+        run: pipx install semgrep==1.183.0
 
       - name: Run semgrep (SARIF, advisory)
         run: |

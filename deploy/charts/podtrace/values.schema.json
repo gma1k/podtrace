@@ -31,13 +31,20 @@
                 "key": {
                   "type": "string"
                 }
-              }
+              },
+              "additionalProperties": false
             }
-          }
+          },
+          "additionalProperties": false
         },
         "btfMode": {
           "type": "string",
-          "enum": ["auto", "host", "file", "embedded"]
+          "enum": [
+            "auto",
+            "host",
+            "file",
+            "embedded"
+          ]
         },
         "btfSource": {
           "type": "object",
@@ -46,7 +53,9 @@
             "configMap": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["name"],
+              "required": [
+                "name"
+              ],
               "properties": {
                 "name": {
                   "type": "string",
@@ -148,15 +157,42 @@
                 "process": {
                   "type": "boolean"
                 }
-              }
+              },
+              "additionalProperties": false
             },
             "kernelAggregation": {
               "type": "boolean"
             },
             "filesystem": {
               "type": "boolean"
+            },
+            "inspections": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "interval": {
+                  "type": "string"
+                },
+                "alerts": {
+                  "type": "boolean"
+                },
+                "budget": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "holdTime": {
+                  "type": "string"
+                },
+                "thresholds": {
+                  "type": "object"
+                }
+              }
             }
-          }
+          },
+          "additionalProperties": false
         },
         "resources": {
           "type": "object",
@@ -217,8 +253,23 @@
               }
             }
           }
+        },
+        "allowedImageRepos": {
+          "type": "array",
+          "description": "Extra repositories a TracerConfig may point the agent and session Job image at; \"*\" disables the check.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "continuousProfiling": {
+          "type": "boolean"
+        },
+        "sockOpsRTT": {
+          "type": "boolean"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "crds": {
       "type": "object",
@@ -235,7 +286,8 @@
         "labelerImage": {
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "examples": {
       "type": "object",
@@ -272,9 +324,18 @@
             "synthesizeSpans": {
               "type": "boolean"
             }
-          }
+          },
+          "additionalProperties": false
         }
-      }
+      },
+      "additionalProperties": false
+    },
+    "fullnameOverride": {
+      "type": "string"
+    },
+    "global": {
+      "type": "object",
+      "description": "Reserved by Helm for parent-chart globals."
     },
     "image": {
       "type": "object",
@@ -298,7 +359,8 @@
           "type": "string",
           "pattern": "^(sha256:[a-f0-9]{64})?$"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "metrics": {
       "type": "object",
@@ -318,7 +380,8 @@
             "path": {
               "type": "string"
             }
-          }
+          },
+          "additionalProperties": false
         },
         "serviceMonitor": {
           "type": "object",
@@ -335,9 +398,14 @@
             "path": {
               "type": "string"
             }
-          }
+          },
+          "additionalProperties": false
         }
-      }
+      },
+      "additionalProperties": false
+    },
+    "nameOverride": {
+      "type": "string"
     },
     "namespace": {
       "type": "object",
@@ -353,6 +421,36 @@
         },
         "name": {
           "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "metricsFrom": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "NetworkPolicy `from` peers."
+        },
+        "inspectFrom": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "NetworkPolicy `from` peers."
+        },
+        "allowAPIServerToInspect": {
+          "type": "boolean"
+        },
+        "allowAPIServerProxy": {
+          "type": "boolean"
         }
       }
     },
@@ -386,7 +484,8 @@
                 "type": "string"
               }
             }
-          }
+          },
+          "additionalProperties": false
         },
         "podAnnotations": {
           "type": "object"
@@ -440,7 +539,8 @@
         "tolerations": {
           "type": "array"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "rbac": {
       "type": "object",
@@ -448,7 +548,8 @@
         "create": {
           "type": "boolean"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "session": {
       "type": "object",
@@ -511,7 +612,8 @@
         "ttlSecondsAfterFinished": {
           "type": "integer"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "tracerConfig": {
       "type": "object",
@@ -520,21 +622,60 @@
           "type": "boolean"
         },
         "name": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 253,
+          "pattern": "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?)?$",
+          "description": "Name of the cluster-scoped TracerConfig. Empty means \"default\"."
         },
         "sidecarUploader": {
           "type": "boolean"
         },
         "retainOnUninstall": {
           "type": "boolean"
+        },
+        "redaction": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "redactDNSNames": {
+              "type": "boolean"
+            },
+            "customRules": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "capture": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "headers": {
+              "type": "array",
+              "maxItems": 4,
+              "items": {
+                "type": "string",
+                "maxLength": 32,
+                "pattern": "^[A-Za-z0-9!#$%&'*+.^_|~-]+$"
+              }
+            }
+          }
         }
-      }
+      },
+      "additionalProperties": false
     },
     "webhook": {
       "type": "object",
       "properties": {
         "caBundle": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^[A-Za-z0-9+/=]*$",
+          "description": "Base64-encoded PEM CA bundle that signed the webhook serving certificate. Required unless certSource is cert-manager."
         },
         "certManager": {
           "type": "object",
@@ -548,12 +689,20 @@
                 "name": {
                   "type": "string"
                 }
-              }
+              },
+              "additionalProperties": false
             }
-          }
+          },
+          "additionalProperties": false
         },
         "certSource": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "cert-manager",
+            "manual",
+            "self-signed"
+          ],
+          "description": "cert-manager issues the serving certificate. manual (self-signed is an alias) uses your own Secret <fullname>-webhook-tls and needs webhook.caBundle."
         },
         "enabled": {
           "type": "boolean"
@@ -561,7 +710,9 @@
         "port": {
           "type": "integer"
         }
-      }
+      },
+      "additionalProperties": false
     }
-  }
+  },
+  "additionalProperties": false
 }

@@ -67,7 +67,9 @@ func TestHookRBACIsRemovedWhenTheHookFails(t *testing.T) {
 		if o.Kind != "ClusterRole" && o.Kind != "ClusterRoleBinding" && o.Kind != "ServiceAccount" {
 			continue
 		}
-		if !strings.HasSuffix(o.Metadata.Name, "-crd-labeler") && !strings.HasSuffix(o.Metadata.Name, "-namespace-bootstrap") {
+		if !slices.ContainsFunc([]string{"-crd-labeler", "-namespace-bootstrap", "-cr-bootstrap", "-cr-teardown"}, func(suffix string) bool {
+			return strings.HasSuffix(o.Metadata.Name, suffix)
+		}) {
 			continue
 		}
 		if policy := o.Metadata.Annotations["helm.sh/hook-delete-policy"]; !strings.Contains(policy, "hook-failed") {
@@ -148,7 +150,7 @@ func TestNamespaceBootstrapScriptRunsUnderShell(t *testing.T) {
 	}
 }
 
-func TestQuickstartLeavesNoNamespaceBootstrapGrantBehind(t *testing.T) {
+func TestQuickstartLeavesNoNamespaceOrCRDGrantBehind(t *testing.T) {
 	helmAvailable(t)
 	dir := t.TempDir()
 	cmd := exec.Command("bash", "-c", `"${REPO}/hack/render-quickstart.sh" "${REPO}/deploy/charts/podtrace" quickstart.yaml`)
@@ -167,9 +169,14 @@ func TestQuickstartLeavesNoNamespaceBootstrapGrantBehind(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, ok := findObject(t, rendered, "ClusterRole", "podtrace-namespace-bootstrap"); ok {
-		t.Error("kubectl apply keeps hook objects for good, so the quickstart must not ship " +
-			"the namespace-bootstrap ClusterRole")
+	for _, name := range []string{"podtrace-namespace-bootstrap", "podtrace-crd-labeler"} {
+		if _, ok := findObject(t, append([]byte("---\n"), rendered...), "ClusterRole", name); ok {
+			t.Errorf("kubectl apply keeps hook objects for good, so the quickstart must not ship "+
+				"the %s ClusterRole", name)
+		}
+	}
+	if _, ok := findObject(t, append([]byte("---\n"), rendered...), "Job", "podtrace-crd-labeler"); ok {
+		t.Error("the quickstart is not a Helm release, so it must not label the CRDs for Helm adoption")
 	}
 	var ns corev1.Namespace
 	mustFindObject(t, append([]byte("---\n"), rendered...), "Namespace", "podtrace-system").decode(t, &ns)

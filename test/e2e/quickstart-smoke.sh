@@ -90,7 +90,7 @@ cleanup() {
 	# the bootstrap and labeler grants behind unless they are named here.
 	local -a roles=(
 		podtrace-operator podtrace-agent
-		podtrace-cr-bootstrap podtrace-crd-labeler
+		podtrace-cr-bootstrap
 	)
 	kubectl delete clusterrole "${roles[@]}" \
 		--ignore-not-found >/dev/null 2>&1 || true

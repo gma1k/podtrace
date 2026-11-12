@@ -6,6 +6,7 @@ import (
 
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/safeconv"
 )
 
 var eventTypeSamplingRates = map[events.EventType]int{
@@ -86,5 +87,5 @@ func (s *sampleDraws) intN(n int) int {
 	}
 	at := len(s.buf) - s.left
 	s.left -= 8
-	return int(binary.LittleEndian.Uint64(s.buf[at:]) % uint64(n))
+	return safeconv.Uint64ToInt(binary.LittleEndian.Uint64(s.buf[at:]) % uint64(n))
 }

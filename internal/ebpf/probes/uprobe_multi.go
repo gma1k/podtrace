@@ -4,6 +4,8 @@ import (
 	"sync/atomic"
 
 	"github.com/cilium/ebpf/link"
+
+	"github.com/gma1k/podtrace/internal/safeconv"
 )
 
 var uprobeMulti atomic.Bool
@@ -41,7 +43,7 @@ func uprobeMultiArgs(symbol string, opts *link.UprobeOptions) ([]string, *link.U
 		multi.Cookies = []uint64{opts.Cookie}
 	}
 	if opts.PID > 0 {
-		multi.PID = uint32(opts.PID)
+		multi.PID = safeconv.IntToUint32(opts.PID)
 	}
 	return symbols, multi
 }

@@ -198,7 +198,7 @@ func TestChart_WebhookRequiresOperatorToRender(t *testing.T) {
 
 func TestChart_CertManagerCertificateConditional(t *testing.T) {
 	with := renderChart(t, "operator.enabled=true", "webhook.enabled=true")
-	withoutCM := renderChart(t, "operator.enabled=true", "webhook.enabled=true", "webhook.certSource=self-signed")
+	withoutCM := renderChart(t, "operator.enabled=true", "webhook.enabled=true", "webhook.certSource=self-signed", "webhook.caBundle=Y2E=")
 
 	if !bytes.Contains(with, []byte("kind: Certificate")) {
 		t.Error("cert-manager default: Certificate should render")

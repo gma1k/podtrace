@@ -23,6 +23,7 @@
   unaffected either way.
 */}}
 {{- if and .Values.operator.enabled .Values.tracerConfig.create (not .Values.tracerConfig.retainOnUninstall) }}
+{{- $tcName := .Values.tracerConfig.name | default "default" }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -35,7 +36,7 @@ metadata:
   annotations:
     helm.sh/hook: pre-delete
     helm.sh/hook-weight: "5"
-    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded,hook-failed
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -47,11 +48,12 @@ metadata:
   annotations:
     helm.sh/hook: pre-delete
     helm.sh/hook-weight: "5"
-    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded,hook-failed
 rules:
   - apiGroups: ["podtrace.io"]
     resources: ["tracerconfigs"]
-    verbs: ["get", "list", "delete"]
+    resourceNames: [{{ $tcName | quote }}]
+    verbs: ["get", "list", "watch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -63,7 +65,7 @@ metadata:
   annotations:
     helm.sh/hook: pre-delete
     helm.sh/hook-weight: "5"
-    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded,hook-failed
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -123,8 +125,8 @@ spec:
             - -c
             - |
               set -eu
-              echo "Deleting TracerConfig {{ .Values.tracerConfig.name }} so the agent DaemonSet stops with the chart."
-              kubectl delete tracerconfig {{ .Values.tracerConfig.name | quote }} \
+              echo "Deleting TracerConfig {{ $tcName }} so the agent DaemonSet stops with the chart."
+              kubectl delete tracerconfig {{ $tcName | quote }} \
                 --ignore-not-found --wait=true --timeout=90s
               echo "Done. Set tracerConfig.retainOnUninstall=true to keep agents running across an uninstall."
 {{- end }}
