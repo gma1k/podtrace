@@ -178,7 +178,7 @@ jobs:
           persist-credentials: false
 
       - name: Install semgrep
-        run: pipx install semgrep==1.183.0
+        run: pipx install semgrep==1.185.0
 
       - name: Run semgrep (SARIF, advisory)
         run: |
