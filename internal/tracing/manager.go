@@ -38,6 +38,7 @@ type Manager struct {
 	stopCh          chan struct{}
 	stopOnce        sync.Once
 	wg              sync.WaitGroup
+	cancelLoops     context.CancelFunc
 
 	exportMu sync.Mutex
 	statsMu  sync.Mutex
@@ -190,6 +191,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		return nil
 	}
 
+	ctx, m.cancelLoops = context.WithCancel(ctx)
 	m.wg.Add(2)
 	go m.exportLoop(ctx)
 	go m.cleanupLoop(ctx)
@@ -210,7 +212,7 @@ func (m *Manager) exportLoop(ctx context.Context) {
 		case <-m.stopCh:
 			return
 		case <-ticker.C:
-			m.exportTraces(false)
+			m.exportTraces(ctx, false)
 		}
 	}
 }
@@ -229,7 +231,7 @@ func (m *Manager) cleanupLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			m.traceTracker.CleanupOldTraces(10 * time.Minute)
-			m.corr.sweep(2 * time.Minute)
+			m.corr.sweep(correlationMaxAge)
 		}
 	}
 }
@@ -239,7 +241,7 @@ func (m *Manager) cleanupLoop(ctx context.Context) {
 type exporterTarget struct {
 	name            string
 	endpoint        string
-	export          func([]*tracker.Trace) error
+	export          func(context.Context, []*tracker.Trace) error
 	recommendations []string
 	suppressAlert   bool
 }
@@ -248,19 +250,19 @@ func (m *Manager) exporterTargets() []exporterTarget {
 	var out []exporterTarget
 	if m.otlpExporter != nil {
 		out = append(out, exporterTarget{
-			name: "otlp", endpoint: config.OTLPEndpoint, export: m.otlpExporter.ExportTraces,
+			name: "otlp", endpoint: config.OTLPEndpoint, export: m.otlpExporter.ExportTracesContext,
 			recommendations: []string{"Check OTLP endpoint connectivity", "Verify endpoint configuration", "Check network connectivity"},
 		})
 	}
 	if m.jaegerExporter != nil {
 		out = append(out, exporterTarget{
-			name: "jaeger", endpoint: config.JaegerEndpoint, export: m.jaegerExporter.ExportTraces,
+			name: "jaeger", endpoint: config.JaegerEndpoint, export: m.jaegerExporter.ExportTracesContext,
 			recommendations: []string{"Check Jaeger endpoint connectivity", "Verify endpoint configuration", "Check network connectivity"},
 		})
 	}
 	if m.splunkExporter != nil {
 		out = append(out, exporterTarget{
-			name: "splunk", endpoint: config.SplunkEndpoint, export: m.splunkExporter.ExportTraces,
+			name: "splunk", endpoint: config.SplunkEndpoint, export: m.splunkExporter.ExportTracesContext,
 			recommendations: []string{"Check Splunk endpoint connectivity", "Verify Splunk token", "Check network connectivity"},
 			// Avoid an alert feedback loop when alerts themselves are
 			// delivered through Splunk.
@@ -269,13 +271,13 @@ func (m *Manager) exporterTargets() []exporterTarget {
 	}
 	if m.datadogExporter != nil {
 		out = append(out, exporterTarget{
-			name: "datadog", endpoint: config.DataDogEndpoint, export: m.datadogExporter.ExportTraces,
+			name: "datadog", endpoint: config.DataDogEndpoint, export: m.datadogExporter.ExportTracesContext,
 			recommendations: []string{"Check DataDog agent endpoint connectivity", "Verify DD-API-KEY if using direct ingest", "Check network connectivity"},
 		})
 	}
 	if m.zipkinExporter != nil {
 		out = append(out, exporterTarget{
-			name: "zipkin", endpoint: config.ZipkinEndpoint, export: m.zipkinExporter.ExportTraces,
+			name: "zipkin", endpoint: config.ZipkinEndpoint, export: m.zipkinExporter.ExportTracesContext,
 			recommendations: []string{"Check Zipkin endpoint connectivity", "Verify endpoint configuration", "Check network connectivity"},
 		})
 	}
@@ -287,30 +289,41 @@ func (m *Manager) exporterTargets() []exporterTarget {
 // accumulated trace (which duplicated spans in all backends on every 5s
 // interval). force (shutdown) flushes spans of traces that are still
 // settling.
-func (m *Manager) exportTraces(force bool) {
+func (m *Manager) exportTraces(ctx context.Context, force bool) {
 	m.exportMu.Lock()
 	defer m.exportMu.Unlock()
+	var wg sync.WaitGroup
 	for _, target := range m.exporterTargets() {
-		traces := m.traceTracker.SnapshotForExport(m.exportInterval, force, target.name)
-		if len(traces) == 0 {
-			continue
-		}
-		err := target.export(traces)
-		m.recordExport(target.name, err)
-		if err != nil {
-			m.reportExporterFailure(target, err)
-		}
-		// Advance only this exporter's watermark, and only past the traces
-		// it must not be offered again.
-		if done := settledTraces(traces, err); len(done) > 0 {
-			m.traceTracker.CommitExport(done, target.name)
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			m.exportTo(ctx, target, force)
+		}()
+	}
+	wg.Wait()
+}
+
+func (m *Manager) exportTo(ctx context.Context, target exporterTarget, force bool) {
+	traces := m.traceTracker.SnapshotForExport(m.exportInterval, force, target.name)
+	if len(traces) == 0 {
+		return
+	}
+	err := target.export(ctx, traces)
+	m.recordExport(target.name, err)
+	if err != nil {
+		m.reportExporterFailure(target, err)
+	}
+	// Advance only this exporter's watermark, and only past the spans it
+	// must not be offered again.
+	if done := settledTraces(traces, err); len(done) > 0 {
+		m.traceTracker.CommitExport(done, target.name)
 	}
 }
 
-// settledTraces returns the traces of a batch that must not be re-offered:
+// settledTraces returns the spans of a batch that must not be re-offered:
 // all of them on success, none on a whole-batch failure, and on a partial
-// failure every trace except those the exporter asks to retry.
+// failure every trace except those the exporter asks to retry, plus the
+// leading spans of a retried trace the exporter already settled.
 func settledTraces(traces []*tracker.Trace, err error) []*tracker.Trace {
 	if err == nil {
 		return traces
@@ -323,6 +336,10 @@ func settledTraces(traces []*tracker.Trace, err error) []*tracker.Trace {
 	for _, t := range traces {
 		if !partial.Retry(t.TraceID) {
 			done = append(done, t)
+			continue
+		}
+		if n := partial.SettledPrefix(t.TraceID); n > 0 {
+			done = append(done, t.Prefix(n))
 		}
 	}
 	return done
@@ -378,12 +395,13 @@ func (m *Manager) recordExport(name string, err error) {
 // Flush exports every pending span now, including spans of traces that are
 // still settling, without stopping the manager. A bounded run (a session
 // Job) calls it before reading ExportStatus so the status covers the final
-// batch too.
-func (m *Manager) Flush() {
+// batch too; ctx bounds the flush so an unreachable collector cannot hold
+// the run past its deadline.
+func (m *Manager) Flush(ctx context.Context) {
 	if !m.enabled {
 		return
 	}
-	m.exportTraces(true)
+	m.exportTraces(ctx, true)
 }
 
 // ExportStatus returns the delivery record of every exporter that has
@@ -424,13 +442,16 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	}
 
 	m.stopOnce.Do(func() { close(m.stopCh) })
+	if m.cancelLoops != nil {
+		m.cancelLoops()
+	}
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		m.wg.Wait()
 		// Final flush: force-export spans of traces still settling.
-		m.exportTraces(true)
+		m.exportTraces(ctx, true)
 		m.shutdownExporters(ctx)
 	}()
 

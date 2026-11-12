@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"path"
 	"strings"
 )
 
@@ -124,9 +125,35 @@ func (d destination) resolveKey(keyHint string) string {
 	return d.path + "/" + keyHint
 }
 
+// IsPrefixURI reports whether raw is a well-formed prefix-mode URI, where
+// the uploader picks each object's name.
+func IsPrefixURI(raw string) bool {
+	d, err := parseURI(raw)
+	return err == nil && d.prefix
+}
+
+// PerNodeURI returns the URI one node of a multi-node session uploads to.
+func PerNodeURI(raw, node string) string {
+	if node == "" {
+		return raw
+	}
+	d, err := parseURI(raw)
+	if err != nil || d.prefix {
+		return raw
+	}
+	u, _ := url.Parse(raw)
+	dir, base := path.Split(u.Path)
+	ext := path.Ext(base)
+	if ext == base {
+		ext = ""
+	}
+	u.Path = dir + strings.TrimSuffix(base, ext) + "-" + node + ext
+	return u.String()
+}
+
 // New constructs a Sink for the given config. Dispatches on URI scheme.
-// Returns a useful error when the scheme is unknown or the URI is malformed
-// — the webhook validates the same way, so this path should only fire on
+// Returns a useful error when the scheme is unknown or the URI is malformed,
+// the webhook validates the same way, so this path should only fire on
 // programmer bugs or out-of-band CR edits that bypass admission.
 func New(ctx context.Context, cfg Config) (Sink, error) {
 	d, err := parseURI(cfg.URI)

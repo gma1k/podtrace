@@ -1,6 +1,7 @@
 package tracing
 
 import (
+	"context"
 	"testing"
 
 	"github.com/gma1k/podtrace/internal/alerting"
@@ -68,7 +69,7 @@ func TestManager_ExportTraces_AllFiveExporters_Populated(t *testing.T) {
 	if manager.GetTraceCount() != 0 {
 		t.Fatalf("expected empty tracker, got %d traces", manager.GetTraceCount())
 	}
-	manager.exportTraces(true)
+	manager.exportTraces(context.Background(), true)
 
 	manager.traceTracker.ProcessEvent(&events.Event{
 		Type:    events.EventHTTPReq,
@@ -80,5 +81,5 @@ func TestManager_ExportTraces_AllFiveExporters_Populated(t *testing.T) {
 		t.Fatalf("expected at least one trace after ProcessEvent")
 	}
 
-	manager.exportTraces(true)
+	manager.exportTraces(context.Background(), true)
 }

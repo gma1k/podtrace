@@ -62,7 +62,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
       - name: Install BPF toolchain
         uses: ./.github/actions/setup-bpf-toolchain
       - name: Build native BPF object (full kernel BTF)
@@ -81,9 +81,12 @@ jobs:
           subject-path: internal/ebpf/embedded/podtrace.${{ matrix.goarch }}.bpf.o
 
       - name: Stage the bundle beside the object
+        env:
+          BUNDLE_PATH: ${{ steps.attest_bpf.outputs.bundle-path }}
+          GOARCH: ${{ matrix.goarch }}
         run: |
-          cp "${{ steps.attest_bpf.outputs.bundle-path }}" \
-            "internal/ebpf/embedded/podtrace.${{ matrix.goarch }}.bpf.o.sigstore.json"
+          cp "${BUNDLE_PATH}" \
+            "internal/ebpf/embedded/podtrace.${GOARCH}.bpf.o.sigstore.json"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
@@ -259,9 +262,11 @@ jobs:
           cosign-release: ${{ env.COSIGN_VERSION }}
 
       - name: Sign chart (keyless)
+        env:
+          CHART_DIGEST: ${{ steps.package.outputs.digest }}
         run: |
           cosign sign --yes \
-            "${{ env.CHART_REPO }}/podtrace@${{ steps.package.outputs.digest }}"
+            "${CHART_REPO}/podtrace@${CHART_DIGEST}"
 
       - name: Attest the chart
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
@@ -332,7 +337,9 @@ jobs:
             dist/quickstart-demo.yaml
 
       - name: Stage the attestation bundle for release
-        run: cp "${{ steps.attest_quickstart.outputs.bundle-path }}" dist/quickstart.sigstore.json
+        env:
+          BUNDLE_PATH: ${{ steps.attest_quickstart.outputs.bundle-path }}
+        run: cp "${BUNDLE_PATH}" dist/quickstart.sigstore.json
 
       - name: Attach to GitHub Release
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3  # v3.0.4
@@ -362,7 +369,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
 
       - name: Install BPF toolchain
         uses: ./.github/actions/setup-bpf-toolchain
@@ -409,7 +416,9 @@ jobs:
           subject-path: release/podtrace_*.tar.gz
 
       - name: Stage the attestation bundle for release
-        run: cp "${{ steps.attest_cli.outputs.bundle-path }}" release/podtrace.sigstore.json
+        env:
+          BUNDLE_PATH: ${{ steps.attest_cli.outputs.bundle-path }}
+        run: cp "${BUNDLE_PATH}" release/podtrace.sigstore.json
 
       - name: Attach tarballs + checksums + signature to GitHub Release
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3  # v3.0.4

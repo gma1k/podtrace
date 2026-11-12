@@ -1,6 +1,7 @@
 package tracing
 
 import (
+	"context"
 	"strings"
 	"sync"
 	"testing"
@@ -15,7 +16,7 @@ func TestExportStatusCountsDeliveredBatches(t *testing.T) {
 	m := managerWithOnly(t, func() { config.ZipkinEndpoint = srv.URL })
 	trackSpan(m, statusTraceID, "1122334455667788")
 
-	m.Flush()
+	m.Flush(context.Background())
 
 	got := m.ExportStatus()
 	if len(got) != 1 || got[0].Exporter != "zipkin" || got[0].SucceededBatches != 1 || got[0].FailedBatches != 0 || got[0].LastError != "" {
@@ -28,8 +29,8 @@ func TestExportStatusRecordsFailuresWithARedactedError(t *testing.T) {
 	m := managerWithOnly(t, func() { config.ZipkinEndpoint = srv.URL + "/api/v2/spans?token=SECRETVALUE" })
 	trackSpan(m, statusTraceID, "1122334455667788")
 
-	m.Flush()
-	m.Flush()
+	m.Flush(context.Background())
+	m.Flush(context.Background())
 
 	got := m.ExportStatus()
 	if len(got) != 1 || got[0].SucceededBatches != 0 || got[0].FailedBatches != 2 {
@@ -47,7 +48,7 @@ func TestExportStatusIsEmptyBeforeAnyExport(t *testing.T) {
 	srv, _ := recordingServer(t, "")
 	m := managerWithOnly(t, func() { config.ZipkinEndpoint = srv.URL })
 
-	m.Flush()
+	m.Flush(context.Background())
 
 	if got := m.ExportStatus(); len(got) != 0 {
 		t.Fatalf("ExportStatus = %+v, want empty when nothing was exported", got)
@@ -56,7 +57,7 @@ func TestExportStatusIsEmptyBeforeAnyExport(t *testing.T) {
 
 func TestExportStatusOfADisabledManagerIsNil(t *testing.T) {
 	m := &Manager{enabled: false}
-	m.Flush()
+	m.Flush(context.Background())
 	if got := m.ExportStatus(); got != nil {
 		t.Fatalf("ExportStatus = %+v, want nil", got)
 	}
@@ -72,7 +73,7 @@ func TestConcurrentFlushesSendEachSpanOnce(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			m.Flush()
+			m.Flush(context.Background())
 		}()
 	}
 	wg.Wait()

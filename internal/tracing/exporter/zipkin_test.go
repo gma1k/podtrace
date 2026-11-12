@@ -71,7 +71,7 @@ func TestZipkinExporter_exportTrace_NoSpans(t *testing.T) {
 		TraceID: "test",
 		Spans:   []*tracker.Span{},
 	}
-	err := exporter.exportTrace(trace)
+	err := exporter.ExportTraces([]*tracker.Trace{trace})
 	if err != nil {
 		t.Errorf("exportTrace() error = %v", err)
 	}
@@ -103,7 +103,7 @@ func TestZipkinExporter_exportTrace_WithSpans(t *testing.T) {
 			},
 		},
 	}
-	exportErr := exporter.exportTrace(trace)
+	exportErr := exporter.ExportTraces([]*tracker.Trace{trace})
 	if exportErr != nil {
 		t.Logf("exportTrace() error (expected for test without server): %v", exportErr)
 	}
@@ -129,7 +129,7 @@ func TestZipkinExporter_exportTrace_WithErrorSpan(t *testing.T) {
 			},
 		},
 	}
-	exportErr := exporter.exportTrace(trace)
+	exportErr := exporter.ExportTraces([]*tracker.Trace{trace})
 	if exportErr != nil {
 		t.Logf("exportTrace() error (expected for test without server): %v", exportErr)
 	}
@@ -154,7 +154,7 @@ func TestZipkinExporter_exportTrace_WithParentSpanID(t *testing.T) {
 			},
 		},
 	}
-	exportErr := exporter.exportTrace(trace)
+	exportErr := exporter.ExportTraces([]*tracker.Trace{trace})
 	if exportErr != nil {
 		t.Logf("exportTrace() error (expected for test without server): %v", exportErr)
 	}
@@ -178,7 +178,7 @@ func TestZipkinExporter_exportTrace_WithEmptyServiceName(t *testing.T) {
 			},
 		},
 	}
-	exportErr := exporter.exportTrace(trace)
+	exportErr := exporter.ExportTraces([]*tracker.Trace{trace})
 	if exportErr != nil {
 		t.Logf("exportTrace() error (expected for test without server): %v", exportErr)
 	}

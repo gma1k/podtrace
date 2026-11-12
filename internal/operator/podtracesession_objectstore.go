@@ -187,6 +187,8 @@ func classifyUploadFailure(message string) podtracev1alpha1.ReportFailureReason 
 	m := strings.ToLower(message)
 
 	switch {
+	case strings.Contains(m, "blocked by the egress guard"):
+		return podtracev1alpha1.ReportFailureReasonAccessDenied
 	case strings.Contains(m, "no such bucket"),
 		strings.Contains(m, "nosuchbucket"),
 		strings.Contains(m, "404"),

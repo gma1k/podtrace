@@ -329,6 +329,21 @@ func (tt *TraceTracker) CommitExport(exported []*Trace, exporter string) {
 	}
 }
 
+// Prefix returns a view of an export snapshot holding only its first n
+// spans, so CommitExport advances the watermark past exactly the spans an
+// exporter settled when it could not settle the whole snapshot.
+func (t *Trace) Prefix(n int) *Trace {
+	n = max(0, min(n, len(t.Spans)))
+	return &Trace{
+		source:    t.source,
+		TraceID:   t.TraceID,
+		StartTime: t.StartTime,
+		EndTime:   t.EndTime,
+		Services:  t.Services,
+		Spans:     t.Spans[:n:n],
+	}
+}
+
 // SnapshotAll returns deep copies of every trace (all spans) without touching
 // export watermarks, for read-only consumers like the request-flow graph.
 func (tt *TraceTracker) SnapshotAll() []*Trace {

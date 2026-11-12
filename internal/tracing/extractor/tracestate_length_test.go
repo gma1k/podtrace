@@ -30,14 +30,3 @@ func TestATracestateAtTheLimitIsKept(t *testing.T) {
 		t.Fatal("a 512-character tracestate must be kept")
 	}
 }
-
-func TestAnOversizedSplunkRequestIDIsNotCarriedAsState(t *testing.T) {
-	e := NewHTTPExtractor()
-	tc := e.ExtractFromHeaders(map[string]string{"x-splunk-requestid": strings.Repeat("r", 1000)})
-	if tc == nil || tc.TraceID == "" {
-		t.Fatal("the request id must still seed a trace")
-	}
-	if tc.State != "" {
-		t.Fatalf("request id of %d bytes was carried as trace state", len(tc.State))
-	}
-}

@@ -59,6 +59,12 @@ func (e *JaegerExporter) ExportTraces(traces []*tracker.Trace) error {
 	return e.inner.ExportTraces(traces)
 }
 
+// ExportTracesContext ships the sampled traces through the OTLP exporter;
+// ctx bounds the request.
+func (e *JaegerExporter) ExportTracesContext(ctx context.Context, traces []*tracker.Trace) error {
+	return e.inner.ExportTracesContext(ctx, traces)
+}
+
 func (e *JaegerExporter) Shutdown(ctx context.Context) error {
 	return e.inner.Shutdown(ctx)
 }

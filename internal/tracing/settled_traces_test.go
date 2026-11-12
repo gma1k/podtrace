@@ -37,3 +37,19 @@ func TestSettledTracesByExportOutcome(t *testing.T) {
 		})
 	}
 }
+
+func TestSettledTracesCommitsTheSettledPrefixOfARetriedTrace(t *testing.T) {
+	split := &tracker.Trace{TraceID: "split", Spans: []*tracker.Span{{SpanID: "a"}, {SpanID: "b"}, {SpanID: "c"}}}
+	unsent := &tracker.Trace{TraceID: "unsent", Spans: []*tracker.Span{{SpanID: "d"}}}
+	partial := &exporter.PartialExportError{
+		FailedTraces: map[string]struct{}{"split": {}, "unsent": {}},
+		SettledSpans: map[string]int{"split": 2},
+		Err:          errors.New("503"),
+	}
+
+	got := settledTraces([]*tracker.Trace{split, unsent}, partial)
+
+	if len(got) != 1 || got[0].TraceID != "split" || len(got[0].Spans) != 2 {
+		t.Fatalf("settled = %+v, want only the first 2 spans of the split trace", got)
+	}
+}

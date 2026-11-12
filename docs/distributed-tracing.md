@@ -68,9 +68,10 @@
    - `X-B3-ParentSpanId`: Parent span ID
    - `X-B3-Sampled`: Sampling decision
 
-3. **Splunk Trace Context**
-   - `X-Request-ID`: Trace ID
-   - `X-Span-ID`: Span ID
+Splunk APM and the Splunk OpenTelemetry distributions propagate W3C
+`traceparent`, so their traffic is covered by the first format. A request
+id header such as `X-Request-ID` names a request, not a span, so it gives
+podtrace no parent span to attach to and is not read.
 
 ### Podtrace observes trace context
 

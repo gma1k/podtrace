@@ -164,6 +164,28 @@
       "depNameTemplate": "helm",
       "packageNameTemplate": "helm/helm",
       "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "Track CI tools installed with pipx at a pinned version (semgrep, zizmor); the github-actions manager does not read run steps",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "pipx install (?<depName>[A-Za-z0-9._-]+)==(?<currentValue>[0-9][^\\s]*)"
+      ],
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "customType": "regex",
+      "description": "Track Go CI tools run or installed at a pinned version in workflows (gosec, govulncheck, actionlint). The capture is the module path, keeping a /vN major suffix, because Go resolves versions per module, not per package",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "go (?:run|install) (?<depName>github\\.com/[^/\\s]+/[^/@\\s]+(?:/v[0-9]+)?|golang\\.org/x/[^/@\\s]+)(?:/[^@\\s]*)?@(?<currentValue>v[0-9][^\\s]*)"
+      ],
+      "datasourceTemplate": "go"
     }
   ],
   "vulnerabilityAlerts": {
@@ -205,11 +227,12 @@
       "allowedVersions": "<7"
     },
     {
-      "description": "Group GitHub Actions updates",
+      "description": "Group GitHub Actions updates, and hold each new release for 7 days. SHA pins stop a retagged release from running here; the cooldown stops Renovate from proposing a freshly published malicious one (the tj-actions/changed-files compromise lasted three days)",
       "matchManagers": [
         "github-actions"
       ],
-      "groupName": "github actions"
+      "groupName": "github actions",
+      "minimumReleaseAge": "7 days"
     },
     {
       "description": "Dockerfile base image \u2014 security-sensitive, label clearly",
@@ -304,6 +327,21 @@
         "minor"
       ],
       "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Group the CI tools pinned in workflow run steps, with the same 7-day cooldown as the actions that run them",
+      "matchManagers": [
+        "custom.regex"
+      ],
+      "matchFileNames": [
+        ".github/workflows/**"
+      ],
+      "matchDatasources": [
+        "pypi",
+        "go"
+      ],
+      "groupName": "ci tools",
+      "minimumReleaseAge": "7 days"
     }
   ]
 }

@@ -13,6 +13,7 @@ import (
 // offered again.
 type PartialExportError struct {
 	FailedTraces map[string]struct{}
+	SettledSpans map[string]int
 	Err          error
 }
 
@@ -24,6 +25,13 @@ func (e *PartialExportError) Unwrap() error { return e.Err }
 func (e *PartialExportError) Retry(traceID string) bool {
 	_, ok := e.FailedTraces[traceID]
 	return ok
+}
+
+// SettledPrefix returns how many leading spans of a retried trace the
+// exporter already settled, because the trace was split across requests and
+// the earlier ones went through. Only the spans after them are offered again.
+func (e *PartialExportError) SettledPrefix(traceID string) int {
+	return e.SettledSpans[traceID]
 }
 
 // permanentError marks a failure that resending the same payload cannot fix.
@@ -45,11 +53,24 @@ func isPermanent(err error) bool {
 	return errors.As(err, &p) || errors.Is(err, netguard.ErrBlocked)
 }
 
+// httpStatusError is a collector's answer with an unexpected HTTP status.
+type httpStatusError struct{ code int }
+
+func (e *httpStatusError) Error() string { return fmt.Sprintf("unexpected status code: %d", e.code) }
+
+// isServerError reports whether the collector answered with a 5xx: it is
+// reachable, and the failure may be caused by one payload rather than by
+// the collector as a whole.
+func isServerError(err error) bool {
+	var status *httpStatusError
+	return errors.As(err, &status) && status.code >= 500 && status.code <= 599
+}
+
 // statusError turns an unexpected HTTP status into an error, marking the
 // client errors a backend will keep returning for the same payload as
 // permanent. 408 and 429 are retryable by definition.
 func statusError(code int) error {
-	err := fmt.Errorf("unexpected status code: %d", code)
+	err := &httpStatusError{code: code}
 	if code >= 400 && code < 500 && code != http.StatusRequestTimeout && code != http.StatusTooManyRequests {
 		return permanent(err)
 	}
@@ -58,8 +79,9 @@ func statusError(code int) error {
 
 // exportOutcome accumulates per-trace results of one ExportTraces call.
 type exportOutcome struct {
-	failed map[string]struct{}
-	errs   []error
+	failed  map[string]struct{}
+	settled map[string]int
+	errs    []error
 }
 
 // record notes err against the given traces; transient errors schedule
@@ -72,6 +94,12 @@ func (o *exportOutcome) record(err error, traceIDs ...string) {
 	if isPermanent(err) {
 		return
 	}
+	o.retry(traceIDs...)
+}
+
+// retry schedules traces that were never sent for the next export, without
+// reporting an error of their own.
+func (o *exportOutcome) retry(traceIDs ...string) {
 	if o.failed == nil {
 		o.failed = make(map[string]struct{}, len(traceIDs))
 	}
@@ -80,9 +108,18 @@ func (o *exportOutcome) record(err error, traceIDs ...string) {
 	}
 }
 
+// settle notes that spans more of the trace's leading spans were delivered
+// or permanently refused.
+func (o *exportOutcome) settle(traceID string, spans int) {
+	if o.settled == nil {
+		o.settled = make(map[string]int)
+	}
+	o.settled[traceID] += spans
+}
+
 func (o *exportOutcome) err() error {
 	if len(o.errs) == 0 {
 		return nil
 	}
-	return &PartialExportError{FailedTraces: o.failed, Err: errors.Join(o.errs...)}
+	return &PartialExportError{FailedTraces: o.failed, SettledSpans: o.settled, Err: errors.Join(o.errs...)}
 }

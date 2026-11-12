@@ -13,6 +13,7 @@ import (
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 	"github.com/gma1k/podtrace/internal/alerting"
 	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/reportsink/objectstore"
 )
 
 const (
@@ -67,6 +68,9 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 	reportTo := reportToSpecFromReportRef(s)
 	if reportSinkIsSecret(s) {
 		reportTo = "secret/$(POD_NAMESPACE)/" + SessionReportStagingName(s.UID, node)
+	}
+	if len(targets.Nodes) > 1 {
+		reportTo = objectstore.PerNodeURI(reportTo, node)
 	}
 
 	volumes := []corev1.Volume{

@@ -123,11 +123,16 @@ func NewOTLPExporter(endpoint string, sampleRate float64) (*OTLPExporter, error)
 }
 
 func (e *OTLPExporter) ExportTraces(traces []*tracker.Trace) error {
+	return e.ExportTracesContext(context.Background(), traces)
+}
+
+// ExportTracesContext ships the sampled traces in one OTLP request; ctx
+// bounds it.
+func (e *OTLPExporter) ExportTracesContext(ctx context.Context, traces []*tracker.Trace) error {
 	if !e.enabled || len(traces) == 0 {
 		return nil
 	}
 
-	ctx := context.Background()
 	var outcome exportOutcome
 	var snapshots []sdktrace.ReadOnlySpan
 	var shipped []string

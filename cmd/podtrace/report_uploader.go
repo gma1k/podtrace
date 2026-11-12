@@ -167,8 +167,11 @@ func uploadToObjectStore(ctx context.Context, opts reportUploaderOptions, report
 		return fmt.Errorf("upload report: %w", err)
 	}
 
-	if opts.SummaryFile != "" {
+	if opts.SummaryFile != "" && objectstore.IsPrefixURI(opts.ReportToSpec) {
 		summary, err := hostfs.ReadFile(opts.SummaryFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: summary not uploaded: read summary file: %v\n", err)
+		}
 		if err == nil && len(summary) > 0 {
 			summaryHint := keyHint + ".summary.json"
 			if _, err := sink.Upload(ctx, summaryHint, "application/json", bytes.NewReader(summary)); err != nil {

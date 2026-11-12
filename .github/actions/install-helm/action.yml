@@ -13,7 +13,7 @@ runs:
   using: composite
   steps:
     - shell: bash
-      run: |
+      run: |  # zizmor: ignore[github-env]
         set -euo pipefail
 
         ver="v4.3.1"
@@ -36,5 +36,7 @@ runs:
         mkdir -p "${bin}"
         tar -C "${bin}" --strip-components=1 -xzf "${tmp}" "linux-${arch}/helm"
         chmod 0755 "${bin}/helm"
+        # The path is a fixed RUNNER_TEMP directory holding the checksum-verified
+        # binary; nothing attacker-controlled reaches GITHUB_PATH.
         echo "${bin}" >> "${GITHUB_PATH}"
         "${bin}/helm" version

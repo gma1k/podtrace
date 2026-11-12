@@ -59,9 +59,16 @@ object filename:
 
 In prefix mode the uploader **also** writes a second object:
 `<key>.summary.json` carrying the same compact summary that lands on
-`status.summary`. Use prefix mode unless you have a downstream pipeline
-that needs a fixed key (and accepts that consecutive sessions will
-overwrite it).
+`status.summary`. An exact key holds only the report. Use prefix mode
+unless you have a downstream pipeline that needs a fixed key (and accepts
+that consecutive sessions will overwrite it).
+
+A session that traces pods on more than one node runs one Job per node.
+In prefix mode each node's object is already distinct (the name starts
+with the node's pod name). An exact key gets the node name inserted
+before its extension, so the nodes do not overwrite each other:
+`s3://b/reports/fixed.txt` becomes `s3://b/reports/fixed-<node>.txt` on
+each node. A single-node session writes the exact key unchanged.
 
 ## Credentials
 
@@ -218,7 +225,7 @@ a namespace other than `podtrace-system` needs the admin's
 | `ReportUploaded=False`, message contains `AccessDenied` | credentials are valid but lack `s3:PutObject` (or equivalent) on the bucket |
 | `Degraded=True` reason `ObjectStoreCreds`, message `ambient credentials are not allowed` | session outside `podtrace-system` with no static credential; add keys to the Secret or ask the admin for `crossNamespaceAmbientCredentials` |
 | `Degraded=True` reason `ObjectStoreCreds`, message `custom endpoint host ... is only honoured` | Secret has `endpoint` but no static credential; add the keys or ask the admin to allowlist the host |
-| `ReportUploaded=False`, message contains `netguard: refusing` | the endpoint redirects, or resolves to a link-local / metadata address |
+| `ReportUploaded=False`, `reportFailureReason: AccessDenied`, message contains `netguard: refusing` | the `endpoint` (or a GCS service account's `token_uri`) in the credentials Secret redirects, or resolves to a link-local / metadata address |
 | `ReportUploaded=Unknown` indefinitely | cluster is <1.29 — the sidecar isn't getting native lifecycle semantics; upgrade or flip `tracerConfig.sidecarUploader=false` and use a ConfigMap sink instead |
 
 ## Security considerations

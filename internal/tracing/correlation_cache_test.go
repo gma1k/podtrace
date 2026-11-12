@@ -1,6 +1,7 @@
 package tracing
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -133,7 +134,7 @@ func TestManager_ExportTraces_SuccessAdvancesWatermark(t *testing.T) {
 		SpanID:  "00f067aa0ba902b7",
 	}, nil)
 
-	m.exportTraces(true)
+	m.exportTraces(context.Background(), true)
 	if got := m.traceTracker.SnapshotForExport(m.exportInterval, true, "otlp"); len(got) != 0 {
 		t.Errorf("a successful export must advance the watermark; re-export snapshot = %d traces", len(got))
 	}
@@ -187,7 +188,7 @@ func TestManager_ExportTraces_SplunkFailureAlertSuppressed(t *testing.T) {
 		SpanID:  "00f067aa0ba902b7",
 	}, nil)
 
-	m.exportTraces(true)
+	m.exportTraces(context.Background(), true)
 	if got := m.traceTracker.SnapshotForExport(m.exportInterval, true, "splunk"); len(got) == 0 {
 		t.Error("a failed export must not advance the watermark; the trace should remain exportable")
 	}

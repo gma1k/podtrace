@@ -27,3 +27,20 @@ func TestUploadReport_ReportFileIsSidecarReadable(t *testing.T) {
 		t.Errorf("report.txt mode = %v, must be other-readable for the nonroot sidecar", info.Mode().Perm())
 	}
 }
+
+func TestWriteSummaryFileIsSidecarReadable(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(config.EnvArtifactBaseDir, dir)
+	path := filepath.Join(dir, "summary.json")
+
+	if err := writeSummaryFile(path, SessionSummary{TotalEvents: 1}); err != nil {
+		t.Fatalf("writeSummaryFile: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat summary file: %v", err)
+	}
+	if info.Mode().Perm()&0o004 == 0 {
+		t.Errorf("summary.json mode = %v, must be other-readable for the nonroot sidecar", info.Mode().Perm())
+	}
+}
