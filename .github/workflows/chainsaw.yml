@@ -49,7 +49,7 @@ concurrency:
 
 jobs:
   chainsaw:
-    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
+    if: ${{ !(startsWith(github.head_ref, 'release-please--') && github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CHAINSAW_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 30
 
@@ -217,7 +217,7 @@ jobs:
           kubectl -n podtrace-system wait --for=delete pod -l podtrace.io/component=agent --timeout=180s || true
 
   quickstart-smoke:
-    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
+    if: ${{ !(startsWith(github.head_ref, 'release-please--') && github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:

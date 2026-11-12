@@ -6,6 +6,9 @@
    operator.enabled is a no-op instead of a self-inflicted outage.
 */ -}}
 {{- if and .Values.webhook.enabled .Values.operator.enabled }}
+{{- if and (ne .Values.webhook.certSource "cert-manager") (not .Values.webhook.caBundle) }}
+{{- fail (printf "webhook.certSource=%s needs webhook.caBundle and a %s-webhook-tls Secret: without a CA the API server rejects the webhook's certificate and, with failurePolicy Fail, every podtrace.io create and update" .Values.webhook.certSource (include "podtrace.fullname" .)) }}
+{{- end }}
 ---
 # Validating admission webhook for podtrace.io/v1alpha1.
 #

@@ -103,6 +103,18 @@
     },
     {
       "customType": "regex",
+      "description": "Track the setup-envtest pin in the Makefile; the kubernetes ecosystem group moves it with controller-runtime",
+      "managerFilePatterns": [
+        "/(^|/)Makefile$/"
+      ],
+      "matchStrings": [
+        "SETUP_ENVTEST_VERSION \\?= (?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "depNameTemplate": "sigs.k8s.io/controller-runtime/tools/setup-envtest",
+      "datasourceTemplate": "go"
+    },
+    {
+      "customType": "regex",
       "description": "Track the client-gen/applyconfiguration-gen pin in the Makefile so the generated clientset follows the k8s.io modules it is built against",
       "managerFilePatterns": [
         "/(^|/)Makefile$/"

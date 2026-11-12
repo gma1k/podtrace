@@ -249,7 +249,7 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "5"
-    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded,hook-failed
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -261,11 +261,25 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "5"
-    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded,hook-failed
 rules:
+  {{- /* create cannot be narrowed by name; everything else is limited to
+  the objects this hook applies. */}}
   - apiGroups: ["podtrace.io"]
     resources: ["tracerconfigs", "exporterconfigs"]
-    verbs: ["get", "create", "update", "patch"]
+    verbs: ["create"]
+  {{- if $tcEnabled }}
+  - apiGroups: ["podtrace.io"]
+    resources: ["tracerconfigs"]
+    resourceNames: [{{ .Values.tracerConfig.name | default "default" | quote }}]
+    verbs: ["get", "update", "patch"]
+  {{- end }}
+  {{- if $ecEnabled }}
+  - apiGroups: ["podtrace.io"]
+    resources: ["exporterconfigs"]
+    resourceNames: [{{ .Values.examples.exporterconfig.name | default "starter-otlp" | quote }}]
+    verbs: ["get", "update", "patch"]
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -277,7 +291,7 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "5"
-    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded,hook-failed
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole

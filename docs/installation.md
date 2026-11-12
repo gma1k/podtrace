@@ -186,11 +186,11 @@ recorded in the public Rekor transparency log. Verify before running:
 ```bash
 gh attestation verify oci://ghcr.io/gma1k/podtrace:latest \
   --repo gma1k/podtrace \
-  --signer-workflow gma1k/podtrace/.github/workflows/release.yml
+  --cert-identity-regex '^https://github\.com/gma1k/podtrace/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'
 ```
 
 That checks in one step that the image was built by the release workflow in
-this repository. To check the cosign signature specifically:
+this repository, from a release tag. To check the cosign signature specifically:
 
 ```bash
 # x-release-please-version
@@ -219,7 +219,7 @@ done
 gh attestation verify quickstart.yaml \
   --bundle quickstart.sigstore.json \
   --repo gma1k/podtrace \
-  --signer-workflow gma1k/podtrace/.github/workflows/release.yml
+  --cert-identity-regex '^https://github\.com/gma1k/podtrace/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'
 ```
 
 The `.sha256` companions are still published for scripts that consume them,
@@ -311,7 +311,7 @@ curl -fsSLO https://github.com/gma1k/podtrace/releases/latest/download/podtrace_
 
 gh attestation verify podtrace_linux_amd64.tar.gz \
   --repo gma1k/podtrace \
-  --signer-workflow gma1k/podtrace/.github/workflows/release.yml
+  --cert-identity-regex '^https://github\.com/gma1k/podtrace/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'
 ```
 
 ##### Alternative: cosign keyless + sha256sum
@@ -777,9 +777,13 @@ issues serving certs and annotates the `ValidatingWebhookConfiguration`
 with `cert-manager.io/inject-ca-from`. Requires cert-manager already
 installed.
 
-For air-gapped clusters without cert-manager, switch to
-`webhook.certSource=self-signed` and supply `webhook.caBundle` /
-`webhook.tls` directly.
+For clusters without cert-manager, set `webhook.certSource=manual`, create
+the serving certificate yourself as the `podtrace-webhook-tls` Secret
+(`tls.crt` / `tls.key`, for the `podtrace-webhook.podtrace-system.svc`
+DNS name) and pass the base64-encoded CA that signed it as
+`webhook.caBundle`. The chart refuses to render without the CA bundle,
+because the webhook fails closed. `self-signed` is accepted as an alias of
+`manual`.
 
 ### kind quick start
 

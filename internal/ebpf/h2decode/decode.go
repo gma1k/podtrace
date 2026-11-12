@@ -372,7 +372,7 @@ func (d *Decoder) isSequenceRestart(st *dirState, seq uint32) bool {
 	if st.inSkippedRange(seq) {
 		return false
 	}
-	return seq == 0 || st.nextSeq-seq > uint32(d.maxPendingPerDir)
+	return seq == 0 || st.nextSeq-seq > safeconv.IntToUint32(d.maxPendingPerDir)
 }
 
 // restartDir resets a direction to decode a new connection from seq.

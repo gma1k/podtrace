@@ -52,6 +52,7 @@ helm template podtrace "${chart}" \
 	--include-crds \
 	--set namespace.create=false \
 	--set operator.enabled=true \
+	--set crds.adopt=false \
 	"$@" |
 	drop_uninstall_hooks >>"${out}"
 
@@ -59,7 +60,9 @@ if grep -q "helm.sh/hook:.*pre-delete" "${out}"; then
 	echo "render-quickstart.sh: pre-delete hooks survived the filter in ${out}" >&2
 	exit 1
 fi
-if grep -q "namespace-bootstrap" "${out}"; then
-	echo "render-quickstart.sh: namespace-bootstrap leaked into ${out}" >&2
-	exit 1
-fi
+for hook in namespace-bootstrap crd-labeler; do
+	if grep -q "${hook}" "${out}"; then
+		echo "render-quickstart.sh: ${hook} leaked into ${out}" >&2
+		exit 1
+	fi
+done

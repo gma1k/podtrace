@@ -94,7 +94,7 @@ Cross-namespace targets must consent with the
   workload namespaces stay as they are.
 - The validating webhook (`webhook.enabled=true`, off by default) needs a
   serving certificate: cert-manager by default, or your own with
-  `webhook.certSource` set to another value, `webhook.caBundle`, and a
+  `webhook.certSource=manual`, `webhook.caBundle`, and a
   `podtrace-webhook-tls` Secret.
 
 See the [compatibility matrix](https://github.com/gma1k/podtrace/blob/main/docs/compatibility.md)
