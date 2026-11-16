@@ -1,9 +1,7 @@
 name: Label Conventional PRs
 
-# pull_request_target is needed to label fork PRs. The job checks out no PR
-# code and reads the title only through an environment variable.
 on:
-  pull_request_target:  # zizmor: ignore[dangerous-triggers]
+  pull_request:
     types: [opened, edited, reopened, synchronize]
 
 permissions:
@@ -12,6 +10,7 @@ permissions:
 
 jobs:
   label:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-26.04
     steps:
       - name: Apply conventional-commit label from PR title
