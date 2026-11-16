@@ -378,7 +378,7 @@ docker-build: bpf-btf-header
 ENVTEST_K8S_VERSION ?= 1.37.x
 ENVTEST_BIN_DIR ?= $(shell go env GOPATH 2>/dev/null)/envtest-assets
 SETUP_ENVTEST ?= $(shell go env GOPATH 2>/dev/null)/bin/setup-envtest
-SETUP_ENVTEST_VERSION ?= v0.25.2
+SETUP_ENVTEST_VERSION ?= v0.25.3
 envtest:
 	@GOBIN=$(dir $(SETUP_ENVTEST)) $(GO) install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(SETUP_ENVTEST_VERSION)
 	KUBEBUILDER_ASSETS=$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir=$(ENVTEST_BIN_DIR) -p path) \
