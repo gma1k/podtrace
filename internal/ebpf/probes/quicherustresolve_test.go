@@ -8,7 +8,7 @@ func TestQuicheRustSendRequestPattern(t *testing.T) {
 		"_RNvMs2_NtCs4fqI2P2rA04_6quiche2h3NtB5_10Connection12send_request",
 	}
 	for _, name := range matches {
-		if !nameContainsAll(name, quicheRustSendRequestPattern...) {
+		if !nameContainsAll([]byte(name), quicheRustSendRequestPattern...) {
 			t.Errorf("pattern did not match %q", name)
 		}
 	}
@@ -21,7 +21,7 @@ func TestQuicheRustSendRequestPattern(t *testing.T) {
 		"_ZN6quiche10Connection11stream_send17h5555555555555555E",
 	}
 	for _, name := range rejects {
-		if nameContainsAll(name, quicheRustSendRequestPattern...) {
+		if nameContainsAll([]byte(name), quicheRustSendRequestPattern...) {
 			t.Errorf("pattern wrongly matched %q", name)
 		}
 	}

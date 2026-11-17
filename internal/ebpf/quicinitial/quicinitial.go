@@ -484,21 +484,19 @@ func parseALPNExtension(d []byte) []string {
 	if len(d) < 2 {
 		return nil
 	}
-	listLen := int(binary.BigEndian.Uint16(d))
-	p := 2
-	end := p + listLen
-	if end > len(d) {
-		end = len(d)
+	list := d[2:]
+	if listLen := int(binary.BigEndian.Uint16(d)); listLen < len(list) {
+		list = list[:listLen]
 	}
 	var out []string
-	for p+1 <= end {
-		n := int(d[p])
-		p++
-		if n == 0 || p+n > end {
+	for len(list) > 0 {
+		n := int(list[0])
+		list = list[1:]
+		if n == 0 || n > len(list) {
 			break
 		}
-		out = append(out, string(d[p:p+n]))
-		p += n
+		out = append(out, string(list[:n]))
+		list = list[n:]
 	}
 	return out
 }

@@ -19,6 +19,7 @@ type fileID struct {
 	ino     uint64
 	size    int64
 	mtimeNs int64
+	ctimeNs int64
 	buildID string
 }
 
@@ -39,7 +40,7 @@ func fileIDOf(fi fs.FileInfo) (fileID, bool) {
 	if !ok {
 		return fileID{}, false
 	}
-	return fileID{ino: st.Ino, size: fi.Size(), mtimeNs: fi.ModTime().UnixNano()}, true
+	return fileID{ino: st.Ino, size: fi.Size(), mtimeNs: fi.ModTime().UnixNano(), ctimeNs: changeTimeNs(st)}, true
 }
 
 // uprobeSite is one uprobe: a program at a place in a file.
@@ -176,6 +177,7 @@ type executable struct {
 	file          *os.File
 	id            fileID
 	shared        bool
+	symbolsOnce   sync.Once
 	symbolsUnsafe bool
 }
 
@@ -202,27 +204,55 @@ var (
 // openExecutable opens a file for uprobes that are shared with every other
 // holder attaching the same program to the same place in the same file.
 // Callers Close it once their attaches are done; links stay valid after.
+//
+// Everything a caller resolves for these uprobes must be parsed from Path,
+// the file held open here, never from a second open of the original path: a
+// process can exec another binary in between, and offsets read from that one
+// would land in this one.
 func openExecutable(path string) (*executable, error) {
-	f, fi, err := safeelf.OpenRegular(path)
+	f, fi, err := openAttachTarget(path)
 	if err != nil {
 		return nil, err
 	}
-	pinned := safeelf.PinnedPath(f, path)
-	exe, err := openLinkExecutable(pinned)
+	exe, err := openLinkExecutable(safeelf.PinnedPath(f, path))
 	if err != nil {
 		_ = f.Close()
 		return nil, err
 	}
 	id, ok := fileIDOf(fi)
-	safe, buildID := inspectSymbolTables(pinned)
-	id.buildID = buildID
+	if ok {
+		id.buildID = buildIDOf(f)
+	}
 	return &executable{
-		Executable:    exe,
-		file:          f,
-		id:            id,
-		shared:        ok,
-		symbolsUnsafe: !safe,
+		Executable: exe,
+		file:       f,
+		id:         id,
+		shared:     ok,
 	}, nil
+}
+
+var openWithinRoot = safeelf.OpenWithinRoot
+
+// openAttachTarget opens path as the file to attach to. A path inside a
+// process's root is resolved again within that root, so a directory the pod
+// swapped for a symlink after the path was checked cannot lead the open out
+// of its rootfs; the file opened is the one attached.
+func openAttachTarget(path string) (*os.File, os.FileInfo, error) {
+	if root, rel, ok := splitProcRoot(path); ok {
+		f, fi, err := openWithinRoot(root, rel)
+		if !errors.Is(err, safeelf.ErrConfinementUnsupported) {
+			return f, fi, err
+		}
+	}
+	return safeelf.OpenRegular(path)
+}
+
+// Path names the file the executable holds open, valid until Close.
+func (e *executable) Path() string {
+	if e == nil || e.file == nil {
+		return ""
+	}
+	return safeelf.PinnedPath(e.file, e.file.Name())
 }
 
 // Close releases the file the executable holds open.
@@ -233,17 +263,38 @@ func (e *executable) Close() error {
 	return e.file.Close()
 }
 
-// inspectSymbolTables reports whether the ELF at path has symbol tables
-// small enough for cilium to parse, and its GNU build-id. A file that is not
-// ELF passes, and fails in cilium as it would have.
-func inspectSymbolTables(path string) (within bool, buildID string) {
-	defer recoverParse("inspectSymbolTables")
-	f, err := elf.Open(path)
+// buildIDOf returns the GNU build-id of the ELF f holds open, or "" for a
+// file that is not ELF.
+func buildIDOf(f *os.File) (buildID string) {
+	defer recoverParse("buildIDOf")
+	ef, err := elf.NewFile(f)
 	if err != nil {
-		return true, ""
+		return ""
 	}
-	defer func() { _ = f.Close() }()
-	return safeelf.SymbolTablesWithinCap(f), elfBuildID(f)
+	return elfBuildID(ef)
+}
+
+// symbolTablesUnsafe reports whether the file's symbol tables are too large
+// for cilium to resolve symbols in, checked on the first attach by name.
+func (e *executable) symbolTablesUnsafe() bool {
+	e.symbolsOnce.Do(func() {
+		if e.file != nil {
+			e.symbolsUnsafe = !symbolTablesWithinCap(e.file)
+		}
+	})
+	return e.symbolsUnsafe
+}
+
+// symbolTablesWithinCap reports whether the ELF f holds open has symbol
+// tables small enough for cilium to parse. A file that is not ELF passes,
+// and fails in cilium as it would have.
+func symbolTablesWithinCap(f *os.File) (within bool) {
+	defer recoverParse("symbolTablesWithinCap")
+	ef, err := elf.NewFile(f)
+	if err != nil {
+		return true
+	}
+	return safeelf.SymbolTablesWithinCap(ef)
 }
 
 // Uprobe attaches prog at the entry of symbol, or returns a handle on the
@@ -265,7 +316,7 @@ func (e *executable) uprobeWithHooks(prog *ebpf.Program, opts *link.UprobeOption
 
 func (e *executable) attach(symbol string, prog *ebpf.Program, opts *link.UprobeOptions, ret bool, hooks siteHooks) (link.Link, error) {
 	if symbol != "" && (opts == nil || opts.Address == 0) {
-		if e.symbolsUnsafe {
+		if e.symbolTablesUnsafe() {
 			return nil, fmt.Errorf("symbol %s: %w", symbol, errSymbolTablesTooLarge)
 		}
 		// Parse the symbol tables now, outside the registry lock that

@@ -1927,20 +1927,36 @@ func AttachTLSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint3
 	}
 
 	if pid > 0 {
-		exePath := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "exe")
-		if !executableExportsSSL(exePath) {
-			if off, ok := resolveSSLOffsets(exePath, pid); ok {
-				if l := attachSSLByOffset(coll, exePath, off); len(l) > 0 {
-					links = append(links, l...)
-					logger.Info("TLS probes attached by offset (stripped binary)",
-						zap.String("exe", exePath), zap.String("source", off.source),
-						zap.Int("links", len(l)))
-				}
-			}
-		}
+		links = append(links, attachStrippedExecutableTLS(coll, pid)...)
 	}
 
 	logger.Debug("TLS probe attach complete", zap.Int("links", len(links)))
+	return links
+}
+
+// attachStrippedExecutableTLS attaches the SSL_* uprobes to pid's own
+// executable when it links OpenSSL statically with its symbols stripped,
+// placing them at offsets its debug file names.
+func attachStrippedExecutableTLS(coll *ebpf.Collection, pid uint32) []link.Link {
+	exePath := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "exe")
+	exe, err := openExecutable(exePath)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = exe.Close() }()
+	if executableExportsSSL(exe.Path()) {
+		return nil
+	}
+	off, ok := resolveSSLOffsets(exe.Path(), pid)
+	if !ok {
+		return nil
+	}
+	links := attachSSLByOffset(coll, exe, pid, off)
+	if len(links) > 0 {
+		logger.Info("TLS probes attached by offset (stripped binary)",
+			zap.String("exe", exePath), zap.String("source", off.source),
+			zap.Int("links", len(links)))
+	}
 	return links
 }
 
@@ -1962,11 +1978,12 @@ func AttachGoTLSProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 		return links
 	}
 	defer func() { _ = exe.Close() }()
-	links = append(links, attachGoHandshakeProbes(coll, exe, exePath, pid)...)
+	parsed := exe.Path()
+	links = append(links, attachGoHandshakeProbes(coll, exe, parsed, pid)...)
 	const sym = "crypto/tls.(*Conn).Write"
 	l, err := exe.Uprobe(sym, prog, nil)
 	if err != nil {
-		if off, ok := goSymbolFileOffset(exePath, sym); ok {
+		if off, ok := goSymbolFileOffset(parsed, sym); ok {
 			l, err = exe.Uprobe("", prog, &link.UprobeOptions{Address: off})
 			if err == nil {
 				logger.Debug("Go TLS uprobe attached via gopclntab",
@@ -1982,7 +1999,7 @@ func AttachGoTLSProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 	links = append(links, l)
 	logger.Debug("Go TLS uprobe attached", zap.Uint32("pid", pid))
 
-	links = append(links, attachGoTLSReadProbes(coll, exe, exePath, pid)...)
+	links = append(links, attachGoTLSReadProbes(coll, exe, parsed, pid)...)
 	return links
 }
 
@@ -2033,6 +2050,7 @@ func AttachGoGRPCProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 		return links
 	}
 	defer func() { _ = exe.Close() }()
+	parsed := exe.Path()
 	targets := []struct{ prog, sym string }{
 		{"uprobe_grpc_go_write_header", "google.golang.org/grpc/internal/transport.(*loopyWriter).writeHeader"},
 		{"uprobe_grpc_go_server_headers", "google.golang.org/grpc/internal/transport.(*http2Server).operateHeaders"},
@@ -2045,7 +2063,7 @@ func AttachGoGRPCProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 		}
 		l, err := exe.Uprobe(t.sym, prog, nil)
 		if err != nil {
-			if off, ok := goSymbolFileOffset(exePath, t.sym); ok {
+			if off, ok := goSymbolFileOffset(parsed, t.sym); ok {
 				l, err = exe.Uprobe("", prog, &link.UprobeOptions{Address: off})
 			}
 		}
@@ -2058,7 +2076,7 @@ func AttachGoGRPCProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 		logger.Debug("Go gRPC uprobe attached", zap.String("symbol", t.sym), zap.Uint32("pid", pid))
 	}
 	if len(links) > 0 {
-		publishGRPCGoOffsets(coll, exePath, pid)
+		publishGRPCGoOffsets(coll, parsed, pid)
 	}
 	return links
 }
@@ -2099,6 +2117,7 @@ func publishPoolOffsets(coll *ebpf.Collection, exePath string, pid uint32) {
 	}
 	off, ok := resolvePoolFieldOffsets(exePath, pid)
 	if !ok {
+		_ = m.Delete(pid)
 		return
 	}
 	value := struct{ NumOpen, MaxOpen, FreeConn uint32 }{NumOpen: off.NumOpen, MaxOpen: off.MaxOpen, FreeConn: off.FreeConn}
@@ -2126,14 +2145,6 @@ func attachGoAcquireProbes(coll *ebpf.Collection, exePath string, pid uint32) []
 		return links
 	}
 
-	const sym = "database/sql.(*DB).conn"
-	entryOff, retOffs, ok := goFuncReturnOffsets(exePath, sym)
-	if !ok {
-		logger.Debug("Go pool wait probe: symbol not resolved",
-			zap.String("path", exePath), zap.Uint32("pid", pid))
-		return links
-	}
-
 	exe, err := openExecutable(exePath)
 	if err != nil {
 		logger.Debug("Go pool wait probe: cannot open executable",
@@ -2141,6 +2152,14 @@ func attachGoAcquireProbes(coll *ebpf.Collection, exePath string, pid uint32) []
 		return links
 	}
 	defer func() { _ = exe.Close() }()
+
+	const sym = "database/sql.(*DB).conn"
+	entryOff, retOffs, ok := goFuncReturns(exe.Path(), sym)
+	if !ok {
+		logger.Debug("Go pool wait probe: symbol not resolved",
+			zap.String("path", exePath), zap.Uint32("pid", pid))
+		return links
+	}
 
 	el, err := exe.Uprobe("", entryProg, &link.UprobeOptions{Address: entryOff})
 	if err != nil {
@@ -2152,7 +2171,7 @@ func attachGoAcquireProbes(coll *ebpf.Collection, exePath string, pid uint32) []
 	// Publish the DB field offsets before the probe can fire. Without an
 	// entry the BPF side emits no pool stats at all, which is the intended
 	// behaviour for a binary that shipped no DWARF.
-	publishPoolOffsets(coll, exePath, pid)
+	publishPoolOffsets(coll, exe.Path(), pid)
 
 	attached := 0
 	for _, ro := range retOffs {
@@ -2194,9 +2213,10 @@ func AttachGoHTTP3Probes(coll *ebpf.Collection, pid uint32) []link.Link {
 		return links
 	}
 	defer func() { _ = exe.Close() }()
+	parsed := exe.Path()
 
 	if m := coll.Maps["h3_offsets"]; m != nil {
-		off, src := resolveH3FieldOffsets(exePath, pid)
+		off, src := resolveH3FieldOffsets(parsed, pid)
 		tgid := pid
 		if err := m.Update(&tgid, &off, ebpf.UpdateAny); err != nil {
 			logger.Debug("HTTP/3 offsets: map update failed", zap.Uint32("pid", pid), zap.Error(err))
@@ -2216,7 +2236,7 @@ func AttachGoHTTP3Probes(coll *ebpf.Collection, pid uint32) []link.Link {
 			"github.com/quic-go/quic-go/http3.SingleDestinationRoundTripper"},
 		{"github.com/quic-go/quic-go/http3.(*Transport).RoundTrip", ""},
 	} {
-		ls := attachGoEntryReturnProbes(coll, exe, exePath, pid, cand.sym,
+		ls := attachGoEntryReturnProbes(coll, exe, parsed, pid, cand.sym,
 			"uprobe_h3_roundtrip", "uprobe_h3_roundtrip_ret")
 		if len(ls) > 0 {
 			links = append(links, ls...)
@@ -2226,7 +2246,7 @@ func AttachGoHTTP3Probes(coll *ebpf.Collection, pid uint32) []link.Link {
 	}
 
 	if m := coll.Maps["h3_peer_paths_map"]; m != nil {
-		if paths, ok := resolveH3PeerPaths(exePath, pid, clientRootType); ok {
+		if paths, ok := resolveH3PeerPaths(parsed, pid, clientRootType); ok {
 			tgid := pid
 			if err := m.Update(&tgid, &paths, ebpf.UpdateAny); err != nil {
 				logger.Debug("HTTP/3 peer paths: map update failed",
@@ -2238,12 +2258,14 @@ func AttachGoHTTP3Probes(coll *ebpf.Collection, pid uint32) []link.Link {
 					zap.Uint8("server_steps", paths.Server.NSteps))
 			}
 		} else {
+			tgid := pid
+			_ = m.Delete(&tgid)
 			logger.Debug("HTTP/3 peer paths unresolved (no DWARF or unsupported quic-go layout)",
 				zap.Uint32("pid", pid))
 		}
 	}
 
-	links = append(links, attachGoReturnProbes(coll, exe, exePath, pid,
+	links = append(links, attachGoReturnProbes(coll, exe, parsed, pid,
 		"github.com/quic-go/quic-go/http3.requestFromHeaders",
 		"uprobe_h3_req_from_headers_ret")...)
 
@@ -2252,7 +2274,7 @@ func AttachGoHTTP3Probes(coll *ebpf.Collection, pid uint32) []link.Link {
 		"github.com/quic-go/quic-go/http3.(*ServerConn).handleRequestStream",
 		"github.com/quic-go/quic-go/http3.(*connection).handleRequestStream",
 	} {
-		if ls := attachGoReturnProbes(coll, exe, exePath, pid, sym,
+		if ls := attachGoReturnProbes(coll, exe, parsed, pid, sym,
 			"uprobe_h3_handle_request_ret"); len(ls) > 0 {
 			links = append(links, ls...)
 			break
@@ -2260,7 +2282,7 @@ func AttachGoHTTP3Probes(coll *ebpf.Collection, pid uint32) []link.Link {
 	}
 	if prog := coll.Programs["uprobe_h3_write_header"]; prog != nil {
 		const sym = "github.com/quic-go/quic-go/http3.(*responseWriter).WriteHeader"
-		if l, ok := attachGoUprobeBySymbol(exe, exePath, sym, prog); ok {
+		if l, ok := attachGoUprobeBySymbol(exe, parsed, sym, prog); ok {
 			links = append(links, l)
 			logger.Debug("Go HTTP/3 WriteHeader uprobe attached", zap.Uint32("pid", pid))
 		}
@@ -2268,12 +2290,12 @@ func AttachGoHTTP3Probes(coll *ebpf.Collection, pid uint32) []link.Link {
 
 	if prog := coll.Programs["uprobe_h3_qpack_write_field"]; prog != nil {
 		const sym = "github.com/quic-go/qpack.(*Encoder).WriteField"
-		if l, ok := attachGoUprobeBySymbol(exe, exePath, sym, prog); ok {
+		if l, ok := attachGoUprobeBySymbol(exe, parsed, sym, prog); ok {
 			links = append(links, l)
 			logger.Debug("Go HTTP/3 WriteField (traceparent) uprobe attached", zap.Uint32("pid", pid))
 		}
 	}
-	links = append(links, attachGoEntryReturnProbes(coll, exe, exePath, pid,
+	links = append(links, attachGoEntryReturnProbes(coll, exe, parsed, pid,
 		"github.com/quic-go/quic-go/http3.parseHeaders",
 		"uprobe_h3_parse_headers", "uprobe_h3_parse_headers_ret")...)
 

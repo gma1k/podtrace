@@ -481,7 +481,7 @@ The Go application:
 
 ## Limitations
 
-- **Kernel version**: Requires 5.8+ for ring buffer support
+- **Kernel version**: Requires 6.4+: the socket payload probes read the 6.4 `iov_iter` layout and the OOM probe needs 6.2 kfuncs (see [compatibility.md](compatibility.md#hard-requirement-64))
 - **BTF**: Requires BTF for CO-RE (Compile Once - Run Everywhere)
 - **Permissions**: Requires CAP_SYS_ADMIN or CAP_BPF
 - **Map size**: Limited by kernel configuration

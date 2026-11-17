@@ -49,7 +49,10 @@ Notes:
   code), so only connection-layer visibility is possible.
 - **Symbol resolution** for quic-go uses `.gopclntab` (works on stripped
   binaries); struct field offsets and the peer walk (below) prefer DWARF with
-  a build-id / `.gnu_debuglink` debug-file fallback.
+  a build-id / `.gnu_debuglink` debug-file fallback. As with gdb, a debug file
+  is used only when it is the one built with the binary: it carries the
+  binary's GNU build-id or, for a binary without one, the CRC32 its
+  `.gnu_debuglink` records.
 
 ## L7 peer attribution
 

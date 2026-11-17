@@ -74,17 +74,17 @@ func mappedFilesMatching(pid uint32, patterns []string) []string {
 		if !e.Named() || !containsAnyPattern(e.Path, patterns) {
 			return true
 		}
-		if e.Inode != 0 {
-			id := mappedFileID{device: e.Device, inode: e.Inode}
-			if _, dup := mapped[id]; dup {
-				return true
-			}
-			mapped[id] = struct{}{}
+		id := mappedFileID{device: e.Device, inode: e.Inode}
+		if _, dup := mapped[id]; dup && e.Inode != 0 {
+			return true
 		}
 		resolved := resolveMappedFile(pid, e)
 		key := inodeKey(resolved)
 		if key == "" {
 			return true
+		}
+		if e.Inode != 0 {
+			mapped[id] = struct{}{}
 		}
 		if _, dup := seen[key]; dup {
 			return true

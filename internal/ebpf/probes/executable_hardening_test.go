@@ -75,11 +75,11 @@ func TestAnExecutableKeepsTheCheckedFileOpenUntilClosed(t *testing.T) {
 	if _, err := os.Stat(pinned); err != nil {
 		t.Fatalf("the pinned path %s is not open: %v", pinned, err)
 	}
+	if exe.symbolTablesUnsafe() {
+		t.Error("the test binary's symbol tables were judged too large")
+	}
 	if err := exe.Close(); err != nil {
 		t.Fatal(err)
-	}
-	if exe.symbolsUnsafe {
-		t.Error("the test binary's symbol tables were judged too large")
 	}
 }
 

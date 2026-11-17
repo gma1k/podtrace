@@ -15,12 +15,19 @@
 #
 # Then pass --service-account=podtrace-cli to the CLI, or set
 # PODTRACE_SPAWN_SA=podtrace-cli.
-
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: podtrace-cli
+  labels:
+    app.kubernetes.io/managed-by: podtrace-cli
+    pod-security.kubernetes.io/enforce: privileged
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: podtrace-cli
-  namespace: kube-system
+  namespace: podtrace-cli
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -48,4 +55,4 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: podtrace-cli
-  namespace: kube-system
+  namespace: podtrace-cli

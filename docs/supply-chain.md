@@ -74,8 +74,12 @@ github.com. You must already be authenticated to the registry.
 
 ### Helm chart
 
+Charts are pushed by version only; there is no `:latest` chart tag. Set
+`CHART_VERSION` to the version you install.
+
 ```bash
-gh attestation verify oci://ghcr.io/gma1k/charts/podtrace:latest \
+CHART_VERSION=0.15.4 # x-release-please-version
+gh attestation verify "oci://ghcr.io/gma1k/charts/podtrace:${CHART_VERSION}" \
   --repo gma1k/podtrace \
   --cert-identity-regex '^https://github\.com/gma1k/podtrace/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'
 ```

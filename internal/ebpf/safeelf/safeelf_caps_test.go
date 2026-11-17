@@ -66,7 +66,7 @@ func TestSectionData_ReadsRealSection(t *testing.T) {
 	}
 }
 
-func TestSymbolSectionWithinCap_RealELF(t *testing.T) {
+func TestSymbolTablesOfARealELFAreWithinCap(t *testing.T) {
 	exe, err := os.Executable()
 	if err != nil {
 		t.Skipf("cannot find test executable: %v", err)
@@ -77,16 +77,11 @@ func TestSymbolSectionWithinCap_RealELF(t *testing.T) {
 	}
 	defer func() { _ = f.Close() }()
 
-	if SymbolSectionWithinCap(f, ".this-section-does-not-exist") {
-		t.Error("SymbolSectionWithinCap must be false for an absent section")
+	if f.SectionByType(elf.SHT_SYMTAB) == nil {
+		t.Skip("test binary has no symbol table to assert on")
 	}
-
-	present := firstPresentSymbolSection(f)
-	if present == "" {
-		t.Skip("test binary has no symbol section to assert on")
-	}
-	if !SymbolSectionWithinCap(f, present) {
-		t.Errorf("SymbolSectionWithinCap(%q) = false, want true for a small real symbol table", present)
+	if !SymbolTableWithinCap(f, elf.SHT_SYMTAB) || !SymbolTablesWithinCap(f) {
+		t.Error("the test binary's symbol tables were judged too large")
 	}
 }
 
@@ -155,29 +150,19 @@ func smallReadableSection(f *elf.File) *elf.Section {
 	return nil
 }
 
-func firstPresentSymbolSection(f *elf.File) string {
-	for _, name := range []string{".symtab", ".dynsym"} {
-		if f.Section(name) != nil {
-			return name
-		}
-	}
-	return ""
-}
-
 func TestASymbolTableOverTheCapIsRejected(t *testing.T) {
 	huge := &elf.File{Sections: []*elf.Section{
-		{SectionHeader: elf.SectionHeader{Name: ".dynsym", Size: 1024}},
-		{SectionHeader: elf.SectionHeader{Name: ".symtab", Size: MaxSymbolTableSize + 1}},
+		{SectionHeader: elf.SectionHeader{Name: ".dynsym", Type: elf.SHT_DYNSYM, Size: 1024}},
+		{SectionHeader: elf.SectionHeader{Name: ".symtab", Type: elf.SHT_SYMTAB, Size: MaxSymbolTableSize + 1, Link: 0}},
 	}}
 	if SymbolTablesWithinCap(huge) {
 		t.Error("a .symtab over MaxSymbolTableSize passed; cilium would expand it to several times its size")
 	}
-	if SymbolSectionWithinCap(huge, ".symtab") {
-		t.Error("SymbolSectionWithinCap passed a .symtab over MaxSymbolTableSize")
+	if SymbolTableWithinCap(huge, elf.SHT_SYMTAB) {
+		t.Error("SymbolTableWithinCap passed a .symtab over MaxSymbolTableSize")
 	}
-	small := &elf.File{Sections: []*elf.Section{{SectionHeader: elf.SectionHeader{Name: ".symtab", Size: 1024}}}}
-	if !SymbolTablesWithinCap(small) || !SymbolTablesWithinCap(&elf.File{}) {
-		t.Error("a small or absent symbol table was rejected")
+	if !SymbolTablesWithinCap(&elf.File{}) {
+		t.Error("a file without symbol tables was rejected")
 	}
 }
 

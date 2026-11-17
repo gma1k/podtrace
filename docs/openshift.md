@@ -46,7 +46,7 @@ mode by default on all RHEL-based OpenShift nodes.
 | cgroup driver | systemd |
 | cgroup version | v1 (≤4.13) / v2 (≥4.14) |
 | SELinux | Enforcing |
-| Kernel | RHEL 9 (5.14) ✅ full L7 (backports `bpf_loop`); RHEL 8 (4.18) ❌ below the 5.8 floor. Mainline `bpf_loop` = 5.17+; older kernels auto-run core L4 only |
+| Kernel | RHEL 9 (5.14) ⚠️ unverified: it loads only if the kernel backports the 6.4 `iov_iter` layout and the 6.2 `bpf_task_from_pid` kfunc ([hard requirement](compatibility.md#hard-requirement-64)); RHEL 8 (4.18) ❌. Mainline `bpf_loop` = 5.17+; older kernels auto-run core L4 only |
 | BTF | ✅ (RHEL 9 kernel), partial (RHEL 8) |
 
 ## Prerequisites
@@ -249,8 +249,11 @@ PODTRACE_CRI_CGROUP_FIELDS=linux.cgroupsPath,cgroupDirectory
 
 ## Known issues
 
-- **RHEL 8 kernels** (4.18) are below the 5.8 floor for BPF ring buffers.
-  OpenShift 4.14+ on RHEL 9 uses kernel 5.14, which gets full L7 tracing because
+- **RHEL 8 kernels** (4.18) are below the floor (BPF ring buffers alone need
+  5.8). OpenShift 4.14+ on RHEL 9 uses kernel 5.14, which is below the mainline
+  [6.4 requirement](compatibility.md#hard-requirement-64) and loads only where
+  RHEL backports the newer `iov_iter` layout and kfuncs (unverified). Where it
+  loads, it gets full L7 tracing because
   RHEL backports the `bpf_loop` helper (mainline 5.17+); podtrace detects the
   helper at load time, so a kernel without it keeps core L4 tracing and only the
   L7 probes are disabled. On older RHEL 8 nodes, BPF perf buffer fallback is not

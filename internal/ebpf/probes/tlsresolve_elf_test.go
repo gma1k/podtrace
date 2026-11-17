@@ -44,13 +44,24 @@ func TestElfBuildIDNoNote(t *testing.T) {
 }
 
 func TestDebugLink(t *testing.T) {
-	data := append([]byte("libfoo.so.debug"), 0, 0, 0xde, 0xad, 0xbe, 0xef)
+	data := append([]byte("libfoo.so.debug"), 0, 0xef, 0xbe, 0xad, 0xde)
 	f, err := elfFromSections([]fixtureSection{{name: ".gnu_debuglink", typ: 1, data: data}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := debugLink(f); got != "libfoo.so.debug" {
-		t.Errorf("debugLink = %q, want libfoo.so.debug", got)
+	name, crc, hasCRC := debugLink(f)
+	if name != "libfoo.so.debug" || !hasCRC || crc != 0xdeadbeef {
+		t.Errorf("debugLink = (%q, %#x, %v), want (libfoo.so.debug, 0xdeadbeef, true)", name, crc, hasCRC)
+	}
+}
+
+func TestDebugLinkWithoutItsCRCKeepsTheName(t *testing.T) {
+	f, err := elfFromSections([]fixtureSection{{name: ".gnu_debuglink", typ: 1, data: []byte("app.debug\x00")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name, _, hasCRC := debugLink(f); name != "app.debug" || hasCRC {
+		t.Errorf("debugLink = (%q, hasCRC %v), want (app.debug, false)", name, hasCRC)
 	}
 }
 
@@ -59,27 +70,7 @@ func TestDebugLinkAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := debugLink(f); got != "" {
-		t.Errorf("debugLink = %q, want empty when the section is absent", got)
-	}
-}
-
-func TestSymbolVaddr(t *testing.T) {
-	bin := goFixtureBinary(t)
-	f, err := openELFCapped(bin)
-	if err != nil {
-		t.Fatalf("open fixture: %v", err)
-	}
-	defer func() { _ = f.Close() }()
-
-	vaddr, ok := symbolVaddr(f, "runtime.main")
-	if !ok {
-		t.Fatal("expected to resolve runtime.main from .symtab")
-	}
-	if vaddr == 0 {
-		t.Error("runtime.main vaddr is 0")
-	}
-	if _, ok := symbolVaddr(f, "definitely_absent_symbol_zzz"); ok {
-		t.Error("expected not-found for an absent symbol name")
+	if name, _, _ := debugLink(f); name != "" {
+		t.Errorf("debugLink = %q, want empty when the section is absent", name)
 	}
 }
