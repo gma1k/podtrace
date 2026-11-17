@@ -18,10 +18,6 @@ func openELFCapped(path string) (*elf.File, error) { return safeelf.Open(path) }
 
 func sectionDataCapped(sec *elf.Section) ([]byte, error) { return safeelf.SectionData(sec) }
 
-func symbolSectionWithinCap(f *elf.File, section string) bool {
-	return safeelf.SymbolSectionWithinCap(f, section)
-}
-
 func dwarfWithinCap(f *elf.File) bool { return safeelf.DWARFWithinCap(f) }
 
 func safeDebugName(name string) bool { return safeelf.SafeDebugName(name) }

@@ -257,7 +257,7 @@ Review:
 - By default traces every running container of each selected pod, including
   sidecars — event volume grows accordingly for sidecar-heavy pods (e.g.
   service meshes); narrow to one container with `--container`
-- Requires kernel **5.8+** with BTF support (BPF ring buffer + CO-RE). Full L7
+- Requires kernel **6.4+** with BTF support (see [compatibility.md](compatibility.md#hard-requirement-64)). Full L7
   protocol tracing (HTTP/1.1, HTTP/2, HTTP/3, gRPC) additionally needs the
   `bpf_loop` helper — mainline **5.17+**, or a distribution that backports it
   (e.g. RHEL 9's 5.14). podtrace probes for `bpf_loop` at load time (a real

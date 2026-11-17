@@ -67,16 +67,17 @@ func AttachGoRequestProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 		return nil
 	}
 	defer func() { _ = exe.Close() }()
+	parsed := exe.Path()
 	var links []link.Link
 	for _, h := range goRequestHandlers {
-		links = append(links, attachGoEntryReturnProbes(coll, exe, exePath, pid, h.symbol, h.entryProg, h.retProg)...)
+		links = append(links, attachGoEntryReturnProbes(coll, exe, parsed, pid, h.symbol, h.entryProg, h.retProg)...)
 	}
 	for _, c := range goConnectionServers {
 		prog := coll.Programs[c.prog]
 		if prog == nil {
 			continue
 		}
-		if l, ok := attachGoUprobeBySymbol(exe, exePath, c.symbol, prog); ok {
+		if l, ok := attachGoUprobeBySymbol(exe, parsed, c.symbol, prog); ok {
 			links = append(links, l)
 		}
 	}

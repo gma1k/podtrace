@@ -3,55 +3,43 @@
 package probes
 
 import (
-	"bytes"
 	"debug/elf"
 	"errors"
-	"fmt"
-	"io"
 	"os"
 	"syscall"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/gma1k/podtrace/internal/ebpf/safeelf"
 )
 
-// openELFWithinRoot opens rel as an ELF resolved strictly within rootDir using
-// openat2(RESOLVE_IN_ROOT|RESOLVE_NO_MAGICLINKS): a "..", an absolute segment,
-// or a symlink in the container-controlled path cannot escape rootDir, closing
-// the .gnu_debuglink traversal that let the root agent open host files such as
-// /proc/kcore.
+// openELFWithinRoot opens rel as an ELF resolved strictly within rootDir
+// using openat2(RESOLVE_IN_ROOT|RESOLVE_NO_MAGICLINKS): a "..", an absolute
+// segment, or a symlink in the container-controlled path cannot escape
+// rootDir, closing the .gnu_debuglink traversal that let the root agent open
+// host files such as /proc/kcore.
 func openELFWithinRoot(rootDir, rel string) (*elf.File, error) {
-	rootFd, err := unix.Open(rootDir, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = unix.Close(rootFd) }()
+	return openVerifiedELFWithinRoot(rootDir, rel, nil)
+}
 
-	how := &unix.OpenHow{
-		Flags:   uint64(unix.O_RDONLY | unix.O_NONBLOCK | unix.O_NOCTTY | unix.O_CLOEXEC),
-		Resolve: unix.RESOLVE_IN_ROOT | unix.RESOLVE_NO_MAGICLINKS,
-	}
-	fd, err := unix.Openat2(rootFd, rel, how)
+// openVerifiedELFWithinRoot is openELFWithinRoot for a file accept must
+// approve. The ELF is parsed on demand from the opened file, never read into
+// memory whole: a sparse file declares any size for free.
+func openVerifiedELFWithinRoot(rootDir, rel string, accept func(*os.File, os.FileInfo, *elf.File) bool) (*elf.File, error) {
+	raw, fi, err := safeelf.OpenWithinRoot(rootDir, rel)
 	if err != nil {
 		return nil, err
 	}
-	file := os.NewFile(uintptr(fd), rel)
-	defer func() { _ = file.Close() }()
-
-	fi, err := file.Stat()
+	defer func() { _ = raw.Close() }()
+	f, err := elf.Open(safeelf.PinnedPath(raw, rel))
 	if err != nil {
 		return nil, err
 	}
-	if !fi.Mode().IsRegular() {
-		return nil, fmt.Errorf("debug file %q is not a regular file", rel)
+	if accept != nil && !accept(raw, fi, f) {
+		_ = f.Close()
+		return nil, errDebugFileMismatch
 	}
-	if fi.Size() > maxELFFileSize {
-		return nil, fmt.Errorf("debug file %q too large: %d bytes", rel, fi.Size())
-	}
-	buf := make([]byte, fi.Size())
-	if _, err := io.ReadFull(file, buf); err != nil {
-		return nil, err
-	}
-	return elf.NewFile(bytes.NewReader(buf))
+	return f, nil
 }
 
 var openat2 = unix.Openat2

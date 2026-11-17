@@ -36,6 +36,10 @@
         {
           "type": "generic",
           "path": "docs/installation.md"
+        },
+        {
+          "type": "generic",
+          "path": "docs/supply-chain.md"
         }
       ],
       "changelog-sections": [

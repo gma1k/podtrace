@@ -21,6 +21,11 @@ type Probe struct {
 
 const maxScannedProbes = 4096
 
+// maxStapsdtNotesSize bounds how much of .note.stapsdt is read. The walker
+// stops at maxScannedProbes, which real notes, at about 200 bytes a probe,
+// reach well inside this.
+const maxStapsdtNotesSize = 4 << 20
+
 // Scan parses the .note.stapsdt section of exePath and returns all USDT probes.
 // Returns nil, nil when no USDT probes are present.
 func Scan(exePath string) (probes []Probe, err error) {
@@ -38,7 +43,7 @@ func Scan(exePath string) (probes []Probe, err error) {
 // ScanFile parses the .note.stapsdt notes of an already-open ELF and returns
 // its USDT probes.
 func ScanFile(f *elf.File) ([]Probe, error) {
-	data, err := safeelf.SectionData(f.Section(".note.stapsdt"))
+	data, err := safeelf.SectionPrefix(f.Section(".note.stapsdt"), maxStapsdtNotesSize)
 	if err != nil {
 		return nil, fmt.Errorf("usdt: read .note.stapsdt: %w", err)
 	}

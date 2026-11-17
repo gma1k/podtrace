@@ -14,7 +14,7 @@ func TestRustlsSymbolPatterns(t *testing.T) {
 		{"v0 read", "_RNvXs2_NtNtCs7J8aaykGygQ_6rustls4conn10connectionNtB5_6ReaderNtNtCs94HoCtyTi6t_3std2io4Read4read", rustlsReadSymbolPattern},
 	}
 	for _, m := range match {
-		if !nameContainsAll(m.sym, m.pat...) {
+		if !nameContainsAll([]byte(m.sym), m.pat...) {
 			t.Errorf("%s: expected match: %s", m.name, m.sym)
 		}
 	}
@@ -32,7 +32,7 @@ func TestRustlsSymbolPatterns(t *testing.T) {
 		{"non-rustls bufwriter", "_ZN3std2io8buffered9bufwriter18BufWriter$LT$W$GT$5write17hdeadbeefdeadbeefE", rustlsWriteSymbolPattern},
 	}
 	for _, m := range noMatch {
-		if nameContainsAll(m.sym, m.pat...) {
+		if nameContainsAll([]byte(m.sym), m.pat...) {
 			t.Errorf("%s: expected NO match: %s", m.name, m.sym)
 		}
 	}

@@ -2,6 +2,8 @@ package probes
 
 import (
 	"debug/elf"
+	"encoding/binary"
+	"hash/crc32"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,12 +11,12 @@ import (
 	"github.com/gma1k/podtrace/internal/config"
 )
 
-func debugLinkSection(name string) []byte {
+func debugLinkSection(name string, crc uint32) []byte {
 	data := append([]byte(name), 0)
 	for len(data)%4 != 0 {
 		data = append(data, 0)
 	}
-	return append(data, 0, 0, 0, 0)
+	return binary.LittleEndian.AppendUint32(data, crc)
 }
 
 func fakeTargetProcess(t *testing.T, pid string, exe string) string {
@@ -38,10 +40,11 @@ func TestADebugLinkIsFoundNextToTheBinaryInsideTheTarget(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "app"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "app/server.debug"), buildELFWithSections(nil), 0o644); err != nil {
+	debugFile := buildELFWithSections(nil)
+	if err := os.WriteFile(filepath.Join(root, "app/server.debug"), debugFile, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	target, err := elfFromSections([]fixtureSection{{name: ".gnu_debuglink", typ: uint32(elf.SHT_PROGBITS), data: debugLinkSection("server.debug")}})
+	target, err := elfFromSections([]fixtureSection{{name: ".gnu_debuglink", typ: uint32(elf.SHT_PROGBITS), data: debugLinkSection("server.debug", crc32.ChecksumIEEE(debugFile))}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,10 +65,11 @@ func TestADebugLinkUnderUsrLibDebugMirrorsTheBinaryDirectory(t *testing.T) {
 	if err := os.MkdirAll(mirrored, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(mirrored, "server.debug"), buildELFWithSections(nil), 0o644); err != nil {
+	debugFile := buildELFWithSections(nil)
+	if err := os.WriteFile(filepath.Join(mirrored, "server.debug"), debugFile, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	target, err := elfFromSections([]fixtureSection{{name: ".gnu_debuglink", typ: uint32(elf.SHT_PROGBITS), data: debugLinkSection("server.debug")}})
+	target, err := elfFromSections([]fixtureSection{{name: ".gnu_debuglink", typ: uint32(elf.SHT_PROGBITS), data: debugLinkSection("server.debug", crc32.ChecksumIEEE(debugFile))}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +82,7 @@ func TestADebugLinkUnderUsrLibDebugMirrorsTheBinaryDirectory(t *testing.T) {
 }
 
 func TestNoDebugLookupRunsWithoutATargetProcess(t *testing.T) {
-	target, err := elfFromSections([]fixtureSection{{name: ".gnu_debuglink", typ: uint32(elf.SHT_PROGBITS), data: debugLinkSection("server.debug")}})
+	target, err := elfFromSections([]fixtureSection{{name: ".gnu_debuglink", typ: uint32(elf.SHT_PROGBITS), data: debugLinkSection("server.debug", 0)}})
 	if err != nil {
 		t.Fatal(err)
 	}

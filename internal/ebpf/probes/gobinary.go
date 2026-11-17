@@ -162,17 +162,18 @@ func (c *goBinaryCache) reset() {
 // path, reusing the one already parsed for the same file.
 func loadGoBinary(path string) (*goBinary, bool) {
 	defer recoverParse("loadGoBinary")
-	var key goBinaryKey
-	cacheable := false
-	if fi, err := os.Stat(path); err == nil {
-		key, cacheable = goBinaryKeyOf(fi)
+	f, fi, err := safeelf.OpenRegular(path)
+	if err != nil {
+		return nil, false
 	}
+	defer func() { _ = f.Close() }()
+	key, cacheable := goBinaryKeyOf(fi)
 	if cacheable {
 		if bin, ok := goBinaries.get(key); ok {
 			return bin, true
 		}
 	}
-	bin, ok := parseGoBinary(path)
+	bin, ok := parseGoBinary(safeelf.PinnedPath(f, path))
 	if !ok {
 		return nil, false
 	}

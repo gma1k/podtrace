@@ -7,6 +7,7 @@ import (
 	"debug/elf"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"syscall"
@@ -16,16 +17,21 @@ import (
 	"github.com/gma1k/podtrace/internal/logger"
 )
 
+// Every cap is a ceiling on memory the agent allocates for one read. Section
+// sizes are declared by the file, and a sparse file makes any declared size
+// free on disk, so none of them may be larger than the agent can afford.
 const (
 	MaxFileSize = int64(1) << 30 // 1 GiB
 
-	MaxSectionSize = uint64(512) << 20 // 512 MiB
+	MaxSectionSize = uint64(128) << 20 // 128 MiB
 
-	MaxDWARFTotalSize = uint64(512) << 20 // 512 MiB
+	MaxDWARFTotalSize = uint64(256) << 20 // 256 MiB
 
-	// MaxSymbolTableSize bounds .symtab and .dynsym, which debug/elf expands
-	// to roughly four times their size as []elf.Symbol.
 	MaxSymbolTableSize = uint64(64) << 20 // 64 MiB
+
+	MaxSymbolNameBytes = uint64(64) << 20 // 64 MiB
+
+	MaxNoteSize = uint64(4) << 10 // 4 KiB
 )
 
 // OpenRegular opens path for reading only when it is a regular file within
@@ -36,20 +42,28 @@ func OpenRegular(path string) (*os.File, os.FileInfo, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	fi, err := f.Stat()
+	fi, err := checkRegular(f, path)
 	if err != nil {
 		_ = f.Close()
 		return nil, nil, err
 	}
+	return f, fi, nil
+}
+
+// checkRegular returns f's FileInfo when f is a regular file within
+// MaxFileSize.
+func checkRegular(f *os.File, name string) (os.FileInfo, error) {
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
 	if !fi.Mode().IsRegular() {
-		_ = f.Close()
-		return nil, nil, fmt.Errorf("%q is not a regular file", path)
+		return nil, fmt.Errorf("%q is not a regular file", name)
 	}
 	if fi.Size() > MaxFileSize {
-		_ = f.Close()
-		return nil, nil, fmt.Errorf("elf %q too large to parse safely: %d bytes", path, fi.Size())
+		return nil, fmt.Errorf("elf %q too large to parse safely: %d bytes", name, fi.Size())
 	}
-	return f, fi, nil
+	return fi, nil
 }
 
 // Open opens a fixed-path ELF (e.g. /proc/<pid>/exe) after rejecting
@@ -64,35 +78,43 @@ func Open(path string) (*elf.File, error) {
 	return elf.Open(PinnedPath(f, path))
 }
 
-// SectionData returns sec.Data only when the section's declared size is within
-// MaxSectionSize, so a lying/huge section header cannot drive a multi-GB
-// allocation.
+// SectionData returns sec's contents when its declared size is within
+// MaxSectionSize.
 func SectionData(sec *elf.Section) ([]byte, error) {
+	return SectionDataWithin(sec, MaxSectionSize)
+}
+
+// SectionDataWithin returns sec's contents when its declared size is within
+// limit. The buffer is allocated once at the declared size, so a read costs
+// that size and no more.
+func SectionDataWithin(sec *elf.Section, limit uint64) ([]byte, error) {
 	if sec == nil {
 		return nil, nil
 	}
-	if sec.Size > MaxSectionSize {
+	if sec.Size > limit {
 		return nil, fmt.Errorf("section %q too large: %d bytes", sec.Name, sec.Size)
 	}
-	return sec.Data()
+	return readSection(sec, sec.Size)
 }
 
-// SymbolSectionWithinCap reports whether the named symbol table is small
-// enough to parse.
-func SymbolSectionWithinCap(f *elf.File, section string) bool {
-	sec := f.Section(section)
-	return sec != nil && sec.Size <= MaxSymbolTableSize
-}
-
-// SymbolTablesWithinCap reports whether every symbol table f carries is small
-// enough to parse; a file without one passes.
-func SymbolTablesWithinCap(f *elf.File) bool {
-	for _, name := range []string{".symtab", ".dynsym"} {
-		if sec := f.Section(name); sec != nil && sec.Size > MaxSymbolTableSize {
-			return false
-		}
+// SectionPrefix returns at most the first n bytes of sec, for a caller that
+// only searches the contents and can do without the rest.
+func SectionPrefix(sec *elf.Section, n uint64) ([]byte, error) {
+	if sec == nil {
+		return nil, nil
 	}
-	return true
+	return readSection(sec, min(sec.Size, n))
+}
+
+func readSection(sec *elf.Section, n uint64) ([]byte, error) {
+	if sec.Type == elf.SHT_NOBITS {
+		return nil, fmt.Errorf("section %q occupies no file space", sec.Name)
+	}
+	buf := make([]byte, n)
+	if _, err := io.ReadFull(sec.Open(), buf); err != nil {
+		return nil, fmt.Errorf("section %q: %w", sec.Name, err)
+	}
+	return buf, nil
 }
 
 // DWARFWithinCap reports whether the combined DWARF sections are within cap,

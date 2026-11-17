@@ -280,7 +280,7 @@ func loadSymbolTable(exePath string) *symbolTable {
 
 // functionSymbols returns f's named function symbols, sorted by address.
 func functionSymbols(f *elf.File) []elf.Symbol {
-	if !safeelf.SymbolSectionWithinCap(f, ".symtab") {
+	if !safeelf.SymbolTableWithinCap(f, elf.SHT_SYMTAB) {
 		return nil
 	}
 	syms, err := f.Symbols()

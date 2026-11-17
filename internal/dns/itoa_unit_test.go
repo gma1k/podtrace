@@ -23,13 +23,13 @@ func TestItoa(t *testing.T) {
 }
 
 func TestIPv4String_WithZeroOctets(t *testing.T) {
-	if got := ipv4String([]byte{0, 0, 0, 0}); got != "0.0.0.0" {
+	if got := ipv4String([4]byte{0, 0, 0, 0}); got != "0.0.0.0" {
 		t.Errorf("ipv4String(0.0.0.0) = %q", got)
 	}
-	if got := ipv4String([]byte{10, 0, 0, 1}); got != "10.0.0.1" {
+	if got := ipv4String([4]byte{10, 0, 0, 1}); got != "10.0.0.1" {
 		t.Errorf("ipv4String(10.0.0.1) = %q", got)
 	}
-	if got := ipv4String([]byte{192, 168, 1, 255}); got != "192.168.1.255" {
+	if got := ipv4String([4]byte{192, 168, 1, 255}); got != "192.168.1.255" {
 		t.Errorf("ipv4String = %q", got)
 	}
 }

@@ -18,6 +18,25 @@ func procRoot(pid uint32) string {
 	return filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "root")
 }
 
+// splitProcRoot splits a path inside a process's root, <proc>/<pid>/root/rel,
+// into that root and rel.
+func splitProcRoot(path string) (root, rel string, ok bool) {
+	base := filepath.Clean(config.ProcBasePath) + string(filepath.Separator)
+	rest, found := strings.CutPrefix(filepath.Clean(path), base)
+	if !found {
+		return "", "", false
+	}
+	pid, after, found := strings.Cut(rest, string(filepath.Separator))
+	if !found || pid == "" || strings.Trim(pid, "0123456789") != "" {
+		return "", "", false
+	}
+	rel, found = strings.CutPrefix(after, "root"+string(filepath.Separator))
+	if !found || rel == "" {
+		return "", "", false
+	}
+	return filepath.Join(base, pid, "root"), rel, true
+}
+
 // fileInProcRoot resolves a path reported by a traced process against that
 // process's own rootfs.
 func fileInProcRoot(pid uint32, containerPath string) string {

@@ -31,25 +31,7 @@ func executableExportsSSL(path string) (exports bool) {
 		return false
 	}
 	defer func() { _ = f.Close() }()
-	if symbolSectionWithinCap(f, ".dynsym") {
-		if dyn, err := f.DynamicSymbols(); err == nil {
-			for i := range dyn {
-				if dyn[i].Name == "SSL_write" {
-					return true
-				}
-			}
-		}
-	}
-	if symbolSectionWithinCap(f, ".symtab") {
-		if sym, err := f.Symbols(); err == nil {
-			for i := range sym {
-				if sym[i].Name == "SSL_write" {
-					return true
-				}
-			}
-		}
-	}
-	return false
+	return hasSymbolNamed(f, "SSL_write")
 }
 
 // vaddrToFileOffset maps a virtual address to its executable file offset using

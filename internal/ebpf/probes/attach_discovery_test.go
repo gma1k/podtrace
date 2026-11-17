@@ -86,7 +86,7 @@ func TestGoBinaryProbesOpenTheProcessExecutable(t *testing.T) {
 	exe := filepath.Join(config.ProcBasePath, fmt.Sprint(pid), "exe")
 	total := len(AttachGoTLSProbes(coll, pid)) + len(AttachGoGRPCProbes(coll, pid)) +
 		len(AttachGoHTTP3Probes(coll, pid)) + len(attachGoAcquireProbes(coll, exe, pid)) +
-		len(attachSSLByOffset(placeholderPrograms("uprobe_SSL_write"), exe, sslOffsets{}))
+		len(attachStrippedExecutableTLS(placeholderPrograms("uprobe_SSL_write"), pid))
 	if total != 0 {
 		t.Errorf("attached %d links from placeholder programs", total)
 	}

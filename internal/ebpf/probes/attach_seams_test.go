@@ -44,6 +44,7 @@ type attachCall struct {
 	addr   uint64
 	cookie uint64
 	refCtr uint64
+	pid    int
 	ret    bool
 }
 
@@ -61,7 +62,7 @@ func installFakeAttacher(t *testing.T, fail func(c attachCall) error) *fakeAttac
 	attachToExecutable = func(_ *link.Executable, symbol string, prog *ebpf.Program, opts *link.UprobeOptions, ret bool) (link.Link, error) {
 		c := attachCall{symbol: symbol, prog: prog, ret: ret}
 		if opts != nil {
-			c.addr, c.cookie, c.refCtr = opts.Address, opts.Cookie, opts.RefCtrOffset
+			c.addr, c.cookie, c.refCtr, c.pid = opts.Address, opts.Cookie, opts.RefCtrOffset, opts.PID
 		}
 		f.mu.Lock()
 		defer f.mu.Unlock()

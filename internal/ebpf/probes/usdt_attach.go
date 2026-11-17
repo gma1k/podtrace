@@ -1,7 +1,6 @@
 package probes
 
 import (
-	"encoding/binary"
 	"fmt"
 	"hash/fnv"
 	"os"
@@ -49,13 +48,7 @@ func usdtCookie(exe *executable, addr uint64) uint64 {
 		return usdtCookieSeq.Add(1) | 1<<63
 	}
 	h := fnv.New64a()
-	var buf [32]byte
-	binary.LittleEndian.PutUint64(buf[0:], exe.id.ino)
-	binary.LittleEndian.PutUint64(buf[8:], uint64(exe.id.size))     // #nosec G115 -- hashed, not interpreted.
-	binary.LittleEndian.PutUint64(buf[16:], uint64(exe.id.mtimeNs)) // #nosec G115 -- hashed, not interpreted.
-	binary.LittleEndian.PutUint64(buf[24:], addr)
-	_, _ = h.Write(buf[:])
-	_, _ = h.Write([]byte(exe.id.buildID))
+	_, _ = fmt.Fprintf(h, "%d:%d:%d:%d:%d:%s", exe.id.ino, exe.id.size, exe.id.mtimeNs, exe.id.ctimeNs, addr, exe.id.buildID)
 	return h.Sum64() &^ (1 << 63)
 }
 
@@ -77,8 +70,12 @@ func AttachUSDTProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 		return links
 	}
 
-	exePath := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "exe")
-	f, err := safeelf.Open(exePath)
+	exe, err := openExecutable(filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "exe"))
+	if err != nil {
+		return links
+	}
+	defer func() { _ = exe.Close() }()
+	f, err := safeelf.Open(exe.Path())
 	if err != nil {
 		return links
 	}
@@ -89,12 +86,6 @@ func AttachUSDTProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 		return links
 	}
 
-	exe, err := openExecutable(exePath)
-	if err != nil {
-		return links
-	}
-	defer func() { _ = exe.Close() }()
-
 	semSupported := uprobeRefCtrOffsetSupported()
 	for i := range found {
 		if len(links) >= maxUSDTProbesPerBinary {
@@ -103,7 +94,7 @@ func AttachUSDTProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 			break
 		}
 		p := found[i]
-		addr, ok := vaddrToFileOffset(f, p.PC)
+		addr, ok := codeFileOffset(f, p.PC)
 		if !ok {
 			continue
 		}
