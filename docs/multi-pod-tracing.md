@@ -105,7 +105,7 @@ kubectl -n podtrace-test exec busybox-test -- sh -c 'for i in $(seq 1 50); do wg
 
 ```bash
 kubectl create ns podtrace-cross
-kubectl -n podtrace-cross run nginx-cross --image=nginx:1.31@sha256:165ddde8751e75a1c907d24ef10d9f6deb08b57e0fe56caf67512486aff76d82 --labels app=podtrace-e2e --port 80
+kubectl -n podtrace-cross run nginx-cross --image=nginx:1.31@sha256:689fbc6acfefc8a172d86d5779265fd52dd82e8c6b0c68c7d4aa35734340eb2a --labels app=podtrace-e2e --port 80
 kubectl -n podtrace-cross expose pod nginx-cross --name nginx-cross --port 80
 kubectl -n podtrace-test label pod alpine-test app=podtrace-e2e --overwrite
 kubectl -n podtrace-test label pod busybox-test app=podtrace-e2e --overwrite
