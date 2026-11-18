@@ -411,7 +411,7 @@ to CRs, see [docs/migration.md](docs/migration.md).
 
 ## Prerequisites
 
-- Linux kernel 6.4+ with BTF support (see [docs/compatibility.md](docs/compatibility.md#hard-requirement-64))
+- Linux kernel 5.15+ with BTF support (see [docs/compatibility.md](docs/compatibility.md#hard-requirement-515))
 - Go 1.27+ (or any earlier 1.x with `GOTOOLCHAIN=auto`)
 - Kubernetes cluster access
 

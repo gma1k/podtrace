@@ -284,16 +284,17 @@ static long h2_frames_cb(u32 idx, void *vctx)
 
 #define H2_MAX_FRAME_STEPS 512
 
-__noinline int h2_walk_frames(u64 base_addr, u64 avail, u64 conn, u32 dir, u32 transport)
+static const struct h2_frame_state h2_frame_state_zero = {};
+
+static __noinline int h2_walk_prepare(void *base, u64 avail, u64 conn, u32 dir)
 {
-	void *base = (void *)base_addr;
 	if (!base || avail == 0)
-		return 0;
+		return -1;
 
 	u8 *known = bpf_map_lookup_elem(&h2_conns, &conn);
 	if (!known) {
 		if (!h2_start_looks_h2(base, avail))
-			return 0;
+			return -1;
 		u8 one = 1;
 		bpf_map_update_elem(&h2_conns, &conn, &one, BPF_ANY);
 	}
@@ -301,16 +302,15 @@ __noinline int h2_walk_frames(u64 base_addr, u64 avail, u64 conn, u32 dir, u32 t
 	struct h2_seq_key fk = { .conn_id = conn, .dir = dir };
 	struct h2_frame_state *fs = bpf_map_lookup_elem(&h2_frame_state, &fk);
 	if (!fs) {
-		struct h2_frame_state init = {};
-		bpf_map_update_elem(&h2_frame_state, &fk, &init, BPF_ANY);
+		bpf_map_update_elem(&h2_frame_state, &fk, &h2_frame_state_zero, BPF_ANY);
 		fs = bpf_map_lookup_elem(&h2_frame_state, &fk);
 		if (!fs)
-			return 0;
+			return -1;
 	}
 
 	struct h2_hdr_scratch *s = h2_hdr_scratch_lookup();
 	if (!s)
-		return 0;
+		return -1;
 
 	u32 start = 0;
 	int pfx = h2_preface_signal(base, avail);
@@ -319,12 +319,13 @@ __noinline int h2_walk_frames(u64 base_addr, u64 avail, u64 conn, u32 dir, u32 t
 			u8 one = 1;
 			bpf_map_update_elem(&h2_server_conns, &conn, &one, BPF_ANY);
 		}
-		struct h2_seq_key ke = { .conn_id = conn, .dir = H2_DIR_EGRESS };
-		struct h2_seq_key ki = { .conn_id = conn, .dir = H2_DIR_INGRESS };
-		bpf_map_delete_elem(&h2_seq, &ke);
-		bpf_map_delete_elem(&h2_seq, &ki);
-		bpf_map_delete_elem(&h2_frame_state, &ke);
-		bpf_map_delete_elem(&h2_frame_state, &ki);
+		fk.dir = H2_DIR_EGRESS;
+		bpf_map_delete_elem(&h2_seq, &fk);
+		bpf_map_delete_elem(&h2_frame_state, &fk);
+		fk.dir = H2_DIR_INGRESS;
+		bpf_map_delete_elem(&h2_seq, &fk);
+		bpf_map_delete_elem(&h2_frame_state, &fk);
+		fk.dir = dir;
 
 		__builtin_memset(&s->rec, 0, sizeof(s->rec));
 		s->rec.conn_id = conn;
@@ -332,26 +333,33 @@ __noinline int h2_walk_frames(u64 base_addr, u64 avail, u64 conn, u32 dir, u32 t
 		s->rec.flags = H2_HDR_FLAG_CLOSE;
 		bpf_ringbuf_output(&h2_hdr_events, &s->rec, sizeof(s->rec), 0);
 
-		struct h2_frame_state fresh = {};
-		bpf_map_update_elem(&h2_frame_state, &fk, &fresh, BPF_ANY);
+		bpf_map_update_elem(&h2_frame_state, &fk, &h2_frame_state_zero, BPF_ANY);
 		fs = bpf_map_lookup_elem(&h2_frame_state, &fk);
 		if (!fs)
-			return 0;
+			return -1;
 
 		if (avail < HTTP2_PREFACE_LEN) {
 			fs->preface_seen = 1;
 			fs->type = HTTP2_SETTINGS;
 			fs->remaining = HTTP2_PREFACE_LEN - (u32)avail;
-			return 0;
+			return -1;
 		}
 		start = HTTP2_PREFACE_LEN;
 	} else if (fs->desync) {
 		if (!h2_start_looks_h2(base, avail))
-			return 0;
+			return -1;
 		__builtin_memset(fs, 0, sizeof(*fs));
 	}
 	fs->preface_seen = 1;
 	s->off = start;
+	return 0;
+}
+
+__noinline int h2_walk_frames(u64 base_addr, u64 avail, u64 conn, u32 dir, u32 transport)
+{
+	void *base = (void *)base_addr;
+	if (h2_walk_prepare(base, avail, conn, dir) < 0)
+		return 0;
 
 	struct h2_raw_ctx c = {
 		.base = base,
@@ -364,7 +372,8 @@ __noinline int h2_walk_frames(u64 base_addr, u64 avail, u64 conn, u32 dir, u32 t
 		.transport = transport,
 	};
 	bpf_loop(H2_MAX_FRAME_STEPS, h2_frames_cb, &c, 0);
-	if (s->off != c.avail)
+	struct h2_hdr_scratch *s = h2_hdr_scratch_lookup();
+	if (s && s->off != c.avail)
 		h2_desync(conn, dir);
 	return 0;
 }
@@ -398,7 +407,7 @@ static __always_inline void h2_forget_conn(u64 conn)
 
 #define H2_MAX_SEGS 8
 
-static __noinline void h2_emit_segment(void *base, u64 len, u64 conn, u32 dir, u8 transport)
+static __always_inline void h2_emit_segment(void *base, u64 len, u64 conn, u32 dir, u8 transport)
 {
 	h2_emit_frames(base, len, conn, dir, transport);
 }

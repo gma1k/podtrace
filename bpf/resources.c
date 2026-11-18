@@ -81,7 +81,7 @@ static inline void emit_resource_alert(u64 cgroup_id, u32 resource_type, u32 uti
     if (idx < max_idx) details[idx++] = '%';
     details[idx < MAX_STRING_LEN ? idx : max_idx] = '\0';
     
-    bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+    emit_event(e);
     
     u32 alert_level = check_alert_threshold(utilization);
     struct resource_key alert_key = {

@@ -73,7 +73,7 @@ static __always_inline int mc_emit(struct pt_regs *ctx, u32 pid, u32 tid, int re
 	e->target[0] = '\0';
 
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	emit_event(e);
 
 	bpf_map_delete_elem(&start_times, &key);
 	bpf_map_delete_elem(&memcached_ops, &key);

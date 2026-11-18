@@ -200,7 +200,7 @@ static __always_inline void grpc_go_process(void *ctx, u64 fields, u64 n, u32 st
 			bpf_probe_read_kernel_str(e->target, sizeof(e->target), s->path);
 			fill_event_peer(e);
 			capture_user_stack(ctx, pid, tid, e);
-			bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+			emit_event(e);
 		}
 	} else if (s->have_status) {
 		struct event *e = get_event_buf();
@@ -225,7 +225,7 @@ static __always_inline void grpc_go_process(void *ctx, u64 fields, u64 n, u32 st
 			}
 			fill_event_peer(e);
 			capture_user_stack(ctx, pid, tid, e);
-			bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+			emit_event(e);
 		}
 	}
 }

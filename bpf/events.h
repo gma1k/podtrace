@@ -254,4 +254,9 @@ static __always_inline int dns_class_failed(u32 class)
 	return class != DNS_CLASS_NOERROR && class != DNS_CLASS_NXDOMAIN;
 }
 
+#define EVENT_BUF_TASK    0
+#define EVENT_BUF_SOFTIRQ 1
+#define EVENT_BUF_SOCKOPS 2
+#define EVENT_BUF_SLOTS   3
+
 #endif

@@ -104,7 +104,7 @@ int uretprobe_rd_kafka_produce(struct pt_regs *ctx)
 		e->details[0] = '\0';
 
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	emit_event(e);
 
 	bpf_map_delete_elem(&start_times, &key);
 	bpf_map_delete_elem(&kafka_topic_tmp, &key);
@@ -176,7 +176,7 @@ int uretprobe_rd_kafka_consumer_poll(struct pt_regs *ctx)
 	}
 
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	emit_event(e);
 
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;

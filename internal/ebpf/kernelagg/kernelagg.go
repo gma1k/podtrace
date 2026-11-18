@@ -8,9 +8,11 @@
 package kernelagg
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
+	"net"
 	"sort"
 
 	"github.com/cilium/ebpf"
@@ -34,13 +36,31 @@ const (
 // the C layout exactly; a mismatch silently misreads every row.
 type Key struct {
 	CgroupID  uint64
-	PeerIP    uint32
+	PeerAddr  [16]byte
 	PeerPort  uint16
 	EventType uint8
 	Variant   uint8
 	Bucket    uint16
 	Role      uint8
-	_         [5]byte
+	_         [9]byte
+}
+
+// PeerIP returns the row's peer address, or "" when the row has none. An
+// IPv4 peer prints in dotted form.
+func (k *Key) PeerIP() string {
+	if k.PeerAddr == ([16]byte{}) {
+		return ""
+	}
+	return net.IP(k.PeerAddr[:]).String()
+}
+
+// V4MappedPeer encodes an IPv4 address given in host byte order the way the
+// kernel stores it in Key.PeerAddr.
+func V4MappedPeer(ip uint32) [16]byte {
+	var addr [16]byte
+	addr[10], addr[11] = 0xff, 0xff
+	binary.BigEndian.PutUint32(addr[12:], ip)
+	return addr
 }
 
 // Value mirrors struct agg_value in bpf/agg.h.

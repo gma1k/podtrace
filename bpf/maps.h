@@ -572,16 +572,17 @@ struct {
 	__type(value, u32);
 } alert_thresholds SEC(".maps");
 
-#define EVENT_BUF_TASK    0
-#define EVENT_BUF_SOFTIRQ 1
-#define EVENT_BUF_SOCKOPS 2
-#define EVENT_BUF_SLOTS   3
+struct event_slot {
+	struct event e;
+	u64 owner;
+	u64 races;
+};
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(max_entries, EVENT_BUF_SLOTS);
 	__type(key, u32);
-	__type(value, struct event);
+	__type(value, struct event_slot);
 } event_buf SEC(".maps");
 
 struct fastcgi_req {

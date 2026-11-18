@@ -128,6 +128,7 @@ type Tracer struct {
 	resourceMgr                   *resourceMonitorManager
 	lastDNSDrops                  uint64
 	dropReport                    atomic.Pointer[dropReportFn]
+	eventSlotRaces                atomic.Uint64
 	cgroupPaths                   atomic.Pointer[[]string]
 	useUserspaceCgroupFilter      atomic.Bool
 	denyWhenNoTargets             atomic.Bool
@@ -756,6 +757,20 @@ func pruneL7ProbesIfNoBPFLoop(spec *ebpf.CollectionSpec) {
 	}
 }
 
+// loadCollection drops the programs the running kernel cannot run and loads
+// the rest. It is the only path from a collection spec to the kernel, so the
+// kernel load test exercises exactly what the agent does.
+func loadCollection(spec *ebpf.CollectionSpec, opts ebpf.CollectionOptions, btfFromFile bool) (*ebpf.Collection, bool, error) {
+	pruneL7ProbesIfNoBPFLoop(spec)
+	pruneOnCPUTaskRegsIfUnsupported(spec)
+	pruneFSTracingIfUnsupported(spec, btfFromFile)
+	pruneReturnTracingIfUnsupported(spec, btfFromFile)
+
+	HaveSkStorageCrossContext()
+
+	return newCollectionForUprobeMode(spec, opts, withCompatFallback(ebpf.NewCollectionWithOptions))
+}
+
 func NewTracer(tracerOpts ...Option) (*Tracer, error) {
 	var startup tracerOptions
 	for _, apply := range tracerOpts {
@@ -828,14 +843,7 @@ func NewTracer(tracerOpts ...Option) (*Tracer, error) {
 	}
 	applyVerifierLogOptions(&opts)
 
-	pruneL7ProbesIfNoBPFLoop(spec)
-	pruneOnCPUTaskRegsIfUnsupported(spec)
-	pruneFSTracingIfUnsupported(spec, kspec != nil)
-	pruneReturnTracingIfUnsupported(spec, kspec != nil)
-
-	HaveSkStorageCrossContext()
-
-	coll, uprobeMulti, err := newCollectionForUprobeMode(spec, opts, ebpf.NewCollectionWithOptions)
+	coll, uprobeMulti, err := loadCollection(spec, opts, kspec != nil)
 	if err != nil {
 		logVerifierFailure(err)
 		return nil, NewCollectionError(err)
@@ -2845,6 +2853,7 @@ func (t *Tracer) publishL7DecoderStats() {
 
 func (t *Tracer) pollBPFMapUtilization() {
 	t.publishL7DecoderStats()
+	t.pollEventSlotRaces()
 	if t.collection == nil {
 		return
 	}

@@ -11,7 +11,7 @@ For per-cloud specifics, jump to the [distro-specific notes](#distro-specific-no
 
 | Requirement      | Minimum                | Recommended       |
 |------------------|------------------------|-------------------|
-| Linux kernel     | 6.4 (see [kernel requirements](#kernel-requirements)) | 6.6+ |
+| Linux kernel     | 5.15 (see [kernel requirements](#kernel-requirements)) | 6.12+ |
 | BTF              | Required on the running kernel | `/sys/kernel/btf/vmlinux` present |
 | Architecture     | amd64, arm64           | Same              |
 | Kubernetes       | 1.28                   | 1.32–1.36         |
@@ -21,31 +21,40 @@ For per-cloud specifics, jump to the [distro-specific notes](#distro-specific-no
 
 ## Kernel requirements
 
-### Hard requirement: 6.4+
+### Hard requirement: 5.15+
 
-The BPF collection loads as a whole, so the newest kernel interface any
-program uses sets the floor:
+The BPF collection loads as a whole, so the oldest kernel it loads on sets
+the floor. That floor is **5.15**: below it, `uprobe_usdt` needs the BPF
+attach cookie, which arrived in 5.15.
 
-- The socket payload probes (HTTP/1.x, HTTP/2, gRPC, FastCGI, Unix stream
-  sockets) read `msg_iter.__iov`, `msg_iter.ubuf` and `ITER_UBUF`, which
-  have these names only from 6.4. There is no fallback for the older
-  `iov_iter` layout yet.
-- The OOM probe calls the `bpf_task_from_pid` / `bpf_task_release` kfuncs
-  (6.2+), declared as required rather than optional.
+Every kernel from there up loads the same object. Where a kernel lacks
+something a probe prefers, the probe falls back rather than failing the
+load:
 
-On an older kernel the collection fails to load and the agent reports
-itself degraded with no tracing. These are the upstream versions; a distro
-kernel that backports the interfaces (as RHEL often does) may load anyway,
-which has not been verified. Ring buffers (5.8) and `bpf_loop` (5.17)
-are below this floor. Bringing the floor back down to 5.8 needs CO-RE
-fallbacks for the older `iov_iter` layout and optional kfuncs; until then,
-LTS kernels such as 5.15 (Ubuntu 22.04, Azure Linux 2) and 6.1 (Debian 12,
-Amazon Linux 2023, COS) are below it.
+| Kernel | What changes |
+|---|---|
+| 5.15 – 5.16 | No `bpf_loop` (5.17), so HTTP/1.x request capture, HTTP/2, gRPC and HTTP header capture are off; L4, DNS, filesystem, CPU and memory tracing run. No `bpf_get_func_ret` (5.17), so return probes use kretprobes instead of fexit, which can drop returns on a busy node. |
+| 5.15 – 6.6 (at least) | cgroup_skb programs may not call task helpers, so DNS queries and QUIC Initial packets sent by a pod carry no process ID; they keep their cgroup. Tracepoints may not call `bpf_task_from_pid`, so an OOM kill is reported without the victim's own cgroup and network namespace; it keeps the victim's PID, name and memory. |
+| 6.12 and later | Everything. |
+
+The fallbacks are chosen by the kernel's own verdict, not by version
+number: the agent loads the preferred program first and, only if the
+kernel rejects that program, loads a variant without the newer feature
+and logs a warning naming the program and the reason. A distro kernel
+that backports a feature gets the preferred program.
+
+**Verified** by loading the collection the way the agent does on 5.15,
+6.1, 6.6 and 6.12 kernels in VMs, and on the CI runner's kernel. Older LTS kernels
+such as Ubuntu 22.04 and Azure Linux 2 (5.15), and Debian 12, Amazon
+Linux 2023, Bottlerocket and COS (6.1), are above the floor.
+
+These are upstream versions. RHEL 9 ships 5.14 with many 5.15+ features
+backported; it has not been verified.
 
 Verify:
 
 ```bash
-uname -r                       # 6.4 or higher
+uname -r                       # 5.15 or higher
 ls /sys/kernel/btf/vmlinux     # exists → BTF available
 ```
 
@@ -94,16 +103,16 @@ Two consequences worth knowing:
 ### Kernel features that are genuinely conditional
 
 These are not build-time choices; they depend on the kernel the agent runs
-on. Those marked *detected* adapt at load time; the others are part of the
-hard requirement above:
+on. All of them adapt at load time:
 
 | Feature | Requires |
 |---|---|
 | `vfs_rename` argument layout | *Detected* with `bpf_core_type_exists(struct renamedata)`; the signature changed at 6.3 |
 | OOM victim `comm` | *Detected* with `bpf_core_field_exists(tp->__data_loc_comm)` |
-| OOM victim cgroup | `bpf_task_from_pid` / `bpf_task_release` kfuncs (6.2+); not detected, the collection needs them |
-| Socket payload addressing | `iov_iter` with `__iov` / `ubuf` / `ITER_UBUF` (6.4+); not detected, the collection needs them |
-| `bpf_loop` (traceparent scanning) | 5.17+ |
+| OOM victim cgroup | `bpf_task_from_pid` / `bpf_task_release` kfuncs, callable from tracepoints. *Detected*: the kfuncs are optional (`__weak`), and a kernel that refuses them in a tracepoint gets a variant without them |
+| Socket payload addressing | `iov_iter` named `__iov` from 6.4 and `iov` before; `ubuf` and `ITER_UBUF` from 6.0. *Detected* with `bpf_core_field_exists` / `bpf_core_enum_value_exists` |
+| Process of a DNS query or QUIC Initial sent by a pod | Task helpers in cgroup_skb programs. *Detected*: a kernel that refuses them gets a variant that records no PID |
+| `bpf_loop` (L7 parsing, traceparent scanning) | 5.17+. *Detected*: without it the L7 programs are not loaded |
 
 ## Architecture support
 
@@ -196,25 +205,25 @@ and any platform quirks (AppArmor, SELinux, Pod Security Standards, etc).
 | [Azure AKS](aks.md)                | ✅ Supported | Ubuntu 22.04 / Azure Linux, BTF on by default since 1.25 |
 | [AWS EKS](eks.md)                  | ✅ Supported (on EC2) | AL2, AL2023, Bottlerocket, Ubuntu node groups |
 | [AWS EKS Fargate](eks.md#fargate)  | ❌ Not supported | No BPF / kprobe access on Fargate |
-| [Google GKE Standard](gke.md)      | ✅ Supported | COS or Ubuntu node images with kernel 6.4+ |
+| [Google GKE Standard](gke.md)      | ✅ Supported | COS or Ubuntu node images |
 | [Google GKE Autopilot](gke.md#autopilot) | ❌ Not supported | No BPF kprobe access |
 | [GKE Sandbox (gVisor)](gke.md#sandbox) | ❌ Not supported | gVisor exposes a different syscall surface |
-| [OpenShift / OKD](openshift.md)    | ⚠️ Unverified | RHEL 9 (5.14) loads only if its kernel backports the 6.4 `iov_iter` layout and 6.2 kfuncs; RHEL 8 (4.18) ❌ |
-| [Talos Linux](talos.md)            | ✅ Supported | Releases with kernel 6.4+, cgroupfs driver |
+| [OpenShift / OKD](openshift.md)    | ⚠️ Unverified | RHEL 9 (5.14) loads only if its kernel backports the 5.15 BPF attach cookie; RHEL 8 (4.18) ❌ |
+| [Talos Linux](talos.md)            | ✅ Supported | cgroupfs driver |
 
-Every ✅ assumes node images with a 6.4+ kernel. Images on an older LTS
-kernel, such as Ubuntu 22.04 (5.15), Azure Linux 2 (5.15), Amazon Linux 2
-(5.10), and Amazon Linux 2023, Bottlerocket or Debian 12 on 6.1, are below
-the [hard requirement](#hard-requirement-64) until it comes down.
+Every ✅ assumes node images with a 5.15+ kernel. Amazon Linux 2 (5.10) is
+below the [hard requirement](#hard-requirement-515); on 5.15 and 6.1 nodes
+some probes run in the reduced form the [kernel table](#hard-requirement-515)
+describes.
 
-If you are on a distro not listed and its kernel is 6.4+ with BTF,
+If you are on a distro not listed and its kernel is 5.15+ with BTF,
 podtrace will most likely work. We accept new distro guides as PRs to
 this directory.
 
 ## Verifying your environment
 
 ```bash
-# 1. Kernel version (need 6.4+)
+# 1. Kernel version (need 5.15+)
 uname -r
 
 # 2. BTF available?

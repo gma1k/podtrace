@@ -50,7 +50,7 @@ func TestSocketTracepointsGateOnSocketOwner(t *testing.T) {
 		body := functionBody(t, text, fn)
 		owner := strings.Index(body, "apply_sk_owner(")
 		gate := strings.Index(body, "cgroup_allows(e->cgroup_id)")
-		emit := strings.Index(body, "bpf_ringbuf_output(")
+		emit := strings.Index(body, "emit_event(")
 		if owner < 0 || gate < 0 || gate < owner || gate > emit {
 			t.Errorf("%s must resolve the socket owner and drop untargeted owners before emitting", fn)
 		}

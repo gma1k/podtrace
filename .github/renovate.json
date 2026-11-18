@@ -61,11 +61,12 @@
     },
     {
       "customType": "regex",
-      "description": "Track name:tag@sha256 image pins that no built-in manager reads: chainsaw manifests and the chainsaw preload list, the quickstart sample, examples, docs snippets, scripts and the kind node image in the composite actions. Dockerfiles, compose files and chart templates are left to their own managers so nothing is tracked twice.",
+      "description": "Track name:tag@sha256 image pins that no built-in manager reads: chainsaw manifests and the chainsaw preload list, the verifier kernel images in ebpf-build, the quickstart sample, examples, docs snippets, scripts and the kind node image in the composite actions. Dockerfiles, compose files and chart templates are left to their own managers so nothing is tracked twice.",
       "managerFilePatterns": [
         "/^test/chainsaw/.+\\.ya?ml$/",
         "/^test/[^/]*pod[^/]*\\.ya?ml$/",
         "/^\\.github/workflows/chainsaw\\.yml$/",
+        "/^\\.github/workflows/ebpf-build\\.yml$/",
         "/^deploy/quickstart-sample\\.yaml$/",
         "/^examples/.+\\.ya?ml$/",
         "/^docs/.+\\.md$/",
@@ -190,12 +191,12 @@
     },
     {
       "customType": "regex",
-      "description": "Track Go CI tools run or installed at a pinned version in workflows (gosec, govulncheck, actionlint). The capture is the module path, keeping a /vN major suffix, because Go resolves versions per module, not per package",
+      "description": "Track Go CI tools run or installed at a pinned version in workflows (gosec, govulncheck, actionlint, vimto). The capture is the module path, keeping a /vN major suffix, because Go resolves versions per module, not per package",
       "managerFilePatterns": [
         "/^\\.github/workflows/.+\\.ya?ml$/"
       ],
       "matchStrings": [
-        "go (?:run|install) (?<depName>github\\.com/[^/\\s]+/[^/@\\s]+(?:/v[0-9]+)?|golang\\.org/x/[^/@\\s]+)(?:/[^@\\s]*)?@(?<currentValue>v[0-9][^\\s]*)"
+        "go (?:run|install) (?<depName>github\\.com/[^/\\s]+/[^/@\\s]+(?:/v[0-9]+)?|golang\\.org/x/[^/@\\s]+|lmb\\.io/[^/@\\s]+)(?:/[^@\\s]*)?@(?<currentValue>v[0-9][^\\s]*)"
       ],
       "datasourceTemplate": "go"
     }
@@ -208,6 +209,21 @@
     "schedule": []
   },
   "packageRules": [
+    {
+      "description": "The verifier matrix in ebpf-build tests fixed kernel series. Refresh each series' digest when cilium/ci-kernels rebuilds it, but never move a job to another series: adding or dropping a kernel is a decision, not an update",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "ghcr.io/cilium/ci-kernels"
+      ],
+      "matchUpdateTypes": [
+        "major",
+        "minor",
+        "patch"
+      ],
+      "enabled": false
+    },
     {
       "description": "Group all non-major Go module updates",
       "matchManagers": [
@@ -264,6 +280,7 @@
       "matchFileNames": [
         "test/**",
         ".github/workflows/chainsaw.yml",
+        ".github/workflows/ebpf-build.yml",
         "deploy/quickstart-sample.yaml",
         "examples/**",
         "docs/**",

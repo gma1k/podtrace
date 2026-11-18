@@ -80,7 +80,7 @@ Key characteristics relevant to podtrace:
 - **systemd-free** — Talos uses its own init system (`machined`)
 - **BTF-enabled kernels** — all official Talos kernels since v1.3 include BTF
 - **cgroup v2** with cgroupfs driver (not systemd)
-- **Kernel 6.4+** — podtrace's [hard requirement](compatibility.md#hard-requirement-64); Talos releases still on 6.1 are below it
+- **Kernel 5.15+** — podtrace's [hard requirement](compatibility.md#hard-requirement-515); on 6.1 releases some probes run in the reduced form the [kernel table](compatibility.md#hard-requirement-515) describes
 
 ## Build (cross-compile from a separate machine)
 

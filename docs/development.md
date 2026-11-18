@@ -49,8 +49,8 @@ podtrace/
 - Go 1.27+ (or any earlier 1.x with `GOTOOLCHAIN=auto`, which downloads
   the toolchain version declared in `go.mod` automatically)
 - Clang and LLVM 18+, libbpf headers 0.8+
-- Linux kernel 6.4+ with BTF to run the agent or the kernel tests (see
-  [compatibility.md](compatibility.md#hard-requirement-64); full L7 tracing needs the `bpf_loop` helper,
+- Linux kernel 5.15+ with BTF to run the agent or the kernel tests (see
+  [compatibility.md](compatibility.md#hard-requirement-515); full L7 tracing needs the `bpf_loop` helper,
   mainline 5.17+ or a backporting distro; older kernels auto-run core L4 only)
 
 ### Build Commands
@@ -391,6 +391,37 @@ go test -bench=. -benchmem ./internal/ebpf/parser/...
 # Integration tests (require Kubernetes cluster)
 go test ./test/... -v
 ```
+
+#### Load the collection on older kernels
+
+The kernel on your machine and on the CI runners is recent, and recent
+verifiers accept programs older ones reject: a combined stack over 512
+bytes (fine from 6.13), a bound learned from a register-to-register
+compare (6.8), task helpers in cgroup_skb or sock_ops programs. One
+rejected program fails the whole collection, so the agent comes up with
+no tracing at all.
+
+The `verifier` jobs in
+[ebpf-build.yml](../.github/workflows/ebpf-build.yml) catch that. On every
+BPF change they boot 5.15, 6.1, 6.6 and 6.12 kernels from
+`ghcr.io/cilium/ci-kernels` with [vimto](https://github.com/lmb/vimto) and
+load the collection exactly as the agent does (`loadCollection`). To run
+one locally (needs QEMU and access to `/dev/kvm`, no root):
+
+```bash
+make internal/ebpf/embedded/podtrace.amd64.bpf.o BPF_GOARCH=amd64
+CGO_ENABLED=0 go test -c -tags bpf_loadtest -o bin/tracer-load.test ./internal/ebpf/tracer/
+CGO_ENABLED=0 go install lmb.io/vimto@v0.4.0   # vimto itself must be static
+PODTRACE_BPF_OBJECT=$PWD/internal/ebpf/embedded/podtrace.amd64.bpf.o \
+  vimto -kernel ghcr.io/cilium/ci-kernels:6.1 -sudo -memory 2G exec -- \
+  "$PWD/bin/tracer-load.test" -test.v -test.run TestTracerCollectionLoadsOnRunningKernel
+```
+
+The test stops at the first program a kernel rejects and names it, so a
+fix may need several rounds. When a program needs a capability only newer
+kernels allow, give it a `<name>__compat` variant without it: the agent
+loads that only when the kernel rejects the preferred program (see
+`withCompatFallback`).
 
 ### Manual Testing
 

@@ -27,7 +27,7 @@ func syntheticEvent(row *kernelagg.Row) *events.Event {
 		CgroupID:    row.Key.CgroupID,
 		Bytes:       row.Value.Bytes,
 		TCPState:    uint32(variant.Transport) | uint32(row.Key.Role)&events.HTTPRoleMask,
-		PeerDstIP:   events.PeerIP(peerFamilyV4, row.Key.PeerIP, [16]byte{}),
+		PeerDstIP:   row.Key.PeerIP(),
 		PeerDstPort: row.Key.PeerPort,
 	}
 	if variant.IsError {
@@ -35,8 +35,6 @@ func syntheticEvent(row *kernelagg.Row) *events.Event {
 	}
 	return e
 }
-
-const peerFamilyV4 = uint8(2)
 
 // ingestKernelEdge projects one drained row onto the service map.
 func (s *Sink) ingestKernelEdge(e *events.Event, row *kernelagg.Row, direction string, l7 bool, seconds float64, count float64) {

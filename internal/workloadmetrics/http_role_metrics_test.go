@@ -188,7 +188,7 @@ func roleKernelRow(roleBits uint32, failed bool) kernelagg.Row {
 	}
 	row := kernelRow(events.EventHTTPResp, variant, kernelagg.BucketIndex(4_000_000), 3, 12_000_000, 0)
 	row.Key.Role = uint8(roleBits)
-	row.Key.PeerIP = 0x0701f40a
+	row.Key.PeerAddr = kernelagg.V4MappedPeer(0x0701f40a)
 	row.Key.PeerPort = 8443
 	return row
 }

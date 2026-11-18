@@ -13,14 +13,16 @@
 
 struct agg_key {
 	u64 cgroup_id;
-	u32 peer_ip;
+	u8  peer_addr[16];
 	u16 peer_port;
 	u8  event_type;
 	u8  variant;
 	u16 bucket;
 	u8  role;
-	u8  pad[5];
+	u8  pad[9];
 };
+
+_Static_assert(sizeof(struct agg_key) == 40, "agg_key must match kernelagg.Key");
 
 struct agg_value {
 	u64 count;
@@ -116,20 +118,40 @@ static __always_inline u16 agg_bucket(u64 ns)
 	return (u16)(msb * AGG_SCHEMA_STEPS + sub);
 }
 
+static const struct agg_value agg_value_zero = {};
+
+static __always_inline void agg_key_peer(struct agg_key *key, const struct event *e)
+{
+	if (e->peer_family == AF_INET6) {
+		__builtin_memcpy(key->peer_addr, e->peer_daddr6, sizeof(key->peer_addr));
+		return;
+	}
+	u32 v4 = e->peer_daddr;
+	if (v4 == 0)
+		return;
+	key->peer_addr[10] = 0xff;
+	key->peer_addr[11] = 0xff;
+	key->peer_addr[12] = (u8)(v4 >> 24);
+	key->peer_addr[13] = (u8)(v4 >> 16);
+	key->peer_addr[14] = (u8)(v4 >> 8);
+	key->peer_addr[15] = (u8)v4;
+}
+
 static __always_inline int agg_record_in(void *map, u64 cgroup_id, u8 event_type, u8 variant,
-					 u8 role, u32 peer_ip, u16 peer_port,
+					 u8 role, const struct event *peer,
 					 u64 latency_ns, u64 bytes, int bucketed)
 {
 	struct agg_key key = {};
-	struct agg_value init = {};
 	struct agg_value *val;
 
 	if (cgroup_id == 0)
 		return 0;
 
 	key.cgroup_id = cgroup_id;
-	key.peer_ip = peer_ip;
-	key.peer_port = peer_port;
+	if (peer) {
+		agg_key_peer(&key, peer);
+		key.peer_port = peer->peer_dport;
+	}
 	key.event_type = event_type;
 	key.variant = variant;
 	key.role = role;
@@ -137,11 +159,10 @@ static __always_inline int agg_record_in(void *map, u64 cgroup_id, u8 event_type
 
 	val = bpf_map_lookup_elem(map, &key);
 	if (!val) {
-		init.count = 1;
-		init.sum_ns = bucketed ? latency_ns : 0;
-		init.bytes = bytes;
-		bpf_map_update_elem(map, &key, &init, BPF_ANY);
-		return 1;
+		bpf_map_update_elem(map, &key, &agg_value_zero, BPF_NOEXIST);
+		val = bpf_map_lookup_elem(map, &key);
+		if (!val)
+			return 0;
 	}
 
 	val->count += 1;
@@ -152,19 +173,19 @@ static __always_inline int agg_record_in(void *map, u64 cgroup_id, u8 event_type
 }
 
 static __always_inline int agg_record(u64 cgroup_id, u8 event_type, u8 variant,
-				      u8 role, u32 peer_ip, u16 peer_port,
+				      u8 role, const struct event *peer,
 				      u64 latency_ns, u64 bytes, int bucketed)
 {
 	if (!agg_is_enabled())
 		return 0;
 	return agg_record_in(&agg_metrics, cgroup_id, event_type, variant,
-			     role, peer_ip, peer_port, latency_ns, bytes, bucketed);
+			     role, peer, latency_ns, bytes, bucketed);
 }
 
 #define AGG_VARIANT(proto, status_class, is_error) \
 	((u8)(((proto) & 0x7) | (((status_class) & 0x7) << 3) | (((is_error) & 0x1) << 6)))
 
-static __always_inline int agg_from_event(struct event *e, s32 status_num)
+static __noinline int agg_from_event(struct event *e, s32 status_num)
 {
 	u8 variant = 0;
 	u8 role = 0;
@@ -265,18 +286,33 @@ static __always_inline int agg_from_event(struct event *e, s32 status_num)
 		variant = AGG_VARIANT(0, status_class, is_error);
 
 	return agg_record(e->cgroup_id, (u8)e->type, variant,
-			  role, e->peer_daddr, e->peer_dport,
-			  e->latency_ns, bytes, bucketed);
+			  role, e, e->latency_ns, bytes, bucketed);
 }
 
-static __always_inline int agg_absorbed(struct event *e, s32 status_num)
+static __always_inline int event_buf_intact(struct event *e);
+
+static __always_inline int agg_absorbed_checked(struct event *e, s32 status_num, int tracked)
 {
+	if (tracked && !event_buf_intact(e)) {
+		e->agg_recorded = 0;
+		return 1;
+	}
 	int recorded = agg_from_event(e, status_num);
 
 	e->agg_recorded = (u8)recorded;
 	if (!recorded)
 		return 0;
 	return agg_mode() == AGG_MODE_BYPASS;
+}
+
+static __always_inline int agg_absorbed(struct event *e, s32 status_num)
+{
+	return agg_absorbed_checked(e, status_num, 1);
+}
+
+static __always_inline int agg_absorbed_untracked(struct event *e, s32 status_num)
+{
+	return agg_absorbed_checked(e, status_num, 0);
 }
 
 #endif /* PODTRACE_AGG_H */

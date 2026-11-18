@@ -38,7 +38,7 @@ static inline void emit_pool_event(u32 pid, u32 type, u64 latency_ns, u32 db_typ
 	
 	bpf_probe_read_kernel_str(e->target, sizeof(e->target), pool_name);
 	e->details[0] = '\0';
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	emit_event(e);
 }
 
 static inline void handle_pool_acquire(u32 pid, u32 tid, u64 key, u64 now, u32 db_type) {

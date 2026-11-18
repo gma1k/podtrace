@@ -15,7 +15,7 @@ func newTestMaps(t *testing.T) (metrics, enabled *ebpf.Map) {
 		t.Skipf("cannot raise memlock: %v", err)
 	}
 	metrics, err := ebpf.NewMap(&ebpf.MapSpec{
-		Type: ebpf.LRUCPUHash, KeySize: 24, ValueSize: 24, MaxEntries: 64,
+		Type: ebpf.LRUCPUHash, KeySize: 40, ValueSize: 24, MaxEntries: 64,
 	})
 	if err != nil {
 		t.Skipf("cannot create the metrics map (needs privileges): %v", err)

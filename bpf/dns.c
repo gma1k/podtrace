@@ -226,7 +226,7 @@ static __always_inline int encrypted_dns_first_seen(struct __sk_buff *skb, u8 is
 }
 
 static __always_inline void emit_encrypted_dns(struct __sk_buff *skb, u8 is_v6, __u16 port,
-					       __u16 sport, int is_doh) {
+					       __u16 sport, int is_doh, int task_pid) {
 	if (!encrypted_dns_first_seen(skb, is_v6, port, sport))
 		return;
 	struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
@@ -236,7 +236,7 @@ static __always_inline void emit_encrypted_dns(struct __sk_buff *skb, u8 is_v6, 
 	}
 	__builtin_memset(e, 0, sizeof(*e));
 	e->timestamp = bpf_ktime_get_ns();
-	e->pid = agent_ns_tgid();
+	e->pid = task_pid ? agent_ns_tgid() : 0;
 	e->type = EVENT_DNS;
 	e->cgroup_id = bpf_skb_cgroup_id(skb);
 	e->dns_transport = DNS_SOURCE_ENCRYPTED;
@@ -257,13 +257,13 @@ static __always_inline void emit_encrypted_dns(struct __sk_buff *skb, u8 is_v6, 
 	}
 	__builtin_memcpy(e->details, is_doh ? "encrypted (DoH)" : "encrypted (DoT)",
 			 sizeof("encrypted (DoH)"));
-	if (agg_absorbed(e, 0))
+	if (agg_absorbed_untracked(e, 0))
 		bpf_ringbuf_discard(e, 0);
 	else
 		bpf_ringbuf_submit(e, 0);
 }
 
-static __noinline int skip_name(struct __sk_buff *skb, int off) {
+__noinline int dns_skip_name(struct __sk_buff *skb, int off) {
 	for (int i = 0; i < MAX_NAME_LABELS; i++) {
 		off &= DNS_OFF_MASK;
 		__u8 c = 0;
@@ -278,8 +278,7 @@ static __noinline int skip_name(struct __sk_buff *skb, int off) {
 	return off & DNS_OFF_MASK;
 }
 
-SEC("cgroup_skb/egress")
-int dns_egress(struct __sk_buff *skb) {
+static __always_inline int dns_egress_run(struct __sk_buff *skb, int task_pid) {
 	u8 is_v6 = 0, proto = 0;
 	int l4 = l4_offset(skb, &is_v6, &proto);
 	if (l4 < 0)
@@ -293,7 +292,7 @@ int dns_egress(struct __sk_buff *skb) {
 	bpf_skb_load_bytes(skb, l4, &sport, sizeof(sport));
 
 	if (dporth == DOT_PORT) {
-		emit_encrypted_dns(skb, is_v6, DOT_PORT, sport, 0);
+		emit_encrypted_dns(skb, is_v6, DOT_PORT, sport, 0, task_pid);
 		return 1;
 	}
 
@@ -301,13 +300,13 @@ int dns_egress(struct __sk_buff *skb) {
 		if (!is_v6) {
 			__u32 daddr = 0;
 			if (bpf_skb_load_bytes(skb, 16, &daddr, sizeof(daddr)) == 0 && is_known_doh(daddr)) {
-				emit_encrypted_dns(skb, 0, DOH_PORT, sport, 1);
+				emit_encrypted_dns(skb, 0, DOH_PORT, sport, 1, task_pid);
 				return 1;
 			}
 		} else {
 			u8 a6[16] = {};
 			if (bpf_skb_load_bytes(skb, 24, a6, sizeof(a6)) == 0 && is_known_doh6(a6)) {
-				emit_encrypted_dns(skb, 1, DOH_PORT, sport, 1);
+				emit_encrypted_dns(skb, 1, DOH_PORT, sport, 1, task_pid);
 				return 1;
 			}
 		}
@@ -343,7 +342,7 @@ int dns_egress(struct __sk_buff *skb) {
 	struct dns_query_state q = {};
 	q.ts_ns = bpf_ktime_get_ns();
 	q.last_ns = q.ts_ns;
-	q.pid = agent_ns_tgid();
+	q.pid = task_pid ? agent_ns_tgid() : 0;
 	q.transport = transport;
 	if (!is_v6) {
 		__u32 daddr = 0;
@@ -375,11 +374,21 @@ int dns_egress(struct __sk_buff *skb) {
 	__builtin_memcpy(e->dns_server_ip6, q.server_ip6, 16);
 	__builtin_memcpy(e->comm, q.comm, COMM_LEN);
 	__builtin_memcpy(e->target, q.name, MAX_STRING_LEN);
-	if (agg_absorbed(e, 0))
+	if (agg_absorbed_untracked(e, 0))
 		bpf_ringbuf_discard(e, 0);
 	else
 		bpf_ringbuf_submit(e, 0);
 	return 1;
+}
+
+SEC("cgroup_skb/egress")
+int dns_egress(struct __sk_buff *skb) {
+	return dns_egress_run(skb, 1);
+}
+
+SEC("cgroup_skb/egress")
+int dns_egress__compat(struct __sk_buff *skb) {
+	return dns_egress_run(skb, 0);
 }
 
 struct dns_payload_meta {
@@ -422,6 +431,14 @@ static __noinline void emit_dns_payload(struct __sk_buff *skb, int dns_off,
 		dns_drop_inc();
 		return;
 	}
+	u32 len = avail - 1;
+	barrier_var(len);
+	len = (len & (DNS_PAYLOAD_MAX - 1)) + 1;
+	if (len > DNS_PAYLOAD_MAX - 1) {
+		dns_drop_inc();
+		return;
+	}
+	avail = len;
 	if (bpf_skb_load_bytes(skb, dns_off, scr->payload, avail) < 0) {
 		dns_drop_inc();
 		return;
@@ -507,14 +524,17 @@ int dns_ingress(struct __sk_buff *skb) {
 		ancount = bpf_ntohs(ancount);
 	e->bytes = ancount;
 
-	int qname_end = skip_name(skb, dns_off + 12);
+	int qname_end = dns_skip_name(skb, dns_off + 12);
 	int aoff = qname_end + 4;
 	int wrote_detail = 0;
+	__u32 detail_ip = 0;
+	int detail_off = 0;
+	__u8 detail_kind = 0;
 
 	for (int a = 0; a < MAX_ANSWERS; a++) {
 		if (a >= ancount || qname_end < 0)
 			break;
-		aoff = skip_name(skb, aoff);
+		aoff = dns_skip_name(skb, aoff);
 		if (aoff < 0)
 			break;
 		aoff &= DNS_OFF_MASK;
@@ -532,7 +552,8 @@ int dns_ingress(struct __sk_buff *skb) {
 			if (bpf_skb_load_bytes(skb, rdata, &ip, sizeof(ip)) == 0) {
 				struct dns_resolved_key rk = { .cgroup_id = key.cgroup_id, .ip = ip };
 				bpf_map_update_elem(&dns_resolved, &rk, q->name, BPF_ANY);
-				format_ip_port(__builtin_bswap32(ip), 0, e->details);
+				detail_kind = DNS_TYPE_A;
+				detail_ip = ip;
 				wrote_detail = 1;
 			}
 		} else if (atype == DNS_TYPE_AAAA) {
@@ -540,21 +561,30 @@ int dns_ingress(struct __sk_buff *skb) {
 			if (bpf_skb_load_bytes(skb, rdata, k6.addr, sizeof(k6.addr)) == 0) {
 				bpf_map_update_elem(&dns_resolved6, &k6, q->name, BPF_ANY);
 				if (!wrote_detail) {
-					format_ipv6_port(k6.addr, 0, e->details);
+					detail_kind = DNS_TYPE_AAAA;
+					detail_off = rdata;
 					wrote_detail = 1;
 				}
 			}
 		} else if (atype == DNS_TYPE_CNAME && !wrote_detail) {
-			parse_name_compressed(skb, dns_off, rdata, e->details);
+			detail_kind = DNS_TYPE_CNAME;
+			detail_off = rdata;
 			wrote_detail = 1;
 		}
 		aoff = (rdata + (rdlen & DNS_OFF_MASK)) & DNS_OFF_MASK;
 	}
 
-	/* A reserved record must be released either way: discard rather than
-	 * submit when the map already absorbed it, or the reservation leaks
-	 * and the ring wedges. */
-	if (agg_absorbed(e, 0))
+	if (detail_kind == DNS_TYPE_A) {
+		format_ip_port(__builtin_bswap32(detail_ip), 0, e->details);
+	} else if (detail_kind == DNS_TYPE_AAAA) {
+		__u8 addr6[16] = {};
+		if (bpf_skb_load_bytes(skb, detail_off & DNS_OFF_MASK, addr6, sizeof(addr6)) == 0)
+			format_ipv6_port(addr6, 0, e->details);
+	} else if (detail_kind == DNS_TYPE_CNAME) {
+		parse_name_compressed(skb, dns_off, detail_off & DNS_OFF_MASK, e->details);
+	}
+
+	if (agg_absorbed_untracked(e, 0))
 		bpf_ringbuf_discard(e, 0);
 	else
 		bpf_ringbuf_submit(e, 0);

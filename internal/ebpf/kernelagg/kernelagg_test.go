@@ -7,13 +7,33 @@ import (
 )
 
 func TestKeyAndValueMatchTheKernelLayout(t *testing.T) {
-	if got := binary.Size(Key{}); got != 24 {
-		t.Errorf("binary.Size(Key) = %d, want 24 to match struct agg_key. A mismatch does not "+
+	if got := binary.Size(Key{}); got != 40 {
+		t.Errorf("binary.Size(Key) = %d, want 40 to match struct agg_key. A mismatch does not "+
 			"fail loudly at every row — it can silently misread the key and attribute metrics "+
 			"to the wrong workload", got)
 	}
 	if got := binary.Size(Value{}); got != 24 {
 		t.Errorf("binary.Size(Value) = %d, want 24 to match struct agg_value", got)
+	}
+}
+
+func TestKeyPeerIPPrintsMappedIPv4InDottedForm(t *testing.T) {
+	cases := []struct {
+		name string
+		addr [16]byte
+		want string
+	}{
+		{"no peer", [16]byte{}, ""},
+		{"ipv4", V4MappedPeer(0x0AF40107), "10.244.1.7"},
+		{"ipv6", [16]byte{0xfd, 0x00, 15: 0x07}, "fd00::7"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			k := Key{PeerAddr: tc.addr}
+			if got := k.PeerIP(); got != tc.want {
+				t.Errorf("PeerIP() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

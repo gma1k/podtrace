@@ -42,7 +42,7 @@ int tracepoint_sched_process_exec(void *ctx) {
 	bpf_probe_read_kernel_str(e->target, sizeof(e->target), (char *)ctx + name_off);
 
 	capture_user_stack(ctx, e->pid, 0, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	emit_event(e);
 	return 0;
 }
 
@@ -70,7 +70,7 @@ int raw_tracepoint_sched_process_fork(struct bpf_raw_tracepoint_args *ctx) {
 	BPF_CORE_READ_STR_INTO(&e->target, child, comm);
 
 	capture_user_stack(ctx, pid, 0, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	emit_event(e);
 	return 0;
 }
 

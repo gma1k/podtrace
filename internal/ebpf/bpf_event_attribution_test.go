@@ -7,17 +7,17 @@ import (
 )
 
 func TestDNSQueryPidIsInAgentNamespace(t *testing.T) {
-	body := functionBody(t, bpfSource(t, "dns.c"), "dns_egress")
+	body := functionBody(t, bpfSource(t, "dns.c"), "dns_egress_run")
 	if strings.Contains(body, "bpf_get_current_pid_tgid() >> 32") {
 		t.Fatal("dns_egress records a host-namespace tgid that does not exist in the agent's /proc")
 	}
-	if !strings.Contains(body, "q.pid = agent_ns_tgid();") {
+	if !strings.Contains(body, "q.pid = task_pid ? agent_ns_tgid() : 0;") {
 		t.Fatal("dns_egress must record the query pid with agent_ns_tgid()")
 	}
 }
 
 func TestOOMKillIsAttributedToTheVictim(t *testing.T) {
-	body := functionBody(t, bpfSource(t, "memory.c"), "tracepoint_oom_mark_victim")
+	body := functionBody(t, bpfSource(t, "memory.c"), "oom_mark_victim")
 	acquire := strings.Index(body, "bpf_task_from_pid(")
 	release := strings.Index(body, "bpf_task_release(victim)")
 	if acquire < 0 || release < 0 {
@@ -67,7 +67,7 @@ func TestPthreadLockErrorsAreNegatedLikeFutexReturns(t *testing.T) {
 }
 
 func TestOOMKillCarriesTheVictimsResidentMemory(t *testing.T) {
-	body := functionBody(t, bpfSource(t, "memory.c"), "tracepoint_oom_mark_victim")
+	body := functionBody(t, bpfSource(t, "memory.c"), "oom_mark_victim")
 	for _, want := range []string{"bpf_core_field_exists(tp->anon_rss)", "file_rss", "shmem_rss", "* 1024"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("tracepoint_oom_mark_victim lacks %q; the report would show 0 B for every kill", want)
@@ -76,7 +76,7 @@ func TestOOMKillCarriesTheVictimsResidentMemory(t *testing.T) {
 }
 
 func TestTasksInvisibleToTheAgentGetNoHostPID(t *testing.T) {
-	body := functionBody(t, bpfSource(t, "helpers.h"), "task_ns_tgid")
+	body := functionBody(t, bpfSource(t, "helpers.h"), "task_ns_tgid_inline")
 	if strings.Count(body, "return init_tgid;") != 1 {
 		t.Fatal("task_ns_tgid may fall back to the host PID only when the agent has no pid namespace reference; " +
 			"a task it cannot see (exited, or outside its namespace) must come back as 0")
@@ -88,13 +88,13 @@ func TestTasksInvisibleToTheAgentGetNoHostPID(t *testing.T) {
 	if !strings.Contains(functionBody(t, cpu, "proc_cpu_accumulate"), "if (!tgid)") {
 		t.Error("CPU time must not be counted under PID 0")
 	}
-	if !strings.Contains(functionBody(t, bpfSource(t, "http3.c"), "quic_ship"), "egress ? agent_ns_tgid() : 0") {
+	if !strings.Contains(functionBody(t, bpfSource(t, "http3.c"), "quic_ship"), "(egress && task_pid) ? agent_ns_tgid() : 0") {
 		t.Error("an ingress QUIC packet is handled in softirq; current is not the receiving process")
 	}
 }
 
 func TestOOMVictimIsAttributedToItsOwnProcessAndCgroup(t *testing.T) {
-	body := functionBody(t, bpfSource(t, "memory.c"), "tracepoint_oom_mark_victim")
+	body := functionBody(t, bpfSource(t, "memory.c"), "oom_mark_victim")
 	if !strings.Contains(body, "task_ns_tgid(victim, victim_tgid)") {
 		t.Error("mark_victim reports a thread ID; without a pid namespace reference the event must fall back to the victim's process ID")
 	}
