@@ -10,6 +10,7 @@ import (
 	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
 
 	config "github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/events"
 )
 
 var (
@@ -84,20 +85,11 @@ func ValidateEventFilter(filter string) error {
 	if len(filter) > maxEventFilterLength {
 		return fmt.Errorf("event filter exceeds maximum length of %d characters", maxEventFilterLength)
 	}
-	validFilters := map[string]bool{
-		"dns":    true,
-		"net":    true,
-		"fs":     true,
-		"cpu":    true,
-		"proc":   true,
-		"crypto": true,
-		"usdt":   true,
-	}
 	filters := strings.Split(strings.ToLower(filter), ",")
 	for _, f := range filters {
 		f = strings.TrimSpace(f)
-		if f != "" && !validFilters[f] {
-			return fmt.Errorf("invalid event filter: %s (valid: dns, net, fs, cpu, proc, crypto, usdt)", f)
+		if f != "" && !events.IsFilterCategory(f) {
+			return fmt.Errorf("invalid event filter: %s (valid: %s)", f, strings.Join(events.FilterCategories(), ", "))
 		}
 	}
 	return nil

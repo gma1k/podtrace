@@ -99,6 +99,7 @@ func TestFiltersToSet_DedupesAcrossCategories(t *testing.T) {
 		events.EventOpen, events.EventClose,
 		events.EventRead, events.EventWrite, events.EventFsync,
 		events.EventUnlink, events.EventRename,
+		events.EventRequestDone,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d entries, want %d (%v)", len(got), len(want), got)

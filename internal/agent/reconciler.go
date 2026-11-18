@@ -823,42 +823,18 @@ func filtersToSet(in []podtracev1alpha1.EventFilter) map[events.EventType]struct
 			out[et] = struct{}{}
 		}
 	}
+	if len(out) > 0 {
+		for _, et := range events.EventTypesDeliveredUnderAnyFilter() {
+			out[et] = struct{}{}
+		}
+	}
 	return out
 }
 
 // filterToEventTypes expands a high-level filter category into the set
 // of low-level EventType values the tracer produces for that category.
 func filterToEventTypes(f podtracev1alpha1.EventFilter) []events.EventType {
-	switch f {
-	case podtracev1alpha1.FilterDNS:
-		return []events.EventType{events.EventDNS, events.EventDNSQuery}
-	case podtracev1alpha1.FilterNet:
-		return []events.EventType{
-			events.EventConnect, events.EventTCPSend, events.EventTCPRecv,
-			events.EventUDPSend, events.EventUDPRecv, events.EventTCPState,
-			events.EventTCPRetrans, events.EventNetDevError, events.EventTCPRTT,
-			events.EventConnectResult,
-			events.EventFastCGIReq, events.EventFastCGIResp,
-			events.EventHTTPReq, events.EventHTTPResp,
-			events.EventGRPCMethod, events.EventHTTP3,
-		}
-	case podtracev1alpha1.FilterFS:
-		return []events.EventType{
-			events.EventOpen, events.EventClose, events.EventRead,
-			events.EventWrite, events.EventFsync,
-			events.EventUnlink, events.EventRename,
-		}
-	case podtracev1alpha1.FilterCPU:
-		return []events.EventType{events.EventSchedSwitch, events.EventLockContention}
-	case podtracev1alpha1.FilterProc:
-		return []events.EventType{events.EventExec, events.EventFork, events.EventOOMKill}
-	case podtracev1alpha1.FilterCrypto:
-		return []events.EventType{events.EventAFALG}
-	case podtracev1alpha1.FilterUSDT:
-		return []events.EventType{events.EventUSDT}
-	default:
-		return nil
-	}
+	return events.EventTypesInFilterCategory(string(f))
 }
 
 // copyMap returns a defensive shallow copy of a string map.

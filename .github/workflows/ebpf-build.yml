@@ -121,7 +121,7 @@ jobs:
   verifier-kernel-matrix:
     name: verifier (kernel ${{ matrix.kernel }})
     needs: verifier-build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     strategy:
       fail-fast: false

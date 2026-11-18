@@ -964,30 +964,7 @@ func filterEvents(ctx context.Context, in <-chan *events.Event, out chan<- *even
 			if event == nil {
 				continue
 			}
-			shouldInclude := false
-			switch {
-			case event.Type == events.EventRequestDone:
-				shouldInclude = true
-			case filterMap["dns"] && event.Type == events.EventDNS:
-				shouldInclude = true
-			case filterMap["net"] && (event.Type == events.EventConnect || event.Type == events.EventTCPSend || event.Type == events.EventTCPRecv ||
-				event.Type == events.EventFastCGIReq || event.Type == events.EventFastCGIResp ||
-				event.Type == events.EventHTTPReq || event.Type == events.EventHTTPResp ||
-				event.Type == events.EventGRPCMethod || event.Type == events.EventHTTP3 ||
-				event.Type == events.EventTLSHandshake):
-				shouldInclude = true
-			case filterMap["fs"] && (event.Type == events.EventRead || event.Type == events.EventWrite || event.Type == events.EventFsync):
-				shouldInclude = true
-			case filterMap["cpu"] && event.Type == events.EventSchedSwitch:
-				shouldInclude = true
-			case filterMap["proc"] && (event.Type == events.EventExec || event.Type == events.EventFork || event.Type == events.EventOpen || event.Type == events.EventClose):
-				shouldInclude = true
-			case filterMap["crypto"] && event.Type == events.EventAFALG:
-				shouldInclude = true
-			case filterMap["usdt"] && event.Type == events.EventUSDT:
-				shouldInclude = true
-			}
-			if shouldInclude {
+			if events.MatchesFilter(event.Type, filterMap) {
 				select {
 				case <-ctx.Done():
 					return

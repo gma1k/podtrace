@@ -374,6 +374,53 @@ type CaptureSpec struct {
 	Headers []string `json:"headers,omitempty"`
 }
 
+// EgressSpec governs the outbound connections podtrace makes to exporter,
+// alerting and report-sink endpoints, from both the agent and session Jobs.
+type EgressSpec struct {
+	// BlockPrivateRanges also refuses connections to private addresses
+	// (RFC 1918, RFC 4193). Link-local and cloud metadata addresses are
+	// refused whatever this is set to. Turn it on when ExporterConfigs are
+	// written by tenants who must not reach in-cluster services; leave it off
+	// when the collector itself runs in the cluster. The configured proxy may
+	// still be on a private address; the targets behind it are checked.
+	// +optional
+	BlockPrivateRanges bool `json:"blockPrivateRanges,omitempty"`
+
+	// Proxy routes that egress through an HTTP(S) proxy. Only podtrace's
+	// exporter, alerting and report-sink clients use it; Kubernetes API
+	// traffic never does.
+	// +optional
+	Proxy *EgressProxySpec `json:"proxy,omitempty"`
+}
+
+// EgressProxySpec names the proxy for exporter egress, with the semantics of
+// the standard HTTP_PROXY, HTTPS_PROXY and NO_PROXY variables. The values
+// are rendered into the agent and session pod specs, so they must not carry
+// credentials.
+// +kubebuilder:validation:XValidation:rule="has(self.httpProxy) || has(self.httpsProxy)",message="set httpProxy, httpsProxy or both"
+type EgressProxySpec struct {
+	// HTTPProxy is the proxy URL for http:// endpoints.
+	// +optional
+	// +kubebuilder:validation:MaxLength=2048
+	// +kubebuilder:validation:Pattern=`^https?://[^\s@/]+(/[^\s@]*)?$`
+	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getHostname() != ''",message="must be an http or https URL with a host"
+	HTTPProxy string `json:"httpProxy,omitempty"`
+
+	// HTTPSProxy is the proxy URL for https:// endpoints.
+	// +optional
+	// +kubebuilder:validation:MaxLength=2048
+	// +kubebuilder:validation:Pattern=`^https?://[^\s@/]+(/[^\s@]*)?$`
+	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getHostname() != ''",message="must be an http or https URL with a host"
+	HTTPSProxy string `json:"httpsProxy,omitempty"`
+
+	// NoProxy is a comma-separated list of hosts, domains, IP addresses and
+	// CIDRs reached directly.
+	// +optional
+	// +kubebuilder:validation:MaxLength=4096
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9.,:/*_\[\] -]*$`
+	NoProxy string `json:"noProxy,omitempty"`
+}
+
 // RedactionRule is a single user-supplied redaction pattern.
 type RedactionRule struct {
 	// +kubebuilder:validation:Required
@@ -438,6 +485,11 @@ type TracerConfigSpec struct {
 
 	// +optional
 	Capture *CaptureSpec `json:"capture,omitempty"`
+
+	// Egress governs outbound connections to exporter, alerting and
+	// report-sink endpoints.
+	// +optional
+	Egress *EgressSpec `json:"egress,omitempty"`
 
 	// +optional
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`

@@ -49,13 +49,33 @@ spec:
 | `podRefs` | `[{namespace, name}]` | one of selector/podRefs/appSelector | Explicit pod list. Cross-namespace allowed. |
 | `appSelector` | `{matchSelectors: []LabelSelector}` | one of selector/podRefs/appSelector | Application of several workloads: a pod matching **any** selector is traced (union, de-duplicated). Exactly-one-of is enforced by CEL + webhook. |
 | `namespaceSelector` | LabelSelector | optional | Widens `selector` across namespaces. `matchLabels` and `matchExpressions` are both evaluated against namespace labels; an empty selector (`{}`) matches every namespace. A matched namespace is only traced if it consents via the `podtrace.io/allow-tracing-from` annotation. |
-| `filters` | `[dns,net,fs,cpu,proc,crypto]` | optional | Empty = all categories. Agents enforce the set per-event in userspace and only the listed categories reach the configured exporter. |
+| `filters` | `[dns,net,fs,cpu,proc,crypto,usdt]` | optional | Empty = all categories. Agents enforce the set per-event in userspace and only the listed categories reach the configured exporter. See [Filter categories](#filter-categories) for the events each one selects. |
 | `exporterRef.name` | string | required | Names an `ExporterConfig` in the same namespace. |
 | `paused` | bool | optional | Stop emitting events without deleting the CR. |
 | `samplePercent` | int 0-100 | optional | Workload-owner sampling intent. The operator combines this with `ExporterConfig.spec.samplePercent` (platform-owner cap) and writes the **minimum** of the two to the bundle — that minimum is what every exporter applies. Unset on either side is treated as 100%. The resolved value is echoed at `status.policy.effectiveSampleRate`. Sampling is per trace and consistent across nodes: the decision is a hash of the trace id keyed by this PodTrace's UID, so a caller choosing its own trace ids cannot force its requests into, or keep them out of, the sample. |
 | `thresholds.errorRatePercent` | int 0-100 | optional | When set, the agent stamps `podtrace.threshold.error_rate.observed=true` on every span whose source event carries a non-zero error code and bumps `podtrace_agent_threshold_tripped_total{threshold="error_rate"}`. |
 | `thresholds.rttSpikeMs` | int ≥0 | optional | When set, the agent tags spans whose source event latency exceeds this threshold (Connect/TCPSend/TCPRecv/UDPSend/UDPRecv) and bumps `podtrace_agent_threshold_tripped_total{threshold="rtt_spike"}`. |
 | `thresholds.filesystemLatencyMs` | int ≥0 | optional | When set, the agent tags FS-event spans (Open/Read/Write/Close/Fsync/Unlink/Rename) whose latency exceeds the threshold and bumps `podtrace_agent_threshold_tripped_total{threshold="fs_slow"}`. |
+
+## Filter categories
+
+`spec.filters` on PodTrace and PodTraceSession and the CLI's `--filter` share
+one mapping (`internal/events/filter_categories.go`), so the same list selects
+the same events everywhere.
+
+| Category | Events |
+|---|---|
+| `dns` | DNS lookups (libc and packet capture) |
+| `net` | connect and its result, TCP/UDP send and receive, TCP state, retransmits and RTT, device errors, TLS handshakes and failures, HTTP/1/2/3, gRPC, FastCGI, database queries, Redis, Memcached, Kafka, connection pool acquire/release/exhaustion and pool stats |
+| `fs` | open, close, read, write, fsync, unlink, rename |
+| `cpu` | scheduler switches, lock contention |
+| `proc` | exec, fork, OOM kills, page faults, resource-limit pressure |
+| `crypto` | AF_ALG crypto sockets |
+| `usdt` | USDT probes |
+
+The per-request completion marker is delivered under every non-empty filter:
+it carries no activity of its own but closes the request that the selected
+events belong to.
 
 ## Status reference
 

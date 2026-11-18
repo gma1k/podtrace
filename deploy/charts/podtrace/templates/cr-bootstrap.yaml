@@ -211,6 +211,26 @@ data:
         headers:
           {{- toYaml . | nindent 10 }}
       {{- end }}
+      {{- $egress := .Values.tracerConfig.egress | default dict }}
+      {{- $proxy := $egress.proxy | default dict }}
+      {{- if or $egress.blockPrivateRanges $proxy.httpProxy $proxy.httpsProxy }}
+      egress:
+        {{- if $egress.blockPrivateRanges }}
+        blockPrivateRanges: true
+        {{- end }}
+        {{- if or $proxy.httpProxy $proxy.httpsProxy }}
+        proxy:
+          {{- with $proxy.httpProxy }}
+          httpProxy: {{ . | quote }}
+          {{- end }}
+          {{- with $proxy.httpsProxy }}
+          httpsProxy: {{ . | quote }}
+          {{- end }}
+          {{- with $proxy.noProxy }}
+          noProxy: {{ . | quote }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
   {{- end }}
   {{- if $ecEnabled }}
   exporterconfig.yaml: |

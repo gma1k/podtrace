@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/gma1k/podtrace/internal/netguard"
 )
 
 // newAlertHTTPClient returns the client every HTTP alert sender uses. It never
@@ -13,8 +15,11 @@ import (
 // token with it, to a location that was never validated, including an
 // https-to-http downgrade on the same host.
 func newAlertHTTPClient(timeout time.Duration) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = netguard.EgressProxy
 	return &http.Client{
-		Timeout: timeout,
+		Timeout:   timeout,
+		Transport: transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},

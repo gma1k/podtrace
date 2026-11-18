@@ -32,10 +32,13 @@ type TracerConfigSpecApplyConfiguration struct {
 	Session          *SessionRuntimeSpecApplyConfiguration `json:"session,omitempty"`
 	Redaction        *RedactionSpecApplyConfiguration      `json:"redaction,omitempty"`
 	Capture          *CaptureSpecApplyConfiguration        `json:"capture,omitempty"`
-	NodeSelector     map[string]string                     `json:"nodeSelector,omitempty"`
-	Tolerations      []v1.Toleration                       `json:"tolerations,omitempty"`
-	Affinity         *v1.Affinity                          `json:"affinity,omitempty"`
-	BTFMode          *apiv1alpha1.BTFMode                  `json:"btfMode,omitempty"`
+	// Egress governs outbound connections to exporter, alerting and
+	// report-sink endpoints.
+	Egress       *EgressSpecApplyConfiguration `json:"egress,omitempty"`
+	NodeSelector map[string]string             `json:"nodeSelector,omitempty"`
+	Tolerations  []v1.Toleration               `json:"tolerations,omitempty"`
+	Affinity     *v1.Affinity                  `json:"affinity,omitempty"`
+	BTFMode      *apiv1alpha1.BTFMode          `json:"btfMode,omitempty"`
 	// BTFSource supplies the blob for btfMode "file". Ignored in every other
 	// mode.
 	BTFSource                    *BTFSourceApplyConfiguration `json:"btfSource,omitempty"`
@@ -105,6 +108,14 @@ func (b *TracerConfigSpecApplyConfiguration) WithRedaction(value *RedactionSpecA
 // If called multiple times, the Capture field is set to the value of the last call.
 func (b *TracerConfigSpecApplyConfiguration) WithCapture(value *CaptureSpecApplyConfiguration) *TracerConfigSpecApplyConfiguration {
 	b.Capture = value
+	return b
+}
+
+// WithEgress sets the Egress field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Egress field is set to the value of the last call.
+func (b *TracerConfigSpecApplyConfiguration) WithEgress(value *EgressSpecApplyConfiguration) *TracerConfigSpecApplyConfiguration {
+	b.Egress = value
 	return b
 }
 

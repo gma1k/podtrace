@@ -1385,6 +1385,54 @@ spec:
                     maxItems: 4
                     type: array
                 type: object
+              egress:
+                description: |-
+                  Egress governs outbound connections to exporter, alerting and
+                  report-sink endpoints.
+                properties:
+                  blockPrivateRanges:
+                    description: |-
+                      BlockPrivateRanges also refuses connections to private addresses
+                      (RFC 1918, RFC 4193). Link-local and cloud metadata addresses are
+                      refused whatever this is set to. Turn it on when ExporterConfigs are
+                      written by tenants who must not reach in-cluster services; leave it off
+                      when the collector itself runs in the cluster. The configured proxy may
+                      still be on a private address; the targets behind it are checked.
+                    type: boolean
+                  proxy:
+                    description: |-
+                      Proxy routes that egress through an HTTP(S) proxy. Only podtrace's
+                      exporter, alerting and report-sink clients use it; Kubernetes API
+                      traffic never does.
+                    properties:
+                      httpProxy:
+                        description: HTTPProxy is the proxy URL for http:// endpoints.
+                        maxLength: 2048
+                        pattern: ^https?://[^\s@/]+(/[^\s@]*)?$
+                        type: string
+                        x-kubernetes-validations:
+                        - message: must be an http or https URL with a host
+                          rule: isURL(self) && url(self).getHostname() != ''
+                      httpsProxy:
+                        description: HTTPSProxy is the proxy URL for https:// endpoints.
+                        maxLength: 2048
+                        pattern: ^https?://[^\s@/]+(/[^\s@]*)?$
+                        type: string
+                        x-kubernetes-validations:
+                        - message: must be an http or https URL with a host
+                          rule: isURL(self) && url(self).getHostname() != ''
+                      noProxy:
+                        description: |-
+                          NoProxy is a comma-separated list of hosts, domains, IP addresses and
+                          CIDRs reached directly.
+                        maxLength: 4096
+                        pattern: ^[A-Za-z0-9.,:/*_\[\] -]*$
+                        type: string
+                    type: object
+                    x-kubernetes-validations:
+                    - message: set httpProxy, httpsProxy or both
+                      rule: has(self.httpProxy) || has(self.httpsProxy)
+                type: object
               fleetPriority:
                 format: int32
                 type: integer

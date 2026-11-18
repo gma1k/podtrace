@@ -41,6 +41,8 @@ applies the CR from `values.yaml` via a post-install hook Job:
 | `session.maxDuration` (default unset: no cap below the 24h Job limit) | `spec.session.maxDuration` |
 | `tracerConfig.sidecarUploader` | `spec.session.sidecarUploader` |
 | `tracerConfig.redaction` | `spec.redaction` |
+| `tracerConfig.capture` | `spec.capture` |
+| `tracerConfig.egress` | `spec.egress` |
 
 To change a setting, prefer `helm upgrade --reuse-values --set …`
 rather than editing the CR directly — direct edits get reverted on the
@@ -133,6 +135,24 @@ spec:
   `Details`, one `name: value` line each, values truncated at 64 bytes).
   Captured values pass through the redaction engine when `redaction` is
   enabled. See [http3.md](http3.md#header-allowlist-capture).
+- **`egress`** — outbound connections to exporter, alerting and
+  report-sink endpoints, applied to the agent DaemonSet, session Jobs and
+  their report uploader. `blockPrivateRanges: true` also refuses RFC 1918 /
+  RFC 4193 addresses (link-local and cloud metadata addresses are always
+  refused); leave it off when the collector runs in the cluster.
+  `proxy.httpProxy`, `proxy.httpsProxy` and `proxy.noProxy` send that egress
+  through an HTTP(S) proxy with the usual `HTTP_PROXY` semantics. Only
+  podtrace's exporter, alerting and report-sink clients use the proxy, never
+  Kubernetes API traffic, so `noProxy` does not need to list the API server.
+  The proxy may sit on a private address even with `blockPrivateRanges` on;
+  the targets reached through it are still checked.
+  The URLs are rendered into pod specs, so admission refuses one carrying
+  credentials. See [configuration.md](configuration.md#egress-guard).
+
+  Whether an exporter may use cleartext comes from its ExporterConfig, not
+  from here: `otlp.insecure: true`, an explicit `http://` endpoint, or a
+  Jaeger or Zipkin endpoint without a scheme. Session Jobs and the agent
+  follow the same rule.
 
 ### Defaults: everything on unless you say otherwise
 

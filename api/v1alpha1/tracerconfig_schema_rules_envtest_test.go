@@ -29,6 +29,9 @@ func TestEnvtest_TracerConfigSchemaRules(t *testing.T) {
 	alerting := func(a map[string]any) map[string]any {
 		return map[string]any{"image": "ghcr.io/gma1k/podtrace:test", "agent": map[string]any{"alerting": a}}
 	}
+	egress := func(e map[string]any) map[string]any {
+		return map[string]any{"image": "ghcr.io/gma1k/podtrace:test", "egress": e}
+	}
 	cases := map[string]struct {
 		spec      map[string]any
 		wantError string
@@ -54,6 +57,33 @@ func TestEnvtest_TracerConfigSchemaRules(t *testing.T) {
 		"namespace that is not a name": {
 			spec:      map[string]any{"image": "ghcr.io/gma1k/podtrace:test", "systemNamespace": "Fleet_B"},
 			wantError: "spec.systemNamespace",
+		},
+		"egress proxy": {
+			spec: egress(map[string]any{"blockPrivateRanges": true, "proxy": map[string]any{
+				"httpProxy": "http://proxy.corp:3128", "httpsProxy": "http://[fd00::1]:3128/", "noProxy": ".svc,10.0.0.0/8"}}),
+		},
+		"egress block only": {
+			spec: egress(map[string]any{"blockPrivateRanges": true}),
+		},
+		"egress proxy with credentials": {
+			spec:      egress(map[string]any{"proxy": map[string]any{"httpsProxy": "http://user:pass@proxy:3128"}}),
+			wantError: "spec.egress.proxy.httpsProxy",
+		},
+		"egress proxy without a host": {
+			spec:      egress(map[string]any{"proxy": map[string]any{"httpProxy": "http://:3128"}}),
+			wantError: "must be an http or https URL with a host",
+		},
+		"egress proxy with another scheme": {
+			spec:      egress(map[string]any{"proxy": map[string]any{"httpProxy": "socks5://proxy:1080"}}),
+			wantError: "spec.egress.proxy.httpProxy",
+		},
+		"egress no-proxy list alone": {
+			spec:      egress(map[string]any{"proxy": map[string]any{"noProxy": ".svc"}}),
+			wantError: "set httpProxy, httpsProxy or both",
+		},
+		"egress no-proxy list with a separator it does not use": {
+			spec:      egress(map[string]any{"proxy": map[string]any{"httpProxy": "http://p:1", "noProxy": "a;b"}}),
+			wantError: "spec.egress.proxy.noProxy",
 		},
 	}
 	for name, c := range cases {
