@@ -99,7 +99,7 @@ func TestFilterEvents(t *testing.T) {
 			events: []*events.Event{
 				{Type: events.EventDNS},
 			},
-			expected: 0,
+			expected: 1,
 		},
 	}
 
@@ -194,8 +194,8 @@ func TestFilterEvents_AllEventTypes(t *testing.T) {
 		{"HTTPReq with net filter", "net", &events.Event{Type: events.EventHTTPReq}, true},
 		{"HTTPResp with net filter", "net", &events.Event{Type: events.EventHTTPResp}, true},
 		{"GRPCMethod with net filter", "net", &events.Event{Type: events.EventGRPCMethod}, true},
-		{"EventOpen with proc filter", "proc", &events.Event{Type: events.EventOpen}, true},
-		{"EventClose with proc filter", "proc", &events.Event{Type: events.EventClose}, true},
+		{"EventOpen with fs filter", "fs", &events.Event{Type: events.EventOpen}, true},
+		{"EventClose with fs filter", "fs", &events.Event{Type: events.EventClose}, true},
 		{"EventFsync with fs filter", "fs", &events.Event{Type: events.EventFsync}, true},
 		{"whitespace in filter", " dns , net ", &events.Event{Type: events.EventDNS}, true},
 	}

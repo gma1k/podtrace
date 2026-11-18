@@ -28,6 +28,8 @@ func everyDeepCopyType() map[string]any {
 		"BTFConfigMapSource":              populated[podtracev1alpha1.BTFConfigMapSource](),
 		"BTFSource":                       populated[podtracev1alpha1.BTFSource](),
 		"CaptureSpec":                     populated[podtracev1alpha1.CaptureSpec](),
+		"EgressProxySpec":                 populated[podtracev1alpha1.EgressProxySpec](),
+		"EgressSpec":                      populated[podtracev1alpha1.EgressSpec](),
 		"DataDogExporter":                 populated[podtracev1alpha1.DataDogExporter](),
 		"ExporterConfig":                  populated[podtracev1alpha1.ExporterConfig](),
 		"ExporterConfigList":              populated[podtracev1alpha1.ExporterConfigList](),

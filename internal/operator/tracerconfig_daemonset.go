@@ -105,6 +105,7 @@ func buildAgentDaemonSetSpec(tc *podtracev1alpha1.TracerConfig, systemNS string)
 	env = append(env, redactionEnv(tc.Spec.Redaction)...)
 	env = append(env, captureEnv(tc.Spec.Capture)...)
 	env = append(env, metricsEnv(tc.Spec.Agent.Metrics)...)
+	env = append(env, egressEnv(tc)...)
 
 	btfEnv, btfVolume, btfMount := btfFileWiring(tc)
 	env = append(env, btfEnv...)

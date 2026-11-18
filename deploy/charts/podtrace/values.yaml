@@ -298,6 +298,23 @@ tracerConfig:
   capture:
     headers: []
 
+  # Outbound connections to exporter, alerting and report-sink endpoints,
+  # from the agents and from session Jobs.
+  egress:
+    # Also refuse private (RFC 1918 / RFC 4193) addresses. Link-local and
+    # cloud metadata addresses are always refused. Leave off when the
+    # collector runs in the cluster.
+    blockPrivateRanges: false
+    # Send that egress through an HTTP(S) proxy. Only podtrace's exporter,
+    # alerting and report-sink clients use it, never Kubernetes API traffic.
+    # The URLs end up in pod specs, so they must not carry credentials.
+    proxy:
+      httpProxy: ""
+      httpsProxy: ""
+      # Comma-separated hosts, domains, IPs and CIDRs reached directly, e.g.
+      # ".svc,.cluster.local,10.0.0.0/8".
+      noProxy: ""
+
 examples:
   exporterconfig:
     enabled: false

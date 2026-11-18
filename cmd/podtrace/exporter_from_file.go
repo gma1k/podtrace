@@ -145,6 +145,25 @@ func otlpEndpointWithScheme(endpoint string, insecure bool) string {
 	return "https://" + endpoint
 }
 
+// payloadAllowsCleartext reports whether the ExporterConfig behind a bundle
+// asked for cleartext to its endpoint: insecure set, an explicit http://
+// endpoint, or a Jaeger or Zipkin endpoint without a scheme, which those
+// exporters have always reached over http.
+func payloadAllowsCleartext(p *bundle.Payload) bool {
+	if p.Insecure {
+		return true
+	}
+	endpoint := strings.ToLower(strings.TrimSpace(p.Endpoint))
+	if strings.HasPrefix(endpoint, "http://") {
+		return true
+	}
+	switch p.Type {
+	case bundle.TypeJaeger, bundle.TypeZipkin:
+		return !strings.Contains(endpoint, "://")
+	}
+	return false
+}
+
 // applyPayloadToConfig translates a bundle.Payload into the process-
 // global config.* knobs the existing tracing manager reads on startup.
 func applyPayloadToConfig(p *bundle.Payload) error {
@@ -154,6 +173,7 @@ func applyPayloadToConfig(p *bundle.Payload) error {
 	config.OTLPEndpoint = ""
 	config.OTLPHeaders = nil
 	config.OTLPInsecure = false
+	config.ExporterInsecure = false
 	config.JaegerEndpoint = ""
 	config.ZipkinEndpoint = ""
 	config.SplunkEndpoint = ""
@@ -174,15 +194,17 @@ func applyPayloadToConfig(p *bundle.Payload) error {
 	default:
 		config.OTLPHeaders = headers
 	}
+	cleartext := payloadAllowsCleartext(p)
 	switch p.Type {
 	case bundle.TypeOTLP, bundle.TypeSplunk, bundle.TypeDataDog:
 		config.OTLPEndpoint = otlpEndpointWithScheme(p.Endpoint, p.Insecure)
-		config.OTLPInsecure = p.Insecure
+		config.OTLPInsecure = cleartext
 	case bundle.TypeJaeger:
 		config.JaegerEndpoint = p.Endpoint
-		config.OTLPInsecure = p.Insecure
+		config.OTLPInsecure = cleartext
 	case bundle.TypeZipkin:
 		config.ZipkinEndpoint = p.Endpoint
+		config.ExporterInsecure = cleartext
 	}
 	if p.Sample != nil {
 		config.TracingSampleRate = *p.Sample

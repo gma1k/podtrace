@@ -64,7 +64,7 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 	priv := false
 	runAsRoot := int64(0)
 
-	args := buildDiagnoseArgs(s, targets, effectiveDuration)
+	args := buildDiagnoseArgs(s, targets.forNode(s.Namespace, node), effectiveDuration)
 	reportTo := reportToSpecFromReportRef(s)
 	if reportSinkIsSecret(s) {
 		reportTo = "secret/$(POD_NAMESPACE)/" + SessionReportStagingName(s.UID, node)
@@ -145,14 +145,13 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 			Name:  "PODTRACE_EXPORTER_CREDENTIAL_FILE",
 			Value: "/etc/podtrace/exporter-credential/credential",
 		},
-		{Name: "PODTRACE_OTLP_INSECURE", Value: "1"},
-		{Name: "PODTRACE_EXPORTER_INSECURE", Value: "1"},
 		{Name: config.EnvArtifactBaseDir, Value: "/var/run/podtrace"},
 		podNamespaceEnv(),
 	}
 	if tc != nil {
 		mainEnv = append(mainEnv, redactionEnv(tc.Spec.Redaction)...)
 		mainEnv = append(mainEnv, captureEnv(tc.Spec.Capture)...)
+		mainEnv = append(mainEnv, egressEnv(tc)...)
 		usdtEnabled := true
 		if u := tc.Spec.Agent.USDT; u != nil {
 			usdtEnabled = *u
@@ -196,6 +195,9 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 	}
 
 	initContainers := buildSessionSidecar(sidecarUploader, reportTo, image, imagePullPolicy, s)
+	for i := range initContainers {
+		initContainers[i].Env = append(initContainers[i].Env, egressEnv(tc)...)
+	}
 
 	if vol, ok := objectStoreCredentialsVolume(s); ok {
 		volumes = append(volumes, vol)

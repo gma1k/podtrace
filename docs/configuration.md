@@ -313,8 +313,24 @@ addresses stay reachable so in-cluster collectors work.
 | Variable | Default | Effect |
 |---|---|---|
 | `PODTRACE_EXPORTER_BLOCK_PRIVATE` | `false` | Also refuses RFC 1918 / ULA private addresses |
+| `PODTRACE_EGRESS_HTTP_PROXY` | unset | Proxy for `http://` exporter, alerting and report-sink endpoints |
+| `PODTRACE_EGRESS_HTTPS_PROXY` | unset | Proxy for `https://` exporter, alerting and report-sink endpoints |
+| `PODTRACE_EGRESS_NO_PROXY` | unset | Hosts, domains, IPs and CIDRs those endpoints reach directly |
 
-`HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` are honoured. Behind a proxy the
+On a cluster these are set from TracerConfig `spec.egress` (Helm:
+`tracerConfig.egress`) for both the agents and session Jobs. The
+`PODTRACE_EGRESS_*` proxy is read only by podtrace's exporter, alerting and
+report-sink clients, so the Kubernetes client never goes through it. When
+neither `PODTRACE_EGRESS_HTTP_PROXY` nor `PODTRACE_EGRESS_HTTPS_PROXY` is set,
+the standard `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` are honoured instead,
+and those apply to every client in the process.
+
+With `PODTRACE_EXPORTER_BLOCK_PRIVATE` on, the configured proxy itself may
+still sit on a private address: whoever runs podtrace sets it, and in-cluster
+and corporate proxies usually do. Only the private-range check is relaxed for
+the proxy's own host and port; link-local and metadata addresses stay refused,
+and the target behind the proxy is still checked against the private ranges.
+Behind a proxy the
 guard cannot see the address the proxy dials, so it checks the target host
 before handing the request over: a literal IP directly, a name by resolving it
 locally and refusing if any address is blocked. That check is resolver-based:

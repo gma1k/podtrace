@@ -157,10 +157,11 @@ func eventTypeString(t events.EventType) string {
 	return fmt.Sprintf("event_%d", uint32(t))
 }
 
-// eventTypeNames maps the small set of EventType values we care about
-// for span-name readability.
+// eventTypeNames names every EventType for span names and the
+// podtrace.event.type attribute.
 var eventTypeNames = map[events.EventType]string{
 	events.EventDNS:            "dns",
+	events.EventDNSQuery:       "dns.query",
 	events.EventConnect:        "net.connect",
 	events.EventConnectResult:  "net.connect.result",
 	events.EventTCPSend:        "net.tcp.send",
@@ -170,6 +171,9 @@ var eventTypeNames = map[events.EventType]string{
 	events.EventTCPState:       "net.tcp.state",
 	events.EventTCPRetrans:     "net.tcp.retransmit",
 	events.EventNetDevError:    "net.dev.error",
+	events.EventTCPRTT:         "net.tcp.rtt",
+	events.EventTLSHandshake:   "tls.handshake",
+	events.EventTLSError:       "tls.error",
 	events.EventWrite:          "fs.write",
 	events.EventRead:           "fs.read",
 	events.EventOpen:           "fs.open",
@@ -187,4 +191,20 @@ var eventTypeNames = map[events.EventType]string{
 	events.EventHTTPResp:       "http.resp",
 	events.EventHTTP3:          "http3.conn",
 	events.EventDBQuery:        "db.query",
+	events.EventDBAcquire:      "db.pool.acquire",
+	events.EventDBPoolStats:    "db.pool.stats",
+	events.EventPoolAcquire:    "pool.acquire",
+	events.EventPoolRelease:    "pool.release",
+	events.EventPoolExhausted:  "pool.exhausted",
+	events.EventRedisCmd:       "redis.command",
+	events.EventMemcachedCmd:   "memcached.command",
+	events.EventKafkaProduce:   "kafka.produce",
+	events.EventKafkaFetch:     "kafka.fetch",
+	events.EventFastCGIReq:     "fastcgi.req",
+	events.EventFastCGIResp:    "fastcgi.resp",
+	events.EventGRPCMethod:     "grpc.method",
+	events.EventResourceLimit:  "resource.limit",
+	events.EventAFALG:          "crypto.af_alg",
+	events.EventUSDT:           "usdt",
+	events.EventRequestDone:    "request.done",
 }

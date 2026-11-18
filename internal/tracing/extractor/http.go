@@ -129,14 +129,13 @@ func (e *HTTPExtractor) ExtractFromRawHeaders(rawHeaders string) *context.TraceC
 
 func parseRawHeaders(raw string) map[string]string {
 	headers := make(map[string]string)
-	lines := strings.Split(raw, "\r\n")
 
-	for _, line := range lines {
+	for rest := raw; rest != "" && len(headers) < MaxHeaderCount; {
+		var line string
+		line, rest, _ = strings.Cut(rest, "\n")
+		line = strings.TrimSuffix(line, "\r")
 		if line == "" {
 			continue
-		}
-		if len(headers) >= MaxHeaderCount {
-			break
 		}
 		idx := strings.Index(line, ":")
 		if idx <= 0 {

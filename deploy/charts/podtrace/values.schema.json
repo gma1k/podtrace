@@ -665,6 +665,36 @@
               }
             }
           }
+        },
+        "egress": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "blockPrivateRanges": {
+              "type": "boolean"
+            },
+            "proxy": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "httpProxy": {
+                  "type": "string",
+                  "maxLength": 2048,
+                  "pattern": "^(https?://[^\\s@/]+(/[^\\s@]*)?)?$"
+                },
+                "httpsProxy": {
+                  "type": "string",
+                  "maxLength": 2048,
+                  "pattern": "^(https?://[^\\s@/]+(/[^\\s@]*)?)?$"
+                },
+                "noProxy": {
+                  "type": "string",
+                  "maxLength": 4096,
+                  "pattern": "^[A-Za-z0-9.,:/*_\\[\\] -]*$"
+                }
+              }
+            }
+          }
         }
       },
       "additionalProperties": false

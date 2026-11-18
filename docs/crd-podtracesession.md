@@ -51,7 +51,7 @@ spec:
 | `namespaceSelector` | LabelSelector | optional | Widens `selector` across namespaces. |
 | `containerName` | string | optional | Restrict to one container per pod. |
 | `duration` | Go duration string | required | Wall-clock run time, e.g. `"30s"`, `"5m"`. Webhook rejects `0s` and bounded by `TracerConfig.spec.session.maxDuration`. |
-| `filters` | `[dns,net,fs,cpu,proc,crypto]` | optional | Event categories to record. |
+| `filters` | `[dns,net,fs,cpu,proc,crypto,usdt]` | optional | Event categories to record. Same mapping as PodTrace, see [Filter categories](crd-podtrace.md#filter-categories). |
 | `exporterRef.name` | string | required | Names an `ExporterConfig` in the same namespace. |
 | `tracerConfigRef.name` | string | optional | Pins every Job to one `TracerConfig`, overriding the per-node fleet lookup. Cluster-scoped, so no namespace. See [TracerConfig resolution](#tracerconfig-resolution). |
 | `samplePercent` | int 0-100 | optional | Workload-owner sampling intent. The operator combines this with `ExporterConfig.spec.samplePercent` (platform-owner cap) and writes the **minimum** of the two to the session bundle. Unset on either side is treated as 100%. The resolved value is echoed at `status.policy.effectiveSampleRate`. |

@@ -259,6 +259,7 @@ func resetTracingConfig() {
 	config.TracingSampleRate = config.DefaultTracingSampleRate
 	config.OTLPHeaders = nil
 	config.OTLPInsecure = false
+	config.ExporterInsecure = false
 }
 
 func ptrFloat(v float64) *float64 { return &v }

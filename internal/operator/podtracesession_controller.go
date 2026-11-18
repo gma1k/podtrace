@@ -453,6 +453,35 @@ type sessionTargets struct {
 	Namespaces       []string
 	PodRefs          []podtracev1alpha1.PodRef
 	DeniedNamespaces []string
+	PodRefNodes      map[string]string
+}
+
+// podRefKey is the PodRefNodes key for a ref, defaulting its namespace to the
+// session's own.
+func podRefKey(sessionNamespace string, ref podtracev1alpha1.PodRef) string {
+	ns := ref.Namespace
+	if ns == "" {
+		ns = sessionNamespace
+	}
+	return ns + "/" + ref.Name
+}
+
+// forNode narrows the pod refs to the ones a node's Job can trace: refs bound
+// to that node, plus refs not bound to any node yet, which may still land on
+// it.
+func (t sessionTargets) forNode(sessionNamespace, node string) sessionTargets {
+	if len(t.PodRefNodes) == 0 {
+		return t
+	}
+	out := t
+	out.PodRefs = make([]podtracev1alpha1.PodRef, 0, len(t.PodRefs))
+	for _, ref := range t.PodRefs {
+		if bound, ok := t.PodRefNodes[podRefKey(sessionNamespace, ref)]; ok && bound != node {
+			continue
+		}
+		out.PodRefs = append(out.PodRefs, ref)
+	}
+	return out
 }
 
 // resolveSessionTargets expands spec.selector / spec.podRefs into the
@@ -528,6 +557,7 @@ func (r *PodTraceSessionReconciler) resolveSessionTargets(ctx context.Context, s
 		}
 	}
 
+	podRefNodes := map[string]string{}
 	for _, ref := range allowedPodRefs {
 		ns := ref.Namespace
 		if ns == "" {
@@ -540,7 +570,11 @@ func (r *PodTraceSessionReconciler) resolveSessionTargets(ctx context.Context, s
 			}
 			return sessionTargets{}, fmt.Errorf("get pod %s/%s: %w", ns, ref.Name, err)
 		}
-		if pod.Spec.NodeName != "" && isPodEligible(&pod) {
+		if pod.Spec.NodeName == "" {
+			continue
+		}
+		podRefNodes[podRefKey(s.Namespace, ref)] = pod.Spec.NodeName
+		if isPodEligible(&pod) {
 			nodes[pod.Spec.NodeName] = struct{}{}
 		}
 	}
@@ -555,6 +589,7 @@ func (r *PodTraceSessionReconciler) resolveSessionTargets(ctx context.Context, s
 		Namespaces:       targetNamespaces,
 		PodRefs:          allowedPodRefs,
 		DeniedNamespaces: deniedNamespaces,
+		PodRefNodes:      podRefNodes,
 	}, nil
 }
 

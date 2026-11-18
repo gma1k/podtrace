@@ -675,12 +675,44 @@ func OTLPAllowInsecureNonLoopback() bool {
 	return OTLPInsecure || getBoolEnvOrDefault("PODTRACE_OTLP_INSECURE", false)
 }
 
+var ExporterInsecure bool
+
 func ExporterAllowInsecureNonLoopback() bool {
-	return getBoolEnvOrDefault("PODTRACE_EXPORTER_INSECURE", false)
+	return ExporterInsecure || getBoolEnvOrDefault("PODTRACE_EXPORTER_INSECURE", false)
 }
 
 func ExporterBlockPrivateRanges() bool {
 	return getBoolEnvOrDefault("PODTRACE_EXPORTER_BLOCK_PRIVATE", false)
+}
+
+// Exporter egress proxy settings. They are read only by podtrace's exporter,
+// report-sink and alerting clients, never by the Kubernetes client, so a
+// proxy configured for telemetry cannot capture API server traffic.
+const (
+	EnvEgressHTTPProxy  = "PODTRACE_EGRESS_HTTP_PROXY"
+	EnvEgressHTTPSProxy = "PODTRACE_EGRESS_HTTPS_PROXY"
+	EnvEgressNoProxy    = "PODTRACE_EGRESS_NO_PROXY"
+)
+
+// EgressProxy is the proxy configuration for exporter egress. Set reports
+// whether a proxy was configured; when it was not, callers fall back to the
+// standard HTTP_PROXY/HTTPS_PROXY/NO_PROXY environment.
+type EgressProxy struct {
+	HTTPProxy  string
+	HTTPSProxy string
+	NoProxy    string
+}
+
+func (p EgressProxy) Set() bool {
+	return p.HTTPProxy != "" || p.HTTPSProxy != ""
+}
+
+func EgressProxySettings() EgressProxy {
+	return EgressProxy{
+		HTTPProxy:  strings.TrimSpace(os.Getenv(EnvEgressHTTPProxy)),
+		HTTPSProxy: strings.TrimSpace(os.Getenv(EnvEgressHTTPSProxy)),
+		NoProxy:    strings.TrimSpace(os.Getenv(EnvEgressNoProxy)),
+	}
 }
 
 func MetricsEnablePprof() bool {

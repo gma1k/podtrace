@@ -59,6 +59,10 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1alpha1.CaptureSpecApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("DataDogExporter"):
 		return &apiv1alpha1.DataDogExporterApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("EgressProxySpec"):
+		return &apiv1alpha1.EgressProxySpecApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("EgressSpec"):
+		return &apiv1alpha1.EgressSpecApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("ExporterConfig"):
 		return &apiv1alpha1.ExporterConfigApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("ExporterConfigSpec"):

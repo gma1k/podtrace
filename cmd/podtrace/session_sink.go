@@ -18,6 +18,7 @@ import (
 
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/diagnose"
+	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/internal/hostfs"
 	"github.com/gma1k/podtrace/internal/logger"
 	"github.com/gma1k/podtrace/internal/redactor"
@@ -119,26 +120,26 @@ func collectSessionExports() []SessionExportStatus {
 // computeSessionSummary rolls up a Diagnostician's observed events into
 // the small struct Kubernetes surfaces in pod status.
 func computeSessionSummary(d *diagnose.Diagnostician, node string) SessionSummary {
-	events := d.GetEvents()
+	observed := d.GetEvents()
 	summary := SessionSummary{
-		TotalEvents: int64(len(events)),
+		TotalEvents: int64(len(observed)),
 		DurationMS:  d.EndTime().Sub(d.StartTime()).Milliseconds(),
 		Node:        node,
 	}
-	for _, ev := range events {
+	for _, ev := range observed {
 		if ev == nil {
 			continue
 		}
-		switch categoryForEventType(ev.TypeString()) {
-		case "dns":
+		switch events.FilterCategoryOf(ev.Type) {
+		case events.FilterCategoryDNS:
 			summary.DNSEvents++
-		case "net":
+		case events.FilterCategoryNet:
 			summary.NetEvents++
-		case "fs":
+		case events.FilterCategoryFS:
 			summary.FSEvents++
-		case "cpu":
+		case events.FilterCategoryCPU:
 			summary.CPUEvents++
-		case "proc":
+		case events.FilterCategoryProc:
 			summary.ProcEvents++
 		}
 		if ev.IsError() {
@@ -146,25 +147,6 @@ func computeSessionSummary(d *diagnose.Diagnostician, node string) SessionSummar
 		}
 	}
 	return summary
-}
-
-// categoryForEventType maps the internal events.Event.TypeString() value
-// (uppercase category names like DNS/NET/FS/CPU/PROC) into the five
-// top-level buckets the PodTrace CRD exposes.
-func categoryForEventType(typeStr string) string {
-	switch strings.ToLower(typeStr) {
-	case "dns":
-		return "dns"
-	case "net":
-		return "net"
-	case "fs":
-		return "fs"
-	case "cpu":
-		return "cpu"
-	case "proc":
-		return "proc"
-	}
-	return ""
 }
 
 // emitSessionArtifacts writes the three session artifacts that the
