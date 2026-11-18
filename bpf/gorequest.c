@@ -17,6 +17,8 @@
 
 static __always_inline int go_request_begin(struct pt_regs *ctx, u32 kind)
 {
+	if (!cgroup_allows(bpf_get_current_cgroup_id()))
+		return 0;
 	oncpu_begin_goroutine(GO_REQUEST_GOROUTINE(ctx), kind, request_id_now());
 	return 0;
 }

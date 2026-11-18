@@ -28,6 +28,8 @@ struct {
 SEC("uprobe/go_tls_handshake")
 int uprobe_go_tls_handshake(struct pt_regs *ctx)
 {
+	if (!cgroup_allows(bpf_get_current_cgroup_id()))
+		return 0;
 	u64 g = process_scoped_id(GO_HS_GOROUTINE(ctx));
 	if (g == 0)
 		return 0;
@@ -62,7 +64,7 @@ int uprobe_go_tls_handshake_ret(struct pt_regs *ctx)
 	e->latency_ns = now - began;
 	e->error = error_type ? -1 : 0;
 	if (!agg_absorbed(e, 0))
-		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+		emit_event(e);
 	return 0;
 }
 

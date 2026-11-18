@@ -214,6 +214,9 @@ func kernelEdgeSink(t *testing.T) (*Sink, *prometheus.Registry) {
 			if ip == "10.244.1.7" && port == 8080 {
 				return PeerIdentity{Service: "payments", Namespace: "shop"}, true
 			}
+			if ip == "fd00:10:244::7" && port == 8080 {
+				return PeerIdentity{Service: "ledger", Namespace: "shop"}, true
+			}
 			return PeerIdentity{}, false
 		},
 	})
@@ -225,7 +228,7 @@ func kernelEdgeSink(t *testing.T) (*Sink, *prometheus.Registry) {
 
 func kernelPeerRow(eventType events.EventType, variant uint8, bucket uint16, count, sumNS, bytes uint64) kernelagg.Row {
 	row := kernelRow(eventType, variant, bucket, count, sumNS, bytes)
-	row.Key.PeerIP = 0x0AF40107
+	row.Key.PeerAddr = kernelagg.V4MappedPeer(0x0AF40107)
 	row.Key.PeerPort = 8080
 	return row
 }
@@ -260,6 +263,29 @@ func TestTheServiceMapSurvivesKernelAggregation(t *testing.T) {
 			t.Errorf("%s target_service = %q, want payments; the peer address must resolve "+
 				"through the same join the event path uses", family, target)
 		}
+	}
+}
+
+func TestKernelAggregatedIPv6PeersKeepTheirEdge(t *testing.T) {
+	sink, reg := kernelEdgeSink(t)
+
+	row := kernelRow(events.EventTCPSend, 0, kernelagg.BucketIndex(200_000), 2, 400_000, 900)
+	row.Key.PeerAddr = [16]byte{0xfd, 0x00, 0x00, 0x10, 0x02, 0x44, 15: 0x07}
+	row.Key.PeerPort = 8080
+	sink.IngestKernel([]kernelagg.Row{row})
+
+	metrics := gather(t, reg, "podtrace_workload_edge_bytes_total")
+	if len(metrics) == 0 {
+		t.Fatal("an IPv6 peer produced no edge under kernel aggregation")
+	}
+	var target string
+	for _, l := range metrics[0].GetLabel() {
+		if l.GetName() == "target_service" {
+			target = l.GetValue()
+		}
+	}
+	if target != "ledger" {
+		t.Errorf("target_service = %q, want ledger", target)
 	}
 }
 
@@ -373,7 +399,7 @@ func TestEdgeProjectionSkipsWhatItCannotResolve(t *testing.T) {
 	sink, reg := kernelEdgeSink(t)
 
 	unknown := kernelRow(events.EventTCPSend, 0, kernelagg.BucketIndex(1000), 1, 1000, 500)
-	unknown.Key.PeerIP = 0x08080808
+	unknown.Key.PeerAddr = kernelagg.V4MappedPeer(0x08080808)
 	unknown.Key.PeerPort = 443
 	sink.IngestKernel([]kernelagg.Row{unknown})
 

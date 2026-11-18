@@ -42,7 +42,8 @@ static __always_inline int quic_budget_take(struct quic_flow_key *k)
 }
 
 static __always_inline void quic_ship(struct __sk_buff *skb, u8 is_v6, u32 addr_off,
-				      u32 port_l4_off, u32 lport_l4_off, int l4, u8 egress) {
+				      u32 port_l4_off, u32 lport_l4_off, int l4, u8 egress,
+				      int task_pid) {
 	struct quic_flow_key k = {};
 	k.cgroup_id = bpf_skb_cgroup_id(skb);
 	u16 port_be = 0;
@@ -69,7 +70,7 @@ static __always_inline void quic_ship(struct __sk_buff *skb, u8 is_v6, u32 addr_
 		return;
 	rec->timestamp = bpf_ktime_get_ns();
 	rec->cgroup_id = k.cgroup_id;
-	rec->pid = egress ? agent_ns_tgid() : 0;
+	rec->pid = (egress && task_pid) ? agent_ns_tgid() : 0;
 	__builtin_memset(rec->comm, 0, sizeof(rec->comm));
 	rec->family = is_v6 ? 10 : 2;
 	rec->_pad = 0;
@@ -87,16 +88,25 @@ static __always_inline void quic_ship(struct __sk_buff *skb, u8 is_v6, u32 addr_
 			   __builtin_offsetof(struct quic_initial_record, pkt) + caplen, 0);
 }
 
-SEC("cgroup_skb/egress")
-int http3_egress(struct __sk_buff *skb) {
+static __always_inline int http3_egress_run(struct __sk_buff *skb, int task_pid) {
 	u8 is_v6 = 0, proto = 0;
 	int l4 = l4_offset(skb, &is_v6, &proto);
 	if (l4 < 0 || proto != IPPROTO_UDP)
 		return 1;
 	if (!quic_is_initial(skb, l4))
 		return 1;
-	quic_ship(skb, is_v6, is_v6 ? 24 : 16, 2, 0, l4, 1);
+	quic_ship(skb, is_v6, is_v6 ? 24 : 16, 2, 0, l4, 1, task_pid);
 	return 1;
+}
+
+SEC("cgroup_skb/egress")
+int http3_egress(struct __sk_buff *skb) {
+	return http3_egress_run(skb, 1);
+}
+
+SEC("cgroup_skb/egress")
+int http3_egress__compat(struct __sk_buff *skb) {
+	return http3_egress_run(skb, 0);
 }
 
 SEC("cgroup_skb/ingress")
@@ -107,6 +117,6 @@ int http3_ingress(struct __sk_buff *skb) {
 		return 1;
 	if (!quic_is_initial(skb, l4))
 		return 1;
-	quic_ship(skb, is_v6, is_v6 ? 8 : 12, 0, 2, l4, 0);
+	quic_ship(skb, is_v6, is_v6 ? 8 : 12, 0, 2, l4, 0, 0);
 	return 1;
 }

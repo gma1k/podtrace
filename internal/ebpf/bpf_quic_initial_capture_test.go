@@ -21,9 +21,9 @@ func TestQUICInitialBudgetIsPerConnectionAndExpires(t *testing.T) {
 	if !strings.Contains(ship, "k.lport = bpf_ntohs(port_be);") || !strings.Contains(ship, "rec->lport = k.lport;") {
 		t.Fatal("quic_ship must key and report the local port")
 	}
-	egress := functionBody(t, text, "http3_egress")
+	egress := functionBody(t, text, "http3_egress_run")
 	ingress := functionBody(t, text, "http3_ingress")
-	if !strings.Contains(egress, "2, 0, l4, 1)") || !strings.Contains(ingress, "0, 2, l4, 0)") {
+	if !strings.Contains(egress, "2, 0, l4, 1, task_pid)") || !strings.Contains(ingress, "0, 2, l4, 0, 0)") {
 		t.Fatal("egress must take the peer port from dport and the local from sport; ingress the reverse")
 	}
 }

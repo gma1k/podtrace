@@ -137,18 +137,25 @@ __noinline u64 podtrace_current_request(void)
 
 __noinline int podtrace_emit_request_done(u64 correlation_id, u64 latency_ns, u32 kind)
 {
-	struct event *e = get_event_buf_unfiltered();
+	u64 cgroup_id = bpf_get_current_cgroup_id();
+	if (!cgroup_allows(cgroup_id))
+		return 0;
+	struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
 	if (!e)
 		return 0;
-	if (!cgroup_allows(e->cgroup_id))
-		return 0;
+	__builtin_memset(e, 0, sizeof(*e));
+	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+	e->cgroup_id = cgroup_id;
+	bpf_get_current_comm(&e->comm, sizeof(e->comm));
+	e->net_ns_id = BPF_CORE_READ(task, nsproxy, net_ns, ns.inum);
 	e->timestamp = bpf_ktime_get_ns();
-	e->pid = agent_ns_tgid();
+	e->pid = task_ns_tgid_inline(task, bpf_get_current_pid_tgid() >> 32);
 	e->type = EVENT_REQUEST_DONE;
 	e->latency_ns = latency_ns;
 	e->tcp_state = kind;
 	e->correlation_id = correlation_id;
-	return bpf_ringbuf_output(&events, e, sizeof(*e), 0) == 0;
+	bpf_ringbuf_submit(e, 0);
+	return 1;
 }
 
 static __always_inline int oncpu_sample(struct pt_regs *ctx, int task_regs)

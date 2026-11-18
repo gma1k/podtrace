@@ -34,6 +34,6 @@ int tracepoint_sys_enter_bind(struct trace_event_raw_sys_enter *ctx) {
 	bpf_probe_read_kernel_str(e->target, sizeof(sa.salg_type), sa.salg_type);
 	bpf_probe_read_kernel_str(e->details, sizeof(sa.salg_name), sa.salg_name);
 
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	emit_event(e);
 	return 0;
 }

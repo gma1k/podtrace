@@ -117,7 +117,7 @@ jobs:
           cache: true
 
       - name: Run govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
 
   workflow-lint:
     name: workflow lint
@@ -178,7 +178,7 @@ jobs:
           persist-credentials: false
 
       - name: Install semgrep
-        run: pipx install semgrep==1.185.0
+        run: pipx install semgrep==1.186.0
 
       - name: Run semgrep (SARIF, advisory)
         run: |

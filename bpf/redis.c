@@ -57,7 +57,7 @@ static __always_inline int redis_emit(struct pt_regs *ctx, u32 pair, u32 pid, u3
 	e->target[0] = '\0';
 
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	emit_event(e);
 
 	bpf_map_delete_elem(&start_times, &key);
 	bpf_map_delete_elem(&redis_cmds, &key);

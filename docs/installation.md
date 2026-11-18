@@ -359,7 +359,7 @@ toolchain setup and build steps.
 
 ### System Requirements
 
-- **Linux Kernel**: 6.4+ with BTF support (see [compatibility.md](compatibility.md#hard-requirement-64))
+- **Linux Kernel**: 5.15+ with BTF support (see [compatibility.md](compatibility.md#hard-requirement-515))
 - **Go**: 1.24+
 - **Kubernetes**: Access to a Kubernetes cluster
 - **Build Tools**: `clang 18+` and `llc` (LLVM toolchain), **libbpf headers 0.8+** (e.g. `libbpf-dev` on Debian/Ubuntu)
@@ -520,7 +520,7 @@ You should see usage information.
 - Your libbpf headers are older than 0.8. See [Check libbpf Headers](#check-libbpf-headers) and build with `make build LIBBPF_INCLUDE=$HOME/libbpf-hdr/usr/include`.
 
 **Error: "failed to load eBPF program"**
-- Ensure kernel version is 6.4+ ([why](compatibility.md#hard-requirement-64))
+- Ensure kernel version is 5.15+ ([why](compatibility.md#hard-requirement-515))
 - Check BTF support: `ls /sys/kernel/btf/vmlinux`
 - Verify clang is installed: `clang --version` (or `clang-18 --version`)
 

@@ -8,7 +8,7 @@
 
 #define PIDNS_MAX_LEVELS 8
 
-static __noinline u32 task_ns_tgid(struct task_struct *task, u32 fallback)
+static __always_inline u32 task_ns_tgid_inline(struct task_struct *task, u32 fallback)
 {
 	u32 init_tgid = fallback;
 	u32 zero = 0;
@@ -34,6 +34,17 @@ static __noinline u32 task_ns_tgid(struct task_struct *task, u32 fallback)
 			return (u32)up.nr;
 	}
 	return 0;
+}
+
+static __noinline u32 task_ns_tgid(struct task_struct *task, u32 fallback)
+{
+	return task_ns_tgid_inline(task, fallback);
+}
+
+static __always_inline u32 agent_ns_tgid_inline(void)
+{
+	return task_ns_tgid_inline((struct task_struct *)bpf_get_current_task(),
+				   bpf_get_current_pid_tgid() >> 32);
 }
 
 static __always_inline u32 agent_ns_tgid(void)
@@ -226,22 +237,62 @@ static inline u64 build_stack_key(u32 pid, u32 tid, u64 timestamp) {
 	return h;
 }
 
-static inline struct event *event_buf_slot(u32 slot) {
-	struct event *e = bpf_map_lookup_elem(&event_buf, &slot);
-	if (e) {
-		__builtin_memset(e, 0, sizeof(*e));
-		e->cgroup_id = bpf_get_current_cgroup_id();
-		bpf_get_current_comm(&e->comm, sizeof(e->comm));
+static __always_inline int event_buf_owned(struct event *e) {
+	asm volatile("" ::: "memory");
+	return ((struct event_slot *)e)->owner == bpf_get_current_pid_tgid();
+}
 
-		struct task_struct *__task = (struct task_struct *)bpf_get_current_task();
-		if (__task) {
-			e->net_ns_id = BPF_CORE_READ(__task, nsproxy, net_ns, ns.inum);
-		}
+static __always_inline int event_buf_intact(struct event *e) {
+	if (event_buf_owned(e))
+		return 1;
+	((struct event_slot *)e)->races += 1;
+	return 0;
+}
+
+static __always_inline struct event *event_buf_slot_untracked(u32 slot) {
+	struct event_slot *s = bpf_map_lookup_elem(&event_buf, &slot);
+	if (!s)
+		return NULL;
+	s->owner = 0;
+	__builtin_memset(&s->e, 0, sizeof(s->e));
+	return &s->e;
+}
+
+static __always_inline long emit_event_untracked(struct event *e) {
+	return bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+}
+
+static __always_inline long emit_event(struct event *e) {
+	struct event *rec = bpf_ringbuf_reserve(&events, sizeof(*rec), 0);
+	if (!rec)
+		return -1;
+	if (bpf_probe_read_kernel(rec, sizeof(*rec), e) != 0 || !event_buf_intact(e)) {
+		bpf_ringbuf_discard(rec, 0);
+		return -1;
+	}
+	bpf_ringbuf_submit(rec, 0);
+	return 0;
+}
+
+static __always_inline struct event *event_buf_slot(u32 slot) {
+	struct event_slot *s = bpf_map_lookup_elem(&event_buf, &slot);
+	if (!s)
+		return NULL;
+	s->owner = bpf_get_current_pid_tgid();
+	asm volatile("" ::: "memory");
+	struct event *e = &s->e;
+	__builtin_memset(e, 0, sizeof(*e));
+	e->cgroup_id = bpf_get_current_cgroup_id();
+	bpf_get_current_comm(&e->comm, sizeof(e->comm));
+
+	struct task_struct *__task = (struct task_struct *)bpf_get_current_task();
+	if (__task) {
+		e->net_ns_id = BPF_CORE_READ(__task, nsproxy, net_ns, ns.inum);
 	}
 	return e;
 }
 
-static inline struct event *get_event_buf_unfiltered(void) {
+static __always_inline struct event *get_event_buf_unfiltered(void) {
 	return event_buf_slot(EVENT_BUF_TASK);
 }
 
@@ -261,7 +312,14 @@ static inline int cgroup_allows(u64 cgid) {
 
 __noinline u64 podtrace_current_request(void);
 
-static inline struct event *get_event_buf(void) {
+static __always_inline struct event *get_event_buf_untagged(void) {
+	struct event *e = get_event_buf_unfiltered();
+	if (!e || !cgroup_allows(e->cgroup_id))
+		return NULL;
+	return e;
+}
+
+static __always_inline struct event *get_event_buf(void) {
 	struct event *e = get_event_buf_unfiltered();
 	if (!e) {
 		return NULL;
@@ -294,6 +352,11 @@ static inline void capture_user_stack_slot(void *ctx, u32 pid, u32 tid, struct e
 	trace->nr = nr_frames > max_frames ? max_frames : nr_frames;
 	u64 key = build_stack_key(pid, tid, e->timestamp);
 	bpf_map_update_elem(&stack_traces, &key, trace, BPF_ANY);
+	if (!event_buf_owned(e)) {
+		bpf_map_delete_elem(&stack_traces, &key);
+		e->stack_key = 0;
+		return;
+	}
 	e->stack_key = key;
 }
 

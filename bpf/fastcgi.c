@@ -6,6 +6,8 @@
 #include "helpers.h"
 #include "protocols.h"
 
+static const struct fastcgi_req fastcgi_req_zero = {};
+
 
 SEC("kprobe/unix_stream_recvmsg")
 int kprobe_unix_stream_recvmsg(struct pt_regs *ctx)
@@ -15,20 +17,7 @@ int kprobe_unix_stream_recvmsg(struct pt_regs *ctx)
 	u64 key = get_key(pid, tid);
 
 	struct msghdr *msg = (struct msghdr *)PT_REGS_PARM2(ctx);
-	u64 user_ptr = 0;
-	if (msg) {
-		u8 it = BPF_CORE_READ(msg, msg_iter.iter_type);
-		if (it == ITER_UBUF) {
-			user_ptr = (u64)BPF_CORE_READ(msg, msg_iter.ubuf);
-		} else if (it == ITER_IOVEC) {
-			const struct iovec *iov = BPF_CORE_READ(msg, msg_iter.__iov);
-			if (iov) {
-				struct iovec iov_entry;
-				if (bpf_probe_read_kernel(&iov_entry, sizeof(iov_entry), iov) == 0)
-					user_ptr = (u64)iov_entry.iov_base;
-			}
-		}
-	}
+	u64 user_ptr = (u64)msghdr_user_base(msg, NULL);
 	if (user_ptr)
 		bpf_map_update_elem(&recvmsg_args, &key, &user_ptr, BPF_ANY);
 	return 0;
@@ -189,20 +178,23 @@ emit_params: ;
 	if (!found_uri) e->target[0] = '\0';
 	if (!found_method) e->details[0] = '\0';
 
-	struct fastcgi_req req = {};
-	req.start_ns = bpf_ktime_get_ns();
-	bpf_probe_read_kernel_str(req.uri, sizeof(req.uri), e->target);
-	bpf_probe_read_kernel_str(req.method, sizeof(req.method), e->details);
-	bpf_map_update_elem(&fastcgi_reqs, &req_key, &req, BPF_ANY);
+	u64 start_ns = bpf_ktime_get_ns();
+	bpf_map_update_elem(&fastcgi_reqs, &req_key, &fastcgi_req_zero, BPF_ANY);
+	struct fastcgi_req *req = bpf_map_lookup_elem(&fastcgi_reqs, &req_key);
+	if (req) {
+		req->start_ns = start_ns;
+		bpf_probe_read_kernel_str(req->uri, sizeof(req->uri), e->target);
+		bpf_probe_read_kernel_str(req->method, sizeof(req->method), e->details);
+	}
 
-	e->timestamp  = req.start_ns;
+	e->timestamp  = start_ns;
 	e->pid        = pid;
 	e->type       = EVENT_FASTCGI_REQUEST;
 	e->latency_ns = 0;
 	e->error      = 0;
 	e->bytes      = 0;
 	e->tcp_state  = 0;
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	emit_event(e);
 	return 0;
 }
 
@@ -287,7 +279,7 @@ int kprobe_unix_stream_sendmsg(struct pt_regs *ctx)
 	bpf_map_delete_elem(&fastcgi_reqs, &req_key);
 
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	emit_event(e);
 	return 0;
 }
 

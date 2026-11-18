@@ -111,8 +111,12 @@ static __noinline void http_capture_traceparent(void *base, u64 avail, char *out
 		return;
 
 	u32 v = (u32)sc.pos + 12;
-	if (v < rlen && buf[v & (HTTP_SCAN_BUF_SIZE - 1)] == ' ')
-		v++;
+	if (v < rlen) {
+		u32 idx = v;
+		barrier_var(idx);
+		if (buf[idx & (HTTP_SCAN_BUF_SIZE - 1)] == ' ')
+			v++;
+	}
 
 	if (v + W3C_TRACEPARENT_LEN > rlen)
 		return;
@@ -124,6 +128,8 @@ static __noinline void http_capture_traceparent(void *base, u64 avail, char *out
 	}
 	out[13 + W3C_TRACEPARENT_LEN] = '\0';
 }
+
+static const struct http_req http_req_zero = {};
 
 static __noinline int http_emit_request(void *ctx, void *base, u64 avail,
 					 u8 transport, u64 conn)
@@ -144,13 +150,10 @@ static __noinline int http_emit_request(void *ctx, void *base, u64 avail,
 	if (http_method_len((const u8 *)buf) == 0)
 		return 0;
 
-	struct http_req req = {};
-	req.start_ns = request_id_now();
-	req.method = (u8)http_method_code((const u8 *)buf);
 	u32 p = 0;
 	int spaces = 0;
 	u32 i;
-	for (i = 0; i < HTTP_INSPECT_LEN && i < read_len && p < MAX_STRING_LEN - 1; i++) {
+	for (i = 0; i < HTTP_INSPECT_LEN && i < read_len; i++) {
 		u8 c = (u8)buf[i & (HTTP_SCAN_BUF_SIZE - 1)];
 		if (c == '\r' || c == '\n' || c == 0)
 			break;
@@ -159,21 +162,28 @@ static __noinline int http_emit_request(void *ctx, void *base, u64 avail,
 			if (spaces == 2)
 				break;
 		}
-		req.endpoint[p++] = c;
+		p++;
 	}
 	if (p == 0)
 		return 0;
-	req.endpoint[p & (MAX_STRING_LEN - 1)] = '\0';
+
+	bpf_map_update_elem(&http_reqs, &conn, &http_req_zero, BPF_ANY);
+	struct http_req *req = bpf_map_lookup_elem(&http_reqs, &conn);
+	if (!req)
+		return 0;
+	u64 now = request_id_now();
+	req->start_ns = now;
+	req->method = (u8)http_method_code((const u8 *)buf);
+	bpf_probe_read_kernel(req->endpoint, p & (MAX_STRING_LEN - 1), buf);
+	u8 method = req->method;
 
 	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	u64 now = req.start_ns;
 
-	bpf_map_update_elem(&http_reqs, &conn, &req, BPF_ANY);
 	if (inbound)
 		oncpu_begin_thread_request(ONCPU_KIND_HTTP1, conn, 0, now);
 
-	struct event *e = get_event_buf();
+	struct event *e = get_event_buf_untagged();
 	if (e) {
 		e->timestamp = now;
 		e->pid = pid;
@@ -183,13 +193,13 @@ static __noinline int http_emit_request(void *ctx, void *base, u64 avail,
 		e->bytes = 0;
 		e->tcp_state = transport | HTTP_ROLE_KNOWN | (inbound ? HTTP_ROLE_SERVER : 0);
 		e->correlation_id = now;
-		e->http_method = req.method;
-		bpf_probe_read_kernel_str(e->target, sizeof(e->target), req.endpoint);
+		e->http_method = method;
+		bpf_probe_read_kernel_str(e->target, sizeof(e->target), req->endpoint);
 		http_capture_traceparent(base, avail, e->details);
 		fill_event_peer(e);
 		if (!agg_absorbed(e, 0)) {
 			capture_user_stack(ctx, pid, tid, e);
-			bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+			emit_event(e);
 		}
 	}
 	return 1;
@@ -265,7 +275,7 @@ static __noinline int http_emit_response(void *ctx, void *base, u64 len,
 		fill_event_peer(e);
 		if (!agg_absorbed(e, status_num)) {
 			capture_user_stack(ctx, pid, tid, e);
-			bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+			emit_event(e);
 		}
 	}
 	bpf_map_delete_elem(&http_reqs, &conn);

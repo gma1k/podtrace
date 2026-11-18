@@ -49,23 +49,50 @@
 
 #define FCGI_PARAMS_SCAN_LEN 128
 
+struct iov_iter___pre64 {
+	const struct iovec *iov;
+} __attribute__((preserve_access_index));
+
+static __always_inline const struct iovec *iov_iter_iovec(struct iov_iter *iter)
+{
+	if (bpf_core_field_exists(iter->__iov))
+		return BPF_CORE_READ(iter, __iov);
+	struct iov_iter___pre64 *old = (void *)iter;
+	return BPF_CORE_READ(old, iov);
+}
+
+static __always_inline int iov_iter_type_is_ubuf(u8 it)
+{
+	if (!bpf_core_enum_value_exists(enum iter_type, ITER_UBUF))
+		return 0;
+	if (!bpf_core_field_exists(((struct iov_iter *)0)->ubuf))
+		return 0;
+	return it == (u8)bpf_core_enum_value(enum iter_type, ITER_UBUF);
+}
+
+static __always_inline int iov_iter_type_is_iovec(u8 it)
+{
+	return it == (u8)bpf_core_enum_value(enum iter_type, ITER_IOVEC);
+}
+
 static __always_inline void *msghdr_user_base(struct msghdr *msg, u64 *avail)
 {
 	if (!msg)
 		return NULL;
-	u8 it = BPF_CORE_READ(msg, msg_iter.iter_type);
-	if (it == (u8)bpf_core_enum_value(enum iter_type, ITER_UBUF)) {
-		void *ubuf = (void *)BPF_CORE_READ(msg, msg_iter.ubuf);
-		size_t count = BPF_CORE_READ(msg, msg_iter.count);
-		size_t off = BPF_CORE_READ(msg, msg_iter.iov_offset);
+	struct iov_iter *iter = &msg->msg_iter;
+	u8 it = BPF_CORE_READ(iter, iter_type);
+	if (iov_iter_type_is_ubuf(it)) {
+		void *ubuf = (void *)BPF_CORE_READ(iter, ubuf);
+		size_t count = BPF_CORE_READ(iter, count);
+		size_t off = BPF_CORE_READ(iter, iov_offset);
 		if (avail)
 			*avail = count;
 		if (!ubuf)
 			return NULL;
 		return (u8 *)ubuf + off;
 	}
-	if (it == (u8)bpf_core_enum_value(enum iter_type, ITER_IOVEC)) {
-		const struct iovec *iov = BPF_CORE_READ(msg, msg_iter.__iov);
+	if (iov_iter_type_is_iovec(it)) {
+		const struct iovec *iov = iov_iter_iovec(iter);
 		if (!iov)
 			return NULL;
 		struct iovec iov_entry;
@@ -82,14 +109,15 @@ static __always_inline const struct iovec *msghdr_iovec(struct msghdr *msg, u32 
 {
 	if (!msg)
 		return NULL;
-	u8 it = BPF_CORE_READ(msg, msg_iter.iter_type);
-	if (it != (u8)bpf_core_enum_value(enum iter_type, ITER_IOVEC))
+	struct iov_iter *iter = &msg->msg_iter;
+	u8 it = BPF_CORE_READ(iter, iter_type);
+	if (!iov_iter_type_is_iovec(it))
 		return NULL;
-	unsigned long n = BPF_CORE_READ(msg, msg_iter.nr_segs);
+	unsigned long n = BPF_CORE_READ(iter, nr_segs);
 	if (n < 2)
 		return NULL;
 	*nr_segs = n > 0xffffffffUL ? 0xffffffffU : (u32)n;
-	return BPF_CORE_READ(msg, msg_iter.__iov);
+	return iov_iter_iovec(iter);
 }
 
 static __always_inline int read_msghdr_data(struct msghdr *msg, void *buf, u32 buf_size)

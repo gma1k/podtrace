@@ -257,30 +257,57 @@ func renovateIgnores(cfg renovateConfig) func(string) bool {
 	}
 }
 
-func renovateManagers(t *testing.T) (files []*regexp.Regexp, matches []*regexp.Regexp) {
+type renovateManager struct {
+	files   []*regexp.Regexp
+	matches []*regexp.Regexp
+}
+
+func (m renovateManager) reads(path, ref string) bool {
+	fileTracked := false
+	for _, rx := range m.files {
+		if rx.MatchString(path) {
+			fileTracked = true
+			break
+		}
+	}
+	if !fileTracked {
+		return false
+	}
+	for _, rx := range m.matches {
+		if rx.MatchString(ref) {
+			return true
+		}
+	}
+	return false
+}
+
+func renovateManagers(t *testing.T) []renovateManager {
 	t.Helper()
 	cfg := loadRenovateConfig(t)
+	var managers []renovateManager
 	for _, m := range cfg.CustomManagers {
+		var rm renovateManager
 		for _, p := range m.ManagerFilePatterns {
 			rx, err := regexp.Compile(strings.TrimSuffix(strings.TrimPrefix(p, "/"), "/"))
 			if err != nil {
 				t.Fatalf("renovate managerFilePattern %q does not compile: %v", p, err)
 			}
-			files = append(files, rx)
+			rm.files = append(rm.files, rx)
 		}
 		for _, s := range m.MatchStrings {
 			rx, err := regexp.Compile(strings.ReplaceAll(s, "(?<", "(?P<"))
 			if err != nil {
 				t.Fatalf("renovate matchString %q does not compile: %v", s, err)
 			}
-			matches = append(matches, rx)
+			rm.matches = append(rm.matches, rx)
 		}
+		managers = append(managers, rm)
 	}
-	return files, matches
+	return managers
 }
 
 func TestEveryPinnedImageIsTrackedByRenovate(t *testing.T) {
-	filePatterns, matchStrings := renovateManagers(t)
+	managers := renovateManagers(t)
 	ignored := renovateIgnores(loadRenovateConfig(t))
 	for _, f := range imageReferences(t) {
 		rel := f.path
@@ -291,23 +318,16 @@ func TestEveryPinnedImageIsTrackedByRenovate(t *testing.T) {
 		if natively.MatchString(rel) {
 			continue
 		}
-		fileTracked := false
-		for _, rx := range filePatterns {
-			if rx.MatchString(rel) {
-				fileTracked = true
+		tracked := false
+		for _, m := range managers {
+			if m.reads(rel, f.ref) {
+				tracked = true
 				break
 			}
 		}
-		refTracked := false
-		for _, rx := range matchStrings {
-			if rx.MatchString(f.ref) {
-				refTracked = true
-				break
-			}
-		}
-		if !fileTracked || !refTracked {
-			t.Errorf("%s:%d: %q is pinned but no Renovate manager reads it (file matched: %v, reference matched: %v), "+
-				"so its digest never moves", rel, f.line, f.ref, fileTracked, refTracked)
+		if !tracked {
+			t.Errorf("%s:%d: %q is pinned but no single Renovate manager both scans this file and matches "+
+				"this reference, so its digest never moves", rel, f.line, f.ref)
 		}
 	}
 }

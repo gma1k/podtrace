@@ -360,15 +360,15 @@ ClusterRole, overlap detection reports `Conflict=Unknown` with reason
 
 ## Supplying BTF for a kernel without it
 
-Almost nobody needs this. podtrace requires kernel **6.4+** (see
-[compatibility.md](compatibility.md#hard-requirement-64)), and essentially
+Almost nobody needs this. podtrace requires kernel **5.15+** (see
+[compatibility.md](compatibility.md#hard-requirement-515)), and essentially
 every distro kernel at or above that level ships `CONFIG_DEBUG_INFO_BTF`.
 BTFHub, the archive that exists precisely to serve BTF-less kernels, carries
 almost nothing above the 5.8 line: RHEL/CentOS 7 and 8, Ubuntu 16.04 and
 18.04, Debian 9 and 10, SLES 12 and 15.3, Fedora up to 31 and Amazon Linux
 are all below podtrace's floor already.
 
-What is left is **custom and vendor-built kernels** at 6.4+ where whoever
+What is left is **custom and vendor-built kernels** at 5.15+ where whoever
 built them left `CONFIG_DEBUG_INFO_BTF` off. If that is you, you built the
 kernel, so you can produce its BTF.
 

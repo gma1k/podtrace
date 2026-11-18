@@ -96,12 +96,14 @@ static __always_inline void emit_pool_stats(struct pt_regs *ctx, u64 now)
 	e->bytes = (u64)open;
 	e->tcp_state = max;
 
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	emit_event(e);
 }
 
 SEC("uprobe/go_db_conn")
 int uprobe_go_db_conn(struct pt_regs *ctx)
 {
+	if (!cgroup_allows(bpf_get_current_cgroup_id()))
+		return 0;
 	u64 key = process_scoped_id(GO_ACQUIRE_GOROUTINE(ctx));
 	u64 now = bpf_ktime_get_ns();
 
@@ -149,7 +151,7 @@ int uprobe_go_db_conn_ret(struct pt_regs *ctx)
 	if (agg_absorbed(e, 0))
 		return 0;
 
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	emit_event(e);
 	return 0;
 }
 

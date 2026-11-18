@@ -100,7 +100,7 @@ int sockops_rtt(struct bpf_sock_ops *skops)
 		return 0;
 	}
 
-	struct event *e = event_buf_slot(EVENT_BUF_SOCKOPS);
+	struct event *e = event_buf_slot_untracked(EVENT_BUF_SOCKOPS);
 	if (!e) {
 		return 0;
 	}
@@ -118,7 +118,7 @@ int sockops_rtt(struct bpf_sock_ops *skops)
 
 	rtt_fill_target(skops, e);
 
-	if (!agg_absorbed(e, 0))
-		bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	if (!agg_absorbed_untracked(e, 0))
+		emit_event_untracked(e);
 	return 0;
 }

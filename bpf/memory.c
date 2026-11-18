@@ -33,7 +33,7 @@ int tracepoint_page_fault_user(void *ctx) {
 	e->target[0] = '\0';
 	
 	capture_user_stack(ctx, e->pid, 0, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	emit_event(e);
 	return 0;
 }
 
@@ -43,11 +43,10 @@ struct oom_mark_victim_hdr {
 };
 _Static_assert(__builtin_offsetof(struct oom_mark_victim_hdr, pid) == 8, "mark_victim: pid must be at offset 8");
 
-extern struct task_struct *bpf_task_from_pid(s32 pid) __ksym;
-extern void bpf_task_release(struct task_struct *p) __ksym;
+extern struct task_struct *bpf_task_from_pid(s32 pid) __ksym __weak;
+extern void bpf_task_release(struct task_struct *p) __ksym __weak;
 
-SEC("tp/oom/mark_victim")
-int tracepoint_oom_mark_victim(void *ctx) {
+static __always_inline int oom_mark_victim(void *ctx, int use_kfunc) {
 	struct event *e = get_event_buf_unfiltered();
 	if (!e) {
 		return 0;
@@ -69,7 +68,9 @@ int tracepoint_oom_mark_victim(void *ctx) {
 			     BPF_CORE_READ(tp, shmem_rss);
 		e->bytes = rss_kb * 1024;
 	}
-	struct task_struct *victim = bpf_task_from_pid((s32)e->pid);
+	struct task_struct *victim = NULL;
+	if (use_kfunc && bpf_ksym_exists(bpf_task_from_pid) && bpf_ksym_exists(bpf_task_release))
+		victim = bpf_task_from_pid((s32)e->pid);
 	e->net_ns_id = 0;
 	u32 victim_tgid = 0;
 	if (victim) {
@@ -94,6 +95,16 @@ int tracepoint_oom_mark_victim(void *ctx) {
 
 	if (victim_tgid && victim_tgid == (u32)(bpf_get_current_pid_tgid() >> 32))
 		capture_user_stack(ctx, e->pid, 0, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	emit_event(e);
 	return 0;
+}
+
+SEC("tp/oom/mark_victim")
+int tracepoint_oom_mark_victim(void *ctx) {
+	return oom_mark_victim(ctx, 1);
+}
+
+SEC("tp/oom/mark_victim")
+int tracepoint_oom_mark_victim__compat(void *ctx) {
+	return oom_mark_victim(ctx, 0);
 }

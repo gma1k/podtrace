@@ -441,11 +441,42 @@ power-of-two boundary. `kernelagg.BucketIndex()` is the Go mirror.
 
 ### Struct layout must be spelled out
 
-`struct agg_key` ends with explicit `u8 pad[6]`. The struct would be padded to
+`struct agg_key` ends with explicit `u8 pad[9]`. The struct would be padded to
 its `u64` alignment anyway, but Go's `encoding/binary` adds no implicit
 trailing padding, so an implicitly-padded struct decodes short. That failure
 mode is quiet in the worst way, a misread key attributes metrics to the wrong
-workload — so a test asserts `binary.Size(Key{}) == 24`.
+workload — so a `_Static_assert` in `agg.h` and a Go test both pin the size
+at 40 bytes.
+
+The peer is a 16-byte address, with IPv4 stored v4-mapped (`::ffff:a.b.c.d`).
+An IPv6 socket talking to an IPv4 peer reports that peer v4-mapped too, so
+both shapes land on the same key and print as dotted IPv4. Before the key was
+widened it held only an IPv4 address, and every IPv6 peer collapsed to "no
+peer", dropping its service-map edge whenever kernel aggregation was on. RTT
+rows deliberately carry no peer: `network_rtt_seconds` has no peer label, so
+a peer in the key would only multiply map entries.
+
+### Event scratch slots are claimed, not just borrowed
+
+Probes build an event in a per-CPU scratch slot (`event_buf`) and copy it to
+the ring buffer. A uprobe, fentry/fexit or faultable syscall tracepoint can
+be preempted halfway through on a `PREEMPT` or `PREEMPT_LAZY` kernel, and
+another task's probe on the same CPU then takes the same slot. Each slot is a
+`struct event_slot { struct event e; u64 owner; u64 races; }`: `event_buf_slot()`
+records the acquiring task in `owner` before clearing the event, and
+`emit_event()` reserves the ring record, copies the event into it, and only
+then checks the owner, so a record the slot lost while being copied is
+discarded too. `agg_absorbed()` and the stack capture run the same check.
+Keeping the owner beside the event, rather than in a second map, costs no
+extra lookup and no stack: the deep L7 programs sit close to the 512-byte
+stack limit on kernels before 6.13. Discards count in `races`; the agent
+sums the last eight bytes of every slot and reports them as
+`podtrace_agent_kernel_events_dropped_total{reason="event_slot_race"}`.
+
+Reserving the record up front, without the per-CPU slot, would avoid the
+race but cannot replace the slot: most events are only folded into the
+aggregation map and never emitted, and a full ring buffer would then stop
+aggregation as well.
 
 ### Reserved records must be released
 
@@ -481,7 +512,7 @@ The Go application:
 
 ## Limitations
 
-- **Kernel version**: Requires 6.4+: the socket payload probes read the 6.4 `iov_iter` layout and the OOM probe needs 6.2 kfuncs (see [compatibility.md](compatibility.md#hard-requirement-64))
+- **Kernel version**: Requires 5.15+; older kernels in that range run some probes in a reduced form (see [compatibility.md](compatibility.md#hard-requirement-515))
 - **BTF**: Requires BTF for CO-RE (Compile Once - Run Everywhere)
 - **Permissions**: Requires CAP_SYS_ADMIN or CAP_BPF
 - **Map size**: Limited by kernel configuration

@@ -32,6 +32,8 @@ static __always_inline void cpu_sample_accumulate(void *ctx, u64 on_cpu_ns, u64 
 	if (elapsed > MAX_CPU_WINDOW_NS) {
 		w->window_start_ns = now;
 		w->runtime_ns = 0;
+		struct resource_key stale = {.cgroup_id = cgid, .resource_type = RESOURCE_CPU};
+		bpf_map_delete_elem(&cgroup_alerts, &stale);
 		return;
 	}
 
@@ -138,7 +140,7 @@ int tracepoint_sched_switch(void *ctx) {
 				e->details[0] = '\0';
 
 				capture_user_stack(ctx, e->pid, prev_pid, e);
-				bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+				emit_event(e);
 			}
 		}
 
@@ -232,7 +234,7 @@ static __always_inline int do_futex_return(void *ctx, long rc)
 		e->target[0] = '\0';
 	}
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	emit_event(e);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }
@@ -327,7 +329,7 @@ int uretprobe_pthread_mutex_lock(struct pt_regs *ctx) {
 		e->target[0] = '\0';
 	}
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	emit_event(e);
 	bpf_map_delete_elem(&start_times, &key);
 	return 0;
 }

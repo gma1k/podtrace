@@ -111,6 +111,6 @@ int uprobe_usdt(struct pt_regs *ctx)
 	u32 pid = e->pid;
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	capture_user_stack(ctx, pid, tid, e);
-	bpf_ringbuf_output(&events, e, sizeof(*e), 0);
+	emit_event(e);
 	return 0;
 }
