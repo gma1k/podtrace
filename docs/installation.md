@@ -775,9 +775,38 @@ Validating webhooks require TLS. The chart's default
 (`webhook.certSource=cert-manager`) renders a `Certificate` that
 issues serving certs and annotates the `ValidatingWebhookConfiguration`
 with `cert-manager.io/inject-ca-from`. Requires cert-manager already
-installed.
+installed. The chart also renders the self-signed `Issuer` the `Certificate`
+names (`webhook.certManager.issuerRef`, `podtrace-selfsigned` by default) in
+the system namespace. To sign with an `Issuer` or `ClusterIssuer` of your own,
+set `webhook.certManager.issuerRef` to it and
+`webhook.certManager.createIssuer=false`. An `Issuer` of the configured name
+that the chart did not create is left as it is.
 
-For clusters without cert-manager, set `webhook.certSource=manual`, create
+For clusters without cert-manager, set `webhook.certSource=operator` and the
+operator issues and renews the certificate itself:
+
+```bash
+helm upgrade --install podtrace deploy/charts/podtrace \
+  --namespace podtrace-system --create-namespace \
+  --set webhook.enabled=true \
+  --set webhook.certSource=operator
+```
+
+On start, before it serves any webhook call, the operator creates a private
+CA and a serving certificate for the `podtrace-webhook` Service, keeps both in
+the `podtrace-webhook-certs` Secret in the system namespace, and writes the CA
+into the `podtrace-validating-webhook` configuration's `caBundle`. Every
+replica serves from that one Secret. The serving certificate lasts a year and
+is renewed with four months to go; the CA lasts ten years, and a renewed CA is
+published next to the old one until the old one expires, so no webhook call
+fails during a rotation. The only extra permission is `get` and `update` on
+that one `ValidatingWebhookConfiguration`. GitOps tools that compare the live
+object, such as Argo CD, should ignore its `webhooks[*].clientConfig.caBundle`,
+as they must with cert-manager's CA injector. `helm uninstall` leaves the
+Secret in place, as it does the cert-manager and manual ones; a reinstall
+reuses its CA, or delete it to start over.
+
+To bring your own certificate instead, set `webhook.certSource=manual`, create
 the serving certificate yourself as the `podtrace-webhook-tls` Secret
 (`tls.crt` / `tls.key`, for the `podtrace-webhook.podtrace-system.svc`
 DNS name) and pass the base64-encoded CA that signed it as

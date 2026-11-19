@@ -11,6 +11,9 @@ import (
 	"github.com/gma1k/podtrace/internal/metricsexporter"
 )
 
+// teeEvents fans source out to a primary consumer and to auxiliary ones. The
+// auxiliary copies are taken before the primary receives the event, because
+// the primary mutates it (attachSourcePod sets K8s) as soon as it has it.
 func teeEvents(ctx context.Context, source <-chan *events.Event, auxiliary int) (chan *events.Event, []chan *events.Event) {
 	primary := make(chan *events.Event, config.EventChannelBufferSize)
 	aux := make([]chan *events.Event, auxiliary)
@@ -32,15 +35,18 @@ func teeEvents(ctx context.Context, source <-chan *events.Event, auxiliary int) 
 				if !ok {
 					return
 				}
+				copies := make([]events.Event, len(aux))
+				for i := range copies {
+					copies[i] = *ev
+				}
 				select {
 				case primary <- ev:
 				case <-ctx.Done():
 					return
 				}
 				for i, c := range aux {
-					evCopy := *ev
 					select {
-					case c <- &evCopy:
+					case c <- &copies[i]:
 					default:
 						auxDrops++
 						metricsexporter.RecordTeeAuxDrop()

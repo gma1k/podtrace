@@ -1,10 +1,11 @@
 package main
 
 import (
-	"github.com/gma1k/podtrace/internal/config"
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/gma1k/podtrace/internal/config"
 
 	"github.com/spf13/cobra"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -24,6 +25,10 @@ type operatorOptions struct {
 	leaderElectNamespace string
 	webhookPort          int
 	webhookCertDir       string
+	webhookManageCerts   bool
+	webhookSecretName    string
+	webhookServiceName   string
+	webhookConfigName    string
 }
 
 func newOperatorCmd() *cobra.Command {
@@ -44,9 +49,6 @@ The operator runs unprivileged. Only the agent DaemonSet and per-session
 Jobs require privileged pods, and they live in the podtrace-system
 namespace.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// ctrl.SetupSignalHandler returns a ctx that cancels on
-			// SIGTERM/SIGINT. It is also process-singleton, so we wire
-			// it once here rather than pushing into internal/operator.
 			ctx := ctrl.SetupSignalHandler()
 			leaderNSExplicit := cmd.Flags().Changed("leader-elect-namespace")
 			return operator.Run(ctx, toOperatorOptions(opts, leaderNSExplicit))
@@ -67,6 +69,14 @@ namespace.`,
 		"Port the validating webhook server listens on")
 	cmd.Flags().StringVar(&opts.webhookCertDir, "webhook-cert-dir", "",
 		"Directory containing tls.crt and tls.key for the webhook server (empty disables the webhook)")
+	cmd.Flags().BoolVar(&opts.webhookManageCerts, "webhook-manage-certs", false,
+		"Issue and renew the webhook certificate in the operator, writing it to --webhook-cert-dir, instead of reading one from cert-manager or a Secret")
+	cmd.Flags().StringVar(&opts.webhookSecretName, "webhook-cert-secret", "podtrace-webhook-certs",
+		"Secret in --system-namespace that holds the operator-managed webhook CA and certificate")
+	cmd.Flags().StringVar(&opts.webhookServiceName, "webhook-service", "podtrace-webhook",
+		"Service the API server reaches the webhook through; its DNS names go into the certificate")
+	cmd.Flags().StringVar(&opts.webhookConfigName, "webhook-configuration", "podtrace-validating-webhook",
+		"ValidatingWebhookConfiguration whose caBundle the operator keeps current")
 
 	return cmd
 }
@@ -75,20 +85,20 @@ namespace.`,
 // struct and the operator package's Options struct. Keeping the CLI
 // layer thin here lets internal/operator be a reusable library.
 func toOperatorOptions(c *operatorOptions, leaderNSExplicit bool) operator.Options {
-	// NODE_NAME / POD_NAMESPACE leak through for leader-elect-namespace
-	// when the user wants "wherever this pod runs"; this first iteration
-	// keeps the flag explicit.
 	leaderNS := c.leaderElectNamespace
 	if leaderNS == "" {
 		leaderNS = c.systemNamespace
 	}
-	// If POD_NAMESPACE is set (common in in-cluster deployments) and the
-	// user did not pass --leader-elect-namespace, prefer the pod's own NS.
-	// Explicitness comes from cobra's Changed, NOT from comparing against
-	// the default literal: an operator explicitly passing the default
-	// value was silently overridden by the environment.
 	if envNS, ok := os.LookupEnv("POD_NAMESPACE"); ok && !leaderNSExplicit {
 		leaderNS = envNS
+	}
+	var webhookCerts *operator.WebhookCertificateOptions
+	if c.webhookManageCerts {
+		webhookCerts = &operator.WebhookCertificateOptions{
+			SecretName:               c.webhookSecretName,
+			ServiceName:              c.webhookServiceName,
+			WebhookConfigurationName: c.webhookConfigName,
+		}
 	}
 	return operator.Options{
 		SystemNamespace:           c.systemNamespace,
@@ -98,22 +108,16 @@ func toOperatorOptions(c *operatorOptions, leaderNSExplicit bool) operator.Optio
 		LeaderElectionNamespace:   leaderNS,
 		WebhookPort:               c.webhookPort,
 		WebhookCertDir:            c.webhookCertDir,
+		WebhookCertificates:       webhookCerts,
 		BootstrapFallbackImage:    bootstrapFallbackImage(),
 		BootstrapTracerConfigName: os.Getenv("PODTRACE_BOOTSTRAP_TC_NAME"),
 	}
 }
 
-// releaseVersionPattern matches clean release versions (v0.12.9 / 0.12.9) —
-// dev builds (git describe suffixes, "dev", -dirty) must not produce a
-// fallback image, since that tag does not exist in the registry and the
-// bootstrap TracerConfig would render an unpullable agent DaemonSet.
 var releaseVersionPattern = regexp.MustCompile(`^v?\d+\.\d+\.\d+$`)
 
 // bootstrapFallbackImage derives the agent image for the TracerConfig
-// bootstrap from the operator binary's own build identity. It is the second
-// line of defense behind the PODTRACE_BOOTSTRAP_IMAGE env var: distributions
-// that forget the env (the OLM CSV did, leaving installs with no agent
-// DaemonSet) still bootstrap correctly when running a release build.
+// bootstrap from the operator binary's own build identity.
 func bootstrapFallbackImage() string {
 	if config.Image == "" || !releaseVersionPattern.MatchString(config.Version) {
 		return ""

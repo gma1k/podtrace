@@ -54,6 +54,12 @@ spec:
             {{- if .Values.webhook.enabled }}
             - --webhook-port={{ .Values.webhook.port }}
             - --webhook-cert-dir=/tmp/k8s-webhook-server/serving-certs
+            {{- if eq .Values.webhook.certSource "operator" }}
+            - --webhook-manage-certs=true
+            - --webhook-cert-secret={{ include "podtrace.fullname" . }}-webhook-certs
+            - --webhook-service={{ include "podtrace.fullname" . }}-webhook
+            - --webhook-configuration={{ include "podtrace.fullname" . }}-validating-webhook
+            {{- end }}
             {{- end }}
           env:
             - name: POD_NAMESPACE
@@ -108,14 +114,22 @@ spec:
           volumeMounts:
             - name: webhook-certs
               mountPath: /tmp/k8s-webhook-server/serving-certs
-              readOnly: true
+              readOnly: {{ ne .Values.webhook.certSource "operator" }}
           {{- end }}
       {{- if .Values.webhook.enabled }}
       volumes:
         - name: webhook-certs
+          {{- if eq .Values.webhook.certSource "operator" }}
+          # The operator writes the certificate it issues here; the CA and
+          # certificate persist in the <fullname>-webhook-certs Secret.
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+          {{- else }}
           secret:
             secretName: {{ include "podtrace.fullname" . }}-webhook-tls
             defaultMode: 420
+          {{- end }}
       {{- end }}
       {{- with .Values.operator.nodeSelector }}
       nodeSelector:

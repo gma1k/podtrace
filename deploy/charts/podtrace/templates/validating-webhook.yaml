@@ -6,7 +6,7 @@
    operator.enabled is a no-op instead of a self-inflicted outage.
 */ -}}
 {{- if and .Values.webhook.enabled .Values.operator.enabled }}
-{{- if and (ne .Values.webhook.certSource "cert-manager") (not .Values.webhook.caBundle) }}
+{{- if and (has .Values.webhook.certSource (list "manual" "self-signed")) (not .Values.webhook.caBundle) }}
 {{- fail (printf "webhook.certSource=%s needs webhook.caBundle and a %s-webhook-tls Secret: without a CA the API server rejects the webhook's certificate and, with failurePolicy Fail, every podtrace.io create and update" .Values.webhook.certSource (include "podtrace.fullname" .)) }}
 {{- end }}
 ---
@@ -38,7 +38,7 @@ webhooks:
         name: {{ include "podtrace.fullname" . }}-webhook
         namespace: {{ include "podtrace.systemNamespace" . }}
         path: /validate-podtrace-io-v1alpha1-podtrace
-      {{- if .Values.webhook.caBundle }}
+      {{- if and .Values.webhook.caBundle (ne .Values.webhook.certSource "operator") }}
       caBundle: {{ .Values.webhook.caBundle }}
       {{- end }}
     rules:
@@ -56,7 +56,7 @@ webhooks:
         name: {{ include "podtrace.fullname" . }}-webhook
         namespace: {{ include "podtrace.systemNamespace" . }}
         path: /validate-podtrace-io-v1alpha1-podtracesession
-      {{- if .Values.webhook.caBundle }}
+      {{- if and .Values.webhook.caBundle (ne .Values.webhook.certSource "operator") }}
       caBundle: {{ .Values.webhook.caBundle }}
       {{- end }}
     rules:
@@ -74,7 +74,7 @@ webhooks:
         name: {{ include "podtrace.fullname" . }}-webhook
         namespace: {{ include "podtrace.systemNamespace" . }}
         path: /validate-podtrace-io-v1alpha1-exporterconfig
-      {{- if .Values.webhook.caBundle }}
+      {{- if and .Values.webhook.caBundle (ne .Values.webhook.certSource "operator") }}
       caBundle: {{ .Values.webhook.caBundle }}
       {{- end }}
     rules:
@@ -92,7 +92,7 @@ webhooks:
         name: {{ include "podtrace.fullname" . }}-webhook
         namespace: {{ include "podtrace.systemNamespace" . }}
         path: /validate-podtrace-io-v1alpha1-podtraceschedule
-      {{- if .Values.webhook.caBundle }}
+      {{- if and .Values.webhook.caBundle (ne .Values.webhook.certSource "operator") }}
       caBundle: {{ .Values.webhook.caBundle }}
       {{- end }}
     rules:
@@ -110,7 +110,7 @@ webhooks:
         name: {{ include "podtrace.fullname" . }}-webhook
         namespace: {{ include "podtrace.systemNamespace" . }}
         path: /validate-podtrace-io-v1alpha1-tracerconfig
-      {{- if .Values.webhook.caBundle }}
+      {{- if and .Values.webhook.caBundle (ne .Values.webhook.certSource "operator") }}
       caBundle: {{ .Values.webhook.caBundle }}
       {{- end }}
     rules:
@@ -128,7 +128,7 @@ webhooks:
         name: {{ include "podtrace.fullname" . }}-webhook
         namespace: {{ include "podtrace.systemNamespace" . }}
         path: /validate-podtrace-io-v1alpha1-applicationtrace
-      {{- if .Values.webhook.caBundle }}
+      {{- if and .Values.webhook.caBundle (ne .Values.webhook.certSource "operator") }}
       caBundle: {{ .Values.webhook.caBundle }}
       {{- end }}
     rules:

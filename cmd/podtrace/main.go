@@ -323,6 +323,9 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	if err := validateReportTo(reportTo); err != nil {
 		return err
 	}
+	if err := validateBTFFileFlag(spawnBTFFile); err != nil {
+		return err
+	}
 
 	if exporterFromFile != "" {
 		if err := applyExporterFromFile(exporterFromFile); err != nil {
@@ -457,6 +460,7 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 	if handled, err := maybeSpawnOnNode(hardCtx, ctx.Done(), cmd, resolver, selection); handled {
 		return err
 	}
+	applyLocalBTFFile(spawnBTFFile)
 
 	var metricsServer *metricsexporter.Server
 	if enableMetrics {

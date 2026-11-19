@@ -194,7 +194,7 @@ func TestBuildSessionJobSpec_SidecarOptedIn(t *testing.T) {
 	}
 	s := newSession(func(s *podtracev1alpha1.PodTraceSession) {
 		s.Spec.ReportRef = &podtracev1alpha1.ReportReference{
-			ConfigMap: &corev1.LocalObjectReference{Name: "rpt"},
+			ObjectStore: &podtracev1alpha1.ObjectStoreReference{URI: "s3://bucket/reports/rpt.txt"},
 		}
 	})
 	spec := buildSessionJobSpec(s, tc, "node-a", sessionTargets{PodRefs: s.Spec.PodRefs})
@@ -210,8 +210,29 @@ func TestBuildSessionJobSpec_SidecarOptedIn(t *testing.T) {
 		t.Errorf("sidecar restartPolicy must be Always: %+v", side.RestartPolicy)
 	}
 	argsStr := strings.Join(side.Args, " ")
-	if !strings.Contains(argsStr, "report-uploader") || !strings.Contains(argsStr, "--report-to configmap/default/rpt") {
+	if !strings.Contains(argsStr, "report-uploader") || !strings.Contains(argsStr, "--report-to s3://bucket/reports/rpt.txt") {
 		t.Errorf("sidecar args wrong: %v", side.Args)
+	}
+}
+
+func TestBuildSessionJobSpec_SidecarSuppressedForConfigMapAndSecretReports(t *testing.T) {
+	tc := &podtracev1alpha1.TracerConfig{
+		Spec: podtracev1alpha1.TracerConfigSpec{
+			Image:   "ghcr.io/gma1k/podtrace:test",
+			Session: podtracev1alpha1.SessionRuntimeSpec{SidecarUploader: true},
+		},
+	}
+	for name, ref := range map[string]*podtracev1alpha1.ReportReference{
+		"configMap": {ConfigMap: &corev1.LocalObjectReference{Name: "rpt"}},
+		"secret":    {Secret: &corev1.LocalObjectReference{Name: "rpt"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newSession(func(s *podtracev1alpha1.PodTraceSession) { s.Spec.ReportRef = ref })
+			spec := buildSessionJobSpec(s, tc, "node-a", sessionTargets{PodRefs: s.Spec.PodRefs})
+			if n := len(spec.Template.Spec.InitContainers); n != 0 {
+				t.Fatalf("%d init container(s) for a %s report; the CLI writes it itself, so no uploader may wait for a file", n, name)
+			}
+		})
 	}
 }
 

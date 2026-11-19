@@ -420,7 +420,10 @@
           "type": "object"
         },
         "name": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 63,
+          "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$",
+          "description": "The system namespace, labelled PSA-privileged for the agents and session Jobs. A DNS label; the cluster's own namespaces are refused, as the operator refuses them for TracerConfig.spec.systemNamespace. Empty means podtrace-system."
         }
       },
       "additionalProperties": false
@@ -710,6 +713,10 @@
         "certManager": {
           "type": "object",
           "properties": {
+            "createIssuer": {
+              "type": "boolean",
+              "description": "Render a selfSigned Issuer named by issuerRef.name when issuerRef.kind is Issuer. Skipped when an Issuer of that name already exists outside this release."
+            },
             "issuerRef": {
               "type": "object",
               "properties": {
@@ -729,10 +736,11 @@
           "type": "string",
           "enum": [
             "cert-manager",
+            "operator",
             "manual",
             "self-signed"
           ],
-          "description": "cert-manager issues the serving certificate. manual (self-signed is an alias) uses your own Secret <fullname>-webhook-tls and needs webhook.caBundle."
+          "description": "cert-manager issues the serving certificate. operator makes the operator issue and renew it itself, with no dependency. manual (self-signed is an alias) uses your own Secret <fullname>-webhook-tls and needs webhook.caBundle."
         },
         "enabled": {
           "type": "boolean"

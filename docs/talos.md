@@ -110,20 +110,16 @@ helm install cert-manager jetstack/cert-manager \
   --namespace cert-manager --create-namespace \
   --set crds.enabled=true
 
-# self-signed Issuer for the webhook cert
-kubectl create namespace podtrace-system
-kubectl apply -f - <<'EOF'
-apiVersion: cert-manager.io/v1
-kind: Issuer
-metadata: {name: podtrace-selfsigned, namespace: podtrace-system}
-spec: {selfSigned: {}}
-EOF
-
-# Install podtrace
+# Install podtrace; the chart renders the self-signed Issuer for the webhook
+# cert itself
 helm install podtrace oci://ghcr.io/gma1k/charts/podtrace \
-  --namespace podtrace-system \
+  --namespace podtrace-system --create-namespace \
   --set webhook.enabled=true
 ```
+
+Installs that created the `podtrace-selfsigned` Issuer by hand, as earlier
+versions of this guide did, keep it: the chart leaves an Issuer of that name
+alone when it did not create it.
 
 After install you get:
 

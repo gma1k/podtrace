@@ -161,6 +161,7 @@ build: $(BPF_OBJ)
 RELEASE_DIR ?= release
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+SOURCE_DATE_EPOCH ?= $(shell git log -1 --format=%ct 2>/dev/null || echo 0)
 MODULE = github.com/gma1k/podtrace
 RELEASE_TARGETS = linux-amd64 linux-arm64 darwin-amd64 darwin-arm64
 
@@ -202,11 +203,9 @@ release: release-bpf-objects
 	    exit 1; \
 	  fi; \
 	  cp LICENSE README.md CHANGELOG.md "$$staging/"; \
-	  ( cd "$(RELEASE_DIR)" && \
-	    tar --sort=name --owner=root:0 --group=root:0 \
-	        -czf "podtrace_$$os""_""$$arch.tar.gz" \
-	        -C "staging-$$os-$$arch" \
-	        podtrace LICENSE README.md CHANGELOG.md ); \
+	  SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) ./hack/package-release-tarball.sh \
+	    "$$staging" "$(RELEASE_DIR)/podtrace_$$os""_""$$arch.tar.gz" \
+	    podtrace LICENSE README.md CHANGELOG.md; \
 	  rm -rf "$$staging"; \
 	done
 	cd $(RELEASE_DIR) && sha256sum podtrace_*.tar.gz > checksums.txt

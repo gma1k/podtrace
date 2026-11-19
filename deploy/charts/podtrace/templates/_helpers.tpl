@@ -54,7 +54,11 @@ Resolved system namespace. The operator, agent DaemonSet and session Jobs
 all live here regardless of the Helm release namespace.
 */}}
 {{- define "podtrace.systemNamespace" -}}
-{{- default "podtrace-system" .Values.namespace.name -}}
+{{- $name := default "podtrace-system" .Values.namespace.name -}}
+{{- if has $name (list "default" "kube-system" "kube-public" "kube-node-lease") -}}
+{{- fail (printf "namespace.name %q is one of the cluster's own namespaces; the system namespace is labelled PSA-privileged and receives the agent DaemonSet, session Jobs and exporter credentials, so give podtrace a namespace of its own" $name) -}}
+{{- end -}}
+{{- $name -}}
 {{- end }}
 
 {{/*

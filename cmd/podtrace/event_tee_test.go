@@ -223,3 +223,36 @@ func TestTeeEvents_PrimarySendCanceledByContext(t *testing.T) {
 		}
 	}
 }
+
+func TestTeeEvents_PrimaryMutationDoesNotRaceAuxiliaryCopy(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	source := make(chan *events.Event, 64)
+	primary, aux := teeEvents(ctx, source, 1)
+
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 5000; i++ {
+			source <- &events.Event{PID: uint32(i + 1)}
+		}
+		close(source)
+	}()
+	go func() {
+		defer wg.Done()
+		for ev := range primary {
+			ev.K8s = &events.K8sMetadata{PodName: "source"}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for ev := range aux[0] {
+			if ev.K8s != nil {
+				t.Errorf("auxiliary copy of PID %d carries the primary's later K8s write", ev.PID)
+			}
+		}
+	}()
+	wg.Wait()
+}
