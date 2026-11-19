@@ -70,6 +70,21 @@ func TestPodTraceScheduleValidator(t *testing.T) {
 			exporter: "prod-otlp",
 		},
 		{
+			name: "never-firing-cron",
+			mutate: func(s *podtracev1alpha1.PodTraceSchedule) {
+				s.Spec.Schedule = "0 0 30 2 *"
+			},
+			exporter:  "prod-otlp",
+			wantError: "never fires",
+		},
+		{
+			name: "leap-day-cron",
+			mutate: func(s *podtracev1alpha1.PodTraceSchedule) {
+				s.Spec.Schedule = "0 0 29 2 *"
+			},
+			exporter: "prod-otlp",
+		},
+		{
 			name: "invalid-cron",
 			mutate: func(s *podtracev1alpha1.PodTraceSchedule) {
 				s.Spec.Schedule = "not-a-cron"

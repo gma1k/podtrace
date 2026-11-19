@@ -182,7 +182,11 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 	tc := resolved.primary()
-	revoked, err := r.stopRevokedJobs(ctx, &session, resolved.namespaces)
+	jobNamespaces, err := r.sessionJobNamespaces(ctx, resolved.namespaces)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	revoked, err := r.stopRevokedJobs(ctx, &session, jobNamespaces)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -718,18 +722,68 @@ func effectiveMaxConcurrentSessionsPerNode(tc *podtracev1alpha1.TracerConfig) in
 	return tc.Spec.MaxConcurrentSessionsPerNode
 }
 
-// ensureJobs creates-or-updates one Job per target node in the system
-// namespace.
+// sessionJobNamespaces returns every namespace a session Job can be in: the
+// namespaces resolved on this pass plus every fleet's system namespace and the
+// operator's own.
+func (r *PodTraceSessionReconciler) sessionJobNamespaces(ctx context.Context, resolved []string) ([]string, error) {
+	namespaces, err := sessionSystemNamespaces(ctx, r.Client, r.SystemNamespace)
+	if err != nil {
+		return nil, err
+	}
+	return mergeSortedNamespaceSets(namespaces, sortedCopy(resolved)), nil
+}
+
+func sortedCopy(in []string) []string {
+	out := append([]string(nil), in...)
+	sort.Strings(out)
+	return out
+}
+
+// sessionJobVanishedMessage marks a node whose Job was recorded running but
+// was removed, for example by a short ttlSecondsAfterFinished, before a pass
+// saw how it ended. The node is done: creating its Job again would trace the
+// node a second time.
+const sessionJobVanishedMessage = "Job removed before its outcome was recorded"
+
+// ensureJobs creates one Job per target node.
 func (r *PodTraceSessionReconciler) ensureJobs(ctx context.Context, s *podtracev1alpha1.PodTraceSession, resolved sessionTracerConfigs, targets sessionTargets, completedNodes map[string]struct{}) ([]batchv1.Job, error) {
+	namespaces, err := r.sessionJobNamespaces(ctx, resolved.namespaces)
+	if err != nil {
+		return nil, err
+	}
+	existing, err := r.ownedSessionJobs(ctx, s, namespaces)
+	if err != nil {
+		return nil, err
+	}
+	placed := make(map[string]struct{}, len(existing))
+	for i := range existing {
+		placed[existing[i].Labels[LabelNodeName]] = struct{}{}
+	}
+	recorded := map[string]struct{}{}
+	for i := range s.Status.Jobs {
+		if !s.Status.Jobs[i].Completed && s.Status.Jobs[i].Node != "" {
+			recorded[s.Status.Jobs[i].Node] = struct{}{}
+		}
+	}
 	for _, node := range targets.Nodes {
 		if _, done := completedNodes[node]; done {
 			continue
 		}
+		if _, ok := placed[node]; ok {
+			continue
+		}
+		if _, ok := recorded[node]; ok {
+			gone, err := r.sessionJobGone(ctx, s, node, namespaces)
+			if err != nil {
+				return nil, err
+			}
+			if gone {
+				markSessionJobVanished(s, node)
+			}
+			continue
+		}
 		nodeConfig := resolved.forNode(node)
 		if nodeConfig == nil {
-			// resolveSessionTracerConfigs errors rather than returning a nil
-			// config, so this is unreachable; refuse rather than fall through
-			// to a Job with no image.
 			return nil, fmt.Errorf("no TracerConfig resolved for node %s", node)
 		}
 		job := &batchv1.Job{
@@ -758,7 +812,35 @@ func (r *PodTraceSessionReconciler) ensureJobs(ctx context.Context, s *podtracev
 		}
 	}
 
-	return r.ownedSessionJobs(ctx, s, resolved.namespaces)
+	return r.ownedSessionJobs(ctx, s, namespaces)
+}
+
+// sessionJobGone confirms against the API server, not the cache, that the
+// node's Job exists in none of the namespaces.
+func (r *PodTraceSessionReconciler) sessionJobGone(ctx context.Context, s *podtracev1alpha1.PodTraceSession, node string, namespaces []string) (bool, error) {
+	name := SessionJobName(s.UID, node)
+	for _, ns := range namespaces {
+		var job batchv1.Job
+		err := r.reader().Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &job)
+		if err == nil {
+			return false, nil
+		}
+		if !apierrors.IsNotFound(err) {
+			return false, fmt.Errorf("get Job %s/%s: %w", ns, name, err)
+		}
+	}
+	return true, nil
+}
+
+// markSessionJobVanished records the node's Job as finished with
+// sessionJobVanishedMessage, so mergeSessionJobRefs carries it forward.
+func markSessionJobVanished(s *podtracev1alpha1.PodTraceSession, node string) {
+	for i := range s.Status.Jobs {
+		if s.Status.Jobs[i].Node == node {
+			s.Status.Jobs[i].Completed = true
+			s.Status.Jobs[i].Message = sessionJobVanishedMessage
+		}
+	}
 }
 
 // ownedSessionJobs lists this session's Jobs in the given system namespaces.
@@ -937,6 +1019,10 @@ func (r *PodTraceSessionReconciler) reconcileTerminalSession(ctx context.Context
 	if s.Status.CompletionTime == nil {
 		return ctrl.Result{}, nil
 	}
+	running, err := r.enforceGrantsOnTerminalSession(ctx, s)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 	ttl := sessionTTL(s)
 	deadline := s.Status.CompletionTime.Add(time.Duration(ttl) * time.Second)
 	if time.Now().Before(deadline) {
@@ -949,12 +1035,59 @@ func (r *PodTraceSessionReconciler) reconcileTerminalSession(ctx context.Context
 				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 			}
 		}
-		return ctrl.Result{RequeueAfter: time.Until(deadline)}, nil
+		if wait := time.Until(deadline); !running || wait < terminalSessionJobPoll {
+			return ctrl.Result{RequeueAfter: wait}, nil
+		}
+		return ctrl.Result{RequeueAfter: terminalSessionJobPoll}, nil
 	}
 	if err := r.Delete(ctx, s); err != nil && !apierrors.IsNotFound(err) {
 		return ctrl.Result{}, fmt.Errorf("delete expired session: %w", err)
 	}
 	return ctrl.Result{}, nil
+}
+
+// terminalSessionJobPoll is how often a terminal session whose Jobs still run
+// re-checks the cross-namespace grants those Jobs trace under.
+const terminalSessionJobPoll = 5 * time.Second
+
+// enforceGrantsOnTerminalSession keeps withdrawing consent effective after the
+// session ended: a session turns Failed as soon as one node fails, while the
+// Jobs on its other nodes run on to their deadline.
+func (r *PodTraceSessionReconciler) enforceGrantsOnTerminalSession(ctx context.Context, s *podtracev1alpha1.PodTraceSession) (bool, error) {
+	namespaces, err := r.sessionJobNamespaces(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	jobs, err := r.ownedSessionJobs(ctx, s, namespaces)
+	if err != nil {
+		return false, err
+	}
+	running := 0
+	for i := range jobs {
+		if !jobSucceeded(&jobs[i]) && !jobFailed(&jobs[i]) {
+			running++
+		}
+	}
+	if running == 0 {
+		return false, nil
+	}
+	revoked, err := r.stopRevokedJobs(ctx, s, namespaces)
+	if err != nil {
+		return false, err
+	}
+	if len(revoked) == 0 {
+		return true, nil
+	}
+	if err := deleteSessionPodReadRBAC(ctx, r.Client, s, revoked); err != nil {
+		return false, err
+	}
+	r.setCondition(s, ConditionReconciled, metav1.ConditionTrue, "CrossNamespaceGrantRevoked",
+		fmt.Sprintf("namespace(s) %v no longer grant %q through the %s annotation; stopped the session Jobs that still traced them",
+			revoked, s.Namespace, podtracev1alpha1.AllowTracingFromAnnotation))
+	if err := r.Status().Update(ctx, s); err != nil && !apierrors.IsConflict(err) {
+		return false, fmt.Errorf("update status: %w", err)
+	}
+	return true, nil
 }
 
 func sessionTTL(s *podtracev1alpha1.PodTraceSession) int32 {

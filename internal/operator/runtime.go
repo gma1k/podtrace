@@ -98,36 +98,7 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("register issue correlation metrics: %w", err)
 	}
 
-	managerOpts := ctrl.Options{
-		Scheme: scheme,
-		Metrics: metricsserver.Options{
-			BindAddress:   opts.MetricsBindAddress,
-			ExtraHandlers: map[string]http.Handler{CorrelationsPath: correlator.Handler()},
-		},
-		HealthProbeBindAddress:  opts.HealthBindAddress,
-		LeaderElection:          opts.LeaderElection,
-		LeaderElectionID:        leaderElectionID(opts),
-		LeaderElectionNamespace: opts.LeaderElectionNamespace,
-	}
-	if opts.GracefulShutdownTimeout > 0 {
-		managerOpts.GracefulShutdownTimeout = &opts.GracefulShutdownTimeout
-	}
-	if opts.WebhookCertDir != "" {
-		managerOpts.WebhookServer = webhook.NewServer(webhook.Options{
-			Port:    opts.WebhookPort,
-			CertDir: opts.WebhookCertDir,
-		})
-	}
-	managerOpts.Cache.ByObject = map[client.Object]cache.ByObject{
-		&corev1.Node{}:   {Transform: stripNodeStatus},
-		&corev1.Secret{}: {Transform: stripSecretData},
-		&corev1.Event{}:  {Field: alertEventFieldSelector()},
-
-		&discoveryv1.EndpointSlice{}: {Transform: trimEndpointSlice},
-	}
-	if opts.SyncPeriod > 0 {
-		managerOpts.Cache.SyncPeriod = &opts.SyncPeriod
-	}
+	managerOpts := managerOptions(opts, scheme, correlator.Handler())
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), managerOpts)
 	if err != nil {
@@ -171,6 +142,56 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	return mgr.Start(ctx)
+}
+
+// managerOptions assembles the controller manager's options: metrics and
+// health endpoints, leader election, the webhook server, and the cache
+// shape (trimmed or filtered informers, and kinds read uncached).
+func managerOptions(opts Options, scheme *runtime.Scheme, correlations http.Handler) ctrl.Options {
+	managerOpts := ctrl.Options{
+		Scheme: scheme,
+		Metrics: metricsserver.Options{
+			BindAddress:   opts.MetricsBindAddress,
+			ExtraHandlers: map[string]http.Handler{CorrelationsPath: correlations},
+		},
+		HealthProbeBindAddress:  opts.HealthBindAddress,
+		LeaderElection:          opts.LeaderElection,
+		LeaderElectionID:        leaderElectionID(opts),
+		LeaderElectionNamespace: opts.LeaderElectionNamespace,
+	}
+	if opts.GracefulShutdownTimeout > 0 {
+		managerOpts.GracefulShutdownTimeout = &opts.GracefulShutdownTimeout
+	}
+	if opts.WebhookCertDir != "" {
+		managerOpts.WebhookServer = webhook.NewServer(webhook.Options{
+			Port:    opts.WebhookPort,
+			CertDir: opts.WebhookCertDir,
+		})
+	}
+	managerOpts.Cache.ByObject = map[client.Object]cache.ByObject{
+		&corev1.Node{}:   {Transform: stripNodeStatus},
+		&corev1.Secret{}: {Transform: stripSecretData},
+		&corev1.Event{}:  {Field: alertEventFieldSelector()},
+
+		&discoveryv1.EndpointSlice{}: {Transform: trimEndpointSlice},
+	}
+	managerOpts.Client = uncachedClientOptions()
+	if opts.SyncPeriod > 0 {
+		managerOpts.Cache.SyncPeriod = &opts.SyncPeriod
+	}
+	return managerOpts
+}
+
+// uncachedClientOptions sends ConfigMap reads straight to the API server. No
+// controller watches ConfigMaps, and a cache of them would hold every
+// ConfigMap in the cluster with its data, so a tenant could exhaust the
+// operator's memory by creating large ones in its own namespace.
+func uncachedClientOptions() client.Options {
+	return client.Options{
+		Cache: &client.CacheOptions{
+			DisableFor: []client.Object{&corev1.ConfigMap{}},
+		},
+	}
 }
 
 func alertEventFieldSelector() fields.Selector {
