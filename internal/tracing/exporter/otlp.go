@@ -21,6 +21,7 @@ import (
 	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/internal/safeconv"
 	"github.com/gma1k/podtrace/internal/sanitize"
+	"github.com/gma1k/podtrace/internal/spanattributes"
 )
 
 type OTLPExporter struct {
@@ -253,6 +254,7 @@ func (e *OTLPExporter) spanSnapshot(span *tracker.Span) (sdktrace.ReadOnlySpan, 
 				attribute.String("podtrace.http.transport", event.HTTPProtoLabel()),
 			)
 		}
+		attrs = append(attrs, spanattributes.Protocol(event)...)
 		stub.Events = append(stub.Events, sdktrace.Event{
 			Name:       event.TypeString(),
 			Time:       event.TimestampTime(),

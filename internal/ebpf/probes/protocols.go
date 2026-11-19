@@ -145,6 +145,7 @@ func AttachKafkaProbesWithPID(coll *ebpf.Collection, containerID string, pid uin
 			{"uprobe_rd_kafka_topic_new", "uretprobe_rd_kafka_topic_new", "rd_kafka_topic_new"},
 			{"uprobe_rd_kafka_produce", "uretprobe_rd_kafka_produce", "rd_kafka_produce"},
 			{"uprobe_rd_kafka_consumer_poll", "uretprobe_rd_kafka_consumer_poll", "rd_kafka_consumer_poll"},
+			{"uprobe_rd_kafka_topic_destroy", "", "rd_kafka_topic_destroy"},
 		}
 		l := attachUprobeSymbols(exe, coll, path, pairs)
 		if len(l) > 0 {

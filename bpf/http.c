@@ -313,11 +313,12 @@ int kprobe_http_tcp_recvmsg(struct pt_regs *ctx)
 	if (!base)
 		return 0;
 
-	struct ssl_read_state st = {
+	struct tcp_recv_state st = {
 		.buf = (u64)base,
 		.conn = (u64)PT_REGS_PARM1(ctx),
 		.out_len = avail,
 	};
+	st.seq_known = tcp_copied_seq(st.conn, &st.copied_seq);
 	bpf_map_update_elem(&http_recv_base, &key, &st, BPF_ANY);
 	struct ssl_read_state *tls = bpf_map_lookup_elem(&ssl_read_args, &key);
 	if (tls)
@@ -331,16 +332,20 @@ static __always_inline int http_tcp_recvmsg_return(void *ctx, long rc)
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_key(pid, tid);
 
-	struct ssl_read_state *st = bpf_map_lookup_elem(&http_recv_base, &key);
+	struct tcp_recv_state *st = bpf_map_lookup_elem(&http_recv_base, &key);
 	if (!st)
 		return 0;
 	void *base = (void *)st->buf;
 	u64 sk = st->conn;
 	u64 first_seg = st->out_len;
+	u32 seq_known = st->seq_known;
+	u32 copied_seq = st->copied_seq;
 	bpf_map_delete_elem(&http_recv_base, &key);
 
 	s32 ret = (s32)rc;
 	if (ret <= 0)
+		return 0;
+	if (tcp_recv_was_peek(sk, seq_known, copied_seq))
 		return 0;
 	u64 n = (u64)ret;
 	if (first_seg < n)

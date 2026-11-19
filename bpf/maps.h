@@ -659,11 +659,18 @@ struct ssl_read_state {
 	u64 conn;
 	u64 out_len;
 };
+struct tcp_recv_state {
+	u64 buf;
+	u64 conn;
+	u64 out_len;
+	u32 copied_seq;
+	u32 seq_known;
+};
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 1024);
 	__type(key, u64);
-	__type(value, struct ssl_read_state);
+	__type(value, struct tcp_recv_state);
 } http_recv_base SEC(".maps");
 
 #define HTTP_SCAN_BUF_SIZE 512
@@ -712,6 +719,8 @@ struct h2_recv_info {
 	u64 conn_id;
 	u64 iov;
 	u32 nr_segs;
+	u32 copied_seq;
+	u32 seq_known;
 	u32 _pad;
 };
 struct {
@@ -1090,6 +1099,13 @@ struct {
 	__type(key, u64);
 	__type(value, char[MAX_STRING_LEN]);
 } kafka_topic_names SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 256);
+	__type(key, u64);
+	__type(value, u32);
+} kafka_topic_refs SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);

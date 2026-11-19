@@ -238,3 +238,51 @@ func TestDeliveryObservingExporter_RecoversAfterFailure(t *testing.T) {
 		t.Error("failing flag should be cleared after a successful export")
 	}
 }
+
+func TestSDKEventExporter_Export_StampsCacheMessagingAndFastCGIAttributes(t *testing.T) {
+	rec := &recordingSpanExporter{}
+	b := &bundle.Payload{Type: bundle.TypeOTLP, Endpoint: "x:4318", Insecure: true}
+	exp, err := newSDKEventExporter("otlp", CRKey{"ns", "cr"}, b, rec)
+	if err != nil {
+		t.Fatalf("newSDKEventExporter: %v", err)
+	}
+	now := uint64(time.Now().UnixNano())
+	batch := []*events.Event{
+		{Type: events.EventRedisCmd, Timestamp: now, Details: "HGETALL"},
+		{Type: events.EventKafkaProduce, Timestamp: now, Details: "orders"},
+		{Type: events.EventFastCGIResp, Timestamp: now, Details: "POST", Target: "/checkout.php"},
+	}
+	if err := exp.Export(context.Background(), batch); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := exp.Close(ctx); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	want := map[string]map[string]string{
+		"redis":   {"db.system.name": "redis", "db.operation.name": "HGETALL"},
+		"kafka":   {"messaging.system": "kafka", "messaging.destination.name": "orders", "messaging.operation.type": "send"},
+		"fastcgi": {"network.protocol.name": "fastcgi", "http.request.method": "POST", "url.path": "/checkout.php"},
+	}
+	seen := map[string]bool{}
+	for _, s := range rec.snapshot() {
+		attrs := spanAttrSet(s)
+		for name, expected := range want {
+			match := true
+			for k, v := range expected {
+				if attrs[k] != v {
+					match = false
+				}
+			}
+			if match {
+				seen[name] = true
+			}
+		}
+	}
+	for name := range want {
+		if !seen[name] {
+			t.Errorf("no %s span carried %v", name, want[name])
+		}
+	}
+}

@@ -133,6 +133,7 @@ type dirState struct {
 	key          connKey
 	elem         *list.Element
 	dec          *lateJoinDecoder
+	cgroup       uint64
 	role         uint8
 	nextSeq      uint32
 	pending      map[uint32]*RawRecord
@@ -226,6 +227,7 @@ type Decoder struct {
 	lateRecords       uint64
 	sequenceRestarts  uint64
 	budgetSheds       uint64
+	ownerChanges      uint64
 }
 
 // New returns a Decoder with default tunables.
@@ -274,11 +276,17 @@ func (d *Decoder) Ingest(rec *RawRecord) []*events.Event {
 
 	key := connKey{conn: rec.ConnID, dir: rec.Direction}
 	st := d.dirs[key]
+	if st != nil && ownerChanged(st.cgroup, rec.CgroupID) {
+		d.ownerChanges++
+		d.released = append(d.released, d.evictLocked(rec.ConnID)...)
+		st = nil
+	}
 	if st == nil {
 		d.evictIfFullLocked()
 		st = &dirState{
 			key:        key,
 			dec:        &lateJoinDecoder{},
+			cgroup:     rec.CgroupID,
 			nextSeq:    0,
 			pending:    make(map[uint32]*RawRecord),
 			generation: d.generationLocked(rec.ConnID, otherDirection(rec.Direction)),
@@ -361,6 +369,13 @@ func (d *Decoder) releaseStreamLocked(sk streamKey) {
 		d.released = append(d.released, req.held)
 	}
 	d.deleteStreamLocked(sk)
+}
+
+// ownerChanged reports whether a record comes from another cgroup than the
+// one that opened the direction: the kernel reused the socket address for a
+// different workload, so none of the old decode state applies to it.
+func ownerChanged(owner, cgroup uint64) bool {
+	return owner != 0 && cgroup != 0 && owner != cgroup
 }
 
 // isSequenceRestart tells a record behind nextSeq apart: one from a range
@@ -917,6 +932,10 @@ func (d *Decoder) Sweep() []*events.Event {
 func (d *Decoder) Evict(connID uint64) []*events.Event {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	return d.evictLocked(connID)
+}
+
+func (d *Decoder) evictLocked(connID uint64) []*events.Event {
 	for _, dir := range []uint8{DirEgress, DirIngress} {
 		if st := d.dirs[connKey{conn: connID, dir: dir}]; st != nil {
 			d.dropDirLocked(st)
@@ -956,6 +975,7 @@ type Stats struct {
 	LateRecords       uint64
 	SequenceRestarts  uint64
 	BudgetSheds       uint64
+	OwnerChanges      uint64
 }
 
 func (d *Decoder) Stats() Stats {
@@ -973,6 +993,7 @@ func (d *Decoder) Stats() Stats {
 		LateRecords:       d.lateRecords,
 		SequenceRestarts:  d.sequenceRestarts,
 		BudgetSheds:       d.budgetSheds,
+		OwnerChanges:      d.ownerChanges,
 	}
 }
 

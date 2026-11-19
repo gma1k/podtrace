@@ -148,6 +148,7 @@ var probeGroupMap = map[string]ProbeGroup{
 	"uretprobe_rd_kafka_produce":       GroupMessaging,
 	"uprobe_rd_kafka_consumer_poll":    GroupMessaging,
 	"uretprobe_rd_kafka_consumer_poll": GroupMessaging,
+	"uprobe_rd_kafka_topic_destroy":    GroupMessaging,
 
 	// FastCGI (unix socket PHP-FPM tracing)
 	"kprobe_unix_stream_recvmsg":    GroupFastCGI,

@@ -292,6 +292,7 @@ static __noinline int h2_walk_prepare(void *base, u64 avail, u64 conn, u32 dir)
 		return -1;
 
 	u8 *known = bpf_map_lookup_elem(&h2_conns, &conn);
+	u8 was_known = known != NULL;
 	if (!known) {
 		if (!h2_start_looks_h2(base, avail))
 			return -1;
@@ -306,6 +307,8 @@ static __noinline int h2_walk_prepare(void *base, u64 avail, u64 conn, u32 dir)
 		fs = bpf_map_lookup_elem(&h2_frame_state, &fk);
 		if (!fs)
 			return -1;
+		if (was_known)
+			h2_mark_desync(fs, conn, dir);
 	}
 
 	struct h2_hdr_scratch *s = h2_hdr_scratch_lookup();
@@ -439,7 +442,7 @@ static __always_inline void h2_emit_message(struct h2_recv_info *info, u64 moved
 		h2_desync(conn, dir);
 }
 
-static __always_inline void h2_stash_message(struct pt_regs *ctx, void *map)
+static __always_inline void h2_stash_message(struct pt_regs *ctx, void *map, u32 recv)
 {
 	struct msghdr *msg = (struct msghdr *)PT_REGS_PARM2(ctx);
 	u64 avail = 0;
@@ -461,6 +464,8 @@ static __always_inline void h2_stash_message(struct pt_regs *ctx, void *map)
 		info.iov = (u64)iov;
 		info.nr_segs = nr_segs;
 	}
+	if (recv)
+		info.seq_known = tcp_copied_seq(info.conn_id, &info.copied_seq);
 	bpf_map_update_elem(map, &key, &info, BPF_ANY);
 }
 
@@ -483,7 +488,7 @@ int kprobe_h2_tcp_sendmsg(struct pt_regs *ctx)
 {
 	if (!http_should_trace())
 		return 0;
-	h2_stash_message(ctx, &h2_send_base);
+	h2_stash_message(ctx, &h2_send_base, 0);
 	return 0;
 }
 
@@ -519,7 +524,7 @@ int kprobe_h2_tcp_recvmsg(struct pt_regs *ctx)
 {
 	if (!http_should_trace())
 		return 0;
-	h2_stash_message(ctx, &h2_recv_base);
+	h2_stash_message(ctx, &h2_recv_base, 1);
 	return 0;
 }
 
@@ -530,6 +535,8 @@ static __always_inline int h2_tcp_recvmsg_return(void *ctx, long rc)
 		return 0;
 	s64 ret = (int)rc;
 	if (ret <= 0)
+		return 0;
+	if (tcp_recv_was_peek(info.conn_id, info.seq_known, info.copied_seq))
 		return 0;
 	h2_emit_message(&info, (u64)ret, H2_DIR_INGRESS, HTTP_TRANSPORT_H2C);
 	return 0;
@@ -553,11 +560,9 @@ int fexit_h2_tcp_recvmsg(u64 *ctx)
 SEC("kprobe/tcp_close")
 int kprobe_h2_tcp_close(struct pt_regs *ctx)
 {
-	if (!http_should_trace())
-		return 0;
-
 	u64 sk = (u64)PT_REGS_PARM1(ctx);
-	h2_forget_conn(sk);
+	if (http_should_trace() || bpf_map_lookup_elem(&h2_conns, &sk))
+		h2_forget_conn(sk);
 	u64 scoped = process_scoped_id(sk);
 	if (bpf_map_lookup_elem(&h2_conns, &scoped))
 		h2_forget_conn(scoped);

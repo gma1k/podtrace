@@ -105,6 +105,22 @@ static __always_inline void *msghdr_user_base(struct msghdr *msg, u64 *avail)
 	return NULL;
 }
 
+static __always_inline u32 tcp_copied_seq(u64 sk, u32 *seq)
+{
+	struct tcp_sock *tp = (struct tcp_sock *)sk;
+	if (!tp || bpf_core_read(seq, sizeof(*seq), &tp->copied_seq) != 0)
+		return 0;
+	return 1;
+}
+
+static __always_inline int tcp_recv_was_peek(u64 sk, u32 seq_known, u32 before)
+{
+	u32 after = 0;
+	if (!seq_known || !tcp_copied_seq(sk, &after))
+		return 0;
+	return after == before;
+}
+
 static __always_inline const struct iovec *msghdr_iovec(struct msghdr *msg, u32 *nr_segs)
 {
 	if (!msg)

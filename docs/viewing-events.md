@@ -154,6 +154,22 @@ Error Chains:
 The "Error Chains" section is podtrace's diagnostic engine: it groups
 related failures into causal chains and offers fixes.
 
+Workloads that talk to Redis, Memcached, Kafka or a FastCGI backend also get
+one section per protocol, with calls grouped by command, topic or URI:
+
+```
+Redis Activity:
+  Commands: 312 (10.4/sec)
+  Top commands:
+    - GET (296 calls), p50=0.12ms, p95=0.31ms, p99=0.52ms, max=1.10ms
+    - AUTH (16 calls), p50=0.20ms, p95=0.27ms, p99=0.27ms, max=0.27ms
+
+Kafka Activity:
+  Produced: 200 messages (6.7/sec)
+  Top topics (produce):
+    - orders (200 messages, 14.06 KB), p50=0.02ms, p95=0.05ms, p99=0.08ms, max=0.11ms
+```
+
 Use `reportRef.secret` instead of `configMap` when the report may
 contain sensitive hostnames/paths/payloads. Same read pattern,
 `-o go-template='{{range $k,$v := .data}}{{$v}}{{end}}' | base64 -d`.
