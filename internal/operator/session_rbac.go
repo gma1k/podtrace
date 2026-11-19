@@ -222,6 +222,22 @@ func cleanupSessionPodReadRBAC(ctx context.Context, c client.Client, s *podtrace
 
 // pruneSessionPodReadRBAC deletes the session's pod-read Role+RoleBinding in
 // every namespace not in keep.
+// deleteSessionPodReadRBAC removes the session's pod-read RoleBinding and Role
+// from each of the namespaces.
+func deleteSessionPodReadRBAC(ctx context.Context, c client.Client, s *podtracev1alpha1.PodTraceSession, namespaces []string) error {
+	for _, ns := range namespaces {
+		for _, obj := range []client.Object{
+			&rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: SessionPodReadRoleBindingName(s.UID), Namespace: ns}},
+			&rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: SessionPodReadRoleName(s.UID), Namespace: ns}},
+		} {
+			if err := c.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
+				return fmt.Errorf("delete session pod-read %T in %s: %w", obj, ns, err)
+			}
+		}
+	}
+	return nil
+}
+
 func pruneSessionPodReadRBAC(ctx context.Context, c client.Client, s *podtracev1alpha1.PodTraceSession, keep []string) error {
 	keepSet := make(map[string]struct{}, len(keep))
 	for _, ns := range keep {

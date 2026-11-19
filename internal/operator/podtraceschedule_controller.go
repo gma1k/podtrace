@@ -21,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 )
@@ -272,7 +273,7 @@ func (r *PodTraceScheduleReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("podtraceschedule").
-		For(&podtracev1alpha1.PodTraceSchedule{}).
+		For(&podtracev1alpha1.PodTraceSchedule{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Owns(&podtracev1alpha1.PodTraceSession{}).
 		Watches(&corev1.Event{},
 			handler.EnqueueRequestsFromMapFunc(r.mapEventToTriggerSchedules),

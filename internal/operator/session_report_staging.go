@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -165,7 +166,7 @@ func publishSessionSecretReport(ctx context.Context, c client.Client, reader cli
 			}
 			return fmt.Errorf("read report staging Secret %s/%s: %w", staged[i].Namespace, staged[i].Name, err)
 		}
-		for k, v := range full.Data {
+		for k, v := range stagedReportData(&full) {
 			data[k] = v
 		}
 	}
@@ -195,9 +196,36 @@ func publishSessionSecretReport(ctx context.Context, c client.Client, reader cli
 	return cleanupStagingNamespaces(ctx, c, s, staged)
 }
 
+// stagedReportData returns the report entries of a staging Secret: only an
+// Opaque Secret, and only the report.txt or report-<node>.txt keys a session
+// Job writes.
+func stagedReportData(staged *corev1.Secret) map[string][]byte {
+	if staged.Type != corev1.SecretTypeOpaque && staged.Type != "" {
+		return nil
+	}
+	out := map[string][]byte{}
+	for k, v := range staged.Data {
+		if isStagedReportKey(k) {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func isStagedReportKey(key string) bool {
+	if key == "report.txt" {
+		return true
+	}
+	node, ok := strings.CutPrefix(key, "report-")
+	if !ok {
+		return false
+	}
+	node, ok = strings.CutSuffix(node, ".txt")
+	return ok && node != ""
+}
+
 // cleanupStagingNamespaces removes the staging Secrets and grant from every
-// namespace a staging Secret was found in. The staging grant includes an
-// unscoped secrets create; it must not outlive the report it was for.
+// namespace a staging Secret was found in.
 func cleanupStagingNamespaces(ctx context.Context, c client.Client, s *podtracev1alpha1.PodTraceSession, staged []corev1.Secret) error {
 	namespaces := map[string]struct{}{}
 	for i := range staged {
