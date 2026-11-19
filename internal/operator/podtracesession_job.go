@@ -238,10 +238,10 @@ func buildSessionJobSpec(s *podtracev1alpha1.PodTraceSession, tc *podtracev1alph
 }
 
 // buildSessionSidecar returns the native sidecar (init container with
-// restartPolicy=Always) that re-uploads the session report when the
+// restartPolicy=Always) that uploads an object-store report when the
 // operator's TracerConfig.spec.session.sidecarUploader flag is set.
 func buildSessionSidecar(enabled bool, reportTo, image string, pullPolicy corev1.PullPolicy, s *podtracev1alpha1.PodTraceSession) []corev1.Container {
-	if !enabled || reportTo == "" {
+	if !enabled || reportTo == "" || s.Spec.ReportRef == nil || s.Spec.ReportRef.ObjectStore == nil {
 		return nil
 	}
 	always := corev1.ContainerRestartPolicyAlways

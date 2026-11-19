@@ -38,7 +38,7 @@ func TestBuildSessionJobSpec_ReportUploaderSidecarLockedDown(t *testing.T) {
 	}
 	s := minimalSession()
 	s.Spec.ReportRef = &podtracev1alpha1.ReportReference{
-		ConfigMap: &corev1.LocalObjectReference{Name: "rep"},
+		ObjectStore: &podtracev1alpha1.ObjectStoreReference{URI: "s3://bucket/reports/rep.txt"},
 	}
 	spec := buildSessionJobSpec(s, tc, "node-a", sessionTargets{})
 

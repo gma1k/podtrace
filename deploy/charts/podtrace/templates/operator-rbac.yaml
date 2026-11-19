@@ -66,6 +66,14 @@ rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  {{- if and .Values.webhook.enabled (eq .Values.webhook.certSource "operator") }}
+  # The operator issues its own webhook certificate and keeps the CA in its
+  # own ValidatingWebhookConfiguration current; no other one.
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["validatingwebhookconfigurations"]
+    resourceNames: [{{ printf "%s-validating-webhook" (include "podtrace.fullname" .) | quote }}]
+    verbs: ["get", "update"]
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

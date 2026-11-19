@@ -15,6 +15,7 @@ func TestSpawnControlFlags_PinsTheStrippedSet(t *testing.T) {
 		"pods",
 		"pod-selector",
 		"all-in-namespace",
+		"btf-file",
 	}
 	for _, name := range wantStripped {
 		if _, ok := spawnControlFlags[name]; !ok {

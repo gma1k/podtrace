@@ -215,8 +215,16 @@ session:
 webhook:
   enabled: false
   port: 9443
+  # Where the webhook's TLS certificate comes from:
+  #   cert-manager  cert-manager issues it (needs cert-manager installed)
+  #   operator      the operator issues and renews it, no dependency
+  #   manual        your own <fullname>-webhook-tls Secret plus caBundle
   certSource: cert-manager
   certManager:
+    # Renders the selfSigned Issuer below in the system namespace, so the
+    # webhook only needs cert-manager itself. Set false to use an Issuer or
+    # ClusterIssuer you manage; an existing Issuer of this name is left alone.
+    createIssuer: true
     issuerRef:
       name: podtrace-selfsigned
       kind: Issuer

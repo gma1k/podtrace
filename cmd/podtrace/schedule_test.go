@@ -93,7 +93,9 @@ func TestTwoManualTriggersInTheSameSecondGetDistinctNames(t *testing.T) {
 }
 
 func TestManualSessionNamesAreValidResourceNames(t *testing.T) {
-	for _, schedule := range []string{"nightly", strings.Repeat("x", 70)} {
+	cutOnDot := strings.Repeat("a", 38) + ".b"
+	cutOnDash := strings.Repeat("a", 37) + "-.b"
+	for _, schedule := range []string{"nightly", strings.Repeat("x", 70), cutOnDot, cutOnDash} {
 		name := manualSessionName(schedule, time.Now())
 		if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 || len(name) > 63 {
 			t.Errorf("%q is not a valid session name: %v", name, errs)

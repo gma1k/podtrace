@@ -42,6 +42,7 @@ var spawnControlFlags = map[string]struct{}{
 	"all-namespaces":       {},
 	"kubeconfig":           {},
 	"context":              {},
+	"btf-file":             {},
 }
 
 var credentialFlagEnv = map[string]string{

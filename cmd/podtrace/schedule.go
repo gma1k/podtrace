@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -180,13 +181,14 @@ func buildManualSession(sch *podtracev1alpha1.PodTraceSchedule, now time.Time, f
 
 // manualSessionName stamps the trigger time and a random suffix: a second
 // is too coarse on its own, and two triggers in the same second would
-// collide with AlreadyExists.
+// collide with AlreadyExists. A schedule name cut to fit drops a trailing
+// '.' or '-', which would otherwise end a DNS label before "-manual-".
 func manualSessionName(scheduleName string, t time.Time) string {
 	stamp := strconv.FormatInt(t.Unix(), 10) + "-" + utilrand.String(5)
 	raw := scheduleName + "-manual-" + stamp
 	if len(raw) > 63 {
 		trail := "-manual-" + stamp
-		raw = scheduleName[:63-len(trail)] + trail
+		raw = strings.TrimRight(scheduleName[:63-len(trail)], "-.") + trail
 	}
 	return raw
 }

@@ -40,6 +40,8 @@ type Options struct {
 	WebhookPort    int
 	WebhookCertDir string
 
+	WebhookCertificates *WebhookCertificateOptions
+
 	SyncPeriod time.Duration
 
 	GracefulShutdownTimeout time.Duration
@@ -118,6 +120,9 @@ func Run(ctx context.Context, opts Options) error {
 	if opts.WebhookCertDir != "" {
 		if err := registerWebhooks(mgr, opts.SystemNamespace); err != nil {
 			return fmt.Errorf("register webhooks: %w", err)
+		}
+		if err := provisionWebhookCertificates(ctx, mgr, opts); err != nil {
+			return err
 		}
 	}
 

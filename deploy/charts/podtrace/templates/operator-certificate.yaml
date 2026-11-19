@@ -1,4 +1,31 @@
 {{- if and .Values.operator.enabled .Values.webhook.enabled (eq .Values.webhook.certSource "cert-manager") }}
+{{- $issuerRef := .Values.webhook.certManager.issuerRef }}
+{{- $systemNamespace := include "podtrace.systemNamespace" . }}
+{{- if and .Values.webhook.certManager.createIssuer (eq ($issuerRef.kind | default "Issuer") "Issuer") }}
+{{- /*
+  The Certificate below names this Issuer; without it cert-manager never
+  issues the serving certificate, the operator pod waits forever for its
+  Secret, and the failurePolicy Fail webhook, with no CA, refuses every
+  podtrace.io write. An Issuer of this name that some other owner created
+  (installs before this chart rendered one had to create it by hand) is left
+  alone, so adopting it never fails the upgrade on Helm ownership.
+*/ -}}
+{{- $existing := lookup "cert-manager.io/v1" "Issuer" $systemNamespace $issuerRef.name }}
+{{- $ownedHere := eq (dig "metadata" "annotations" "meta.helm.sh/release-name" "" ($existing | default dict)) .Release.Name }}
+{{- if or (not $existing) $ownedHere }}
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $issuerRef.name }}
+  namespace: {{ $systemNamespace }}
+  labels:
+    {{- include "podtrace.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+spec:
+  selfSigned: {}
+{{- end }}
+{{- end }}
 ---
 # cert-manager Certificate that issues the TLS material for the
 # ValidatingWebhookConfiguration. The validating-webhook template's

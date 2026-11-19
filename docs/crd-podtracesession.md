@@ -91,10 +91,12 @@ can introspect a finished session without scraping pod logs:
 2. **CLI self-upload** — the CLI directly patches the configured
    `reportRef.configMap` or `.secret` using a narrow per-session
    RoleBinding granting `get/update/create` on exactly that object.
-3. **Sidecar uploader (opt-in)** — when `TracerConfig.spec.session.sidecarUploader=true`,
-   the Job runs a native sidecar (k8s 1.29+ init container with
-   `restartPolicy: Always`) that re-uploads the report on main-container
-   termination. Belt-and-suspenders backup if the CLI crashes.
+3. **Sidecar uploader (opt-in, object store only)** — when
+   `TracerConfig.spec.session.sidecarUploader=true` and the report goes to
+   `reportRef.objectStore`, the Job runs a native sidecar (k8s 1.29+ init
+   container with `restartPolicy: Always`) that uploads the report file the
+   CLI leaves behind once the main container ends. A `configMap` or `secret`
+   report is written by the CLI itself and gets no sidecar.
 
 ## Status reference
 
