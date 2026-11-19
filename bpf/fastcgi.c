@@ -12,6 +12,8 @@ static const struct fastcgi_req fastcgi_req_zero = {};
 SEC("kprobe/unix_stream_recvmsg")
 int kprobe_unix_stream_recvmsg(struct pt_regs *ctx)
 {
+	if (!cgroup_allows(bpf_get_current_cgroup_id()))
+		return 0;
 	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 	u64 key = get_key(pid, tid);
@@ -217,6 +219,8 @@ int fexit_unix_stream_recvmsg(u64 *ctx)
 SEC("kprobe/unix_stream_sendmsg")
 int kprobe_unix_stream_sendmsg(struct pt_regs *ctx)
 {
+	if (!cgroup_allows(bpf_get_current_cgroup_id()))
+		return 0;
 	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
 

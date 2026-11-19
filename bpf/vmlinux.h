@@ -147,6 +147,10 @@ struct sk_buff {
 	struct sock *sk;
 };
 
+struct tcp_sock {
+	unsigned int copied_seq;
+};
+
 struct iovec {
 	void *iov_base;
 	unsigned long iov_len;

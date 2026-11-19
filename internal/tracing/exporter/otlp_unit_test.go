@@ -173,3 +173,43 @@ func TestOTLPExporter_exportSpan_DNSEvent_MinimalFields(t *testing.T) {
 		t.Errorf("spanSnapshot() unexpected error: %v", err)
 	}
 }
+
+func TestOTLPExporter_spanSnapshot_ProtocolAttributesOnEvents(t *testing.T) {
+	exporter, err := NewOTLPExporter("http://localhost:4318", 1.0)
+	if err != nil {
+		t.Skipf("failed to create exporter: %v", err)
+	}
+	defer func() { _ = exporter.Shutdown(context.Background()) }()
+
+	span := &tracker.Span{
+		TraceID:   "12345678901234567890123456789012",
+		SpanID:    "1234567890123456",
+		Operation: "cache",
+		StartTime: time.Now(),
+		Duration:  5 * time.Millisecond,
+		Events: []*events.Event{
+			{Type: events.EventRedisCmd, Details: "GET", Timestamp: uint64(time.Now().UnixNano())},
+			{Type: events.EventKafkaFetch, Details: "payments", Timestamp: uint64(time.Now().UnixNano())},
+		},
+	}
+	snap, err := exporter.spanSnapshot(span)
+	if err != nil {
+		t.Fatalf("spanSnapshot: %v", err)
+	}
+	got := map[string]string{}
+	for _, ev := range snap.Events() {
+		for _, kv := range ev.Attributes {
+			got[string(kv.Key)] = kv.Value.AsString()
+		}
+	}
+	for k, v := range map[string]string{
+		"db.system.name":             "redis",
+		"db.operation.name":          "GET",
+		"messaging.destination.name": "payments",
+		"messaging.operation.type":   "receive",
+	} {
+		if got[k] != v {
+			t.Errorf("%s = %q, want %q", k, got[k], v)
+		}
+	}
+}

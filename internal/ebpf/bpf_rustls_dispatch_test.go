@@ -23,7 +23,7 @@ func TestRustlsWritesAreKeyedByTheSocketTheyAreSentOn(t *testing.T) {
 	if !strings.Contains(text, "SEC(\"kprobe/tcp_sendmsg\")\nint kprobe_rustls_tcp_sendmsg(struct pt_regs *ctx)") {
 		t.Fatal("a pending rustls write must be parsed at the thread's next tcp_sendmsg, which names its socket")
 	}
-	if !strings.Contains(functionBody(t, text, "kprobe_rustls_tcp_sendmsg"), "rustls_dispatch_write(ctx, rustls_thread_key(), process_scoped_id(sk));") {
+	if !strings.Contains(functionBody(t, text, "kprobe_rustls_tcp_sendmsg"), "rustls_dispatch_write(ctx, key, process_scoped_id(sk));") {
 		t.Fatal("kprobe_rustls_tcp_sendmsg must key the write by the process-scoped socket it is sent on")
 	}
 	if strings.Contains(functionBody(t, bpfSource(t, "http.c"), "kprobe_http_tcp_sendmsg"), "rustls") {

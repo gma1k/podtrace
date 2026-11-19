@@ -1149,6 +1149,9 @@ func GenerateApplicationTracing(d Diagnostician, duration time.Duration) string 
 	report += formatConnectionPatterns(d, duration)
 	report += formatIOPatterns(d, duration)
 	report += formatFastCGIActivity(d, duration)
+	report += formatCommandActivity(d, duration, "Redis", events.EventRedisCmd)
+	report += formatCommandActivity(d, duration, "Memcached", events.EventMemcachedCmd)
+	report += formatKafkaActivity(d, duration)
 
 	return report
 }

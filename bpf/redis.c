@@ -99,7 +99,19 @@ int uprobe_redisCommandArgv(struct pt_regs *ctx)
 		return 0;
 
 	char buf[MAX_STRING_LEN] = {};
-	bpf_probe_read_user_str(buf, sizeof(buf), cmd_ptr);
+	const u64 *argvlen = (const u64 *)PT_REGS_PARM4(ctx);
+	u64 len = 0;
+	if (argvlen && bpf_probe_read_user(&len, sizeof(len), argvlen) == 0) {
+		if (len > MAX_STRING_LEN - 1)
+			len = MAX_STRING_LEN - 1;
+		u32 n = (u32)len;
+		barrier_var(n);
+		n &= MAX_STRING_LEN - 1;
+		if (n > 0 && bpf_probe_read_user(buf, n, cmd_ptr) != 0)
+			return 0;
+	} else {
+		bpf_probe_read_user_str(buf, sizeof(buf), cmd_ptr);
+	}
 
 	bpf_map_update_elem(&redis_cmds, &key, buf, BPF_ANY);
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);

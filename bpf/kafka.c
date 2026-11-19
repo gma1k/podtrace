@@ -36,7 +36,32 @@ int uretprobe_rd_kafka_topic_new(struct pt_regs *ctx)
 		u64 topic_id = process_scoped_id(topic_ptr);
 		bpf_map_update_elem(&kafka_topic_names, &topic_id, name, BPF_ANY);
 		bpf_map_delete_elem(&kafka_topic_tmp, &key);
+		u32 one = 1;
+		if (bpf_map_update_elem(&kafka_topic_refs, &topic_id, &one, BPF_NOEXIST) != 0) {
+			u32 *refs = bpf_map_lookup_elem(&kafka_topic_refs, &topic_id);
+			if (refs)
+				__sync_fetch_and_add(refs, 1);
+		}
 	}
+	return 0;
+}
+
+SEC("uprobe/rd_kafka_topic_destroy")
+int uprobe_rd_kafka_topic_destroy(struct pt_regs *ctx)
+{
+	u64 topic_ptr = (u64)PT_REGS_PARM1(ctx);
+	if (!topic_ptr)
+		return 0;
+	u64 topic_id = process_scoped_id(topic_ptr);
+	u32 *refs = bpf_map_lookup_elem(&kafka_topic_refs, &topic_id);
+	if (!refs)
+		return 0;
+	if (*refs > 1) {
+		__sync_fetch_and_add(refs, -1);
+		return 0;
+	}
+	bpf_map_delete_elem(&kafka_topic_refs, &topic_id);
+	bpf_map_delete_elem(&kafka_topic_names, &topic_id);
 	return 0;
 }
 

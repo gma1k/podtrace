@@ -143,6 +143,23 @@ Traces are automatically enriched with:
 - Kubernetes labels
 - Target service information
 
+### Protocol Attributes
+
+Cache, messaging and FastCGI events carry the operation they observed as
+OpenTelemetry semantic-convention attributes, both on PodTrace spans and on
+the span events the CLI exporter sends:
+
+| Event | Attributes |
+|---|---|
+| Redis command | `db.system.name=redis`, `db.operation.name` (the command, e.g. `GET`) |
+| Memcached command | `db.system.name=memcached`, `db.operation.name` |
+| Kafka produce | `messaging.system=kafka`, `messaging.operation.type=send`, `messaging.operation.name=produce`, `messaging.destination.name` (the topic) |
+| Kafka consume | `messaging.system=kafka`, `messaging.operation.type=receive`, `messaging.operation.name=poll`, `messaging.destination.name` |
+| FastCGI request/response | `network.protocol.name=fastcgi`, `http.request.method`, `url.path` |
+
+Only the command name, topic, method and path are exported, never command
+arguments or message payloads.
+
 ## Usage
 
 ### Basic Usage

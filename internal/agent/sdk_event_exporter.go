@@ -22,6 +22,7 @@ import (
 	"github.com/gma1k/podtrace/internal/logger"
 	"github.com/gma1k/podtrace/internal/safeconv"
 	"github.com/gma1k/podtrace/internal/sanitize"
+	"github.com/gma1k/podtrace/internal/spanattributes"
 	"github.com/gma1k/podtrace/internal/tracing/extractor"
 	bundlepkg "github.com/gma1k/podtrace/pkg/exporter/bundle"
 	"github.com/gma1k/podtrace/pkg/tracer"
@@ -226,6 +227,7 @@ func (e *sdkEventExporter) Export(ctx context.Context, batch []*events.Event) er
 		if ev.Type == events.EventDNS && ev.Details != "" {
 			attrs = append(attrs, attribute.String("dns.resolved", ev.Details))
 		}
+		attrs = append(attrs, spanattributes.Protocol(ev)...)
 		if ev.PeerDstIP != "" {
 			attrs = append(attrs,
 				attribute.String("network.peer.address", ev.PeerDstIP),

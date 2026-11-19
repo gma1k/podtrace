@@ -65,6 +65,16 @@ static __always_inline void rustls_dispatch(void *ctx, void *base, u64 len,
 		h2_emit_frames(base, len, conn, dir, HTTP_TRANSPORT_H2_TLS);
 }
 
+static __always_inline int rustls_send_is_tls_record(struct msghdr *msg)
+{
+	u64 avail = 0;
+	void *base = msghdr_user_base(msg, &avail);
+	u8 hdr[3] = {};
+	if (!base || avail < sizeof(hdr) || bpf_probe_read_user(hdr, sizeof(hdr), base) != 0)
+		return 1;
+	return hdr[0] >= 0x14 && hdr[0] <= 0x18 && hdr[1] == 0x03 && hdr[2] <= 0x04;
+}
+
 static __always_inline void rustls_dispatch_write(void *ctx, u64 key, u64 conn)
 {
 	struct rustls_write_state *st = bpf_map_lookup_elem(&rustls_write_args, &key);
@@ -87,7 +97,13 @@ int kprobe_rustls_tcp_sendmsg(struct pt_regs *ctx)
 	u64 sk = (u64)PT_REGS_PARM1(ctx);
 	if (!sk)
 		return 0;
-	rustls_dispatch_write(ctx, rustls_thread_key(), process_scoped_id(sk));
+	u64 key = rustls_thread_key();
+	struct rustls_write_state *st = bpf_map_lookup_elem(&rustls_write_args, &key);
+	if (!st || !st->len)
+		return 0;
+	if (!rustls_send_is_tls_record((struct msghdr *)PT_REGS_PARM2(ctx)))
+		return 0;
+	rustls_dispatch_write(ctx, key, process_scoped_id(sk));
 	return 0;
 }
 
