@@ -107,7 +107,7 @@ static __always_inline int fs_count(u32 type, u64 latency_ns, u64 bytes, s32 err
 	if (agg_record(cgroup_id, (u8)type, variant, 0, NULL, latency_ns, bytes, 1))
 		return 1;
 	if (latency_ns < MIN_LATENCY_NS && fs_fast_ops_on())
-		agg_record_in(&fs_fast_ops, cgroup_id, (u8)type, variant, 0, NULL, latency_ns, bytes, 1);
+		agg_record_in(&fs_fast_ops, cgroup_id, (u8)type, variant, 0, NULL, latency_ns, bytes, 1, 0);
 	return 0;
 }
 

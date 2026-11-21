@@ -22,7 +22,11 @@ package sysfs
 import (
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -110,4 +114,44 @@ func CgroupRelative(absolute string) (string, bool) {
 		return absolute[len(base)+1:], true
 	}
 	return "", false
+}
+
+// cgroupSearchLimit bounds how many cgroup directories CgroupFindProcess
+// visits.
+var cgroupSearchLimit = 200000
+
+// CgroupFindProcess returns the cgroup, relative to the cgroup root, whose
+// cgroup.procs lists pid.
+func CgroupFindProcess(pid int) (string, bool) {
+	r, err := cgroupRoot()
+	if err != nil {
+		return "", false
+	}
+	want := strconv.Itoa(pid)
+	found := ""
+	visited := 0
+	_ = fs.WalkDir(r.FS(), ".", func(rel string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return fs.SkipDir
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		visited++
+		if visited > cgroupSearchLimit {
+			return fs.SkipAll
+		}
+		data, readErr := r.ReadFile(path.Join(rel, "cgroup.procs"))
+		if readErr != nil {
+			return nil
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			if line == want {
+				found = rel
+				return fs.SkipAll
+			}
+		}
+		return nil
+	})
+	return found, found != ""
 }

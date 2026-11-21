@@ -597,6 +597,7 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		countProcessCPU(tracer)
 	}
 
+	narrowRestartInheritance(ctx, tracer, containerName, sourceIndex, resolverPodGetter(resolver))
 	cgroupPaths, containerIDs := targetAttachSets(targetInfos)
 	setTracerCgroupOwners(tracer, targetCgroupOwners(targetInfos))
 	if err := attachTracerToCgroups(tracer, cgroupPaths); err != nil {
@@ -1028,10 +1029,11 @@ func targetAttachSets(infos []*kubernetes.PodInfo) (cgroupPaths, containerIDs []
 }
 
 type sourcePodIndex struct {
-	mu       sync.RWMutex
-	byCG     map[uint64]*kubernetes.PodInfo
-	byParent map[uint64]*kubernetes.PodInfo
-	parentOf func(uint64) (uint64, bool)
+	mu          sync.RWMutex
+	byCG        map[uint64]*kubernetes.PodInfo
+	byParent    map[uint64]*kubernetes.PodInfo
+	parentPaths map[uint64]string
+	parentOf    func(uint64) (uint64, bool)
 }
 
 func newSourcePodIndex(targets []*kubernetes.PodInfo) *sourcePodIndex {
@@ -1045,6 +1047,7 @@ func newSourcePodIndex(targets []*kubernetes.PodInfo) *sourcePodIndex {
 func (s *sourcePodIndex) Replace(targets []*kubernetes.PodInfo) {
 	nextByCG := make(map[uint64]*kubernetes.PodInfo, len(targets))
 	nextByParent := make(map[uint64]*kubernetes.PodInfo, len(targets))
+	nextParentPaths := make(map[uint64]string, len(targets))
 	for _, t := range targets {
 		if t == nil {
 			continue
@@ -1066,13 +1069,30 @@ func (s *sourcePodIndex) Replace(targets []*kubernetes.PodInfo) {
 				pod := *t
 				pod.ContainerName, pod.ContainerID, pod.CgroupPath = "", "", ""
 				nextByParent[pid] = &pod
+				nextParentPaths[pid] = filepath.Dir(c.CgroupPath)
 			}
 		}
 	}
 	s.mu.Lock()
 	s.byCG = nextByCG
 	s.byParent = nextByParent
+	s.parentPaths = nextParentPaths
 	s.mu.Unlock()
+}
+
+// parentTarget returns the pod a targeted pod cgroup belongs to and that
+// cgroup's path.
+func (s *sourcePodIndex) parentTarget(parent uint64) (namespace, pod, path string, ok bool) {
+	if s == nil {
+		return "", "", "", false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	info, found := s.byParent[parent]
+	if !found || info == nil {
+		return "", "", "", false
+	}
+	return info.Namespace, info.PodName, s.parentPaths[parent], true
 }
 
 type inheritedCgroupResolver interface {

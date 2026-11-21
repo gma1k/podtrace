@@ -68,3 +68,25 @@ func TestTheAdapterSurfacesADrainFailure(t *testing.T) {
 		t.Error("a drain failure was swallowed; the interval would look idle rather than broken")
 	}
 }
+
+type pressureCapableTracer struct {
+	aggCapableTracer
+	pressure kernelagg.Pressure
+}
+
+func (p *pressureCapableTracer) KernelAggregationPressure() kernelagg.Pressure {
+	return p.pressure
+}
+
+func TestTheAdapterForwardsKernelAggregationPressure(t *testing.T) {
+	want := kernelagg.Pressure{RowsEvicted: 3, PeerCollapsed: 11}
+	a := &ebpfBackendAdapter{tr: &pressureCapableTracer{pressure: want}}
+	if got := a.KernelAggregationPressure(); got != want {
+		t.Errorf("KernelAggregationPressure = %+v, want %+v", got, want)
+	}
+
+	plain := &ebpfBackendAdapter{tr: &plainTracer{}}
+	if got := plain.KernelAggregationPressure(); got != (kernelagg.Pressure{}) {
+		t.Errorf("a tracer without pressure reporting forwarded %+v, want zero", got)
+	}
+}

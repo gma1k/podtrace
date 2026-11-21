@@ -1,14 +1,17 @@
 package tracer
 
 import (
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/internal/metricsexporter"
 	"github.com/gma1k/podtrace/internal/procfs"
+	"github.com/gma1k/podtrace/internal/sysfs"
 )
 
 // Attribution sources reported to podtrace_attribution_total.
@@ -65,16 +68,51 @@ var procCgroupID = func(pid uint32) (uint64, bool) {
 	}
 	for _, line := range strings.Split(string(data), "\n") {
 		path, ok := strings.CutPrefix(line, "0::")
-		if !ok || !strings.HasPrefix(path, "/") || strings.Contains(path, "..") {
+		if !ok || !strings.HasPrefix(path, "/") {
 			continue
 		}
-		id, err := getCgroupIDFromPath(filepath.Join(config.CgroupBasePath, path))
+		hostPath, ok := hostCgroupPath(path)
+		if !ok {
+			return 0, false
+		}
+		id, err := getCgroupIDFromPath(filepath.Join(config.CgroupBasePath, hostPath))
 		if err != nil || id == 0 {
 			return 0, false
 		}
 		return id, true
 	}
 	return 0, false
+}
+
+// hostCgroupPath turns a cgroup path as /proc/<pid>/cgroup shows it into
+// one under the host's cgroup root.
+func hostCgroupPath(path string) (string, bool) {
+	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	climbs := 0
+	for climbs < len(parts) && parts[climbs] == ".." {
+		climbs++
+	}
+	for _, p := range parts[climbs:] {
+		if p == ".." {
+			return "", false
+		}
+	}
+	if climbs == 0 {
+		return path, true
+	}
+	root, ok := cgroupNamespaceRoot()
+	if !ok {
+		return "", false
+	}
+	return filepath.Join("/", root, path), true
+}
+
+// cgroupNamespaceRoot is where this process's cgroup namespace root sits in
+// the host hierarchy: the cgroup that lists this process, found once.
+var cgroupNamespaceRoot = sync.OnceValues(defaultCgroupNamespaceRoot)
+
+func defaultCgroupNamespaceRoot() (string, bool) {
+	return sysfs.CgroupFindProcess(os.Getpid())
 }
 
 // recordAttributionOutcome feeds the attribution table and the metrics

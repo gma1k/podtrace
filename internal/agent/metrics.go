@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/gma1k/podtrace/internal/alerting"
+	"github.com/gma1k/podtrace/internal/ebpf/kernelagg"
 	"github.com/gma1k/podtrace/internal/ebpf/oncpu"
 	"github.com/gma1k/podtrace/internal/logger"
 	"github.com/gma1k/podtrace/internal/metricsexporter"
@@ -32,6 +33,8 @@ type Metrics struct {
 	KernelDrainInterval   prometheus.Gauge
 	KernelSinceDrain      prometheus.GaugeFunc
 	lastKernelDrain       atomic.Int64
+	kernelAggPressureMu   sync.Mutex
+	kernelAggPressure     kernelagg.Pressure
 	OnCPUSamplerCPUs      prometheus.Gauge
 	OnCPUSamples          prometheus.Counter
 	OnCPUSamplesLost      *prometheus.CounterVec
@@ -126,7 +129,8 @@ func NewMetrics() *Metrics {
 		KernelAggRows: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "podtrace_agent",
 			Name:      "kernel_agg_rows_total",
-			Help:      "Rows drained from the kernel metric aggregation map, by outcome. Collector internal, not part of the contractual surface.",
+			Help: "Rows drained from the kernel metric aggregation map, by outcome: applied, unattributed, evicted (rows the kernel's LRU dropped before a drain reached them, a lower bound) " +
+				"and peer_collapsed (observations folded onto a peer-less row because their cgroup reached its per-drain row budget). Collector internal, not part of the contractual surface.",
 		}, []string{"outcome"}),
 		KernelDrainedAt: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: "podtrace_agent",
@@ -743,6 +747,24 @@ func (m *Metrics) RecordKernelDrain(rows, applied int) {
 	}
 	if dropped := rows - applied; dropped > 0 {
 		m.KernelAggRows.WithLabelValues("unattributed").Add(float64(dropped))
+	}
+}
+
+// RecordKernelAggPressure adds what the aggregation map lost or folded since
+// the previous call.
+func (m *Metrics) RecordKernelAggPressure(p kernelagg.Pressure) {
+	if m == nil || m.KernelAggRows == nil {
+		return
+	}
+	m.kernelAggPressureMu.Lock()
+	prev := m.kernelAggPressure
+	m.kernelAggPressure = p
+	m.kernelAggPressureMu.Unlock()
+	if p.RowsEvicted > prev.RowsEvicted {
+		m.KernelAggRows.WithLabelValues("evicted").Add(float64(p.RowsEvicted - prev.RowsEvicted))
+	}
+	if p.PeerCollapsed > prev.PeerCollapsed {
+		m.KernelAggRows.WithLabelValues("peer_collapsed").Add(float64(p.PeerCollapsed - prev.PeerCollapsed))
 	}
 }
 

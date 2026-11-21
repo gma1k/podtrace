@@ -143,6 +143,12 @@
             "semanticConventions": {
               "type": "boolean"
             },
+            "containerRowBudget": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65536,
+              "description": "0 turns the per-container row budget off."
+            },
             "attributeCardinality": {
               "type": "integer",
               "minimum": 0,

@@ -158,6 +158,40 @@ func (t *Tracer) ensureCgroupMkdirHook() {
 	t.cgroupMkdirAttached = true
 }
 
+// InheritedCgroupVerdict is what an InheritedCgroupFilter says about a
+// container cgroup created under a targeted pod cgroup.
+type InheritedCgroupVerdict int
+
+const (
+	InheritedCgroupUndecided InheritedCgroupVerdict = iota
+	InheritedCgroupAdmit
+	InheritedCgroupRefuse
+)
+
+// InheritedCgroupFilter decides whether a container cgroup created under a
+// targeted pod cgroup may be traced.
+type InheritedCgroupFilter func(child, parent uint64) InheritedCgroupVerdict
+
+// SetInheritedCgroupFilter narrows restart inheritance.
+func (t *Tracer) SetInheritedCgroupFilter(f InheritedCgroupFilter) {
+	if t == nil {
+		return
+	}
+	if f == nil {
+		t.inheritedFilter.Store(nil)
+		return
+	}
+	t.inheritedFilter.Store(&f)
+}
+
+func (t *Tracer) inheritedChildVerdict(child, parent uint64) InheritedCgroupVerdict {
+	f := t.inheritedFilter.Load()
+	if f == nil {
+		return InheritedCgroupAdmit
+	}
+	return (*f)(child, parent)
+}
+
 // InheritedCgroupParent reports the targeted pod cgroup a container cgroup
 // was created under after targeting began, so its events are kept and
 // attributed to that pod before the pod watch catches up.
@@ -184,6 +218,27 @@ func (t *Tracer) InheritedCgroupParent(id uint64) (uint64, bool) {
 	if err := m.Lookup(&id, &parent); err != nil || parent == 0 || !t.inheritedParentWanted(parent) {
 		return 0, false
 	}
+	switch t.inheritedChildVerdict(id, parent) {
+	case InheritedCgroupAdmit:
+	case InheritedCgroupRefuse:
+		forgetRefusedInheritedCgroup(m, id)
+		return 0, false
+	default:
+		return 0, false
+	}
 	t.inheritedCache.Store(id, parent)
 	return parent, true
+}
+
+type inheritedCgroupDeleter interface {
+	Delete(key any) error
+}
+
+// forgetRefusedInheritedCgroup removes a refused child from the kernel's
+// inherited set, so the kernel stops admitting its events at all.
+func forgetRefusedInheritedCgroup(m inheritedCgroupDeleter, id uint64) {
+	if err := m.Delete(&id); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+		logger.Debug("Could not stop the kernel tracing a refused container cgroup",
+			zap.Uint64("cgroup_id", id), zap.Error(err))
+	}
 }

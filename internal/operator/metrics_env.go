@@ -23,6 +23,7 @@ const (
 	envMetricsKernelAggregation = "PODTRACE_WORKLOAD_METRICS_KERNEL_AGGREGATION"
 	envMetricsFilesystem        = "PODTRACE_WORKLOAD_METRICS_FILESYSTEM"
 	envMetricsAttributeLimit    = "PODTRACE_WORKLOAD_METRICS_ATTRIBUTE_CARDINALITY"
+	envMetricsContainerRows     = "PODTRACE_WORKLOAD_METRICS_CONTAINER_ROW_BUDGET"
 
 	envInspectionsEnabled    = "PODTRACE_INSPECTIONS"
 	envInspectionsInterval   = "PODTRACE_INSPECTIONS_INTERVAL"
@@ -73,6 +74,12 @@ func metricsEnv(spec *podtracev1alpha1.AgentMetricsSpec) []corev1.EnvVar {
 		env = append(env, corev1.EnvVar{
 			Name:  envMetricsSeriesBudget,
 			Value: strconv.FormatInt(int64(*spec.SeriesBudget), 10),
+		})
+	}
+	if spec.ContainerRowBudget != nil {
+		env = append(env, corev1.EnvVar{
+			Name:  envMetricsContainerRows,
+			Value: strconv.FormatInt(int64(*spec.ContainerRowBudget), 10),
 		})
 	}
 	if spec.SemanticConventions {

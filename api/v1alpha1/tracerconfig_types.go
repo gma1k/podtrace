@@ -186,6 +186,18 @@ type AgentMetricsSpec struct {
 	// +kubebuilder:default=true
 	Filesystem *bool `json:"filesystem,omitempty"`
 
+	// ContainerRowBudget bounds how many rows one container may create in the
+	// node's shared kernel aggregation map between two drains, so a container
+	// talking to thousands of distinct peers cannot evict every other
+	// container's rows. Past it, that container's new rows drop the peer
+	// address and port: counts, latency and bytes stay exact, only the
+	// service-map edge is lost. 0 turns the budget off.
+	// +optional
+	// +kubebuilder:default=4096
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=65536
+	ContainerRowBudget *int32 `json:"containerRowBudget,omitempty"`
+
 	// +optional
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=10000

@@ -26,10 +26,13 @@ const Schema = 3
 // BucketNone marks a row carrying only counters, with no latency observation.
 const BucketNone = uint16(0xFFFF)
 
-// MapName and EnabledMapName are the BPF map names this package binds to.
+// MapName, EnabledMapName, ConfigMapName and StatsMapName are the BPF map
+// names this package binds to.
 const (
 	MapName        = "agg_metrics"
 	EnabledMapName = "agg_enabled"
+	ConfigMapName  = "agg_config"
+	StatsMapName   = "agg_stats"
 )
 
 // Key mirrors struct agg_key in bpf/agg.h. Field order and padding must match
@@ -126,18 +129,154 @@ func SetMode(m *ebpf.Map, mode Mode) error {
 	return nil
 }
 
+// Config mirrors struct agg_config in bpf/agg.h.
+type Config struct {
+	CgroupRowBudget uint32
+	Generation      uint32
+}
+
+// configMap is the part of *ebpf.Map the budget configuration uses.
+type configMap interface {
+	Lookup(key, valueOut any) error
+	Update(key, value any, flags ebpf.MapUpdateFlags) error
+}
+
+// SetCgroupRowBudget sets how many rows one cgroup may create between two
+// drains before its new rows are folded onto a peer-less row. Zero turns the
+// budget off.
+func SetCgroupRowBudget(m configMap, budget uint32) error {
+	if m == nil {
+		return errors.New("kernelagg: config map is nil")
+	}
+	key := uint32(0)
+	var cfg Config
+	if err := m.Lookup(&key, &cfg); err != nil {
+		return fmt.Errorf("kernelagg: read config: %w", err)
+	}
+	cfg.CgroupRowBudget = budget
+	if err := m.Update(&key, &cfg, ebpf.UpdateAny); err != nil {
+		return fmt.Errorf("kernelagg: set row budget: %w", err)
+	}
+	return nil
+}
+
+// AdvanceGeneration starts a new budget interval: every cgroup's row count
+// is treated as zero from here on, without walking the per-cgroup map.
+func AdvanceGeneration(m configMap) error {
+	if m == nil {
+		return errors.New("kernelagg: config map is nil")
+	}
+	key := uint32(0)
+	var cfg Config
+	if err := m.Lookup(&key, &cfg); err != nil {
+		return fmt.Errorf("kernelagg: read config: %w", err)
+	}
+	cfg.Generation++
+	if err := m.Update(&key, &cfg, ebpf.UpdateAny); err != nil {
+		return fmt.Errorf("kernelagg: advance generation: %w", err)
+	}
+	return nil
+}
+
+// Stats are the kernel's running counters for the metrics map, mirroring
+// the AGG_STAT_* slots of agg_stats in bpf/agg.h.
+type Stats struct {
+	RowsCreated   uint64
+	PeerCollapsed uint64
+}
+
+const (
+	statRowsCreated   = uint32(0)
+	statPeerCollapsed = uint32(1)
+)
+
+// statsMap is the part of *ebpf.Map reading the counters uses.
+type statsMap interface {
+	Lookup(key, valueOut any) error
+}
+
+// ReadStats sums the per-CPU copies of the kernel's metrics-map counters.
+func ReadStats(m statsMap) (Stats, error) {
+	if m == nil {
+		return Stats{}, errors.New("kernelagg: stats map is nil")
+	}
+	read := func(slot uint32) (uint64, error) {
+		var perCPU []uint64
+		if err := m.Lookup(&slot, &perCPU); err != nil {
+			return 0, fmt.Errorf("kernelagg: read stat %d: %w", slot, err)
+		}
+		var total uint64
+		for _, v := range perCPU {
+			total += v
+		}
+		return total, nil
+	}
+	created, err := read(statRowsCreated)
+	if err != nil {
+		return Stats{}, err
+	}
+	collapsed, err := read(statPeerCollapsed)
+	if err != nil {
+		return Stats{}, err
+	}
+	return Stats{RowsCreated: created, PeerCollapsed: collapsed}, nil
+}
+
+// Pressure is what the metrics map lost or folded since the probes loaded.
+type Pressure struct {
+	RowsEvicted   uint64
+	PeerCollapsed uint64
+}
+
+// PressureTracker turns the kernel's row-creation counter and the rows each
+// drain takes into a running count of rows the LRU evicted before a drain
+// reached them.
+type PressureTracker struct {
+	taken    uint64
+	pressure Pressure
+}
+
+// Observe folds one drain into the tracker: the stats read just before it,
+// and how many rows it took.
+func (p *PressureTracker) Observe(before Stats, taken int) Pressure {
+	if taken > 0 {
+		p.taken += uint64(taken)
+	}
+	if before.RowsCreated > p.taken {
+		if lost := before.RowsCreated - p.taken; lost > p.pressure.RowsEvicted {
+			p.pressure.RowsEvicted = lost
+		}
+	}
+	if before.PeerCollapsed > p.pressure.PeerCollapsed {
+		p.pressure.PeerCollapsed = before.PeerCollapsed
+	}
+	return p.pressure
+}
+
+// Pressure returns the totals folded in so far.
+func (p *PressureTracker) Pressure() Pressure {
+	return p.pressure
+}
+
 // Drain reads every row and removes it, returning the summed deltas.
 //
 // Each row is read and removed in one step. Reading every row first and
 // deleting them all afterwards loses whatever the probes add to a row in
 // between, an undercount that grows with the number of series.
 func Drain(m *ebpf.Map) ([]Row, error) {
+	rows, _, err := DrainCounted(m)
+	return rows, err
+}
+
+// DrainCounted is Drain that also reports how many rows it removed from the
+// map, including rows whose delta was zero.
+func DrainCounted(m *ebpf.Map) ([]Row, int, error) {
 	if m == nil {
-		return nil, errors.New("kernelagg: metrics map is nil")
+		return nil, 0, errors.New("kernelagg: metrics map is nil")
 	}
 	iter := m.Iterate()
 	t := &mapTaker{m: m}
-	return drainRows(iter.Next, iter.Err, t.take)
+	return drainRowsCounted(iter.Next, iter.Err, t.take)
 }
 
 // rowMap is the part of *ebpf.Map a drain uses.
@@ -179,13 +318,23 @@ func (t *mapTaker) take(k *Key) (Value, error) {
 
 // drainRows holds the drain logic, separated from the map I/O so it can be
 // exercised without a BPF map, creating one needs privileges a unit test
-// does not have. Keys are collected first, then each is taken: the read and
-// the removal of a row happen together.
+// does not have.
 func drainRows(
 	next func(key, value any) bool,
 	iterErr func() error,
 	take func(*Key) (Value, error),
 ) ([]Row, error) {
+	rows, _, err := drainRowsCounted(next, iterErr, take)
+	return rows, err
+}
+
+// drainRowsCounted collects the keys first, then takes each: the read and
+// the removal of a row happen together.
+func drainRowsCounted(
+	next func(key, value any) bool,
+	iterErr func() error,
+	take func(*Key) (Value, error),
+) ([]Row, int, error) {
 	var (
 		key    Key
 		perCPU []Value
@@ -193,29 +342,36 @@ func drainRows(
 		rows   []Row
 	)
 
+	seen := make(map[Key]struct{})
 	for next(&key, &perCPU) {
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
 		keys = append(keys, key)
 	}
-	if err := iterErr(); err != nil {
-		return nil, fmt.Errorf("kernelagg: iterate: %w", err)
+	if err := iterErr(); err != nil && !errors.Is(err, ebpf.ErrIterationAborted) {
+		return nil, 0, fmt.Errorf("kernelagg: iterate: %w", err)
 	}
 
 	var failed []error
+	taken := 0
 	for i := range keys {
 		total, err := take(&keys[i])
 		if err != nil {
 			failed = append(failed, err)
 			continue
 		}
+		taken++
 		if total.Count == 0 && total.Bytes == 0 {
 			continue
 		}
 		rows = append(rows, Row{Key: keys[i], Value: total})
 	}
 	if len(failed) > 0 {
-		return rows, fmt.Errorf("kernelagg: take failed for %d of %d rows: %w", len(failed), len(keys), errors.Join(failed...))
+		return rows, taken, fmt.Errorf("kernelagg: take failed for %d of %d rows: %w", len(failed), len(keys), errors.Join(failed...))
 	}
-	return rows, nil
+	return rows, taken, nil
 }
 
 // SumPerCPU folds the per-CPU copies of one row into a single delta.

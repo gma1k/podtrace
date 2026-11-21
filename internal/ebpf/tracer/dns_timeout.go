@@ -25,16 +25,17 @@ type dnsFlowKey struct {
 
 // dnsQueryState mirrors struct dns_query_state in bpf/maps.h.
 type dnsQueryState struct {
-	TsNS      uint64
-	PID       uint32
-	QType     uint32
-	ServerIP  uint32
-	Transport uint8
-	Pad       [3]uint8
-	Comm      [16]byte
-	Name      [128]byte
-	ServerIP6 [16]byte
-	LastNS    uint64
+	TsNS        uint64
+	PID         uint32
+	QType       uint32
+	ServerIP    uint32
+	Transport   uint8
+	MultiServer uint8
+	ClientPort  uint16
+	Comm        [16]byte
+	Name        [128]byte
+	ServerIP6   [16]byte
+	LastNS      uint64
 }
 
 const (

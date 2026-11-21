@@ -158,6 +158,7 @@ data:
           semanticConventions: {{ .Values.agent.metrics.semanticConventions }}
           kernelAggregation: {{ .Values.agent.metrics.kernelAggregation }}
           filesystem: {{ .Values.agent.metrics.filesystem }}
+          containerRowBudget: {{ .Values.agent.metrics.containerRowBudget }}
           {{- if .Values.agent.metrics.attributeCardinality }}
           attributeCardinality: {{ .Values.agent.metrics.attributeCardinality }}
           {{- end }}
