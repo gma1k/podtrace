@@ -226,3 +226,19 @@ func TestEmitSessionArtifacts_NoSinks_IsNoop(t *testing.T) {
 		t.Fatalf("no-sinks emit should be no-op: %v", err)
 	}
 }
+
+func TestTheSessionSummaryCountsEverythingTheDiagnosticianSaw(t *testing.T) {
+	d := diagnose.NewDiagnostician()
+	for i := range 40 {
+		ev := &events.Event{Type: events.EventConnectResult}
+		if i%4 == 0 {
+			ev.Error = -111
+		}
+		d.AddEvent(ev)
+	}
+	d.Finish()
+	s := computeSessionSummary(d, "node-a")
+	if s.TotalEvents != int64(d.EventsSeen()) || s.NetEvents != 40 || s.ErrorsDetected != int32(d.ErrorsSeen()) || s.ErrorsDetected != 10 {
+		t.Errorf("summary = %+v, want the seen totals: 40 events, 10 errors", s)
+	}
+}

@@ -1,6 +1,7 @@
 package diagnose
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/gma1k/podtrace/internal/events"
@@ -18,20 +19,21 @@ func TestFilterEvents_NotWrappedReturnsMatchesInOrder(t *testing.T) {
 	}
 }
 
-func TestFilterEvents_WalksRingInOrderAcrossWrap(t *testing.T) {
-	a := &events.Event{Type: events.EventDNS, Target: "a"}
-	b := &events.Event{Type: events.EventConnect, Target: "b"}
-	c := &events.Event{Type: events.EventDNS, Target: "c"}
-	dd := &events.Event{Type: events.EventConnect, Target: "d"}
-
+func TestFilterEvents_KeepsArrivalOrderOnceTheBufferSamples(t *testing.T) {
 	d := NewDiagnostician()
 	d.maxEvents = 4
-	d.events = []*events.Event{c, dd, a, b}
-	d.evHead = 2
-	d.wrapped = true
+	d.sampleUniform = falling()
+	for _, target := range []string{"a", "b", "c", "d", "e", "f"} {
+		d.AddEvent(&events.Event{Type: events.EventDNS, Target: target})
+	}
+	d.AddEvent(&events.Event{Type: events.EventConnect, Target: "g"})
 
 	got := d.FilterEvents(events.EventDNS)
-	if len(got) != 2 || got[0].Target != "a" || got[1].Target != "c" {
-		t.Fatalf("FilterEvents(DNS) across wrap = %+v, want targets [a c] in ring order", got)
+	var targets []string
+	for _, e := range got {
+		targets = append(targets, e.Target)
+	}
+	if !slices.Equal(targets, []string{"c", "d", "e", "f"}) {
+		t.Fatalf("FilterEvents(DNS) after sampling = %v, want [c d e f] in arrival order", targets)
 	}
 }

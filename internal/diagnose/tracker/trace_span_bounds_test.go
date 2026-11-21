@@ -118,7 +118,7 @@ func TestAnEarlierEventMovesTheSpanStartBack(t *testing.T) {
 func TestASpanWithoutAttributesStillRecordsDroppedEvents(t *testing.T) {
 	s := &Span{}
 	for i := range maxEventsPerSpan + 2 {
-		s.addEvent(tracedEvent(events.EventTCPSend, uint64(1_000_000+i)))
+		s.addEvent(tracedEvent(events.EventTCPSend, uint64(1_000_000+i)), len(s.Events) < maxEventsPerSpan)
 	}
 	if got := s.Attributes["podtrace.dropped_events"]; got != "2" {
 		t.Errorf("podtrace.dropped_events = %q, want 2", got)

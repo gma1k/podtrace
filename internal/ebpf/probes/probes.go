@@ -1896,6 +1896,9 @@ func AttachTLSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint3
 			continue
 		}
 		defer func() { _ = exe.Close() }()
+		if !tlsLibraryResolvable(exe, libPath, pid) {
+			continue
+		}
 
 		for symbol, progNames := range tlsSymbols {
 			if len(progNames) < 2 {
@@ -1932,6 +1935,24 @@ func AttachTLSProbesWithPID(coll *ebpf.Collection, containerID string, pid uint3
 
 	logger.Debug("TLS probe attach complete", zap.Int("links", len(links)))
 	return links
+}
+
+// warnTLSLibrarySkipped says a library's TLS traffic will not be decoded
+// because its symbol tables are too large to resolve safely.
+var warnTLSLibrarySkipped = func(libPath string, pid uint32) {
+	logger.Warn("TLS probes skipped: the library's symbol tables are too large to resolve safely, so its TLS traffic is not decoded",
+		zap.String("lib", libPath), zap.Uint32("pid", pid))
+}
+
+// tlsLibraryResolvable reports whether exe's symbols can be resolved by name.
+// A library over the cap refuses every symbol, so it is reported once here
+// rather than as one debug line per symbol nobody sees.
+func tlsLibraryResolvable(exe *executable, libPath string, pid uint32) bool {
+	if exe.symbolTablesUnsafe() {
+		warnTLSLibrarySkipped(libPath, pid)
+		return false
+	}
+	return true
 }
 
 // attachStrippedExecutableTLS attaches the SSL_* uprobes to pid's own

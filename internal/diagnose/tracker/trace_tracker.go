@@ -5,16 +5,21 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/events"
 )
 
+// TraceTracker groups events into traces. It holds at most
+// config.MaxTrackedTraces traces and config.MaxTrackedTraceBytes of them,
+// evicting the trace idle longest to make room.
 type TraceTracker struct {
 	mu      sync.RWMutex
 	traces  map[string]*Trace
 	recency *list.List
 	evicted uint64
+	bytes   int64
 }
 
 type Trace struct {
@@ -28,6 +33,7 @@ type Trace struct {
 	exportedSpans map[string]int
 	lastUpdate    time.Time
 	recency       *list.Element
+	bytes         int64
 
 	source *Trace
 }
@@ -53,6 +59,25 @@ const maxEventsPerSpan = 128
 
 const maxOpenSpanHold = time.Minute
 
+// spanOverheadBytes is what a span costs on the heap before its strings and
+// events: the struct, its attribute map and the map's handful of entries.
+const spanOverheadBytes = 512
+
+// eventBytes is what keeping e costs on the heap.
+func eventBytes(e *events.Event) int64 {
+	n := int64(unsafe.Sizeof(*e)) + 8*int64(len(e.Stack))
+	for _, s := range []string{e.PeerSrcIP, e.PeerDstIP, e.ProcessName, e.Target, e.Details,
+		e.TraceID, e.SpanID, e.ParentSpanID, e.TraceState, e.HTTPMethod} {
+		n += int64(len(s))
+	}
+	return n
+}
+
+// spanBytes is what a span made from e costs on the heap, its events aside.
+func spanBytes(e *events.Event) int64 {
+	return spanOverheadBytes + int64(len(e.SpanID)+len(e.ParentSpanID)+len(e.ProcessName)+len(e.Target)+len(e.Details))
+}
+
 type ServiceInfo struct {
 	Name      string
 	Namespace string
@@ -77,12 +102,12 @@ func (tt *TraceTracker) ProcessEvent(event *events.Event, k8sContext interface{}
 	}
 
 	tt.mu.Lock()
+	defer tt.mu.Unlock()
 	trace, exists := tt.traces[event.TraceID]
 	if exists {
 		tt.touchLocked(trace)
 	} else {
 		if config.MaxTrackedTraces <= 0 {
-			tt.mu.Unlock()
 			return
 		}
 		for len(tt.traces) >= config.MaxTrackedTraces {
@@ -99,7 +124,6 @@ func (tt *TraceTracker) ProcessEvent(event *events.Event, k8sContext interface{}
 		tt.traces[event.TraceID] = trace
 		tt.touchLocked(trace)
 	}
-	tt.mu.Unlock()
 
 	trace.mu.Lock()
 	defer trace.mu.Unlock()
@@ -117,7 +141,8 @@ func (tt *TraceTracker) ProcessEvent(event *events.Event, k8sContext interface{}
 		return
 	}
 
-	span.addEvent(event)
+	keep := len(span.Events) < maxEventsPerSpan && tt.reserveLocked(trace, eventBytes(event))
+	span.addEvent(event, keep)
 
 	if k8sContext != nil {
 		tt.updateServiceInfo(trace, span, k8sContext)
@@ -133,6 +158,22 @@ func (tt *TraceTracker) touchLocked(trace *Trace) {
 	trace.recency = tt.recency.PushFront(trace)
 }
 
+// reserveLocked makes room for cost more bytes in trace, evicting the traces
+// idle longest, and charges them to it. It reports false, charging nothing,
+// when trace alone would exceed the budget. Caller holds tt.mu and trace.mu.
+func (tt *TraceTracker) reserveLocked(trace *Trace, cost int64) bool {
+	for tt.bytes+cost > config.MaxTrackedTraceBytes {
+		oldest := tt.recency.Back()
+		if oldest == nil || oldest.Value.(*Trace) == trace {
+			return false
+		}
+		tt.evictOldestLocked()
+	}
+	tt.bytes += cost
+	trace.bytes += cost
+	return true
+}
+
 // evictOldestLocked drops the trace idle longest. Caller holds tt.mu and
 // guarantees the tracker is not empty.
 func (tt *TraceTracker) evictOldestLocked() {
@@ -144,6 +185,7 @@ func (tt *TraceTracker) evictOldestLocked() {
 // removeLocked forgets the trace stored under traceID. Caller holds tt.mu.
 func (tt *TraceTracker) removeLocked(traceID string, trace *Trace) {
 	delete(tt.traces, traceID)
+	tt.bytes -= trace.bytes
 	if trace.recency != nil && tt.recency != nil {
 		tt.recency.Remove(trace.recency)
 		trace.recency = nil
@@ -158,6 +200,8 @@ func (tt *TraceTracker) EvictedTraceCount() uint64 {
 	return tt.evicted
 }
 
+// findOrCreateSpan returns trace's span for event, creating it when there is
+// room. Caller holds tt.mu and trace.mu.
 func (tt *TraceTracker) findOrCreateSpan(trace *Trace, event *events.Event) *Span {
 	for _, span := range trace.Spans {
 		if span.SpanID == event.SpanID {
@@ -165,7 +209,7 @@ func (tt *TraceTracker) findOrCreateSpan(trace *Trace, event *events.Event) *Spa
 		}
 	}
 
-	if len(trace.Spans) >= config.MaxSpansPerTrace {
+	if len(trace.Spans) >= config.MaxSpansPerTrace || !tt.reserveLocked(trace, spanBytes(event)) {
 		return nil
 	}
 
@@ -441,8 +485,8 @@ func (tt *TraceTracker) GetTraceCount() int {
 }
 
 // addEvent records e on the span: it widens the span to cover e, in constant
-// time, and keeps e itself while the span holds fewer than maxEventsPerSpan.
-func (s *Span) addEvent(e *events.Event) {
+// time, and keeps e itself when keep is true, counting it as dropped when not.
+func (s *Span) addEvent(e *events.Event, keep bool) {
 	hi := e.TimestampTime()
 	lo := hi.Add(-e.Latency())
 	if len(s.Events) == 0 && s.droppedEvents == 0 {
@@ -467,7 +511,7 @@ func (s *Span) addEvent(e *events.Event) {
 		s.awaitingResponse = false
 	}
 
-	if len(s.Events) < maxEventsPerSpan {
+	if keep {
 		s.Events = append(s.Events, e)
 		return
 	}

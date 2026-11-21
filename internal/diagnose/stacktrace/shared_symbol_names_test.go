@@ -7,6 +7,7 @@ import (
 	"math"
 	"runtime"
 	"testing"
+	"unsafe"
 )
 
 func fileOffset(n int) uint64 {
@@ -31,7 +32,8 @@ func sharedNameELF(symbols, nameLen int) []byte {
 		e := symtab[i*elf.Sym64Size:]
 		le.PutUint32(e[0:], 1)
 		e[4] = byte(elf.STT_FUNC)
-		le.PutUint64(e[8:], 0x401000)
+		le.PutUint64(e[8:], 0x401000+uint64(i)*16)
+		le.PutUint64(e[16:], 16)
 	}
 	shstr := []byte("\x00.hidden\x00.strtab\x00.symtab\x00.shstrtab\x00")
 	type section struct {
@@ -79,20 +81,79 @@ func sharedNameELF(symbols, nameLen int) []byte {
 	return buf
 }
 
-func TestSymbolizingABinaryWhoseSymbolsShareOneLongNameIsRefused(t *testing.T) {
+func allocatedDuring(fn func()) uint64 {
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	fn()
+	runtime.ReadMemStats(&after)
+	return after.TotalAlloc - before.TotalAlloc
+}
+
+func TestSymbolsSharingOneLongNameHoldOneCopyOfIt(t *testing.T) {
 	f, err := elf.NewFile(bytes.NewReader(sharedNameELF(40000, 16<<10)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime.GC()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
-	syms := functionSymbols(f)
-	runtime.ReadMemStats(&after)
-	if syms != nil {
-		t.Errorf("functionSymbols returned %d symbols", len(syms))
+	var syms []funcSymbol
+	var held int64
+	alloc := allocatedDuring(func() { syms, held = functionSymbols(f, maxCachedSymbolBytes) })
+	if len(syms) != 40000 {
+		t.Fatalf("kept %d symbols, want 40000", len(syms))
 	}
-	if mib := (after.TotalAlloc - before.TotalAlloc) >> 20; mib > 8 {
-		t.Errorf("functionSymbols allocated %d MiB; debug/elf copies a name per symbol", mib)
+	for _, s := range syms[1:] {
+		if unsafe.StringData(s.Name) != unsafe.StringData(syms[0].Name) {
+			t.Fatal("symbols sharing a name hold separate copies of it")
+		}
+	}
+	if want := 40000*funcSymbolBytes + 16<<10; held != want {
+		t.Errorf("accounted %d bytes, want %d", held, want)
+	}
+	if mib := alloc >> 20; mib > 8 {
+		t.Errorf("functionSymbols allocated %d MiB for 40000 symbols sharing one 16 KiB name", mib)
+	}
+}
+
+func TestASymbolTableDeclaringMillionsOfFunctionsIsRefusedCheaply(t *testing.T) {
+	f, err := elf.NewFile(bytes.NewReader(sharedNameELF(2_700_000, 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var syms []funcSymbol
+	alloc := allocatedDuring(func() { syms, _ = functionSymbols(f, maxCachedSymbolBytes) })
+	if syms != nil {
+		t.Errorf("kept %d symbols past the %d byte budget", len(syms), maxCachedSymbolBytes)
+	}
+	if mib := alloc >> 20; mib > 160 {
+		t.Errorf("allocated %d MiB refusing a 62 MiB symbol table", mib)
+	}
+}
+
+func TestATableOverItsBudgetIsRefusedWhole(t *testing.T) {
+	f, err := elf.NewFile(bytes.NewReader(sharedNameELF(100, 4)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if syms, held := functionSymbols(f, 99*funcSymbolBytes); syms != nil || held != 0 {
+		t.Errorf("got %d symbols holding %d bytes, want none", len(syms), held)
+	}
+	if syms, _ := functionSymbols(f, 100*funcSymbolBytes+4); len(syms) != 100 {
+		t.Errorf("got %d symbols within an exact budget, want 100", len(syms))
+	}
+	if got := symbolCapacity(f, 0); got != 0 {
+		t.Errorf("capacity with no budget = %d", got)
+	}
+}
+
+func TestThe32BitSymbolEntrySizesTheCapacity(t *testing.T) {
+	f := &elf.File{
+		FileHeader: elf.FileHeader{Class: elf.ELFCLASS32},
+		Sections:   []*elf.Section{{SectionHeader: elf.SectionHeader{Type: elf.SHT_SYMTAB, Size: 10 * elf.Sym32Size}}},
+	}
+	if got := symbolCapacity(f, maxCachedSymbolBytes); got != 10 {
+		t.Errorf("capacity of ten 32-bit entries = %d", got)
+	}
+	if got := symbolCapacity(f, 3*funcSymbolBytes); got != 3 {
+		t.Errorf("capacity within a three-symbol budget = %d", got)
 	}
 }

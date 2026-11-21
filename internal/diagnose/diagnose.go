@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,10 +44,14 @@ type Diagnostician struct {
 	maxEvents          int
 	eventCount         int
 	droppedEvents      int
-	sampleIntN         func(int) int
+	seenByType         map[events.EventType]int
+	errorsSeen         int
+	priorities         []float64
+	threshold          float64
+	sampling           bool
+	sampleUniform      func() float64
 	draws              sampleDraws
-	evHead             int
-	wrapped            bool
+	sessionSampling    *bufferSampling
 	podCommTracker     *tracker.PodCommunicationTracker
 	errorCorrelator    *correlator.ErrorCorrelator
 	criticalPath       *criticalpath.Collector
@@ -117,6 +122,13 @@ func (d *Diagnostician) AddEventWithContext(event *events.Event, k8sContext map[
 	defer d.mu.Unlock()
 
 	d.eventCount++
+	if d.seenByType == nil {
+		d.seenByType = make(map[events.EventType]int)
+	}
+	d.seenByType[event.Type]++
+	if event.IsError() {
+		d.errorsSeen++
+	}
 	if !d.fsTotalsInherited && analyzer.IsFSEvent(event.Type) {
 		if d.fsEventTotals == nil {
 			d.fsEventTotals = analyzer.FSEventTotals{}
@@ -132,39 +144,30 @@ func (d *Diagnostician) AddEventWithContext(event *events.Event, k8sContext map[
 	}
 	d.criticalPath.Feed(event)
 
-	if len(d.events) < d.maxEvents {
-		d.events = append(d.events, event)
-		d.enrichedEvents = append(d.enrichedEvents, k8sContext)
-		return
-	}
-
-	intn := d.sampleIntN
-	if intn == nil {
-		intn = d.draws.intN
-	}
-	if !shouldSampleEvent(event, intn) {
+	p := d.priority(event.Type)
+	if d.sampling && p >= d.threshold {
 		d.droppedEvents++
 		d.logSamplingLocked()
 		return
 	}
-	d.events[d.evHead] = event
-	d.enrichedEvents[d.evHead] = k8sContext
-	d.evHead = (d.evHead + 1) % d.maxEvents
-	d.wrapped = true
+	if len(d.events) >= d.maxEvents {
+		d.compactLocked()
+		d.logSamplingLocked()
+		if p >= d.threshold {
+			d.droppedEvents++
+			return
+		}
+	}
+	d.events = append(d.events, event)
+	d.enrichedEvents = append(d.enrichedEvents, k8sContext)
+	d.priorities = append(d.priorities, p)
 }
 
+// GetEvents returns the buffered events in arrival order.
 func (d *Diagnostician) GetEvents() []*events.Event {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-
-	result := make([]*events.Event, len(d.events))
-	if !d.wrapped {
-		copy(result, d.events)
-	} else {
-		n := copy(result, d.events[d.evHead:])
-		copy(result[n:], d.events[:d.evHead])
-	}
-	return result
+	return append([]*events.Event(nil), d.events...)
 }
 
 // AddFastFilesystemOps keeps the kernel's counts of the filesystem
@@ -308,11 +311,62 @@ func (d *Diagnostician) EventsSeen() int {
 	return d.eventCount
 }
 
+// EventsSeenByType counts every event added by type, including those the
+// full buffer sampled out.
+func (d *Diagnostician) EventsSeenByType() map[events.EventType]int {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	out := make(map[events.EventType]int, len(d.seenByType))
+	for t, n := range d.seenByType {
+		out[t] = n
+	}
+	return out
+}
+
+// ErrorsSeen counts every failed event added, including those the full
+// buffer sampled out.
+func (d *Diagnostician) ErrorsSeen() int {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.errorsSeen
+}
+
 // EventsSampledOut counts the events a full buffer did not keep.
 func (d *Diagnostician) EventsSampledOut() int {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.droppedEvents
+}
+
+// bufferSampling is what a full buffer saw and let go.
+type bufferSampling struct {
+	seen       int
+	sampledOut int
+}
+
+// InheritSessionSampling records that the events this diagnostician is given
+// come from session's buffer, so its report says they are a sample when
+// session's buffer sampled.
+func (d *Diagnostician) InheritSessionSampling(session *Diagnostician) {
+	seen, out := session.EventsSeen(), session.EventsSampledOut()
+	if out == 0 {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.sessionSampling = &bufferSampling{seen: seen, sampledOut: out}
+}
+
+// SessionSampling returns how many events the session buffer this
+// diagnostician's events were taken from saw and sampled out, with ok false
+// when they were not taken from a buffer that sampled.
+func (d *Diagnostician) SessionSampling() (seen, sampledOut int, ok bool) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if d.sessionSampling == nil {
+		return 0, 0, false
+	}
+	return d.sessionSampling.seen, d.sessionSampling.sampledOut, true
 }
 
 // EventContexts returns the per-event enrichment contexts, index-aligned with
@@ -321,14 +375,7 @@ func (d *Diagnostician) EventContexts() []map[string]interface{} {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
-	result := make([]map[string]interface{}, len(d.enrichedEvents))
-	if !d.wrapped {
-		copy(result, d.enrichedEvents)
-	} else {
-		n := copy(result, d.enrichedEvents[d.evHead:])
-		copy(result[n:], d.enrichedEvents[:d.evHead])
-	}
-	return result
+	return append([]map[string]interface{}(nil), d.enrichedEvents...)
 }
 
 // SetTimeWindow overrides the observation window.
@@ -352,22 +399,10 @@ func (d *Diagnostician) FilterEvents(eventType events.EventType) []*events.Event
 	defer d.mu.RUnlock()
 
 	var filtered []*events.Event
-	match := func(e *events.Event) {
+	for _, e := range d.events {
 		if e != nil && e.Type == eventType {
 			filtered = append(filtered, e)
 		}
-	}
-	if !d.wrapped {
-		for _, e := range d.events {
-			match(e)
-		}
-		return filtered
-	}
-	for _, e := range d.events[d.evHead:] {
-		match(e)
-	}
-	for _, e := range d.events[:d.evHead] {
-		match(e)
 	}
 	return filtered
 }
@@ -412,53 +447,67 @@ func (d *Diagnostician) GenerateReport() string {
 	return d.GenerateReportWithContext(ctx)
 }
 
+// GenerateReportWithContext builds the report section by section, stopping
+// when ctx ends: a report cut short says so and keeps what it has.
 func (d *Diagnostician) GenerateReportWithContext(ctx context.Context) string {
 	allEvents := d.GetEvents()
 	if len(allEvents) == 0 {
 		return "No events collected during the diagnostic period.\n"
 	}
 
-	select {
-	case <-ctx.Done():
-		return fmt.Sprintf("Report generation cancelled: %v\n", ctx.Err())
-	default:
-	}
-
 	duration := d.EndTime().Sub(d.StartTime())
-	var result string
-
-	result += report.GenerateSummarySection(d, duration)
-	result += report.GenerateSecuritySection(d)
-	result += report.GenerateCgroupScopeSection(d)
-	result += report.GenerateDNSSection(d, duration)
-	result += report.GenerateTCPSection(d, duration)
-	result += report.GenerateTLSSection(d, duration)
-	result += report.GenerateConnectionSection(d, duration)
-	result += report.GenerateFileSystemSection(d, duration)
-	result += report.GenerateUDPSection(d, duration)
-	result += report.GenerateHTTPSection(d, duration)
-	result += report.GenerateHTTP3Section(d, duration)
-	result += report.GenerateCPUSection(d, duration)
-	result += report.GenerateTCPStateSection(d, duration)
-	result += report.GenerateMemorySection(d, duration)
-	result += report.GenerateResourceSection(d)
-	result += report.GeneratePoolSection(d, duration)
-	result += profiling.GenerateProcessCPUReport(allEvents, duration, d.ProcessCPU())
-	result += stacktrace.GenerateStackTraceSectionWithContext(d, ctx)
-	result += report.GenerateSyscallSection(d, duration)
-	result += report.GenerateApplicationTracing(d, duration)
-	result += tracker.GenerateConnectionCorrelation(allEvents)
-
-	if d.podCommTracker != nil {
-		summaries := d.podCommTracker.GetSummary()
-		result += tracker.GeneratePodCommunicationReport(summaries)
+	sections := []func() string{
+		func() string { return report.GenerateSummarySection(d, duration) },
+		func() string { return report.GenerateSecuritySection(d) },
+		func() string { return report.GenerateCgroupScopeSection(d) },
+		func() string { return report.GenerateDNSSection(d, duration) },
+		func() string { return report.GenerateTCPSection(d, duration) },
+		func() string { return report.GenerateTLSSection(d, duration) },
+		func() string { return report.GenerateConnectionSection(d, duration) },
+		func() string { return report.GenerateFileSystemSection(d, duration) },
+		func() string { return report.GenerateUDPSection(d, duration) },
+		func() string { return report.GenerateHTTPSection(d, duration) },
+		func() string { return report.GenerateHTTP3Section(d, duration) },
+		func() string { return report.GenerateCPUSection(d, duration) },
+		func() string { return report.GenerateTCPStateSection(d, duration) },
+		func() string { return report.GenerateMemorySection(d, duration) },
+		func() string { return report.GenerateResourceSection(d) },
+		func() string { return report.GeneratePoolSection(d, duration) },
+		func() string { return profiling.GenerateProcessCPUReport(allEvents, duration, d.ProcessCPU()) },
+		func() string { return stacktrace.GenerateStackTraceSectionWithContext(d, ctx) },
+		func() string { return report.GenerateSyscallSection(d, duration) },
+		func() string { return report.GenerateApplicationTracing(d, duration) },
+		func() string { return tracker.GenerateConnectionCorrelation(allEvents) },
+		func() string {
+			if d.podCommTracker == nil {
+				return ""
+			}
+			return tracker.GeneratePodCommunicationReport(d.podCommTracker.GetSummary())
+		},
+		func() string {
+			if d.errorCorrelator == nil {
+				return ""
+			}
+			return d.errorCorrelator.GetErrorSummary()
+		},
+		func() string { return report.GenerateIssuesSection(d) },
 	}
 
-	if d.errorCorrelator != nil {
-		result += d.errorCorrelator.GetErrorSummary()
+	return writeSections(ctx, sections)
+}
+
+// writeSections joins what each section renders, checking ctx before each.
+func writeSections(ctx context.Context, sections []func() string) string {
+	var b strings.Builder
+	for _, section := range sections {
+		if err := ctx.Err(); err != nil {
+			if b.Len() == 0 {
+				return fmt.Sprintf("Report generation cancelled: %v\n", err)
+			}
+			fmt.Fprintf(&b, "\nReport generation cancelled: %v; the sections after this point were not generated\n", err)
+			break
+		}
+		b.WriteString(section())
 	}
-
-	result += report.GenerateIssuesSection(d)
-
-	return result
+	return b.String()
 }

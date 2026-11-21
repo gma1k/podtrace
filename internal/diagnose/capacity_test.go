@@ -55,7 +55,7 @@ func TestADiagnosticianUnderAMemoryLimitSizesItsBuffer(t *testing.T) {
 func TestTheReportSaysWhenTheBufferWasSizedDown(t *testing.T) {
 	withMemoryLimit(t, 4<<20, true)
 	d := NewDiagnostician()
-	d.sampleIntN = reject
+	d.sampleUniform = rising()
 	for i := 0; i < minimumEventCapacity+5; i++ {
 		d.AddEvent(&events.Event{Type: events.EventTCPRecv})
 	}

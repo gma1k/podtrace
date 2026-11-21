@@ -1,7 +1,9 @@
 package correlator
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -340,6 +342,17 @@ func (ec *ErrorCorrelator) GetChains() []*ErrorChain {
 	return out
 }
 
+// maxChainsShown is how many chains the summary details.
+const maxChainsShown = 5
+
+// largestChains returns up to n of chains, longest first and, among equally
+// long ones, the earliest first, leaving chains in time order.
+func largestChains(chains []*ErrorChain, n int) []*ErrorChain {
+	out := slices.Clone(chains)
+	slices.SortStableFunc(out, func(a, b *ErrorChain) int { return cmp.Compare(len(b.Chain), len(a.Chain)) })
+	return out[:min(n, len(out))]
+}
+
 func (ec *ErrorCorrelator) GetErrorSummary() string {
 	ec.mu.Lock()
 	defer ec.mu.Unlock()
@@ -358,13 +371,7 @@ func (ec *ErrorCorrelator) GetErrorSummary() string {
 
 	if len(ec.chains) > 0 {
 		report += "  Top error chains:\n"
-		maxChains := 5
-		if len(ec.chains) < maxChains {
-			maxChains = len(ec.chains)
-		}
-
-		for i := 0; i < maxChains; i++ {
-			chain := ec.chains[i]
+		for i, chain := range largestChains(ec.chains, maxChainsShown) {
 			report += fmt.Sprintf("    Chain %d (Severity: %s):\n", i+1, chain.Severity)
 			report += fmt.Sprintf("      Root cause: %s error on %s (%s)\n",
 				chain.RootCause.Operation, sanitize.Terminal(chain.RootCause.Target), errorCodeText(chain.RootCause))

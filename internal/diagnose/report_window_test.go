@@ -13,18 +13,18 @@ import (
 func TestTheSummarySaysWhenTheBufferSampled(t *testing.T) {
 	d := NewDiagnostician()
 	d.maxEvents = 10
-	d.sampleIntN = reject
+	d.sampleUniform = rising()
 	for i := range 30 {
 		d.AddEvent(&events.Event{Type: events.EventRead, Timestamp: uint64(i + 1)})
 	}
 	d.Finish()
 
 	got := report.GenerateSummarySection(d, time.Second)
-	if !strings.Contains(got, "Events seen: 30") || !strings.Contains(got, "sampled out 20") {
+	if !strings.Contains(got, "Events seen: 30") || !strings.Contains(got, "sampled out 23") {
 		t.Errorf("summary does not say the counts are a sample:\n%s", got)
 	}
-	if summary := d.ExportJSON().Summary; summary["events_sampled_out"] != 20 {
-		t.Errorf("export summary = %v, want events_sampled_out 20", summary)
+	if summary := d.ExportJSON().Summary; summary["events_sampled_out"] != 23 {
+		t.Errorf("export summary = %v, want events_sampled_out 23", summary)
 	}
 }
 

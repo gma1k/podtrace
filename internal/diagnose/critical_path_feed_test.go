@@ -43,9 +43,17 @@ func TestEveryConstructorHasACriticalPath(t *testing.T) {
 	}
 }
 
-func TestARequestDoneIsNeverSampledOut(t *testing.T) {
-	never := func(n int) int { return n - 1 }
-	if !shouldSampleEvent(&events.Event{Type: events.EventRequestDone}, never) {
-		t.Fatal("a request-done event was sampled out")
+func TestARequestDoneSampledOutOfTheBufferStillReachesTheCriticalPath(t *testing.T) {
+	d := NewDiagnostician()
+	d.maxEvents = 1
+	d.sampleUniform = rising()
+	for i := range 3 {
+		d.AddEvent(&events.Event{Type: events.EventRequestDone, CorrelationID: uint64(i + 1), Timestamp: uint64(10 + i), LatencyNS: 5})
+	}
+	if d.EventsSampledOut() == 0 {
+		t.Fatal("the buffer never sampled")
+	}
+	if got := d.CriticalPath().Requests; got != 3 {
+		t.Errorf("critical path counted %d requests, want 3", got)
 	}
 }
