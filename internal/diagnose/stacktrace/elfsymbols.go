@@ -11,6 +11,7 @@ import (
 
 	"github.com/gma1k/podtrace/internal/ebpf/safeelf"
 	"github.com/gma1k/podtrace/internal/hostfs"
+	"github.com/gma1k/podtrace/internal/safeconv"
 )
 
 // symbolTable names instruction pointers from an executable's own symbols,
@@ -338,7 +339,7 @@ func symbolCapacity(f *elf.File, budget int64) int {
 	if f.Class == elf.ELFCLASS32 {
 		entry = elf.Sym32Size
 	}
-	return int(min(sec.Size/entry, uint64(budget/funcSymbolBytes)))
+	return safeconv.Uint64ToInt(min(sec.Size/entry, safeconv.Int64ToUint64(budget/funcSymbolBytes)))
 }
 
 // boundSizelessSymbols gives each symbol with no size an extent: up to the

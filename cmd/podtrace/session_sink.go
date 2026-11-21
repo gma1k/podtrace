@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"os"
 	"strings"
 	"time"
@@ -23,6 +22,7 @@ import (
 	"github.com/gma1k/podtrace/internal/hostfs"
 	"github.com/gma1k/podtrace/internal/logger"
 	"github.com/gma1k/podtrace/internal/redactor"
+	"github.com/gma1k/podtrace/internal/safeconv"
 	"github.com/gma1k/podtrace/internal/tracing"
 	"go.uber.org/zap"
 )
@@ -124,7 +124,7 @@ func collectSessionExports() []SessionExportStatus {
 func computeSessionSummary(d *diagnose.Diagnostician, node string) SessionSummary {
 	summary := SessionSummary{
 		TotalEvents:    int64(d.EventsSeen()),
-		ErrorsDetected: int32(min(d.ErrorsSeen(), math.MaxInt32)),
+		ErrorsDetected: safeconv.IntToInt32(d.ErrorsSeen()),
 		DurationMS:     d.EndTime().Sub(d.StartTime()).Milliseconds(),
 		Node:           node,
 	}
