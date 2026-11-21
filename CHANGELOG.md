@@ -9,6 +9,36 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.15.5](https://github.com/gma1k/podtrace/compare/v0.15.4...v0.15.5) (2026-11-21)
+
+
+### Features
+
+* add operator-managed webhook certs and harden cli and chart ([#589](https://github.com/gma1k/podtrace/issues/589)) ([40b322c](https://github.com/gma1k/podtrace/commit/40b322c5e6d4ea5996065cbc463d2b609ee95a75))
+* add tracerconfig egress settings and unify event filters ([#585](https://github.com/gma1k/podtrace/issues/585)) ([62b4a66](https://github.com/gma1k/podtrace/commit/62b4a66ffc16c917a5c7c794a2ae8352513a3402))
+
+
+### Bug Fixes
+
+* bound http/3 decoder memory and widen credential redaction ([#591](https://github.com/gma1k/podtrace/issues/591)) ([ba2b293](https://github.com/gma1k/podtrace/commit/ba2b293f583e4d603657c7bdb2dc04c36e853662))
+* bound per-container agg rows and bind dns replies to queries ([#590](https://github.com/gma1k/podtrace/issues/590)) ([a85f32f](https://github.com/gma1k/podtrace/commit/a85f32f3ea6362af346e6076d28836aab5a4704c))
+* bound symbol parsing and sample the diagnose buffer without bias ([#592](https://github.com/gma1k/podtrace/issues/592)) ([7426d28](https://github.com/gma1k/podtrace/commit/7426d287d490aefeab5948c3181b79d1bc21f4c2))
+* harden bpf l7 state and report cache and kafka activity ([#587](https://github.com/gma1k/podtrace/issues/587)) ([ca36931](https://github.com/gma1k/podtrace/commit/ca36931cd974282e0cefa22db8003241614be2b9))
+* harden operator schedules, session jobs and report staging ([#588](https://github.com/gma1k/podtrace/issues/588)) ([3d4749c](https://github.com/gma1k/podtrace/commit/3d4749c4cb54ffcd40251acb4ffe32f93c175473))
+* harden uprobe attach layer and bound ELF parsing ([#583](https://github.com/gma1k/podtrace/issues/583)) ([b5727b2](https://github.com/gma1k/podtrace/commit/b5727b206f07b0df9ab41bbee064afa8330ff857))
+* load bpf on kernels 5.15+ and fix event and peer handling ([#584](https://github.com/gma1k/podtrace/issues/584)) ([f979e7c](https://github.com/gma1k/podtrace/commit/f979e7c1cadddc21f4532a2a7820f5e38da7288a))
+
+
+### CI
+
+* switch PR labeling workflows from pull_request_target to pull_request ([#582](https://github.com/gma1k/podtrace/issues/582)) ([121af1b](https://github.com/gma1k/podtrace/commit/121af1b12260c342301f66df7cd499587a05f0fa))
+
+
+### Maintenance
+
+* **deps:** update go modules, helm, controller-runtime and image pins ([#580](https://github.com/gma1k/podtrace/issues/580)) ([cf17548](https://github.com/gma1k/podtrace/commit/cf1754847d1124a38f7974a174ac8ead6e6a9174))
+* **deps:** update nginx image digests and google/pprof ([#586](https://github.com/gma1k/podtrace/issues/586)) ([5d48cf7](https://github.com/gma1k/podtrace/commit/5d48cf7bc7803d4cacc0b3d904f7e209f50dafbf))
+
 ## [0.15.4](https://github.com/gma1k/podtrace/compare/v0.15.3...v0.15.4) (2026-11-12)
 
 
