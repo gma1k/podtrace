@@ -17,7 +17,7 @@ func slowWrite(cgroup uint64) *events.Event {
 func TestAFullBufferStillReportsEveryFilesystemOperation(t *testing.T) {
 	d := NewDiagnosticianWithThresholds(10, 100, 10)
 	d.maxEvents = 50
-	d.sampleIntN = reject
+	d.sampleUniform = rising()
 	for i := 0; i < 500; i++ {
 		d.AddEvent(slowWrite(1))
 	}
@@ -45,7 +45,7 @@ func TestADiagnosticianWithoutFilesystemEventsHasNoTotals(t *testing.T) {
 func TestAPerPodDiagnosticianReportsItsShareOfTheWholeSession(t *testing.T) {
 	agg := NewDiagnosticianWithThresholds(10, 100, 10)
 	agg.maxEvents = 40
-	agg.sampleIntN = reject
+	agg.sampleUniform = rising()
 	for i := 0; i < 300; i++ {
 		agg.AddEvent(slowWrite(1))
 		agg.AddEvent(slowWrite(2))
@@ -73,7 +73,7 @@ func TestAPerPodDiagnosticianReportsItsShareOfTheWholeSession(t *testing.T) {
 func TestTheJSONExportCountsEveryFilesystemOperationOfAFullBuffer(t *testing.T) {
 	d := NewDiagnosticianWithThresholds(10, 100, 10)
 	d.maxEvents = 20
-	d.sampleIntN = reject
+	d.sampleUniform = rising()
 	for i := 0; i < 200; i++ {
 		d.AddEvent(slowWrite(1))
 	}

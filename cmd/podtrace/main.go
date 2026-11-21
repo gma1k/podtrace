@@ -1462,6 +1462,7 @@ func diagnosisByPod(agg *diagnose.Diagnostician) string {
 		child := diagnose.NewDiagnosticianWithK8sAndThresholds(
 			b.podName, b.namespace, errorRateThreshold, rttSpikeThreshold, fsSlowThreshold)
 		child.SetTimeWindow(agg.StartTime(), agg.EndTime())
+		child.InheritSessionSampling(agg)
 		child.AddFastFilesystemOps(agg.FastFilesystemRows())
 		child.InheritFilesystemEventTotals(fsTotals.Share(b.events, fsKept))
 		child.AddProcessCPU(agg.ProcessCPU())

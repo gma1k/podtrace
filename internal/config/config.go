@@ -94,6 +94,7 @@ var (
 	MetricsPodLabelLimit      = getIntEnvOrDefault("PODTRACE_METRICS_POD_LABEL_LIMIT", 500)
 	MaxTrackedTraces          = getIntEnvOrDefault("PODTRACE_MAX_TRACKED_TRACES", 10000)
 	MaxSpansPerTrace          = getIntEnvOrDefault("PODTRACE_MAX_SPANS_PER_TRACE", 1000)
+	MaxTrackedTraceBytes      = getInt64EnvOrDefault("PODTRACE_MAX_TRACKED_TRACE_BYTES", 64<<20)
 	ProcessCacheEvictionRatio = getFloatEnvInRange("PODTRACE_PROCESS_CACHE_EVICTION_RATIO", DefaultProcessCacheEvictionRatio, 0, 1)
 	PIDCacheEvictionRatio     = getFloatEnvInRange("PODTRACE_PID_CACHE_EVICTION_RATIO", DefaultPIDCacheEvictionRatio, 0, 1)
 	PIDCacheTTLSeconds        = getIntEnvOrDefault("PODTRACE_PID_CACHE_TTL_SECONDS", DefaultPIDCacheTTLSeconds)

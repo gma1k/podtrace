@@ -34,23 +34,24 @@ func TestEventContexts_UnwrappedBuffer(t *testing.T) {
 	}
 }
 
-func TestEventContexts_WrappedBuffer(t *testing.T) {
+func TestEventContexts_SampledBuffer(t *testing.T) {
 	d := NewDiagnostician()
 	d.maxEvents = 1
+	d.sampleUniform = falling()
 	d.startTime = time.Now()
 
 	d.AddEventWithContext(&events.Event{Type: events.EventDNS}, map[string]interface{}{"seq": "first"})
 	d.AddEventWithContext(&events.Event{Type: events.EventOOMKill}, map[string]interface{}{"seq": "second"})
 
-	if !d.wrapped {
-		t.Fatal("buffer should have wrapped after overflow with a sampled event")
+	if d.EventsSampledOut() != 1 {
+		t.Fatalf("sampled out %d events, want the first", d.EventsSampledOut())
 	}
 	contexts := d.EventContexts()
 	if len(contexts) != 1 {
 		t.Fatalf("EventContexts len = %d, want 1", len(contexts))
 	}
 	if contexts[0]["seq"] != "second" {
-		t.Errorf("wrapped EventContexts should surface the newest context, got %v", contexts[0])
+		t.Errorf("EventContexts should surface the lower-priority newest context, got %v", contexts[0])
 	}
 }
 

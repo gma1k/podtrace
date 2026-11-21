@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -117,33 +118,29 @@ func collectSessionExports() []SessionExportStatus {
 	return out
 }
 
-// computeSessionSummary rolls up a Diagnostician's observed events into
-// the small struct Kubernetes surfaces in pod status.
+// computeSessionSummary rolls up every event a Diagnostician saw into the
+// small struct Kubernetes surfaces in pod status. It counts the whole
+// stream, not the buffer, which keeps only a sample once it fills.
 func computeSessionSummary(d *diagnose.Diagnostician, node string) SessionSummary {
-	observed := d.GetEvents()
 	summary := SessionSummary{
-		TotalEvents: int64(len(observed)),
-		DurationMS:  d.EndTime().Sub(d.StartTime()).Milliseconds(),
-		Node:        node,
+		TotalEvents:    int64(d.EventsSeen()),
+		ErrorsDetected: int32(min(d.ErrorsSeen(), math.MaxInt32)),
+		DurationMS:     d.EndTime().Sub(d.StartTime()).Milliseconds(),
+		Node:           node,
 	}
-	for _, ev := range observed {
-		if ev == nil {
-			continue
-		}
-		switch events.FilterCategoryOf(ev.Type) {
+	for typ, n := range d.EventsSeenByType() {
+		count := int64(n)
+		switch events.FilterCategoryOf(typ) {
 		case events.FilterCategoryDNS:
-			summary.DNSEvents++
+			summary.DNSEvents += count
 		case events.FilterCategoryNet:
-			summary.NetEvents++
+			summary.NetEvents += count
 		case events.FilterCategoryFS:
-			summary.FSEvents++
+			summary.FSEvents += count
 		case events.FilterCategoryCPU:
-			summary.CPUEvents++
+			summary.CPUEvents += count
 		case events.FilterCategoryProc:
-			summary.ProcEvents++
-		}
-		if ev.IsError() {
-			summary.ErrorsDetected++
+			summary.ProcEvents += count
 		}
 	}
 	return summary

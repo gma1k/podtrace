@@ -41,7 +41,7 @@ func TestSizelessSymbolsAreBoundedByTheNextSymbolAndTheirSection(t *testing.T) {
 		{},
 		{SectionHeader: elf.SectionHeader{Name: ".text", Addr: 0x1000, Size: 0x1000}},
 	}
-	got := boundSizelessSymbols([]elf.Symbol{
+	got := boundSizelessSymbols([]funcSymbol{
 		{Name: "sized", Value: 0x1000, Size: 0x20, Section: 1},
 		{Name: "mid", Value: 0x1100, Section: 1},
 		{Name: "last", Value: 0x1800, Section: 1},
@@ -61,7 +61,7 @@ func TestSizelessSymbolsAreBoundedByTheNextSymbolAndTheirSection(t *testing.T) {
 }
 
 func TestASizelessSymbolWithNoBoundAtAllIsDropped(t *testing.T) {
-	got := boundSizelessSymbols([]elf.Symbol{
+	got := boundSizelessSymbols([]funcSymbol{
 		{Name: "only", Value: 0x5000, Section: elf.SHN_ABS},
 	}, []*elf.Section{{}})
 	if len(got) != 0 {

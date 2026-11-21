@@ -17,7 +17,7 @@ import (
 func TestASamplingDiagnosticianSaysSoOnceAMinuteAtMost(t *testing.T) {
 	d := NewDiagnostician()
 	d.maxEvents = 1
-	d.sampleIntN = reject
+	d.sampleUniform = rising()
 	now := time.Date(2026, 11, 11, 10, 0, 0, 0, time.UTC)
 	d.now = func() time.Time { return now }
 	add := func(n int) {
@@ -45,7 +45,7 @@ func TestASamplingDiagnosticianSaysSoOnceAMinuteAtMost(t *testing.T) {
 func TestTheSamplingNoticeUsesTheWallClockByDefault(t *testing.T) {
 	d := NewDiagnostician()
 	d.maxEvents = 1
-	d.sampleIntN = reject
+	d.sampleUniform = rising()
 	before := time.Now()
 	d.AddEvent(&events.Event{Type: events.EventTCPRecv})
 	d.AddEvent(&events.Event{Type: events.EventTCPRecv})
@@ -81,7 +81,7 @@ func TestAFullBufferRaisesNoAlert(t *testing.T) {
 
 	d := NewDiagnostician()
 	d.maxEvents = 1
-	d.sampleIntN = reject
+	d.sampleUniform = rising()
 	for i := 0; i < 30_000; i++ {
 		d.AddEvent(&events.Event{Type: events.EventTCPRecv})
 	}

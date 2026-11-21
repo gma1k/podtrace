@@ -79,6 +79,35 @@ type bufferSampler interface {
 	EventsSampledOut() int
 }
 
+// sessionSampler is a Diagnostician given a share of another's buffer, which
+// may have sampled.
+type sessionSampler interface {
+	SessionSampling() (seen, sampledOut int, ok bool)
+}
+
+// samplingNotice says when the counts in the report are a sample, and why.
+func samplingNotice(d Diagnostician) string {
+	var notice string
+	if s, ok := d.(bufferSampler); ok && s.EventsSampledOut() > 0 {
+		notice = fmt.Sprintf("  Events seen: %d; the buffer filled and sampled out %d, so the counts below "+
+			"are a sample (ratios within each event type still hold)\n", s.EventsSeen(), s.EventsSampledOut())
+	} else if s, ok := d.(sessionSampler); ok {
+		if seen, out, ok := s.SessionSampling(); ok {
+			notice = fmt.Sprintf("  These events are this pod's share of a session buffer that saw %d events "+
+				"across all pods and sampled out %d, so the counts below are a sample (ratios within each "+
+				"event type still hold)\n", seen, out)
+		}
+	}
+	if notice == "" {
+		return ""
+	}
+	if c, ok := d.(capacityReporter); ok && c.EventCapacity() < config.MaxEvents {
+		notice += fmt.Sprintf("  The buffer held %d events rather than %d, to stay within the container's "+
+			"memory limit\n", c.EventCapacity(), config.MaxEvents)
+	}
+	return notice
+}
+
 func GenerateSummarySection(d Diagnostician, duration time.Duration) string {
 	events := d.GetEvents()
 	eventsPerSec := d.CalculateRate(len(events), duration)
@@ -86,16 +115,7 @@ func GenerateSummarySection(d Diagnostician, duration time.Duration) string {
 	report += fmt.Sprintf("=== Diagnostic Report (collected over %v) ===\n\n", duration)
 	report += "Summary:\n"
 	report += fmt.Sprintf("  Total events: %d\n", len(events))
-	if s, ok := d.(bufferSampler); ok {
-		if out := s.EventsSampledOut(); out > 0 {
-			report += fmt.Sprintf("  Events seen: %d; the buffer filled and sampled out %d, so the counts below "+
-				"are a sample (ratios within each event type still hold)\n", s.EventsSeen(), out)
-			if c, ok := d.(capacityReporter); ok && c.EventCapacity() < config.MaxEvents {
-				report += fmt.Sprintf("  The buffer held %d events rather than %d, to stay within the container's "+
-					"memory limit\n", c.EventCapacity(), config.MaxEvents)
-			}
-		}
-	}
+	report += samplingNotice(d)
 	report += fmt.Sprintf("  Events per second: %.1f\n", eventsPerSec)
 	report += fmt.Sprintf("  Collection period: %v to %v\n\n", d.StartTime().Format("15:04:05"), d.EndTime().Format("15:04:05"))
 	return report
@@ -1221,7 +1241,11 @@ func formatFastCGIActivity(d Diagnostician, duration time.Duration) string {
 			return ms[i].method < ms[j].method
 		})
 		result += "  Methods:\n"
-		for _, m := range ms {
+		for i, m := range ms {
+			if i >= config.TopProcessesLimit {
+				result += fmt.Sprintf("    (%d more methods)\n", len(ms)-i)
+				break
+			}
 			result += fmt.Sprintf("    %s: %d\n", m.method, m.count)
 		}
 	}
@@ -1275,6 +1299,7 @@ func formatFastCGIActivity(d Diagnostician, duration time.Duration) string {
 	type uriStat struct {
 		uri       string
 		method    string
+		mixed     bool
 		count     int
 		latencies []uint64
 		appErrors int
@@ -1297,6 +1322,8 @@ func formatFastCGIActivity(d Diagnostician, duration time.Duration) string {
 		s.count++
 		if s.method == "" {
 			s.method = method
+		} else if method != "" && method != s.method {
+			s.mixed = true
 		}
 	}
 	for _, e := range resps {
@@ -1336,7 +1363,10 @@ func formatFastCGIActivity(d Diagnostician, duration time.Duration) string {
 			break
 		}
 		method := s.method
-		if method == "" {
+		switch {
+		case s.mixed:
+			method = "(mixed)"
+		case method == "":
 			method = "REQ"
 		}
 		line := fmt.Sprintf("    - %s %s: %d req", sanitize.Terminal(method), sanitize.Terminal(s.uri), s.count)

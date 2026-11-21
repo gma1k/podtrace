@@ -29,14 +29,13 @@ const (
 
 	MaxSymbolTableSize = uint64(64) << 20 // 64 MiB
 
-	MaxSymbolNameBytes = uint64(64) << 20 // 64 MiB
+	MaxMaterializedSymbolBytes = uint64(192) << 20 // 192 MiB
 
 	MaxNoteSize = uint64(4) << 10 // 4 KiB
 )
 
 // OpenRegular opens path for reading only when it is a regular file within
-// MaxFileSize. The open is non-blocking, so a FIFO or device planted under a
-// library's name cannot hang the caller.
+// MaxFileSize.
 func OpenRegular(path string) (*os.File, os.FileInfo, error) {
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOCTTY, 0) // #nosec G304 -- callers pass paths already confined to the target's rootfs; this open only checks the file type.
 	if err != nil {

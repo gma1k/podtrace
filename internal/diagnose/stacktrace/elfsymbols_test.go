@@ -1,7 +1,6 @@
 package stacktrace
 
 import (
-	"debug/elf"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -179,7 +178,7 @@ func TestAnUnparseableBinaryCachesItsAbsence(t *testing.T) {
 	}
 }
 
-func elfOnlyTable(syms ...elf.Symbol) *symbolTable {
+func elfOnlyTable(syms ...funcSymbol) *symbolTable {
 	t := &symbolTable{elfSyms: syms}
 	sort.Slice(t.elfSyms, func(i, j int) bool { return t.elfSyms[i].Value < t.elfSyms[j].Value })
 	return t
@@ -187,8 +186,8 @@ func elfOnlyTable(syms ...elf.Symbol) *symbolTable {
 
 func TestANonGoBinaryResolvesThroughTheELFSymbolTable(t *testing.T) {
 	tbl := elfOnlyTable(
-		elf.Symbol{Name: "handle_request", Value: 0x1000, Size: 0x80},
-		elf.Symbol{Name: "parse_header", Value: 0x1100, Size: 0x40},
+		funcSymbol{Name: "handle_request", Value: 0x1000, Size: 0x80},
+		funcSymbol{Name: "parse_header", Value: 0x1100, Size: 0x40},
 	)
 
 	for addr, want := range map[uint64]string{
@@ -206,7 +205,7 @@ func TestANonGoBinaryResolvesThroughTheELFSymbolTable(t *testing.T) {
 }
 
 func TestAnAddressBeforeTheFirstSymbolResolvesToNothing(t *testing.T) {
-	tbl := elfOnlyTable(elf.Symbol{Name: "first", Value: 0x2000, Size: 0x10})
+	tbl := elfOnlyTable(funcSymbol{Name: "first", Value: 0x2000, Size: 0x10})
 
 	if got := tbl.lookup(0x1fff); got != "" {
 		t.Errorf("lookup below the first symbol = %q, want empty; attributing it to "+
@@ -215,7 +214,7 @@ func TestAnAddressBeforeTheFirstSymbolResolvesToNothing(t *testing.T) {
 }
 
 func TestAnAddressPastASymbolsEndResolvesToNothing(t *testing.T) {
-	tbl := elfOnlyTable(elf.Symbol{Name: "small", Value: 0x3000, Size: 0x10})
+	tbl := elfOnlyTable(funcSymbol{Name: "small", Value: 0x3000, Size: 0x10})
 
 	if got := tbl.lookup(0x3010); got != "" {
 		t.Errorf("lookup past the symbol's size = %q, want empty.\n\nThe gap after a "+
@@ -225,7 +224,7 @@ func TestAnAddressPastASymbolsEndResolvesToNothing(t *testing.T) {
 }
 
 func TestASymbolWithNoSizeStillClaimsItsOwnAddress(t *testing.T) {
-	tbl := elfOnlyTable(elf.Symbol{Name: "sizeless", Value: 0x4000})
+	tbl := elfOnlyTable(funcSymbol{Name: "sizeless", Value: 0x4000})
 
 	if got := tbl.lookup(0x4008); got != "sizeless" {
 		t.Errorf("lookup = %q, want sizeless; a zero size means unknown extent, not "+

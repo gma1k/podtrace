@@ -22,7 +22,7 @@ func (d *Diagnostician) logSamplingLocked() {
 	t := now()
 	fields := []zap.Field{zap.Int("max_events", d.maxEvents), zap.Int("sampled_out", d.droppedEvents)}
 	switch {
-	case d.droppedEvents == 1:
+	case d.lastSamplingNotice.IsZero():
 		logger.Logger().Warn("Event buffer full; sampling events from here on, and the report will say how many it sampled out", fields...)
 	case t.Sub(d.lastSamplingNotice) < samplingNoticeInterval:
 		return

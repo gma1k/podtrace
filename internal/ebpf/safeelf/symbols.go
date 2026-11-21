@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unsafe"
 )
 
 // Symbol is one entry of an ELF symbol table, without its name.
@@ -26,10 +27,7 @@ var symbolTableVersionSections = []elf.SectionType{elf.SHT_GNU_VERSYM, elf.SHT_G
 
 // ForEachSymbol calls fn for every symbol in f's first table of type typ,
 // SHT_SYMTAB or SHT_DYNSYM, the one debug/elf would parse, skipping the
-// reserved null entry, until fn returns false. The name is a view into the
-// string table, valid only during the call, so a table naming every symbol
-// with the same long string costs nothing per symbol. A file without such a
-// table returns elf.ErrNoSymbols.
+// reserved null entry, until fn returns false.
 func ForEachSymbol(f *elf.File, typ elf.SectionType, fn func(name []byte, sym Symbol) bool) error {
 	syms, strs, err := symbolTableData(f, typ)
 	if err != nil {
@@ -116,33 +114,62 @@ func storedPlainWithin(s *elf.Section, limit uint64) bool {
 	return s.Flags&elf.SHF_COMPRESSED == 0 && !strings.HasPrefix(s.Name, ".zdebug") && s.Size <= limit
 }
 
+// materializedSymbolBytes is what one symbol costs once debug/elf and cilium
+// have materialised it, its raw entry and name aside: debug/elf's record.
+const materializedSymbolBytes = 2*uint64(unsafe.Sizeof(elf.Symbol{})) + symbolMapEntryBytes
+
+// symbolMapEntryBytes is one entry of cilium's name-to-address map.
+const symbolMapEntryBytes = 96
+
 // SymbolTableWithinCap reports whether debug/elf can materialise f's symbol
 // table of type typ, the way Symbols, DynamicSymbols and cilium's
 // link.Executable do, within the caps: the table and its string table are
-// bounded in size, and so are the names copied out per symbol. The section
-// is found by type, as debug/elf finds it, not by name. A file without such
-// a table passes.
+// bounded in size, and what materialising them costs, per symbol the raw
+// entry, the records and map entry built from it and the name both as read
+// and as copied, is within MaxMaterializedSymbolBytes.
 func SymbolTableWithinCap(f *elf.File, typ elf.SectionType) bool {
-	if f.SectionByType(typ) == nil {
-		return true
+	_, ok := materializedCost(f, typ, MaxMaterializedSymbolBytes)
+	return ok
+}
+
+// SymbolTablesWithinCap reports whether every symbol table f carries can be
+// materialised together within MaxMaterializedSymbolBytes.
+func SymbolTablesWithinCap(f *elf.File) bool {
+	static, ok := materializedCost(f, elf.SHT_SYMTAB, MaxMaterializedSymbolBytes)
+	if !ok {
+		return false
+	}
+	_, ok = materializedCost(f, elf.SHT_DYNSYM, MaxMaterializedSymbolBytes-static)
+	return ok
+}
+
+// materializedCost returns what materialising f's table of type typ costs,
+// and false when that is over limit or the table cannot be read within the
+// caps.
+func materializedCost(f *elf.File, typ elf.SectionType, limit uint64) (uint64, bool) {
+	sec := f.SectionByType(typ)
+	if sec == nil {
+		return 0, true
 	}
 	if typ == elf.SHT_DYNSYM {
 		for _, vt := range symbolTableVersionSections {
 			if s := f.SectionByType(vt); s != nil && !storedPlainWithin(s, MaxSymbolTableSize) {
-				return false
+				return 0, false
 			}
 		}
 	}
-	var names uint64
+	entry := uint64(elf.Sym64Size)
+	if f.Class == elf.ELFCLASS32 {
+		entry = elf.Sym32Size
+	}
+	perSymbol := entry + materializedSymbolBytes
+	if records := sec.Size / entry; records > 0 && records-1 > limit/perSymbol {
+		return 0, false
+	}
+	var cost uint64
 	err := ForEachSymbol(f, typ, func(name []byte, _ Symbol) bool {
-		names += uint64(len(name))
-		return names <= MaxSymbolNameBytes
+		cost += perSymbol + 2*uint64(len(name))
+		return cost <= limit
 	})
-	return err == nil && names <= MaxSymbolNameBytes
-}
-
-// SymbolTablesWithinCap reports whether every symbol table f carries is
-// within SymbolTableWithinCap.
-func SymbolTablesWithinCap(f *elf.File) bool {
-	return SymbolTableWithinCap(f, elf.SHT_SYMTAB) && SymbolTableWithinCap(f, elf.SHT_DYNSYM)
+	return cost, err == nil && cost <= limit
 }
