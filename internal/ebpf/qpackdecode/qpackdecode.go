@@ -78,7 +78,12 @@ func NewDecoder(maxTableCapacity uint64) *Decoder {
 }
 
 func (d *Decoder) InsertCount() uint64 {
-	return d.evicted + uint64(len(d.entries)-d.head)
+	return d.evicted + uint64(len(d.liveEntries()))
+}
+
+// liveEntries is the dynamic table still in force, oldest entry first.
+func (d *Decoder) liveEntries() []tableEntry {
+	return d.entries[d.head:]
 }
 
 // RetainedBytes is the memory the peer's traffic makes this decoder hold:
