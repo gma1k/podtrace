@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gma1k/podtrace/internal/ebpf/qpackdecode"
+	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/internal/safeconv"
 )
 
@@ -20,10 +21,10 @@ type ConnKey struct {
 	Conn uint64
 }
 
-// Section is one decoded inbound field section.
+// Section is what a decoded inbound field section contributes to its
+// transaction.
 type Section struct {
 	StreamID    uint64
-	Fields      []qpackdecode.HeaderField
 	Method      string
 	Path        string
 	Traceparent string
@@ -470,18 +471,28 @@ func (a *Assembler) retryBlocked(key ConnKey, cs *connState) {
 	cs.blocked = kept
 }
 
+// Bounds on the strings a Section keeps, matching what the BPF transaction
+// record carries for method and traceparent.
+const (
+	sectionMethodMax      = 16
+	sectionPathMax        = 2048
+	sectionTraceparentMax = 64
+)
+
 func (a *Assembler) emit(key ConnKey, cs *connState, streamID uint64, fields []qpackdecode.HeaderField) {
-	sec := Section{StreamID: streamID, Fields: fields}
+	sec := Section{StreamID: streamID}
 	for _, f := range fields {
 		switch f.Name {
 		case ":method":
-			sec.Method = f.Value
+			sec.Method = events.TruncateString(f.Value, sectionMethodMax)
 		case ":path":
-			sec.Path = f.Value
+			sec.Path = events.TruncateString(f.Value, sectionPathMax)
 		case ":status":
 			sec.Status = parseStatus(f.Value)
 		case "traceparent":
-			sec.Traceparent = f.Value
+			if len(f.Value) <= sectionTraceparentMax {
+				sec.Traceparent = f.Value
+			}
 		}
 	}
 	if st := cs.streams[streamID]; st != nil && (sec.Method != "" || sec.Status >= 200) {

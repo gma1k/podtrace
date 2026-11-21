@@ -5,6 +5,7 @@ package sanitize
 
 import (
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -76,9 +77,12 @@ func clean(s string) bool {
 //     (U+202A–U+202E, U+2066–U+2069) and the implicit direction marks
 //     (U+200E LRM, U+200F RLM, U+061C ALM) — the Trojan-Source spoofing
 //     class;
-//   - the invisible U+200B (zero-width space) and U+FEFF (BOM / zero-width
-//     no-break space), which make two visibly identical names differ. The
-//     joiners U+200C/U+200D stay: scripts and emoji sequences need them.
+//   - every other format character (Unicode category Cf: soft hyphen, word
+//     joiner, invisible operators, interlinear annotation, the tag block,
+//     U+200B, U+FEFF, ...), the combining grapheme joiner U+034F, the
+//     Mongolian free variation selectors and the Hangul fillers: all render
+//     as nothing or as blank space, so they make two visibly identical names
+//     differ or smuggle hidden text.
 //
 // Every other rune, including normal printable Unicode, is preserved.
 func unsafeRune(r rune) bool {
@@ -95,9 +99,13 @@ func unsafeRune(r rune) bool {
 		return true
 	case r == 0x061c, r == 0x200e, r == 0x200f:
 		return true
-	case r == 0x200b, r == 0xfeff:
+	case r == 0x200c, r == 0x200d:
+		return false
+	case r == 0x034f, r >= 0x180b && r <= 0x180f:
+		return true
+	case r == 0x115f, r == 0x1160, r == 0x3164, r == 0xffa0:
 		return true
 	default:
-		return false
+		return r > 0x7f && unicode.Is(unicode.Cf, r)
 	}
 }

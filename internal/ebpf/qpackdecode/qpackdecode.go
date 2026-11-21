@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"unsafe"
 
 	"golang.org/x/net/http2/hpack"
 
@@ -29,9 +30,15 @@ const (
 	maxTableCapacity       = 1 << 16
 	maxEncoderRemainder    = 64 * 1024
 	maxPrefixedIntegerBits = 62
+	maxFieldsPerSection    = 256
 )
 
-var errIncomplete = errors.New("qpackdecode: truncated input")
+var tableSlotBytes = int(unsafe.Sizeof(tableEntry{}))
+
+var (
+	errIncomplete    = errors.New("qpackdecode: truncated input")
+	errTooManyFields = fmt.Errorf("qpackdecode: field section exceeds %d field lines", maxFieldsPerSection)
+)
 
 // BlockedError reports a field section that references dynamic table state
 // beyond what the encoder stream has delivered so far (RFC 9204 §2.1.2).
@@ -58,6 +65,7 @@ type Decoder struct {
 	largestCapacity  uint64
 	capacity         uint64
 	entries          []tableEntry
+	head             int
 	evicted          uint64
 	size             uint64
 	remainder        []byte
@@ -70,14 +78,14 @@ func NewDecoder(maxTableCapacity uint64) *Decoder {
 }
 
 func (d *Decoder) InsertCount() uint64 {
-	return d.evicted + uint64(len(d.entries))
+	return d.evicted + uint64(len(d.entries)-d.head)
 }
 
 // RetainedBytes is the memory the peer's traffic makes this decoder hold:
-// its dynamic table (RFC 9204 entry sizes) plus buffered encoder-stream
-// bytes.
+// its dynamic table (RFC 9204 entry sizes), the slots of the array backing
+// it, and buffered encoder-stream bytes.
 func (d *Decoder) RetainedBytes() int {
-	return safeconv.Uint64ToInt(d.size) + cap(d.remainder)
+	return safeconv.Uint64ToInt(d.size) + cap(d.entries)*tableSlotBytes + cap(d.remainder)
 }
 
 // ParseEncoderStream consumes the next chunk of the peer's encoder stream.
@@ -199,7 +207,7 @@ func (d *Decoder) absoluteEntry(absolute uint64) (tableEntry, error) {
 	if absolute >= d.InsertCount() {
 		return tableEntry{}, fmt.Errorf("qpackdecode: reference to dynamic entry %d beyond insert count %d", absolute, d.InsertCount())
 	}
-	return d.entries[absolute-d.evicted], nil
+	return d.entries[d.head+safeconv.Uint64ToInt(absolute-d.evicted)], nil
 }
 
 func (d *Decoder) setCapacity(capacity uint64) error {
@@ -229,11 +237,32 @@ func (d *Decoder) insert(name, value string) error {
 }
 
 func (d *Decoder) evictTo(target uint64) {
-	for d.size > target && len(d.entries) > 0 {
-		d.size -= d.entries[0].size
-		d.entries = d.entries[1:]
+	for d.size > target && d.head < len(d.entries) {
+		d.size -= d.entries[d.head].size
+		d.entries[d.head] = tableEntry{}
+		d.head++
 		d.evicted++
 	}
+	d.compact()
+}
+
+// compact moves the live entries to the front of the backing array once
+// evicted slots outnumber them, and releases an array far larger than the
+// table it now holds.
+func (d *Decoder) compact() {
+	live := len(d.entries) - d.head
+	if d.head == 0 || d.head < live {
+		return
+	}
+	if cap(d.entries) > 4*live+16 {
+		d.entries = append([]tableEntry(nil), d.entries[d.head:]...)
+		d.head = 0
+		return
+	}
+	copy(d.entries, d.entries[d.head:])
+	clear(d.entries[live:])
+	d.entries = d.entries[:live]
+	d.head = 0
 }
 
 // DecodeFieldSection decodes one complete field section (the payload of one
@@ -312,6 +341,9 @@ func (d *Decoder) decodeFieldSection(p []byte, bestEffort bool) ([]HeaderField, 
 	}
 
 	for len(p) > 0 {
+		if len(fields)+unresolved >= maxFieldsPerSection {
+			return nil, 0, errTooManyFields
+		}
 		switch b := p[0]; {
 		case b&0x80 != 0: // Indexed Field Line: 1 T(1) Index(6+)
 			index, n, err := readPrefixedInteger(p, 6)

@@ -226,7 +226,7 @@ func TestSectionStash(t *testing.T) {
 	s := NewSectionStash(time.Hour, 4)
 	key := SectionKey{TGID: 1, Conn: 2, Stream: 3}
 
-	s.Put(key, Section{Fields: nil})
+	s.Put(key, Section{StreamID: 3})
 	if _, ok := s.Take(key); ok {
 		t.Fatal("empty section stashed")
 	}

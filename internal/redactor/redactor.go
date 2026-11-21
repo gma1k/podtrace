@@ -12,10 +12,11 @@ import (
 
 // Rule describes one PII redaction pattern applied to event string fields.
 type Rule struct {
-	Name     string
-	Pattern  *regexp.Regexp
-	Replace  string
-	Validate func(match string) bool
+	Name      string
+	Pattern   *regexp.Regexp
+	Replace   string
+	Validate  func(match string) bool
+	Transform func(s string) string
 }
 
 // ruleSpec is the JSON shape of a custom rule as carried in the
@@ -102,6 +103,9 @@ func (r *Redactor) Redact(e *events.Event) {
 			e.Details = redactSNI(e.Details)
 		}
 	}
+	if e.Type == events.EventRedisCmd {
+		e.Details = redactRedisAuth(e.Details)
+	}
 	e.Target = r.applyRules(e.Target)
 	e.Details = r.applyRules(e.Details)
 	e.TraceState = r.applyRules(e.TraceState)
@@ -115,6 +119,10 @@ func (r *Redactor) RedactText(s string) string {
 // regex replace (with $-group expansion).
 func (r *Redactor) applyRules(s string) string {
 	for _, rule := range r.rules {
+		if rule.Transform != nil {
+			s = rule.Transform(s)
+			continue
+		}
 		if rule.Validate == nil {
 			s = rule.Pattern.ReplaceAllString(s, rule.Replace)
 			continue
@@ -161,7 +169,7 @@ func luhnValid(s string) bool {
 // credentialKeyNames is the single source of truth for the key names whose
 // values are treated as secrets, shared by the key=value, JSON, and YAML
 // rules so coverage cannot drift between formats.
-const credentialKeyNames = `password|passwd|pwd|token|api[_-]?key|apikey|secret|access[_-]?key|` +
+const credentialKeyNames = `password|passwd|pwd|passcode|token|api[_-]?key|apikey|secret|access[_-]?key|` +
 	`authorization|auth|bearer|session[_-]?id|jsessionid|phpsessid|asp\.net_sessionid|session|sid|` +
 	`csrf[_-]?token|xsrf[_-]?token|refresh[_-]?token|id[_-]?token|` +
 	`private[_-]?key|client[_-]?key|passphrase|signature|credentials?`
@@ -180,6 +188,23 @@ const (
 	doubleQuotedValue = `"(?:[^"\\]|\\.)*(?:"|\\?$)`
 	singleQuotedValue = `'[^']*(?:'|$)`
 )
+
+var (
+	escapedJSONCredential = regexp.MustCompile(`(?i)\\"(` + affixedCredentialKey + `)\\"\s*:\s*` +
+		`(?:\\"(?:[^"\\]|\\\\\\\\|\\\\\\"|\\[^"\\])*(?:\\"|\\*$)|[^\s,}\]"\\{\[]+)`)
+	yamlCredential = regexp.MustCompile(`(?i)(')?\b(` + affixedCredentialKey + `)'?\s*:\s*` +
+		`(?:` + doubleQuotedValue + `|` + singleQuotedValue + `|[^\s,}]+)`)
+	xmlCredential  = regexp.MustCompile(`(?i)<((?:[\w.\-]+:)?(` + affixedCredentialKey + `))(\s[^<>]*)?>[^<]+`)
+	flagCredential = regexp.MustCompile(`(?im)(^|[\s"'])(--?(` + affixedCredentialKey + `))[ \t]+` +
+		`(?:` + doubleQuotedValue + `|` + singleQuotedValue + `|[^\s"'\-][^\s"']*)`)
+	redisAuthCommand = regexp.MustCompile(`(?im)^([ \t]*(?:AUTH|HELLO[ \t]+\S+[ \t]+AUTH|CONFIG[ \t]+SET[ \t]+(?:requirepass|masterauth)))[ \t]+\S.*$`)
+)
+
+// redactRedisAuth masks the arguments of the Redis commands that carry a
+// password.
+func redactRedisAuth(s string) string {
+	return redisAuthCommand.ReplaceAllString(s, "${1} ***")
+}
 
 func defaultRules() []Rule {
 	return []Rule{
@@ -250,22 +275,32 @@ func defaultRules() []Rule {
 			Replace: "${1}***",
 		},
 		{
-			Name: "credential_json",
-			Pattern: regexp.MustCompile(`(?i)"(` + credentialKeyNames + `)"\s*:\s*` +
-				`(?:` + doubleQuotedValue + `|[^\s,}\]"{\[]+)`),
-			Replace: `"${1}":"***"`,
+			Name:      "credential_json",
+			Transform: redactJSONCredentials,
 		},
 		{
-			Name: "credential_escaped_json",
-			Pattern: regexp.MustCompile(`(?i)\\"(` + credentialKeyNames + `)\\"\s*:\s*` +
-				`(?:\\"(?:[^"\\]|\\\\\\\\|\\\\\\"|\\[^"\\])*(?:\\"|\\*$)|[^\s,}\]"\\{\[]+)`),
-			Replace: `\"${1}\":\"***\"`,
+			Name:     "credential_escaped_json",
+			Pattern:  escapedJSONCredential,
+			Replace:  `\"${1}\":\"***\"`,
+			Validate: keyGroupValidator(escapedJSONCredential, 1),
 		},
 		{
-			Name: "credential_yaml",
-			Pattern: regexp.MustCompile(`(?i)(')?\b(` + credentialKeyNames + `)'?\s*:\s*` +
-				`(?:` + doubleQuotedValue + `|` + singleQuotedValue + `|[^\s,}]+)`),
-			Replace: "${1}${2}${1}: ***",
+			Name:     "credential_yaml",
+			Pattern:  yamlCredential,
+			Replace:  "${1}${2}${1}: ***",
+			Validate: keyGroupValidator(yamlCredential, 2),
+		},
+		{
+			Name:     "credential_xml",
+			Pattern:  xmlCredential,
+			Replace:  "<${1}${3}>***",
+			Validate: keyGroupValidator(xmlCredential, 2),
+		},
+		{
+			Name:     "credential_flag",
+			Pattern:  flagCredential,
+			Replace:  "${1}${2} ***",
+			Validate: keyGroupValidator(flagCredential, 3),
 		},
 		{
 			Name:    "email",
