@@ -210,6 +210,11 @@ func (in *AgentMetricsSpec) DeepCopyInto(out *AgentMetricsSpec) {
 		*out = new(bool)
 		**out = **in
 	}
+	if in.ContainerRowBudget != nil {
+		in, out := &in.ContainerRowBudget, &out.ContainerRowBudget
+		*out = new(int32)
+		**out = **in
+	}
 	if in.AttributeCardinality != nil {
 		in, out := &in.AttributeCardinality, &out.AttributeCardinality
 		*out = new(int32)

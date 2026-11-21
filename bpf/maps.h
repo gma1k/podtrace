@@ -147,7 +147,8 @@ struct dns_query_state {
 	u32 qtype;
 	u32 server_ip;
 	u8 transport;
-	u8 _pad[3];
+	u8 multi_server;
+	u16 client_port;
 	char comm[COMM_LEN];
 	char name[MAX_STRING_LEN];
 	u8 server_ip6[16];

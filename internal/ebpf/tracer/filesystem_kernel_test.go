@@ -160,6 +160,7 @@ func TestKernelFSWorker(t *testing.T) {
 		}
 	}
 	fmt.Println("done")
+	syscall.Exit(0)
 }
 
 type fsWorker struct {

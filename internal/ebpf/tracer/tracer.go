@@ -81,6 +81,7 @@ type Tracer struct {
 	cgroupMkdirAttached bool
 	inheritedCache      sync.Map
 	inheritedParents    atomic.Pointer[map[uint64]struct{}]
+	inheritedFilter     atomic.Pointer[InheritedCgroupFilter]
 	collection          *ebpf.Collection
 	links               []link.Link
 	probeGroupsMu       sync.Mutex
@@ -134,6 +135,9 @@ type Tracer struct {
 	denyWhenNoTargets             atomic.Bool
 	targetCgroupIDs               atomic.Pointer[map[uint64]struct{}]
 	cgroupIDsAuthoritative        atomic.Bool
+	cgroupFilterBypassed          atomic.Bool
+	aggPressureMu                 sync.Mutex
+	aggPressure                   kernelagg.PressureTracker
 	cgroupCapacityWarned          atomic.Int64
 	cgroupWriteMu                 sync.Mutex
 	onCPUFlags                    uint32
@@ -1088,6 +1092,7 @@ func (t *Tracer) primaryCgroupPath() string {
 func (t *Tracer) SetCgroups(cgroupPaths []string) error {
 	if len(cgroupPaths) == 0 {
 		t.cgroupWriteMu.Lock()
+		t.cgroupFilterBypassed.Store(false)
 		t.setCgroupPaths(nil)
 		t.storeCgroupIDs(map[uint64]struct{}{})
 		t.cgroupIDsAuthoritative.Store(false)
@@ -1155,6 +1160,7 @@ func (t *Tracer) attachCgroups(cgroupPaths []string, replace bool) error {
 
 	t.cgroupWriteMu.Lock()
 	defer t.cgroupWriteMu.Unlock()
+	t.cgroupFilterBypassed.Store(false)
 
 	var allPaths []string
 	var newIDs map[uint64]struct{}
@@ -1353,8 +1359,90 @@ func (t *Tracer) warnOnCgroupCapacity(count int, maxEntries uint32) {
 		zap.Uint32("max_entries", maxEntries))
 }
 
-// setCgroupFilterEnabled flips the dedicated flag the BPF side consults
-// before applying the in-kernel cgroup prefilter.
+// newEventCounters returns the counters one Start shares between its reader
+// goroutines and its monitor. The filter bypass lives on the tracer, so a
+// new target set can end it.
+func (t *Tracer) newEventCounters() *eventCounters {
+	return &eventCounters{
+		collected:         new(atomic.Int64),
+		filtered:          new(atomic.Int64),
+		parsed:            new(atomic.Int64),
+		filteringDisabled: &t.cgroupFilterBypassed,
+	}
+}
+
+// bypassStalledCgroupFilter applies the opt-in fallback for a target set that
+// has admitted nothing while events keep arriving.
+func (t *Tracer) checkEventFlow(ec *eventCounters, elapsed time.Duration, hintLogged bool) bool {
+	if !t.cgroupFilterBypassed.Load() && ec.parsed.Load() > 10 && ec.collected.Load() == 0 && elapsed > 10*time.Second {
+		return t.handleStalledCgroupFilter(ec, hintLogged)
+	} else if ec.parsed.Load() == 0 && elapsed > 15*time.Second {
+		logger.Warn("No events parsed from ring buffer after 15 seconds - check eBPF program attachment",
+			zap.Int("target_cgroup_id_count", len(t.loadCgroupIDs())),
+			zap.String("cgroup_path", t.primaryCgroupPath()),
+			zap.Duration("elapsed", elapsed),
+			zap.Int("links_attached", t.linkCount()))
+		logger.Warn("If running in a container (e.g. DaemonSet), ensure host /sys/fs/cgroup and /proc are mounted and PODTRACE_CGROUP_BASE / PODTRACE_PROC_BASE point at them; see installation doc 'Running as a DaemonSet'")
+	} else if ec.collected.Load() == 0 && ec.parsed.Load() > 0 && elapsed > 10*time.Second {
+		logger.Warn("Events parsed but none collected - filtering may be too strict",
+			zap.Int64("events_parsed", ec.parsed.Load()),
+			zap.Int64("events_filtered", ec.filtered.Load()),
+			zap.Int("target_cgroup_id_count", len(t.loadCgroupIDs())),
+			zap.String("cgroup_path", t.primaryCgroupPath()),
+			zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter.Load()),
+			zap.Duration("elapsed", elapsed))
+		if t.useUserspaceCgroupFilter.Load() {
+			logger.Warn("Running in a container (e.g. DaemonSet)? Set PODTRACE_CGROUP_BASE and PODTRACE_PROC_BASE to the host's cgroup and proc mount paths so the target pod's cgroup is visible and filtering can match events",
+				zap.String("cgroup_base", config.CgroupBasePath),
+				zap.String("proc_base", config.ProcBasePath))
+		}
+	}
+	return hintLogged
+}
+
+// handleStalledCgroupFilter reacts to a target set that has filtered every
+// parsed event: it bypasses the filter when the operator allowed that, and
+// otherwise says once how to allow it.
+func (t *Tracer) handleStalledCgroupFilter(ec *eventCounters, hintLogged bool) bool {
+	if config.AllowCgroupFilterAutoDisable() {
+		t.bypassStalledCgroupFilter(ec)
+		return hintLogged
+	}
+	if !hintLogged {
+		logger.Warn("Events parsed but all filtered; automatic cgroup filter disable not applied. Set PODTRACE_ALLOW_CGROUP_FILTER_DISABLE=1 to allow clearing cgroup filters as a last resort",
+			zap.Int64("events_parsed", ec.parsed.Load()),
+			zap.Int64("events_filtered", ec.filtered.Load()),
+			zap.Int64("events_collected", ec.collected.Load()),
+			zap.String("cgroup_path", t.primaryCgroupPath()))
+	}
+	return true
+}
+
+func (t *Tracer) bypassStalledCgroupFilter(ec *eventCounters) {
+	logger.Warn("Events being parsed but all filtered - disabling filtering as fallback until the targets change",
+		zap.Int64("events_parsed", ec.parsed.Load()),
+		zap.Int64("events_filtered", ec.filtered.Load()),
+		zap.Int64("events_collected", ec.collected.Load()),
+		zap.Int("target_cgroup_id_count", len(t.loadCgroupIDs())),
+		zap.String("cgroup_path", t.primaryCgroupPath()),
+		zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter.Load()))
+	if err := t.bypassCgroupFilter(); err != nil {
+		logger.Warn("Could not clear the kernel-side cgroup filter", zap.Error(err))
+		return
+	}
+	logger.Info("Cleared kernel-side cgroup filter")
+}
+
+// bypassCgroupFilter is the opt-in last resort for a target set that admits
+// nothing: both the kernel and the userspace cgroup gate stand aside until
+// the targets next change.
+func (t *Tracer) bypassCgroupFilter() error {
+	t.cgroupWriteMu.Lock()
+	defer t.cgroupWriteMu.Unlock()
+	t.cgroupFilterBypassed.Store(true)
+	return t.setCgroupFilterEnabled(false)
+}
+
 func (t *Tracer) setCgroupFilterEnabled(enabled bool) error {
 	if t.collection == nil || t.collection.Maps == nil {
 		return nil
@@ -1661,16 +1749,7 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 		go t.serveManagementAPI(ctx, config.ManagementPort)
 	}
 
-	var eventsCollected atomic.Int64
-	var eventsFiltered atomic.Int64
-	var eventsParsed atomic.Int64
-	var filteringDisabled atomic.Bool
-	ec := &eventCounters{
-		collected:         &eventsCollected,
-		filtered:          &eventsFiltered,
-		parsed:            &eventsParsed,
-		filteringDisabled: &filteringDisabled,
-	}
+	ec := t.newEventCounters()
 	startTime := time.Now()
 
 	logger.Info("Starting event collection",
@@ -1693,53 +1772,7 @@ func (t *Tracer) Start(ctx context.Context, eventChan chan<- *events.Event) erro
 				if t.idleDeny() {
 					continue
 				}
-				elapsed := time.Since(startTime)
-				if !filteringDisabled.Load() && eventsParsed.Load() > 10 && eventsCollected.Load() == 0 && elapsed > 10*time.Second {
-					if config.AllowCgroupFilterAutoDisable() {
-						logger.Warn("Events being parsed but all filtered - disabling filtering as fallback",
-							zap.Int64("events_parsed", eventsParsed.Load()),
-							zap.Int64("events_filtered", eventsFiltered.Load()),
-							zap.Int64("events_collected", eventsCollected.Load()),
-							zap.Int("target_cgroup_id_count", len(t.loadCgroupIDs())),
-							zap.String("cgroup_path", t.primaryCgroupPath()),
-							zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter.Load()))
-						filteringDisabled.Store(true)
-						t.cgroupWriteMu.Lock()
-						t.useUserspaceCgroupFilter.Store(false)
-						t.storeCgroupIDs(map[uint64]struct{}{})
-						if err := t.syncTargetCgroupMap(); err == nil {
-							logger.Info("Cleared kernel-side cgroup filter")
-						}
-						t.cgroupWriteMu.Unlock()
-					} else if !filterAutoDisableHintLogged {
-						filterAutoDisableHintLogged = true
-						logger.Warn("Events parsed but all filtered; automatic cgroup filter disable not applied. Set PODTRACE_ALLOW_CGROUP_FILTER_DISABLE=1 to allow clearing cgroup filters as a last resort",
-							zap.Int64("events_parsed", eventsParsed.Load()),
-							zap.Int64("events_filtered", eventsFiltered.Load()),
-							zap.Int64("events_collected", eventsCollected.Load()),
-							zap.String("cgroup_path", t.primaryCgroupPath()))
-					}
-				} else if eventsParsed.Load() == 0 && elapsed > 15*time.Second {
-					logger.Warn("No events parsed from ring buffer after 15 seconds - check eBPF program attachment",
-						zap.Int("target_cgroup_id_count", len(t.loadCgroupIDs())),
-						zap.String("cgroup_path", t.primaryCgroupPath()),
-						zap.Duration("elapsed", elapsed),
-						zap.Int("links_attached", t.linkCount()))
-					logger.Warn("If running in a container (e.g. DaemonSet), ensure host /sys/fs/cgroup and /proc are mounted and PODTRACE_CGROUP_BASE / PODTRACE_PROC_BASE point at them; see installation doc 'Running as a DaemonSet'")
-				} else if eventsCollected.Load() == 0 && eventsParsed.Load() > 0 && elapsed > 10*time.Second {
-					logger.Warn("Events parsed but none collected - filtering may be too strict",
-						zap.Int64("events_parsed", eventsParsed.Load()),
-						zap.Int64("events_filtered", eventsFiltered.Load()),
-						zap.Int("target_cgroup_id_count", len(t.loadCgroupIDs())),
-						zap.String("cgroup_path", t.primaryCgroupPath()),
-						zap.Bool("use_userspace_filter", t.useUserspaceCgroupFilter.Load()),
-						zap.Duration("elapsed", elapsed))
-					if t.useUserspaceCgroupFilter.Load() {
-						logger.Warn("Running in a container (e.g. DaemonSet)? Set PODTRACE_CGROUP_BASE and PODTRACE_PROC_BASE to the host's cgroup and proc mount paths so the target pod's cgroup is visible and filtering can match events",
-							zap.String("cgroup_base", config.CgroupBasePath),
-							zap.String("proc_base", config.ProcBasePath))
-					}
-				}
+				filterAutoDisableHintLogged = t.checkEventFlow(ec, time.Since(startTime), filterAutoDisableHintLogged)
 			}
 		}
 	}()
@@ -3235,6 +3268,16 @@ func (t *Tracer) SetKernelAggregationMode(mode kernelagg.Mode) error {
 	if m == nil {
 		return nil
 	}
+	if mode != kernelagg.ModeOff {
+		if cfg := t.collection.Maps[kernelagg.ConfigMapName]; cfg != nil {
+			budget := config.ClampUint32(config.WorkloadMetricsContainerRowBudget)
+			if err := kernelagg.SetCgroupRowBudget(cfg, budget); err != nil {
+				logger.Warn("Could not set the per-cgroup row budget of the kernel aggregation map; "+
+					"one workload with many peers can evict other workloads' rows",
+					zap.Error(err))
+			}
+		}
+	}
 	return kernelagg.SetMode(m, mode)
 }
 
@@ -3248,5 +3291,38 @@ func (t *Tracer) DrainKernelMetrics() ([]kernelagg.Row, error) {
 	if m == nil {
 		return nil, nil
 	}
-	return kernelagg.Drain(m)
+	stats, statsErr := t.readKernelAggStats()
+	rows, taken, err := kernelagg.DrainCounted(m)
+	if statsErr == nil {
+		t.aggPressureMu.Lock()
+		t.aggPressure.Observe(stats, taken)
+		t.aggPressureMu.Unlock()
+	}
+	if cfg := t.collection.Maps[kernelagg.ConfigMapName]; cfg != nil {
+		if genErr := kernelagg.AdvanceGeneration(cfg); genErr != nil {
+			logger.Debug("Could not start a new kernel aggregation budget interval", zap.Error(genErr))
+		}
+	}
+	return rows, err
+}
+
+func (t *Tracer) readKernelAggStats() (kernelagg.Stats, error) {
+	sm := t.collection.Maps[kernelagg.StatsMapName]
+	if sm == nil {
+		return kernelagg.Stats{}, errors.New("kernel aggregation stats map not loaded")
+	}
+	return kernelagg.ReadStats(sm)
+}
+
+// KernelAggregationPressure reports, since the probes loaded, how many
+// aggregation rows the kernel evicted before a drain reached them (a lower
+// bound) and how many observations lost their peer to the per-cgroup row
+// budget.
+func (t *Tracer) KernelAggregationPressure() kernelagg.Pressure {
+	if t == nil {
+		return kernelagg.Pressure{}
+	}
+	t.aggPressureMu.Lock()
+	defer t.aggPressureMu.Unlock()
+	return t.aggPressure.Pressure()
 }

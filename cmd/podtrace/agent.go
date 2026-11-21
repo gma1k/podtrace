@@ -245,6 +245,20 @@ func (a *ebpfBackendAdapter) DrainKernelMetrics() ([]kernelagg.Row, error) {
 	return agg.DrainKernelMetrics()
 }
 
+type kernelAggPressureCapable interface {
+	KernelAggregationPressure() kernelagg.Pressure
+}
+
+// KernelAggregationPressure forwards the tracer's eviction and peer-folding
+// totals for the kernel aggregation map, or zero when it keeps none.
+func (a *ebpfBackendAdapter) KernelAggregationPressure() kernelagg.Pressure {
+	p, ok := a.tr.(kernelAggPressureCapable)
+	if !ok {
+		return kernelagg.Pressure{}
+	}
+	return p.KernelAggregationPressure()
+}
+
 // onCPUCapable is the slice of the eBPF tracer the continuous profiler's
 // on-CPU source needs.
 type onCPUCapable interface {

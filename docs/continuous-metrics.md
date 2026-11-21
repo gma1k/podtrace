@@ -44,6 +44,7 @@ agent:
     kernelAggregation: true    # on by default; see "Kernel-side aggregation"
     excludeNamespaces: []      # skipped by the plane; diagnostics unaffected
     seriesBudget: 0            # 0 uses the built-in default of 40000
+    containerRowBudget: 4096   # per-container kernel rows per drain; 0 = off
     nativeHistograms: true
     labels:
       pod: false               # each of these multiplies series count
@@ -157,6 +158,7 @@ underlying knobs, useful when running the agent outside the operator:
 | `PODTRACE_WORKLOAD_METRICS` | `false` | `enabled` |
 | `PODTRACE_WORKLOAD_METRICS_EXCLUDE_NAMESPACES` | empty | `excludeNamespaces`, comma-separated |
 | `PODTRACE_WORKLOAD_METRICS_SERIES_BUDGET` | `40000` | `seriesBudget` |
+| `PODTRACE_WORKLOAD_METRICS_CONTAINER_ROW_BUDGET` | `4096` | `containerRowBudget`, `0` turns it off |
 | `PODTRACE_WORKLOAD_METRICS_NATIVE_HISTOGRAMS` | `true` | `nativeHistograms` |
 | `PODTRACE_WORKLOAD_METRICS_POD_LABEL` | `false` | `labels.pod` |
 | `PODTRACE_WORKLOAD_METRICS_PROCESS_LABEL` | `false` | `labels.process` |
@@ -1115,7 +1117,22 @@ it. Draining means an eviction costs at most one partial interval.
 
 `PODTRACE_WORKLOAD_METRICS_DRAIN_INTERVAL` (default `10s`) bounds how long an
 observation waits before it is scrapeable. `podtrace_agent_kernel_agg_rows_total`
-reports rows drained by outcome, `applied`, `unattributed`, `drain_failed`.
+reports rows drained by outcome, `applied`, `unattributed`, `drain_failed`,
+plus `evicted` (rows the LRU dropped before a drain reached them, a lower
+bound) and `peer_collapsed` (see below).
+
+### Per-container row budget
+
+The map is shared by every traced container on the node, and a row's key
+includes the peer address and port. A container that talks to thousands of
+distinct peers in one interval, by design or through a port scan, would
+otherwise evict every other container's rows. So each container may create at
+most `containerRowBudget` rows (default `4096`, chart value
+`agent.metrics.containerRowBudget`) between two drains. Past that, its new
+rows drop the peer address and port: counts, latency and bytes stay exact,
+only the service-map edge for those observations is lost. `peer_collapsed` counts how many observations were
+folded this way; a steady rate means the budget is too small for that
+workload. `0` turns the budget off.
 
 ### The ring-buffer bypass
 

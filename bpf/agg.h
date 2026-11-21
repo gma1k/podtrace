@@ -44,6 +44,41 @@ struct {
 	__uint(max_entries, 1);
 } agg_enabled SEC(".maps");
 
+struct agg_config {
+	u32 cgroup_row_budget;
+	u32 generation;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__type(key, u32);
+	__type(value, struct agg_config);
+	__uint(max_entries, 1);
+} agg_config SEC(".maps");
+
+struct agg_cgroup_rows_value {
+	u32 generation;
+	u32 rows;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__type(key, u64);
+	__type(value, struct agg_cgroup_rows_value);
+	__uint(max_entries, 16384);
+} agg_cgroup_rows SEC(".maps");
+
+#define AGG_STAT_ROWS_CREATED  0
+#define AGG_STAT_PEER_COLLAPSED 1
+#define AGG_STAT_COUNT         2
+
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__type(key, u32);
+	__type(value, u64);
+	__uint(max_entries, AGG_STAT_COUNT);
+} agg_stats SEC(".maps");
+
 #define AGG_MODE_OFF    0
 #define AGG_MODE_ON     1
 #define AGG_MODE_BYPASS 2
@@ -137,9 +172,50 @@ static __always_inline void agg_key_peer(struct agg_key *key, const struct event
 	key->peer_addr[15] = (u8)v4;
 }
 
+static __always_inline void agg_stat_inc(u32 index)
+{
+	u64 *count = bpf_map_lookup_elem(&agg_stats, &index);
+	if (count)
+		*count += 1;
+}
+
+static __always_inline int agg_cgroup_over_budget(u64 cgroup_id, const struct agg_config *cfg)
+{
+	if (!cfg || cfg->cgroup_row_budget == 0)
+		return 0;
+	struct agg_cgroup_rows_value *rows = bpf_map_lookup_elem(&agg_cgroup_rows, &cgroup_id);
+	if (!rows || rows->generation != cfg->generation)
+		return 0;
+	return rows->rows >= cfg->cgroup_row_budget;
+}
+
+static __always_inline void agg_cgroup_row_created(u64 cgroup_id, const struct agg_config *cfg)
+{
+	agg_stat_inc(AGG_STAT_ROWS_CREATED);
+	if (!cfg || cfg->cgroup_row_budget == 0)
+		return;
+	struct agg_cgroup_rows_value *rows = bpf_map_lookup_elem(&agg_cgroup_rows, &cgroup_id);
+	if (rows && rows->generation == cfg->generation) {
+		__sync_fetch_and_add(&rows->rows, 1);
+		return;
+	}
+	struct agg_cgroup_rows_value fresh = {
+		.generation = cfg->generation,
+		.rows = 1,
+	};
+	bpf_map_update_elem(&agg_cgroup_rows, &cgroup_id, &fresh, BPF_ANY);
+}
+
+static __always_inline int agg_key_has_peer(const struct agg_key *key)
+{
+	const u64 *addr = (const u64 *)key->peer_addr;
+	return addr[0] | addr[1] | key->peer_port;
+}
+
 static __always_inline int agg_record_in(void *map, u64 cgroup_id, u8 event_type, u8 variant,
 					 u8 role, const struct event *peer,
-					 u64 latency_ns, u64 bytes, int bucketed)
+					 u64 latency_ns, u64 bytes, int bucketed,
+					 int budgeted)
 {
 	struct agg_key key = {};
 	struct agg_value *val;
@@ -159,10 +235,24 @@ static __always_inline int agg_record_in(void *map, u64 cgroup_id, u8 event_type
 
 	val = bpf_map_lookup_elem(map, &key);
 	if (!val) {
-		bpf_map_update_elem(map, &key, &agg_value_zero, BPF_NOEXIST);
-		val = bpf_map_lookup_elem(map, &key);
-		if (!val)
-			return 0;
+		const struct agg_config *cfg = NULL;
+		if (budgeted) {
+			u32 zero = 0;
+			cfg = bpf_map_lookup_elem(&agg_config, &zero);
+			if (agg_key_has_peer(&key) && agg_cgroup_over_budget(cgroup_id, cfg)) {
+				__builtin_memset(key.peer_addr, 0, sizeof(key.peer_addr));
+				key.peer_port = 0;
+				agg_stat_inc(AGG_STAT_PEER_COLLAPSED);
+				val = bpf_map_lookup_elem(map, &key);
+			}
+		}
+		if (!val) {
+			if (bpf_map_update_elem(map, &key, &agg_value_zero, BPF_NOEXIST) == 0 && budgeted)
+				agg_cgroup_row_created(cgroup_id, cfg);
+			val = bpf_map_lookup_elem(map, &key);
+			if (!val)
+				return 0;
+		}
 	}
 
 	val->count += 1;
@@ -179,7 +269,7 @@ static __always_inline int agg_record(u64 cgroup_id, u8 event_type, u8 variant,
 	if (!agg_is_enabled())
 		return 0;
 	return agg_record_in(&agg_metrics, cgroup_id, event_type, variant,
-			     role, peer, latency_ns, bytes, bucketed);
+			     role, peer, latency_ns, bytes, bucketed, 1);
 }
 
 #define AGG_VARIANT(proto, status_class, is_error) \

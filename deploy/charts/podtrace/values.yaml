@@ -173,6 +173,10 @@ agent:
     # only those of 1ms or more become events.
     filesystem: true
 
+    # Rows one container may create in the node's shared kernel aggregation
+    # map between two drains.
+    containerRowBudget: 4096
+
     attributeCardinality: 0
 
     labels:

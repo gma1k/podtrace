@@ -427,7 +427,7 @@ loads that only when the kernel rejects the preferred program (see
 
 1. **Create test pod**:
    ```bash
-   kubectl run test-pod --image=nginx:1.31@sha256:689fbc6acfefc8a172d86d5779265fd52dd82e8c6b0c68c7d4aa35734340eb2a -n default
+   kubectl run test-pod --image=nginx:1.31@sha256:84f7876d21d154885f99554d7ae325d8c2213f9169726ea7ab60642f2573a787 -n default
    ```
 
 2. **Run podtrace**:

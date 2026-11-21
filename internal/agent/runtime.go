@@ -463,6 +463,20 @@ func logDNSCoverage(logger logr.Logger, packetCapture bool) {
 		"remedy", "leave TracerConfig.spec.agent.dnsPacketCapture on to count every query on the wire")
 }
 
+// kernelAggPressureReporter is the optional part of a kernel aggregator that
+// reports what the shared aggregation map evicted or folded.
+type kernelAggPressureReporter interface {
+	KernelAggregationPressure() kernelagg.Pressure
+}
+
+func recordKernelAggPressure(aggregator any, metrics *Metrics) {
+	reporter, ok := aggregator.(kernelAggPressureReporter)
+	if !ok {
+		return
+	}
+	metrics.RecordKernelAggPressure(reporter.KernelAggregationPressure())
+}
+
 // drainKernelMetrics folds the kernel's aggregation map into the sink on an
 // interval, which is what makes the plane cost O(series) instead of O(events).
 func drainKernelMetrics(ctx context.Context, backend tracer.TracerBackend, sink *workloadmetrics.Sink, router *Router, metrics *Metrics, logger logr.Logger) error {
@@ -515,6 +529,7 @@ func drainKernelMetrics(ctx context.Context, backend tracer.TracerBackend, sink 
 				return
 			}
 		}
+		recordKernelAggPressure(aggregator, metrics)
 		applied := sink.IngestKernel(rows)
 		metrics.RecordKernelDrain(len(rows), applied)
 		metrics.RecordKernelDrainTime(time.Now(), config.WorkloadMetricsDrainInterval)

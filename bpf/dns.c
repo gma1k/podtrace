@@ -278,6 +278,32 @@ __noinline int dns_skip_name(struct __sk_buff *skb, int off) {
 	return off & DNS_OFF_MASK;
 }
 
+static __always_inline int dns_server_matches(struct __sk_buff *skb,
+					      const struct dns_query_state *q,
+					      u8 is_v6, int v4_off, int v6_off) {
+	if (!is_v6) {
+		__u32 addr = 0;
+		if (bpf_skb_load_bytes(skb, v4_off, &addr, sizeof(addr)) < 0)
+			return 0;
+		return addr == q->server_ip;
+	}
+	__u64 addr6[2] = {};
+	if (bpf_skb_load_bytes(skb, v6_off, addr6, sizeof(addr6)) < 0)
+		return 0;
+	const __u64 *want = (const __u64 *)q->server_ip6;
+	return addr6[0] == want[0] && addr6[1] == want[1];
+}
+
+static __always_inline int dns_response_matches_query(struct __sk_buff *skb,
+						      const struct dns_query_state *q,
+						      u8 is_v6, __u16 dport) {
+	if (q->client_port != dport)
+		return 0;
+	if (q->multi_server)
+		return 1;
+	return dns_server_matches(skb, q, is_v6, 12, 8);
+}
+
 static __always_inline int dns_egress_run(struct __sk_buff *skb, int task_pid) {
 	u8 is_v6 = 0, proto = 0;
 	int l4 = l4_offset(skb, &is_v6, &proto);
@@ -336,6 +362,9 @@ static __always_inline int dns_egress_run(struct __sk_buff *skb, int task_pid) {
 	struct dns_query_state *sent = bpf_map_lookup_elem(&dns_inflight, &key);
 	if (sent) {
 		sent->last_ns = bpf_ktime_get_ns();
+		sent->client_port = sport;
+		if (!dns_server_matches(skb, sent, is_v6, 16, 24))
+			sent->multi_server = 1;
 		return 1;
 	}
 
@@ -344,6 +373,7 @@ static __always_inline int dns_egress_run(struct __sk_buff *skb, int task_pid) {
 	q.last_ns = q.ts_ns;
 	q.pid = task_pid ? agent_ns_tgid() : 0;
 	q.transport = transport;
+	q.client_port = sport;
 	if (!is_v6) {
 		__u32 daddr = 0;
 		if (bpf_skb_load_bytes(skb, 16, &daddr, sizeof(daddr)) == 0)
@@ -459,6 +489,9 @@ int dns_ingress(struct __sk_buff *skb) {
 		return 1;
 	if (bpf_ntohs(sport) != DNS_PORT)
 		return 1;
+	__u16 dport = 0;
+	if (bpf_skb_load_bytes(skb, l4 + 2, &dport, sizeof(dport)) < 0)
+		return 1;
 
 	u8 transport = 0;
 	int dns_off = dns_msg_offset(skb, l4, proto, &transport);
@@ -478,6 +511,8 @@ int dns_ingress(struct __sk_buff *skb) {
 	key.txid = bpf_ntohs(txid);
 	struct dns_query_state *q = bpf_map_lookup_elem(&dns_inflight, &key);
 	if (!q)
+		return 1;
+	if (!dns_response_matches_query(skb, q, is_v6, dport))
 		return 1;
 
 	struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);

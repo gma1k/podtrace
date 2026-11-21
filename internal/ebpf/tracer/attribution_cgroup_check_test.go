@@ -96,6 +96,7 @@ func TestProcCgroupIDUnverifiable(t *testing.T) {
 		"directory gone":        "0::/kubepods.slice/missing\n",
 		"relative path":         "0::kubepods.slice\n",
 	}
+	swapCgroupNamespaceRoot(t, "", false)
 	for name, content := range cases {
 		t.Run(name, func(t *testing.T) {
 			fakeProcCgroup(t, "4243", content)

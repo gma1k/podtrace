@@ -176,6 +176,8 @@ var (
 	WorkloadMetricsReapInterval = getDurationEnvOrDefault("PODTRACE_WORKLOAD_METRICS_REAP_INTERVAL", time.Minute)
 
 	WorkloadMetricsDrainInterval = getDurationEnvOrDefault("PODTRACE_WORKLOAD_METRICS_DRAIN_INTERVAL", 10*time.Second)
+
+	WorkloadMetricsContainerRowBudget = getNonNegativeIntEnvOrDefault("PODTRACE_WORKLOAD_METRICS_CONTAINER_ROW_BUDGET", 4096)
 )
 
 var (
@@ -505,14 +507,20 @@ func getIntEnvOrDefault(key string, defaultValue int) int {
 	return defaultValue
 }
 
+// getNonNegativeIntEnvOrDefault reads an integer knob where zero is a real
+// setting, typically "no limit".
+func getNonNegativeIntEnvOrDefault(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if i, err := strconv.Atoi(value); err == nil && i >= 0 {
+			return i
+		}
+		warnIgnoredEnv(key, value, "must be a non-negative integer")
+	}
+	return defaultValue
+}
+
 // ParseNonNegativeFloat is the accepted form of a float-valued environment
-// variable. It is exported because the operator writes these values and the
-// agent parses them: a value the operator renders but this rejects falls back
-// to a default with only a warning, so the user's setting would be silently
-// ignored. Having one named function lets a test assert the two halves agree.
-//
-// Zero is accepted. For a rate threshold it means "any occurrence at all
-// fires", which is a real setting rather than an unset one.
+// variable.
 func ParseNonNegativeFloat(value string) (float64, bool) {
 	f, err := strconv.ParseFloat(value, 64)
 	if err != nil || f < 0 {
