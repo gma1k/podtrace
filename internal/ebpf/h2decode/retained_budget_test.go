@@ -88,12 +88,14 @@ func TestRetainedBytesStayWithinTheGlobalBudget(t *testing.T) {
 func TestPendingRecordsCountTowardTheBudget(t *testing.T) {
 	d := New()
 	frag := make([]byte, 1000)
+	cost := 0
 	for seq := uint32(1); seq <= 10; seq++ {
 		r := rec(0x62, DirEgress, seq, 1, frag)
 		r.Flags = 0
+		cost += r.pendingCost()
 		d.Ingest(r)
 	}
-	if s := d.Stats(); s.RetainedBytes != 10*1000 {
+	if s := d.Stats(); s.RetainedBytes != cost || cost <= 10*1000 {
 		t.Fatalf("retained %d bytes with 10 buffered 1000-byte records", s.RetainedBytes)
 	}
 	d.Evict(0x62)
@@ -105,12 +107,14 @@ func TestPendingRecordsCountTowardTheBudget(t *testing.T) {
 func TestDuplicatePendingRecordIsChargedOnce(t *testing.T) {
 	d := New()
 	frag := make([]byte, 500)
+	cost := 0
 	for i := 0; i < 2; i++ {
 		r := rec(0x63, DirEgress, 5, 1, frag)
 		r.Flags = 0
+		cost = r.pendingCost()
 		d.Ingest(r)
 	}
-	if s := d.Stats(); s.RetainedBytes != 500 {
+	if s := d.Stats(); s.RetainedBytes != cost {
 		t.Fatalf("retained %d bytes for one buffered record seen twice", s.RetainedBytes)
 	}
 }

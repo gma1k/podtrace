@@ -176,6 +176,8 @@ Built-in redaction rules:
 | Credential headers (`Cookie`, `Set-Cookie`, `Authorization`, `X-Api-Key`, …) | `<header>: ***` |
 | `password=<value>`, `token=<value>`, … (also percent-encoded `%3D`) | `password=***` |
 | `"password": <value>` in JSON, escaped JSON, and `password: <value>` in YAML or `'password': <value>` | value replaced by `***` |
+| `<password>value</password>` in XML, `--password <value>` command-line flags | value replaced by `***` |
+| Redis `AUTH`, `HELLO … AUTH` and `CONFIG SET requirepass` arguments | `AUTH ***` |
 | `?sig=`, `?key=`, `?code=` query parameters | `?sig=***` |
 | `Bearer <token>`, `Basic <credentials>` | `Bearer ***`, `Basic ***` |
 | `scheme://user:password@host` | `scheme://***@host` |
@@ -183,6 +185,14 @@ Built-in redaction rules:
 | JWTs, AWS access key ids, GitHub, Slack and Stripe tokens, Google API keys | prefix kept, rest `***` |
 | Email addresses | `***@***` |
 | Luhn-valid card numbers | `****-****-****-****` |
+
+JSON, XML, YAML and flag rules match compound key names as well as the bare
+ones: `db_password`, `clientSecret`, `x-api-key` and `aws_secret_access_key`
+are masked, while names that describe a secret rather than hold it
+(`secretName`, `token_type`, `--token-file`) are kept. A JSON array or object
+under a secret key (`"password": {"value": …}`) is masked whole; under a key
+that groups credentials (`credentials`, `auth`, `session`) only its secret
+members are.
 
 Captured payloads are prefixes cut at a fixed size, so a quoted value whose
 closing quote was not captured is masked to the end of the text, and a quoted

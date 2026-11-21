@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/internal/safeconv"
@@ -76,6 +77,15 @@ type RawRecord struct {
 	PeerDstIP   string
 	PeerSrcPort uint16
 	PeerDstPort uint16
+}
+
+// pendingRecordOverhead is what a buffered record costs beyond its byte
+// fields: the record itself plus its slot in the pending map.
+var pendingRecordOverhead = int(unsafe.Sizeof(RawRecord{})) + int(unsafe.Sizeof(uint32(0))) + int(unsafe.Sizeof(&RawRecord{}))
+
+// pendingCost is the memory a record holds while it waits in a pending map.
+func (r *RawRecord) pendingCost() int {
+	return pendingRecordOverhead + cap(r.Frag) + len(r.PeerSrcIP) + len(r.PeerDstIP)
 }
 
 func (r *RawRecord) endHeaders() bool { return r.Flags&flagEndHeaders != 0 }
@@ -163,7 +173,7 @@ func (st *dirState) takePending(seq uint32) (*RawRecord, bool) {
 	rec, ok := st.pending[seq]
 	if ok {
 		delete(st.pending, seq)
-		st.pendingBytes -= len(rec.Frag)
+		st.pendingBytes -= rec.pendingCost()
 	}
 	return rec, ok
 }
@@ -309,10 +319,10 @@ func (d *Decoder) Ingest(rec *RawRecord) []*events.Event {
 	d.dirOrder.MoveToBack(st.elem)
 
 	if old, dup := st.pending[rec.Seq]; dup {
-		st.pendingBytes -= len(old.Frag)
+		st.pendingBytes -= old.pendingCost()
 	}
 	st.pending[rec.Seq] = rec
-	st.pendingBytes += len(rec.Frag)
+	st.pendingBytes += rec.pendingCost()
 
 	if len(st.pending) > d.maxPendingPerDir {
 		d.skipGapLocked(st)
