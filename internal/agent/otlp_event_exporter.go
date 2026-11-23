@@ -56,8 +56,9 @@ func attachMetricPusher(exporter tracer.Exporter, cr CRKey, b *BundlePayload, op
 	return exporter, nil
 }
 
-// newOTLPSpanExporter wires an otlptrace HTTP client from a bundle.
-// Shared by every OTLP-speaking backend (OTLP, Jaeger, DataDog, Splunk).
+// newOTLPSpanExporter wires an otlptrace client from a bundle: gRPC when
+// an otlp bundle asks for it, HTTP otherwise. Shared by every
+// OTLP-speaking backend (OTLP, Jaeger, DataDog, Splunk).
 func newOTLPSpanExporter(b *BundlePayload) (*otlptrace.Exporter, error) {
 	if b.Endpoint == "" {
 		return nil, fmt.Errorf("bundle missing endpoint")
@@ -66,6 +67,9 @@ func newOTLPSpanExporter(b *BundlePayload) (*otlptrace.Exporter, error) {
 	endpoint, err := normalizeOTLPEndpoint(b.Endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("bundle endpoint: %w", err)
+	}
+	if b.UsesGRPC() {
+		return newOTLPGRPCSpanExporter(b, endpoint)
 	}
 
 	opts := []otlptracehttp.Option{

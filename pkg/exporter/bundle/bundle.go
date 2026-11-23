@@ -44,6 +44,18 @@ const (
 	TypeDataDog Type = "datadog"
 )
 
+// OTLP transports an OTLP bundle may name. An empty protocol means HTTP.
+const (
+	ProtocolHTTP = "http"
+	ProtocolGRPC = "grpc"
+)
+
+// UsesGRPC reports whether the payload asks for OTLP over gRPC. Only the
+// otlp type has a protocol; every other type speaks OTLP/HTTP.
+func (p *Payload) UsesGRPC() bool {
+	return p != nil && p.Type == TypeOTLP && p.Protocol == ProtocolGRPC
+}
+
 // FilterCategory enumerates the event categories an operator may push into
 // the bundle.
 type FilterCategory string
@@ -410,6 +422,11 @@ func validatePayload(p *Payload) error {
 	}
 	if p.Sample != nil && (*p.Sample < 0 || *p.Sample > 1) {
 		return fmt.Errorf("bundle: sample %v out of range 0-1", *p.Sample)
+	}
+	switch p.Protocol {
+	case "", ProtocolHTTP, ProtocolGRPC:
+	default:
+		return fmt.Errorf("bundle: unsupported protocol %q (want %q or %q)", p.Protocol, ProtocolHTTP, ProtocolGRPC)
 	}
 	if p.Metrics && p.Type != TypeOTLP {
 		return fmt.Errorf("bundle: metrics export requires type %q, got %q", TypeOTLP, p.Type)

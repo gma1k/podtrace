@@ -467,6 +467,10 @@ func TestTracer_GetProcessNameQuick_InvalidPID(t *testing.T) {
 }
 
 func TestTracer_GetProcessNameQuick_FromCache(t *testing.T) {
+	origProcBase := config.ProcBasePath
+	config.SetProcBasePath(t.TempDir())
+	defer func() { config.SetProcBasePath(origProcBase) }()
+
 	ttl := time.Duration(config.CacheTTLSeconds) * time.Second
 	tracer := &Tracer{
 		processNameCache: cache.NewLRUCache(config.CacheMaxSize, ttl),

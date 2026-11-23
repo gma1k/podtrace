@@ -260,6 +260,7 @@ func resetTracingConfig() {
 	config.OTLPHeaders = nil
 	config.OTLPInsecure = false
 	config.ExporterInsecure = false
+	config.OTLPProtocol = ""
 }
 
 func ptrFloat(v float64) *float64 { return &v }

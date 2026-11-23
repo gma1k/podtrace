@@ -109,3 +109,25 @@ func unsafeRune(r rune) bool {
 		return r > 0x7f && unicode.Is(unicode.Cf, r)
 	}
 }
+
+// responseBodyMarker is how the OTLP/HTTP exporters introduce the body of a
+// non-2xx response in their errors.
+const responseBodyMarker = "body: "
+
+// WithholdResponseBody drops the remote response body from an export error.
+// Exporter endpoints are tenant-chosen, so echoing what one answered into a
+// status, a log or an alert would let the privileged agent read back any
+// in-cluster HTTP service a tenant names. The status line before the body
+// stays, since it tells a wrong endpoint from a rejected credential.
+func WithholdResponseBody(text string) string {
+	i := strings.Index(text, responseBodyMarker)
+	if i < 0 {
+		return text
+	}
+	head := text[:i]
+	out := head + "response body withheld"
+	if strings.HasSuffix(head, "(") {
+		out += ")"
+	}
+	return out
+}

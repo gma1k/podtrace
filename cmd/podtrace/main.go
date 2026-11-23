@@ -196,6 +196,7 @@ func main() {
 		if logLevel != "" {
 			logger.SetLevel(logLevel)
 		}
+		logger.InstallOTelErrorHandler()
 		awaitSpawnAttach(os.Stdin)
 	}
 

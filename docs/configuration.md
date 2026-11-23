@@ -304,7 +304,8 @@ Two more weaken transport security. Both use `ParseBool`:
 
 Trace, event and metric exporters and the object-store report uploader
 connect through a guard that refuses link-local and cloud-metadata addresses
-(169.254.0.0/16, fe80::/10, `fd00:ec2::254`, `100.100.100.200`,
+(169.254.0.0/16, fe80::/10, `fd00:ec2::254`, `fd20:ce::254`,
+`fd00:c1::a9fe:a9fe`, `100.100.100.200`,
 `168.63.129.16`, and those addresses reached through NAT64 `64:ff9b::/96` or
 IPv4-mapped forms), the unspecified address and multicast, and refuses
 redirects. Private and loopback
@@ -324,6 +325,12 @@ report-sink clients, so the Kubernetes client never goes through it. When
 neither `PODTRACE_EGRESS_HTTP_PROXY` nor `PODTRACE_EGRESS_HTTPS_PROXY` is set,
 the standard `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` are honoured instead,
 and those apply to every client in the process.
+
+OTLP/gRPC exporters (`otlp.protocol: grpc`) use the HTTPS proxy setting and
+reach the collector through an HTTP `CONNECT` tunnel; the proxy URL must be
+`http://` or `https://` (a SOCKS proxy is refused for gRPC). As for OTLP/HTTP,
+the collector's hostname is what `NO_PROXY` is matched against and what the
+proxy is asked to connect to, not an address resolved beforehand.
 
 With `PODTRACE_EXPORTER_BLOCK_PRIVATE` on, the configured proxy itself may
 still sit on a private address: whoever runs podtrace sets it, and in-cluster

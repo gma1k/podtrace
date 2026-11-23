@@ -263,11 +263,24 @@ func TestAnInvalidHeaderNameStopsTheSession(t *testing.T) {
 	}
 }
 
-func TestUnsupportedExporterSettingsAreWarnedNotFatal(t *testing.T) {
+func TestAGRPCBundleSelectsOTLPOverGRPC(t *testing.T) {
 	defer resetTracingConfig()
 	if err := applyPayloadToConfig(&bundle.Payload{Type: bundle.TypeOTLP, Endpoint: "otel:4317", Protocol: "grpc"}); err != nil {
 		t.Fatal(err)
 	}
+	if config.OTLPProtocol != config.OTLPProtocolGRPC {
+		t.Fatalf("OTLPProtocol = %q, want grpc", config.OTLPProtocol)
+	}
+	if err := applyPayloadToConfig(&bundle.Payload{Type: bundle.TypeOTLP, Endpoint: "otel:4318", Protocol: "http"}); err != nil {
+		t.Fatal(err)
+	}
+	if config.OTLPProtocol != "" {
+		t.Fatalf("OTLPProtocol = %q after an http bundle, want it reset", config.OTLPProtocol)
+	}
+}
+
+func TestUnsupportedExporterSettingsAreWarnedNotFatal(t *testing.T) {
+	defer resetTracingConfig()
 	if err := applyPayloadToConfig(&bundle.Payload{Type: bundle.TypeZipkin, Endpoint: "http://zipkin:9411", Headers: map[string]string{"X-Tenant": "a"}}); err != nil {
 		t.Fatal(err)
 	}

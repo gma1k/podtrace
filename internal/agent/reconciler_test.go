@@ -763,15 +763,24 @@ func TestReconcile_TargetsChannelKeepLatest(t *testing.T) {
 	}
 }
 
-func TestEnqueueAllPodTraces(t *testing.T) {
+func TestEnqueueOnPodChangeCollapsesToOneRebuild(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(newScheme(t)).WithObjects(
 		&podtracev1alpha1.PodTrace{ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns1"}},
 		&podtracev1alpha1.PodTrace{ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "ns2"}},
 	).Build()
 	r := &AgentReconciler{Client: c}
-	got := r.enqueueAllPodTraces(context.Background(), &corev1.Pod{})
-	if len(got) != 2 {
-		t.Fatalf("got %d requests, want 2", len(got))
+	got := r.enqueueOnPodChange(context.Background(), &corev1.Pod{})
+	if len(got) != 1 || got[0] != rebuildRequest {
+		t.Fatalf("got %v, want exactly the rebuild request", got)
+	}
+}
+
+func TestEveryPodTraceEventEnqueuesTheRebuildRequest(t *testing.T) {
+	got := enqueueRebuild(context.Background(), &podtracev1alpha1.PodTrace{
+		ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns1"},
+	})
+	if len(got) != 1 || got[0] != rebuildRequest {
+		t.Fatalf("got %v, want exactly the rebuild request", got)
 	}
 }
 
@@ -808,8 +817,8 @@ func TestEnqueueOnBundleChange(t *testing.T) {
 			},
 		},
 	})
-	if len(got) != 1 {
-		t.Errorf("bundle CM enqueued %d, want 1", len(got))
+	if len(got) != 1 || got[0] != rebuildRequest {
+		t.Errorf("bundle CM enqueued %v, want the rebuild request", got)
 	}
 
 	gotSecret := r.enqueueOnBundleChange(context.Background(), &corev1.Secret{

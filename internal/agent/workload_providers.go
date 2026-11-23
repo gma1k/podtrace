@@ -136,13 +136,19 @@ func (w *workloadProviders) tracerFor(meta *events.K8sMetadata) trace.Tracer {
 // podtrace identifies itself as the instrumentation via telemetry.sdk.name,
 // which is where the spec puts the producing SDK.
 func (w *workloadProviders) resourceFor(meta *events.K8sMetadata) *resource.Resource {
-	attrs := make([]attribute.KeyValue, 0, len(w.crAttrs)+8)
+	attrs := make([]attribute.KeyValue, 0, len(w.crAttrs)+6)
 	attrs = append(attrs, semconv.ServiceName(meta.WorkloadName))
 	attrs = append(attrs, semconv.TelemetrySDKName("podtrace"))
 	if meta.Namespace != "" {
-		attrs = append(attrs, semconv.ServiceNamespace(meta.Namespace))
+		attrs = append(attrs,
+			semconv.ServiceNamespace(meta.Namespace),
+			semconv.K8SNamespaceName(meta.Namespace),
+		)
 	}
-	attrs = appendK8sAttributes(attrs, meta)
+	if meta.NodeName != "" {
+		attrs = append(attrs, semconv.K8SNodeName(meta.NodeName))
+	}
+	attrs = appendWorkloadAttributes(attrs, meta.WorkloadKind, meta.WorkloadName)
 	attrs = append(attrs, w.crAttrs...)
 
 	// resource.NewSchemaless rather than resource.New: New merges the

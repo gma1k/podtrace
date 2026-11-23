@@ -12,7 +12,7 @@ func TestAdmissionAndTheDialGuardAgreeOnEveryLiteral(t *testing.T) {
 	t.Setenv("PODTRACE_EXPORTER_BLOCK_PRIVATE", "false")
 	for _, ip := range []string{
 		"169.254.169.254", "fe80::1", "0.0.0.0", "224.0.0.1",
-		"fd00:ec2::254", "100.100.100.200", "168.63.129.16",
+		"fd00:ec2::254", "fd20:ce::254", "fd00:c1::a9fe:a9fe", "100.100.100.200", "168.63.129.16",
 		"::ffff:169.254.169.254", "64:ff9b::a9fe:a9fe",
 		"10.0.0.1", "8.8.8.8", "2001:db8::1",
 	} {

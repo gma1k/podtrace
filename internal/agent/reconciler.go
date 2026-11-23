@@ -105,9 +105,12 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
-		For(&podtracev1alpha1.PodTrace{}, builder.WithPredicates(podTraceChangePredicate())).
+		Watches(&podtracev1alpha1.PodTrace{},
+			handler.EnqueueRequestsFromMapFunc(enqueueRebuild),
+			builder.WithPredicates(podTraceChangePredicate()),
+		).
 		Watches(&corev1.Pod{},
-			handler.EnqueueRequestsFromMapFunc(r.enqueueAllPodTraces),
+			handler.EnqueueRequestsFromMapFunc(r.enqueueOnPodChange),
 			builder.WithPredicates(podChangePredicates()),
 		).
 		Watches(&corev1.ConfigMap{},
@@ -293,28 +296,34 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	return ctrl.Result{}, nil
 }
 
-func (r *AgentReconciler) enqueueAllPodTraces(ctx context.Context, _ client.Object) []reconcile.Request {
+// rebuildRequest is the single key every watch enqueues. Reconcile ignores
+// the request and rebuilds the whole rule set from the PodTrace and Pod
+// lists, so one key lets the workqueue collapse a burst of events into one
+// rebuild.
+var rebuildRequest = reconcile.Request{
+	NamespacedName: types.NamespacedName{Name: "podtrace.io/agent-rebuild"},
+}
+
+func enqueueRebuild(context.Context, client.Object) []reconcile.Request {
+	return []reconcile.Request{rebuildRequest}
+}
+
+// enqueueOnPodChange rebuilds on a Pod event when something consumes the
+// rule set: a PodTrace exists, or the metrics plane covers pods without one.
+func (r *AgentReconciler) enqueueOnPodChange(ctx context.Context, obj client.Object) []reconcile.Request {
+	if r.MetricsPlane.Enabled {
+		return enqueueRebuild(ctx, obj)
+	}
 	var list podtracev1alpha1.PodTraceList
-	if err := r.List(ctx, &list); err != nil {
+	if err := r.List(ctx, &list, client.Limit(1)); err == nil && len(list.Items) == 0 {
 		return nil
 	}
-	out := make([]reconcile.Request, 0, len(list.Items)+1)
-	for _, pt := range list.Items {
-		out = append(out, reconcile.Request{NamespacedName: types.NamespacedName{
-			Namespace: pt.Namespace,
-			Name:      pt.Name,
-		}})
-	}
-	if r.MetricsPlane.Enabled {
-		out = append(out, metricsPlaneRequest)
-	}
-	return out
+	return enqueueRebuild(ctx, obj)
 }
 
 // enqueueOnBundleChange handles the ConfigMap and Secret bundle watches:
 // only bundle objects (with our managed-by + exporter-bundle labels)
-// produce reconcile requests, and each such event enqueues every
-// PodTrace.
+// trigger a rebuild.
 func (r *AgentReconciler) enqueueOnBundleChange(ctx context.Context, obj client.Object) []reconcile.Request {
 	if obj.GetLabels()[operator.LabelManagedBy] != operator.ManagedByValue {
 		return nil
@@ -322,7 +331,7 @@ func (r *AgentReconciler) enqueueOnBundleChange(ctx context.Context, obj client.
 	if obj.GetLabels()[operator.LabelComponent] != operator.ComponentBundle {
 		return nil
 	}
-	return r.enqueueAllPodTraces(ctx, obj)
+	return enqueueRebuild(ctx, obj)
 }
 
 // obtainExporter returns the cached Exporter for this CR if the
