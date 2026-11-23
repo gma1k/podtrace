@@ -231,7 +231,7 @@ Triggered when fatal errors occur:
 
 ## Alert Deduplication
 
-The alerting system automatically deduplicates alerts to prevent alert storms. If the same alert (same severity, source, pod, namespace, and title) is sent within the deduplication window, it will be suppressed.
+The alerting system automatically deduplicates alerts to prevent alert storms. If the same alert (same severity, source, pod, namespace, and title) is sent within the deduplication window, it will be suppressed. Alerts raised from Podtrace's own log messages (source `logger`) share one title per level, so their message is part of the identity too: a repeated warning is suppressed, but it never hides a different one.
 
 Configure the deduplication window:
 

@@ -36,17 +36,8 @@ func TestKernelAFailedHandshakeReachesTheAggregatedRows(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, symbol := range hl.symbols {
-				for _, ret := range []bool{true, false} {
-					name, attach := "uprobe_"+symbol, exe.Uprobe
-					if ret {
-						name, attach = "uretprobe_"+symbol, exe.Uretprobe
-					}
-					l, err := attach(symbol, tr.collection.Programs[name], nil)
-					if err != nil {
-						t.Fatalf("attach %s: %v", name, err)
-					}
-					t.Cleanup(func() { _ = l.Close() })
-				}
+				attachLibraryProbe(t, tr, exe, symbol, "uretprobe_"+symbol, true)
+				attachLibraryProbe(t, tr, exe, symbol, "uprobe_"+symbol, false)
 			}
 			if err := tr.SetKernelAggregationMode(mode); err != nil {
 				t.Fatal(err)

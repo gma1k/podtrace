@@ -22,6 +22,9 @@ const maxStringLen = 128
 
 // decodeTarget turns a raw fixed-size target buffer into a string.
 func decodeTarget(eventType uint32, raw []byte) string {
+	if events.EventType(eventType) == events.EventDBQuery {
+		return events.SQLKeyword(string(bytes.TrimRight(raw, "\x00")))
+	}
 	if events.EventType(eventType) == events.EventRename && len(raw) >= maxStringLen {
 		half := maxStringLen / 2
 		oldName := string(bytes.TrimRight(raw[:half-1], "\x00"))

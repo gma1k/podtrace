@@ -229,6 +229,21 @@ func dbSystem(t events.EventType) string {
 	}
 }
 
+// dbOperationName renders semconv's db.operation.name. Redis and Memcached
+// probes capture the command alone, in Details.
+func dbOperationName(e *events.Event) string {
+	if e.Type == events.EventDBQuery {
+		return sqlOperation(e.Target)
+	}
+	return firstLine(e.Details)
+}
+
+// sqlOperation is a statement's leading keyword, uppercased as semconv's
+// db.operation.name expects, or "" when it has none.
+func sqlOperation(statement string) string {
+	return strings.ToUpper(events.SQLKeyword(statement))
+}
+
 // firstLine trims an event string field to its first line, so a multi-line
 // Details payload cannot smuggle newlines into a label value.
 func firstLine(s string) string {

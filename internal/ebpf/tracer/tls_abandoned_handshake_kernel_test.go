@@ -92,23 +92,10 @@ func TestKernelAnAbandonedHandshakeIsAFailureAndARepeatedOneCountsOnce(t *testin
 		t.Fatal(err)
 	}
 	for _, symbol := range append(openSSLSymbols, "SSL_accept") {
-		for _, name := range []string{"uprobe_" + symbol, "uretprobe_" + symbol} {
-			attach := exe.Uprobe
-			if name[:3] == "ure" {
-				attach = exe.Uretprobe
-			}
-			l, err := attach(symbol, tr.collection.Programs[name], nil)
-			if err != nil {
-				t.Fatalf("attach %s: %v", name, err)
-			}
-			t.Cleanup(func() { _ = l.Close() })
-		}
+		attachLibraryProbe(t, tr, exe, symbol, "uprobe_"+symbol, false)
+		attachLibraryProbe(t, tr, exe, symbol, "uretprobe_"+symbol, true)
 	}
-	l, err := exe.Uprobe("SSL_free", tr.collection.Programs["uprobe_SSL_free"], nil)
-	if err != nil {
-		t.Fatalf("attach uprobe_SSL_free: %v", err)
-	}
-	t.Cleanup(func() { _ = l.Close() })
+	attachLibraryProbe(t, tr, exe, "SSL_free", "uprobe_SSL_free", false)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

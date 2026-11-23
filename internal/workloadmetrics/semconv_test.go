@@ -171,20 +171,21 @@ func TestUnknownMethodUsesTheConventionPlaceholder(t *testing.T) {
 
 func TestRPCAndDBConventionsMapTheirSystems(t *testing.T) {
 	for _, tc := range []struct {
-		typ    events.EventType
-		family string
-		labels map[string]string
+		typ             events.EventType
+		target, details string
+		family          string
+		labels          map[string]string
 	}{
-		{events.EventGRPCMethod, semconvRPCDuration, map[string]string{"rpc_system": "grpc", "rpc_method": "/svc/Method"}},
-		{events.EventRedisCmd, semconvDBDuration, map[string]string{"db_system_name": "redis", "db_operation_name": "GET"}},
-		{events.EventMemcachedCmd, semconvDBDuration, map[string]string{"db_system_name": "memcached", "db_operation_name": "GET"}},
-		{events.EventDBQuery, semconvDBDuration, map[string]string{"db_system_name": "other_sql", "db_operation_name": "GET"}},
+		{events.EventGRPCMethod, "/svc/Method", "", semconvRPCDuration, map[string]string{"rpc_system": "grpc", "rpc_method": "/svc/Method"}},
+		{events.EventRedisCmd, "", "GET", semconvDBDuration, map[string]string{"db_system_name": "redis", "db_operation_name": "GET"}},
+		{events.EventMemcachedCmd, "", "get", semconvDBDuration, map[string]string{"db_system_name": "memcached", "db_operation_name": "get"}},
+		{events.EventDBQuery, "select * from users where email = 'a@b.c'", "", semconvDBDuration, map[string]string{"db_system_name": "other_sql", "db_operation_name": "SELECT"}},
 	} {
 		t.Run(fmt.Sprint(tc.typ), func(t *testing.T) {
 			sink, reg := newSemconvSink(t, 0)
 			if err := sink.Export(context.Background(), []*events.Event{{
 				Type: tc.typ, LatencyNS: 2_000_000,
-				Target: "/svc/Method", Details: "GET", K8s: enriched(),
+				Target: tc.target, Details: tc.details, K8s: enriched(),
 			}}); err != nil {
 				t.Fatalf("Export: %v", err)
 			}

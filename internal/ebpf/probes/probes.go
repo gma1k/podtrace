@@ -1307,6 +1307,8 @@ func getArchitectureDBPaths(libNames []string) []string {
 			fmt.Sprintf("/usr/lib/%s", libName),
 			fmt.Sprintf("/lib64/%s", libName),
 			fmt.Sprintf("/lib/%s", libName),
+			fmt.Sprintf("/usr/local/lib64/%s", libName),
+			fmt.Sprintf("/usr/local/lib/%s", libName),
 		)
 	}
 

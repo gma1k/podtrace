@@ -477,6 +477,19 @@ func recordKernelAggPressure(aggregator any, metrics *Metrics) {
 	metrics.RecordKernelAggPressure(reporter.KernelAggregationPressure())
 }
 
+// kernelAggregationMode picks what the probes ship while the kernel
+// aggregates.
+func kernelAggregationMode(hasRules, semanticConventions bool) kernelagg.Mode {
+	switch {
+	case hasRules:
+		return kernelagg.ModeOn
+	case semanticConventions:
+		return kernelagg.ModeBypassExceptL7
+	default:
+		return kernelagg.ModeBypass
+	}
+}
+
 // drainKernelMetrics folds the kernel's aggregation map into the sink on an
 // interval, which is what makes the plane cost O(series) instead of O(events).
 func drainKernelMetrics(ctx context.Context, backend tracer.TracerBackend, sink *workloadmetrics.Sink, router *Router, metrics *Metrics, logger logr.Logger) error {
@@ -495,14 +508,8 @@ func drainKernelMetrics(ctx context.Context, backend tracer.TracerBackend, sink 
 		return nil
 	}
 
-	modeFor := func(hasRules bool) kernelagg.Mode {
-		if hasRules {
-			return kernelagg.ModeOn
-		}
-		return kernelagg.ModeBypass
-	}
 	applyMode := func(hasRules bool) {
-		mode := modeFor(hasRules)
+		mode := kernelAggregationMode(hasRules, config.WorkloadMetricsSemanticConv)
 		if err := aggregator.SetKernelAggregationMode(mode); err != nil {
 			logger.Error(err, "could not set kernel aggregation mode", "mode", mode.String())
 			return

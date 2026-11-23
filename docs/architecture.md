@@ -82,7 +82,12 @@ The eBPF programs run in the kernel and trace system calls and kernel events. Th
   - `getaddrinfo` (libc) - DNS lookups
   - `pthread_mutex_lock` (libc) - User-space mutex operations
   - `PQexec` (libpq) - PostgreSQL query execution
-  - `mysql_real_query` (libmysqlclient) - MySQL query execution
+  - `mysql_real_query` (libmysqlclient) - MySQL query execution. Both keep only
+    the statement's leading keyword (`SELECT`, `INSERT`, …, after any leading
+    comments and whitespace) as the event target; the rest of the statement,
+    which carries its literals, is dropped when the agent decodes the record.
+    The client library is found in the container's `/usr/lib`, `/lib`,
+    `/usr/local/lib` (and their 64-bit and multiarch variants).
 
 - **Tracepoints**: Kernel events
   - `sched_switch` - CPU scheduling events

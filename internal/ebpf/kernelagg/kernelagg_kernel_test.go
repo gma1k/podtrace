@@ -35,7 +35,7 @@ func newTestMaps(t *testing.T) (metrics, enabled *ebpf.Map) {
 func TestKernelSetModeWritesTheModeThroughToTheMap(t *testing.T) {
 	_, enabled := newTestMaps(t)
 
-	for _, mode := range []Mode{ModeOn, ModeBypass, ModeOff} {
+	for _, mode := range []Mode{ModeOn, ModeBypass, ModeBypassExceptL7, ModeOff} {
 		if err := SetMode(enabled, mode); err != nil {
 			t.Fatalf("SetMode(%s): %v", mode, err)
 		}
