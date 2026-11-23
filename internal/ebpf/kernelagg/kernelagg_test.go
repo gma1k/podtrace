@@ -225,7 +225,7 @@ func TestVariantRoundTripsThroughTheKernelPacking(t *testing.T) {
 
 func TestModeNamesAreStableForLogs(t *testing.T) {
 	for mode, want := range map[Mode]string{
-		ModeOff: "off", ModeOn: "on", ModeBypass: "bypass", Mode(99): "off",
+		ModeOff: "off", ModeOn: "on", ModeBypass: "bypass", ModeBypassExceptL7: "bypass-except-l7", Mode(99): "off",
 	} {
 		if got := mode.String(); got != want {
 			t.Errorf("Mode(%d).String() = %q, want %q", mode, got, want)

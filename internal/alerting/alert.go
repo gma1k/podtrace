@@ -33,14 +33,20 @@ type Alert struct {
 	Recommendations []string
 }
 
+// Key identifies an alert for deduplication. Logger alerts share one title
+// per level, so their message, a constant at every call site, is what tells
+// them apart: without it the first warning of a window would mask every
+// other warning the agent logs until the window closes.
 func (a *Alert) Key() string {
 	if a == nil {
 		return ""
 	}
+	fields := []string{string(a.Severity), a.Source, a.PodName, a.Namespace, a.Title}
+	if a.Source == AlertSourceLogger {
+		fields = append(fields, a.Message)
+	}
 	h := sha256.New()
-	for _, field := range []string{
-		string(a.Severity), a.Source, a.PodName, a.Namespace, a.Title,
-	} {
+	for _, field := range fields {
 		h.Write([]byte(field))
 		h.Write([]byte{0})
 	}

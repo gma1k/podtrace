@@ -82,6 +82,7 @@ struct {
 #define AGG_MODE_OFF    0
 #define AGG_MODE_ON     1
 #define AGG_MODE_BYPASS 2
+#define AGG_MODE_BYPASS_EXCEPT_L7 3
 
 static __always_inline u32 agg_mode(void)
 {
@@ -379,6 +380,21 @@ static __noinline int agg_from_event(struct event *e, s32 status_num)
 			  role, e, e->latency_ns, bytes, bucketed);
 }
 
+static __always_inline int agg_l7_detail_wanted(const struct event *e)
+{
+	switch (e->type) {
+	case EVENT_HTTP_RESP:
+	case EVENT_GRPC_METHOD:
+		return (e->tcp_state & HTTP_ROLE_MASK) != HTTP_ROLE_KNOWN;
+	case EVENT_REDIS_CMD:
+	case EVENT_MEMCACHED_CMD:
+	case EVENT_DB_QUERY:
+		return 1;
+	default:
+		return 0;
+	}
+}
+
 static __always_inline int event_buf_intact(struct event *e);
 
 static __always_inline int agg_absorbed_checked(struct event *e, s32 status_num, int tracked)
@@ -392,7 +408,12 @@ static __always_inline int agg_absorbed_checked(struct event *e, s32 status_num,
 	e->agg_recorded = (u8)recorded;
 	if (!recorded)
 		return 0;
-	return agg_mode() == AGG_MODE_BYPASS;
+	u32 mode = agg_mode();
+	if (mode == AGG_MODE_BYPASS)
+		return 1;
+	if (mode == AGG_MODE_BYPASS_EXCEPT_L7)
+		return !agg_l7_detail_wanted(e);
+	return 0;
 }
 
 static __always_inline int agg_absorbed(struct event *e, s32 status_num)

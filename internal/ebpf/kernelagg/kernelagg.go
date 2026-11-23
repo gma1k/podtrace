@@ -100,9 +100,10 @@ func DecodeVariant(v uint8) Variant {
 type Mode uint32
 
 const (
-	ModeOff    Mode = 0
-	ModeOn     Mode = 1
-	ModeBypass Mode = 2
+	ModeOff            Mode = 0
+	ModeOn             Mode = 1
+	ModeBypass         Mode = 2
+	ModeBypassExceptL7 Mode = 3
 )
 
 func (m Mode) String() string {
@@ -111,6 +112,8 @@ func (m Mode) String() string {
 		return "on"
 	case ModeBypass:
 		return "bypass"
+	case ModeBypassExceptL7:
+		return "bypass-except-l7"
 	default:
 		return "off"
 	}

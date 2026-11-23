@@ -280,6 +280,10 @@ Three deliberate differences from the native families:
   observed traffic, so their value space is open; past
   `PODTRACE_WORKLOAD_METRICS_ATTRIBUTE_CARDINALITY` (default 50) the tail
   folds into `_other` rather than minting series without end.
+- **`db_operation_name` for SQL is the statement's leading keyword**
+  (`SELECT`, `INSERT`, `WITH`, …), uppercased, after any comments. The rest
+  of the statement never becomes a label value, because it carries the
+  query's literals. Redis and Memcached report the command as sent.
 - **Kafka and FastCGI are absent.** Neither has a server-duration
   convention, and forcing them into one would misdescribe them. They remain
   on the native `podtrace_workload_l7_*` families.
@@ -1146,6 +1150,17 @@ and turning the bypass on cannot silently lose an event type. And the bypass
 lifts the instant a CR starts routing, the router notifies the agent on
 publish rather than the agent waiting for a drain tick, so a diagnose session
 never loses its opening seconds.
+
+With `semanticConventions` on, the bypass keeps one exception: the L7
+responses those families read (HTTP and gRPC responses the workload served,
+Redis, Memcached and SQL operations) still cross the ring buffer. Their
+method, status code and operation are not part of the aggregation key, so
+without the events the convention families would stay empty until someone
+created a `PodTrace`. The kernel still counts these responses, and the plane
+reads only their attributes, so nothing is counted twice. They also carry
+exemplars for the native L7 families. Network, filesystem, scheduler and DNS
+observations, and responses to calls the workload made, stay bypassed, so the
+cost is one ring-buffer record per served request.
 
 ### The service map still works
 

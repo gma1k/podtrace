@@ -39,7 +39,9 @@ func (s *alertEventSender) Name() string { return "kubernetes-event" }
 // flight-recorder trigger.
 func (s *alertEventSender) NamespaceScoped() bool { return true }
 
+// Send records the alert as an Event.
 func (s *alertEventSender) Send(ctx context.Context, alert *alerting.Alert) error {
+	alert.Sanitize()
 	now := s.nowFn()
 	event := alerting.BuildAlertEvent(alert, now)
 	if event == nil {

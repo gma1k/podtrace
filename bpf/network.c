@@ -1270,13 +1270,6 @@ int uprobe_PQexec(struct pt_regs *ctx) {
 	if (query) {
 		char buf[MAX_STRING_LEN] = {};
 		bpf_probe_read_user_str(buf, sizeof(buf), query);
-		u32 i;
-		for (i = 0; i < MAX_STRING_LEN; i++) {
-			if (buf[i] == ' ' || buf[i] == '\n' || buf[i] == '\t' || buf[i] == '\0') {
-				buf[i] = '\0';
-				break;
-			}
-		}
 		bpf_map_update_elem(&db_queries, &key, buf, BPF_ANY);
 	}
 	return 0;
@@ -1332,13 +1325,6 @@ int uprobe_mysql_real_query(struct pt_regs *ctx) {
 	if (query) {
 		char buf[MAX_STRING_LEN] = {};
 		bpf_probe_read_user_str(buf, sizeof(buf), query);
-		u32 i;
-		for (i = 0; i < MAX_STRING_LEN; i++) {
-			if (buf[i] == ' ' || buf[i] == '\n' || buf[i] == '\t' || buf[i] == '\0') {
-				buf[i] = '\0';
-				break;
-			}
-		}
 		bpf_map_update_elem(&db_queries, &key, buf, BPF_ANY);
 	}
 	return 0;

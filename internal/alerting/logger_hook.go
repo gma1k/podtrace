@@ -8,6 +8,9 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+// AlertSourceLogger is the Source of alerts raised from log messages.
+const AlertSourceLogger = "logger"
+
 var (
 	globalManager *Manager
 	managerMu     sync.RWMutex
@@ -67,7 +70,7 @@ func CreateAlertFromLog(level zapcore.Level, msg string, fields []zap.Field, pod
 		Title:     "Podtrace " + level.String() + " Error",
 		Message:   msg,
 		Timestamp: time.Now(),
-		Source:    "logger",
+		Source:    AlertSourceLogger,
 		PodName:   podName,
 		Namespace: namespace,
 		Context:   context,

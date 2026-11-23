@@ -720,7 +720,7 @@ func (s *Sink) recordSemconv(e *events.Event, seconds float64) {
 			appendLabels(id, rpcSystem(e.Type), method), seconds)
 
 	case events.EventRedisCmd, events.EventMemcachedCmd, events.EventDBQuery:
-		op := s.sc.operationValues.bound(meta.Namespace, firstLine(e.Details), s.now())
+		op := s.sc.operationValues.bound(meta.Namespace, dbOperationName(e), s.now())
 		s.observe(e, s.sc.dbDuration, semconvDBDuration,
 			appendLabels(id, dbSystem(e.Type), op), seconds)
 	}
