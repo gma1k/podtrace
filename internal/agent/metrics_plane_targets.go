@@ -3,9 +3,6 @@ package agent
 import (
 	"sort"
 
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
 	podtracev1alpha1 "github.com/gma1k/podtrace/api/v1alpha1"
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/podworkload"
@@ -154,8 +151,4 @@ func expandTargetsForMetricsPlane(
 
 func targetIdentity(namespace, pod, container string) string {
 	return namespace + "/" + pod + "/" + container
-}
-
-var metricsPlaneRequest = reconcile.Request{
-	NamespacedName: types.NamespacedName{Name: "podtrace.io/metrics-plane"},
 }

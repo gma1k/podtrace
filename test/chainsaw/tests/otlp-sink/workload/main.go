@@ -18,6 +18,7 @@ import (
 	"os"
 	"sort"
 	"sync"
+	"time"
 )
 
 // printableRuns emits maximal runs of printable ASCII (>= minLen) from b, one
@@ -47,17 +48,30 @@ func printableRuns(b []byte, minLen int) []string {
 // readBody decompresses the request when the client compressed it. The OTLP
 // HTTP exporters gzip by default, and a gzip stream has no printable runs at
 // all, so skipping this step would make every body look empty.
-func readBody(r *http.Request) ([]byte, error) {
+//
+// Both the compressed and the decompressed body are capped at maxBodyBytes, so
+// a stuck or misbehaving exporter cannot exhaust the sink's memory.
+func readBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
+	body := http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	if r.Header.Get("Content-Encoding") != "gzip" {
-		return io.ReadAll(r.Body)
+		return io.ReadAll(body)
 	}
-	reader, err := gzip.NewReader(r.Body)
+	reader, err := gzip.NewReader(body)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = reader.Close() }()
-	return io.ReadAll(reader)
+	decoded, err := io.ReadAll(io.LimitReader(reader, maxBodyBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(decoded) > maxBodyBytes {
+		return nil, fmt.Errorf("decompressed body exceeds %d bytes", maxBodyBytes)
+	}
+	return decoded, nil
 }
+
+const maxBodyBytes = 32 << 20
 
 const maxRuns = 4000
 
@@ -107,7 +121,7 @@ func (t *tally) snapshot() map[string]any {
 
 func logSignal(t *tally, signal, prefix string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		body, err := readBody(r)
+		body, err := readBody(w, r)
 		if err != nil {
 			t.failed()
 			fmt.Fprintln(os.Stderr, prefix, "read error:", err)
@@ -138,7 +152,14 @@ func main() {
 	})
 	addr := ":4318"
 	fmt.Fprintln(os.Stderr, "otlp-sink listening on", addr)
-	if err := http.ListenAndServe(addr, nil); err != nil {
+	server := &http.Server{
+		Addr:              addr,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	if err := server.ListenAndServe(); err != nil {
 		fmt.Fprintln(os.Stderr, "server error:", err)
 		os.Exit(1)
 	}

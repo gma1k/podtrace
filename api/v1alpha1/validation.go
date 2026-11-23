@@ -112,9 +112,35 @@ func ValidateExporterConfigVariant(spec ExporterConfigSpec) error {
 		if m := spec.OTLP.Metrics; m != nil && m.Interval != nil && m.Interval.Duration < 0 {
 			return fmt.Errorf("spec.otlp.metrics.interval %v must not be negative", m.Interval.Duration)
 		}
+		if spec.OTLP.Protocol == OTLPProtocolGRPC {
+			if err := validateGRPCEndpoint(spec.OTLP.Endpoint); err != nil {
+				return err
+			}
+		}
 	}
 	if err := validateExporterEndpoint(spec); err != nil {
 		return err
+	}
+	return nil
+}
+
+// validateGRPCEndpoint refuses a URL path on an OTLP/gRPC endpoint. gRPC
+// dials host:port and has no path, so a path almost always means an
+// OTLP/HTTP URL (".../v1/traces", port 4318) was paired with protocol: grpc,
+// and every export would fail.
+func validateGRPCEndpoint(raw string) error {
+	if !strings.Contains(raw, "://") {
+		if strings.Contains(raw, "/") {
+			return fmt.Errorf("spec.otlp.endpoint %q: protocol grpc takes host:port without a URL path", raw)
+		}
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("spec.otlp.endpoint: parse %q: %w", raw, err)
+	}
+	if u.Path != "" && u.Path != "/" {
+		return fmt.Errorf("spec.otlp.endpoint %q: protocol grpc takes host:port without a URL path (got %q); use protocol http for an OTLP/HTTP URL", raw, u.Path)
 	}
 	return nil
 }

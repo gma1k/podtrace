@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gma1k/podtrace/internal/alerting"
+	"github.com/gma1k/podtrace/internal/sanitize"
 )
 
 const maxDeliveryErrorBytes = 300
@@ -45,15 +46,28 @@ func (h *deliveryHealth) register(cr CRKey, owner any) {
 	h.byCR[cr] = &deliveryEntry{owner: owner}
 }
 
+// deliveryErrorText is the form of an export error that may leave the
+// agent: PodTrace status (readable by the tenant that owns the CR), the
+// warning log and the alerts built from it. URLs are redacted, the size is
+// bounded, and the body of the remote response is withheld. The endpoint is
+// tenant-chosen, so echoing what it answered would turn the privileged
+// agent into a reader of any in-cluster HTTP service the tenant names. The
+// status line stays, since it is what tells a misconfigured endpoint from a
+// rejected credential.
+func deliveryErrorText(err error) string {
+	text := sanitize.WithholdResponseBody(alerting.RedactURLsInText(err.Error()))
+	if len(text) > maxDeliveryErrorBytes {
+		text = strings.ToValidUTF8(text[:maxDeliveryErrorBytes], "") + "..."
+	}
+	return text
+}
+
 // fail records a failed batch of the current exporter.
 func (h *deliveryHealth) fail(cr CRKey, owner any, exporter string, err error, now time.Time) {
 	if h == nil || err == nil {
 		return
 	}
-	text := alerting.RedactURLsInText(err.Error())
-	if len(text) > maxDeliveryErrorBytes {
-		text = strings.ToValidUTF8(text[:maxDeliveryErrorBytes], "") + "..."
-	}
+	text := deliveryErrorText(err)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	e, ok := h.byCR[cr]

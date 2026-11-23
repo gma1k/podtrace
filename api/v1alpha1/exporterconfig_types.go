@@ -28,11 +28,15 @@ const (
 
 // OTLPExporter configures the OpenTelemetry OTLP exporter.
 type OTLPExporter struct {
-	// Endpoint of the OTLP receiver, e.g. "otel-collector.observability:4318".
+	// Endpoint of the OTLP receiver, e.g. "otel-collector.observability:4318"
+	// for http or "otel-collector.observability:4317" for grpc.
 	// +kubebuilder:validation:Required
 	Endpoint string `json:"endpoint"`
 
-	// Protocol selects http or grpc. Defaults to http.
+	// Protocol selects OTLP over http (port 4318) or grpc (port 4317).
+	// Defaults to http. A grpc endpoint is host:port, with an optional
+	// http:// or https:// scheme for cleartext or TLS, and no URL path; a
+	// host without a port uses 4317.
 	// +optional
 	Protocol OTLPProtocol `json:"protocol,omitempty"`
 
@@ -126,9 +130,10 @@ type DataDogExporter struct {
 	Endpoint string `json:"endpoint,omitempty"`
 
 	// Site, e.g. "datadoghq.com" or "datadoghq.eu". Defaults to datadoghq.com.
-	// Used as a label for routing and (when Endpoint is empty) to derive
-	// a default Endpoint pointing at a conventional DataDog Agent
-	// service name.
+	// Informational only: spans go to the Datadog Agent's OTLP receiver at
+	// Endpoint (default "datadog-agent.datadog:4318"), and the Agent
+	// forwards them to the site it is itself configured for. To reach a
+	// different site, point Endpoint at an Agent configured for it.
 	// +optional
 	Site string `json:"site,omitempty"`
 

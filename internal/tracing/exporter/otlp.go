@@ -73,36 +73,19 @@ func normalizeOTLPHTTPEndpoint(endpoint string) (endpointURL string, useInsecure
 }
 
 func NewOTLPExporter(endpoint string, sampleRate float64) (*OTLPExporter, error) {
-	endpointURL, useInsecure, err := normalizeOTLPHTTPEndpoint(endpoint)
-	if err != nil {
-		return nil, err
-	}
-
-	httpClient, err := otlpHTTPClient(config.TracingExporterTimeout, useInsecure)
-	if err != nil {
-		return nil, err
-	}
-
 	ctx := context.Background()
-	opts := []otlptracehttp.Option{
-		otlptracehttp.WithEndpointURL(endpointURL),
-		otlptracehttp.WithHTTPClient(httpClient),
-		otlptracehttp.WithTimeout(config.TracingExporterTimeout),
-		otlptracehttp.WithRetry(otlptracehttp.RetryConfig{Enabled: false}),
+	var (
+		otlpExporter sdktrace.SpanExporter
+		endpointURL  string
+		err          error
+	)
+	if config.OTLPProtocol == config.OTLPProtocolGRPC {
+		otlpExporter, endpointURL, err = newOTLPGRPCSpanExporter(ctx, endpoint)
+	} else {
+		otlpExporter, endpointURL, err = newOTLPHTTPSpanExporter(ctx, endpoint)
 	}
-	if useInsecure {
-		opts = append(opts, otlptracehttp.WithInsecure())
-	}
-	if len(config.OTLPHeaders) > 0 {
-		headers := make(map[string]string, len(config.OTLPHeaders))
-		for k, v := range config.OTLPHeaders {
-			headers[k] = v
-		}
-		opts = append(opts, otlptracehttp.WithHeaders(headers))
-	}
-	otlpExporter, err := newOTLPClient(ctx, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
+		return nil, err
 	}
 
 	res, err := newResource(ctx,
@@ -121,6 +104,40 @@ func NewOTLPExporter(endpoint string, sampleRate float64) (*OTLPExporter, error)
 		enabled:    true,
 		sampleRate: sampleRate,
 	}, nil
+}
+
+func newOTLPHTTPSpanExporter(ctx context.Context, endpoint string) (sdktrace.SpanExporter, string, error) {
+	endpointURL, useInsecure, err := normalizeOTLPHTTPEndpoint(endpoint)
+	if err != nil {
+		return nil, "", err
+	}
+
+	httpClient, err := otlpHTTPClient(config.TracingExporterTimeout, useInsecure)
+	if err != nil {
+		return nil, "", err
+	}
+
+	opts := []otlptracehttp.Option{
+		otlptracehttp.WithEndpointURL(endpointURL),
+		otlptracehttp.WithHTTPClient(httpClient),
+		otlptracehttp.WithTimeout(config.TracingExporterTimeout),
+		otlptracehttp.WithRetry(otlptracehttp.RetryConfig{Enabled: false}),
+	}
+	if useInsecure {
+		opts = append(opts, otlptracehttp.WithInsecure())
+	}
+	if len(config.OTLPHeaders) > 0 {
+		headers := make(map[string]string, len(config.OTLPHeaders))
+		for k, v := range config.OTLPHeaders {
+			headers[k] = v
+		}
+		opts = append(opts, otlptracehttp.WithHeaders(headers))
+	}
+	otlpExporter, err := newOTLPClient(ctx, opts...)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to create OTLP exporter: %w", err)
+	}
+	return otlpExporter, endpointURL, nil
 }
 
 func (e *OTLPExporter) ExportTraces(traces []*tracker.Trace) error {

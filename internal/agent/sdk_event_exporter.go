@@ -490,6 +490,10 @@ func (e *deliveryObservingExporter) ExportSpans(ctx context.Context, spans []sdk
 				zap.String("cr", e.cr.String()),
 				zap.String("exporter", e.name),
 				zap.Int("spans_dropped", len(spans)),
+				zap.String("error", deliveryErrorText(err)))
+			logger.Debug("exporter delivery failure detail",
+				zap.String("cr", e.cr.String()),
+				zap.String("exporter", e.name),
 				zap.Error(err))
 		}
 		return err

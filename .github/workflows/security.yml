@@ -140,7 +140,7 @@ jobs:
           cache: false
 
       - name: Install zizmor
-        run: pipx install zizmor==1.32.0
+        run: pipx install zizmor==1.33.1
 
       - name: Run zizmor
         env:

@@ -38,6 +38,23 @@ spec:
 ```
 
 Literal-valued headers go straight into the bundle ConfigMap.
+
+For OTLP over gRPC, point the endpoint at the collector's gRPC receiver
+(port 4317) and set `protocol: grpc`. The endpoint is `host:port`, with an
+optional `http://` (cleartext) or `https://` (TLS) scheme, and no URL path;
+a host without a port uses 4317. Headers are sent as gRPC metadata, spans
+and the metrics plane (`otlp.metrics`) both use gRPC, and connections go
+through the same egress guard and `spec.egress` proxy (as an HTTP CONNECT
+tunnel) as OTLP/HTTP.
+
+```yaml
+spec:
+  type: otlp
+  otlp:
+    endpoint: otel-collector.observability:4317
+    protocol: grpc
+    insecure: true
+```
 Secret-valued headers are loaded into the companion Secret under the
 fixed `credential` key. Today only ONE Secret-valued header is
 supported per OTLP exporter.
@@ -123,7 +140,7 @@ spec:
   type: datadog
   datadog:
     endpoint: datadog-agent.datadog:4318  # optional; defaults to this
-    site: datadoghq.com                    # or datadoghq.eu, etc.
+    site: datadoghq.com                    # informational, see below
     apiKeySecretRef:
       name: dd-api-key
       key: api_key
@@ -159,7 +176,7 @@ written. To reach a Service in another namespace, name it as
 |---|---|---|
 | `type` | enum | `otlp` / `jaeger` / `zipkin` / `splunk` / `datadog` |
 | `otlp.endpoint` | string | Required when `type=otlp`. |
-| `otlp.protocol` | enum | `http` / `grpc`. Defaults to `http`. |
+| `otlp.protocol` | enum | `http` / `grpc`. Defaults to `http`. `grpc` takes `host:port` without a URL path (default port 4317). |
 | `otlp.insecure` | bool | Disables TLS. |
 | `otlp.headers[]` | list | Either literal `value` or `valueFrom: SecretKeySelector`. |
 | `otlp.headersFromSecret` | object | `{name}` reference to a Secret in the same namespace; every key in that Secret becomes an OTLP header. Use for bulk or additional secret-backed headers beyond the single `headers[].valueFrom` credential. |
@@ -169,7 +186,7 @@ written. To reach a Service in another namespace, name it as
 | `zipkin.endpoint` | string | Required when `type=zipkin`. |
 | `splunk.endpoint` | string | Splunk HEC URL. |
 | `splunk.tokenSecretRef` | object | `{name, key}` selector. |
-| `datadog.site` | string | E.g. `datadoghq.com`, `datadoghq.eu`. |
+| `datadog.site` | string | E.g. `datadoghq.com`, `datadoghq.eu`. Informational: spans go to the Datadog Agent at `datadog.endpoint`, which forwards them to the site it is configured for. |
 | `datadog.apiKeySecretRef` | object | `{name, key}` selector. |
 | `samplePercent` | int 0-100 | Optional sampling rate. |
 

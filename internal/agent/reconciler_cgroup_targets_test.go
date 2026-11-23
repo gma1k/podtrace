@@ -111,7 +111,7 @@ func TestReconcile_CategoryGateErrorIsNonFatal(t *testing.T) {
 	}
 }
 
-func TestEnqueueAllPodTraces_ListErrorReturnsNil(t *testing.T) {
+func TestPodEventStillRebuildsWhenThePodTraceLookupFails(t *testing.T) {
 	c := fake.NewClientBuilder().
 		WithScheme(newScheme(t)).
 		WithInterceptorFuncs(interceptor.Funcs{
@@ -121,8 +121,9 @@ func TestEnqueueAllPodTraces_ListErrorReturnsNil(t *testing.T) {
 		}).Build()
 
 	r := &AgentReconciler{Client: c, NodeName: "n"}
-	if reqs := r.enqueueAllPodTraces(context.Background(), &corev1.Pod{}); reqs != nil {
-		t.Errorf("expected nil requests on list error, got %v", reqs)
+	reqs := r.enqueueOnPodChange(context.Background(), &corev1.Pod{})
+	if len(reqs) != 1 || reqs[0] != rebuildRequest {
+		t.Errorf("got %v; a failed lookup must still rebuild so Reconcile surfaces and retries the error", reqs)
 	}
 }
 

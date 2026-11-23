@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"go.uber.org/zap"
 	"golang.org/x/net/http/httpguts"
 
 	"github.com/gma1k/podtrace/internal/config"
@@ -178,9 +177,9 @@ func applyPayloadToConfig(p *bundle.Payload) error {
 	config.ZipkinEndpoint = ""
 	config.SplunkEndpoint = ""
 	config.DataDogEndpoint = ""
-	if p.Protocol != "" && p.Protocol != "http" {
-		logger.Warn("Exporter protocol is not supported; podtrace exports OTLP over HTTP only",
-			zap.String("protocol", p.Protocol))
+	config.OTLPProtocol = ""
+	if p.UsesGRPC() {
+		config.OTLPProtocol = config.OTLPProtocolGRPC
 	}
 	headers, err := otlpHeaders(p)
 	if err != nil {

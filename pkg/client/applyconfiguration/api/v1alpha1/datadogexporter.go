@@ -24,9 +24,10 @@ package v1alpha1
 type DataDogExporterApplyConfiguration struct {
 	Endpoint *string `json:"endpoint,omitempty"`
 	// Site, e.g. "datadoghq.com" or "datadoghq.eu". Defaults to datadoghq.com.
-	// Used as a label for routing and (when Endpoint is empty) to derive
-	// a default Endpoint pointing at a conventional DataDog Agent
-	// service name.
+	// Informational only: spans go to the Datadog Agent's OTLP receiver at
+	// Endpoint (default "datadog-agent.datadog:4318"), and the Agent
+	// forwards them to the site it is itself configured for. To reach a
+	// different site, point Endpoint at an Agent configured for it.
 	Site *string `json:"site,omitempty"`
 	// APIKeySecretRef references the DataDog API key in a Secret in the
 	// same namespace as the ExporterConfig.

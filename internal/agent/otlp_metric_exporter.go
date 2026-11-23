@@ -117,6 +117,7 @@ func metricNamespaceScope(crNamespace string, targetNamespaces []string) []strin
 // Two exporters agree on a pusher exactly when these agree.
 type destination struct {
 	endpoint string
+	grpc     bool
 	insecure bool
 	headers  map[string]string
 	interval time.Duration
@@ -224,7 +225,7 @@ func (p *metricPusherPool) size() int {
 func noopRelease(context.Context) error { return nil }
 
 // newOTLPMetricReader builds the periodic reader that pushes the external
-// producer's metrics over OTLP HTTP.
+// producer's metrics over OTLP, HTTP or gRPC as the destination asks.
 func newOTLPMetricReader(dest destination, producer sdkmetric.Producer) (sdkmetric.Reader, error) {
 	if dest.endpoint == "" {
 		return nil, fmt.Errorf("bundle missing endpoint")
@@ -232,6 +233,9 @@ func newOTLPMetricReader(dest destination, producer sdkmetric.Producer) (sdkmetr
 	endpoint, err := normalizeOTLPEndpoint(dest.endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("bundle endpoint: %w", err)
+	}
+	if dest.grpc {
+		return newOTLPGRPCMetricReader(dest, endpoint, producer)
 	}
 
 	opts := []otlpmetrichttp.Option{
@@ -259,11 +263,15 @@ func newOTLPMetricReader(dest destination, producer sdkmetric.Producer) (sdkmetr
 	if err != nil {
 		return nil, fmt.Errorf("create OTLP metric exporter: %w", err)
 	}
+	return newPeriodicMetricReader(exporter, dest, producer), nil
+}
+
+func newPeriodicMetricReader(exporter sdkmetric.Exporter, dest destination, producer sdkmetric.Producer) sdkmetric.Reader {
 	return sdkmetric.NewPeriodicReader(exporter,
 		sdkmetric.WithInterval(dest.interval),
 		sdkmetric.WithTimeout(metricPushTimeout),
 		sdkmetric.WithProducer(producer),
-	), nil
+	)
 }
 
 // metricsPath maps a trace endpoint path onto the metrics signal.
@@ -279,7 +287,7 @@ func metricsPath(tracePath string) string {
 // key is a stable identity for a destination.
 func (d destination) key() string {
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "endpoint=%s\ninsecure=%t\ninterval=%d\n", d.endpoint, d.insecure, d.interval)
+	_, _ = fmt.Fprintf(h, "endpoint=%s\ngrpc=%t\ninsecure=%t\ninterval=%d\n", d.endpoint, d.grpc, d.insecure, d.interval)
 	writeSortedHeaders(h, d.headers)
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -303,6 +311,7 @@ func destinationFromBundle(b *BundlePayload) (destination, bool) {
 	}
 	return destination{
 		endpoint: b.Endpoint,
+		grpc:     b.UsesGRPC(),
 		insecure: b.Insecure,
 		headers:  bundleHeaders(b),
 		interval: clampPushInterval(b.MetricsInterval),

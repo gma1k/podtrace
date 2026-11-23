@@ -9,9 +9,11 @@ import (
 )
 
 var metadataHosts = []net.IP{
-	net.ParseIP("fd00:ec2::254"),   // AWS IMDS over IPv6
-	net.ParseIP("100.100.100.200"), // Alibaba Cloud metadata
-	net.ParseIP("168.63.129.16"),   // Azure WireServer / host agent
+	net.ParseIP("fd00:ec2::254"),      // AWS IMDS over IPv6
+	net.ParseIP("fd20:ce::254"),       // GCP metadata server over IPv6
+	net.ParseIP("fd00:c1::a9fe:a9fe"), // Oracle Cloud IMDS over IPv6
+	net.ParseIP("100.100.100.200"),    // Alibaba Cloud metadata
+	net.ParseIP("168.63.129.16"),      // Azure WireServer / host agent
 }
 
 var nat64Prefix = [12]byte{0x00, 0x64, 0xff, 0x9b}

@@ -21,7 +21,7 @@ func enqueueFor(t *testing.T, plane MetricsPlaneConfig, podTraces ...*podtracev1
 	}
 
 	r := &AgentReconciler{Client: builder.Build(), MetricsPlane: plane}
-	return len(r.enqueueAllPodTraces(context.Background(), &corev1.Pod{}))
+	return len(r.enqueueOnPodChange(context.Background(), &corev1.Pod{}))
 }
 
 func TestPodEventEnqueuesNothingWithoutCRsOrPlane(t *testing.T) {
@@ -40,25 +40,24 @@ func TestPodEventStillReconcilesWhenPlaneIsOnAndNoCRExists(t *testing.T) {
 	}
 }
 
-func TestPlaneRequestIsAdditiveToRealCRRequests(t *testing.T) {
-	pt := &podtracev1alpha1.PodTrace{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "one"},
+func TestPodEventEnqueuesOneRebuildWhateverTheCRCount(t *testing.T) {
+	pts := []*podtracev1alpha1.PodTrace{
+		{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "one"}},
+		{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "two"}},
+		{ObjectMeta: metav1.ObjectMeta{Namespace: "other", Name: "three"}},
 	}
 
-	withoutPlane := enqueueFor(t, MetricsPlaneConfig{Enabled: false}, pt)
-	withPlane := enqueueFor(t, MetricsPlaneConfig{Enabled: true}, pt)
-
-	if withoutPlane != 1 {
-		t.Fatalf("got %d requests for one CR, want 1", withoutPlane)
+	if got := enqueueFor(t, MetricsPlaneConfig{Enabled: false}, pts...); got != 1 {
+		t.Errorf("got %d requests for three CRs, want 1; Reconcile rebuilds every CR "+
+			"on any request, so one request per CR repeats the same rebuild", got)
 	}
-	if withPlane != 2 {
-		t.Errorf("got %d requests with the plane on, want 2; the plane's refresh "+
-			"must be added to the CR requests, not replace them", withPlane)
+	if got := enqueueFor(t, MetricsPlaneConfig{Enabled: true}, pts...); got != 1 {
+		t.Errorf("got %d requests with the plane on, want 1", got)
 	}
 }
 
 func TestPlaneRequestCannotCollideWithARealPodTrace(t *testing.T) {
-	name := metricsPlaneRequest.Name
+	name := rebuildRequest.Name
 	if errs := apivalidation.NameIsDNSSubdomain(name, false); len(errs) == 0 {
 		t.Errorf("%q is a valid object name, so a real PodTrace could take it and "+
 			"the two reconcile paths would alias", name)

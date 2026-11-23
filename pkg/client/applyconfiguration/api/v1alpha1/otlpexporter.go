@@ -27,9 +27,13 @@ import (
 //
 // OTLPExporter configures the OpenTelemetry OTLP exporter.
 type OTLPExporterApplyConfiguration struct {
-	// Endpoint of the OTLP receiver, e.g. "otel-collector.observability:4318".
+	// Endpoint of the OTLP receiver, e.g. "otel-collector.observability:4318"
+	// for http or "otel-collector.observability:4317" for grpc.
 	Endpoint *string `json:"endpoint,omitempty"`
-	// Protocol selects http or grpc. Defaults to http.
+	// Protocol selects OTLP over http (port 4318) or grpc (port 4317).
+	// Defaults to http. A grpc endpoint is host:port, with an optional
+	// http:// or https:// scheme for cleartext or TLS, and no URL path; a
+	// host without a port uses 4317.
 	Protocol *apiv1alpha1.OTLPProtocol `json:"protocol,omitempty"`
 	// Insecure disables TLS. Do not use in production.
 	Insecure *bool `json:"insecure,omitempty"`

@@ -680,6 +680,10 @@ func GetUserAgent() string {
 
 var OTLPInsecure bool
 
+const OTLPProtocolGRPC = "grpc"
+
+var OTLPProtocol string
+
 func OTLPAllowInsecureNonLoopback() bool {
 	return OTLPInsecure || getBoolEnvOrDefault("PODTRACE_OTLP_INSECURE", false)
 }
