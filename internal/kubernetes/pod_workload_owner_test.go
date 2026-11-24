@@ -8,7 +8,6 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-
 func TestADeploymentPodIsAttributedToItsDeploymentLikeTheAgent(t *testing.T) {
 	cid := hex64()
 	newCgroupV2Sandbox(t, cid)
