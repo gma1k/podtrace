@@ -3,7 +3,7 @@
 # Debian's shared libnghttp3 so the uprobes find it mapped like any
 # distribution-packaged server would have it. ngtcp2's own libraries are
 # linked in statically; the source is pinned to the v1.11.0 tag's commit.
-FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2 AS build
+FROM debian:trixie-slim@sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0 AS build
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates git build-essential autoconf automake libtool pkg-config \
       libnghttp3-dev libgnutls28-dev libev-dev \
@@ -17,7 +17,7 @@ RUN git init /src && cd /src \
     && ./configure --with-gnutls --disable-shared --enable-static \
     && make -j"$(nproc)"
 
-FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
+FROM debian:trixie-slim@sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0
 RUN apt-get update && apt-get install -y --no-install-recommends \
       libnghttp3-9 libgnutls30t64 libev4t64 gnutls-bin \
     && rm -rf /var/lib/apt/lists/*

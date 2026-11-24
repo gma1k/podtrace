@@ -12,6 +12,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
@@ -19,6 +20,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/gma1k/podtrace/internal/logger"
+	"github.com/gma1k/podtrace/internal/podworkload"
 	"go.uber.org/zap"
 )
 
@@ -29,6 +31,7 @@ type TargetSelection struct {
 	AllInNamespace   bool
 	Pods             []string // supports "pod" or "namespace/pod"
 	ContainerName    string
+	NodeName         string
 }
 
 func (s TargetSelection) EffectiveNamespaces() []string {
@@ -63,7 +66,8 @@ func (s TargetSelection) WatchNamespaces() []string {
 // Matcher returns the predicate both the spawn and the local plane apply to a
 // candidate pod, so the two select the same pods: a pod named by a pod ref
 // when there are refs, otherwise one in the selection's namespaces, and in
-// either case one the label selector matches.
+// either case one the label selector matches, and, when the selection names a
+// node, one scheduled on it.
 func (s TargetSelection) Matcher() (func(*corev1.Pod) bool, error) {
 	selector := labels.Everything()
 	if s.PodSelector != "" {
@@ -80,6 +84,9 @@ func (s TargetSelection) Matcher() (func(*corev1.Pod) bool, error) {
 	}
 	return func(pod *corev1.Pod) bool {
 		if pod == nil {
+			return false
+		}
+		if s.NodeName != "" && pod.Spec.NodeName != s.NodeName {
 			return false
 		}
 		if len(refs) > 0 {
@@ -131,6 +138,8 @@ type TargetRegistry struct {
 	targets map[types.UID]*PodInfo
 	deleted map[types.UID]time.Time
 
+	capped map[types.UID]string
+
 	pendingMu sync.Mutex
 	pending   map[types.UID]*corev1.Pod
 	pendingCh chan struct{}
@@ -147,6 +156,7 @@ func NewTargetRegistry(clientset kubernetes.Interface, selection TargetSelection
 		updates:    make(chan []*PodInfo, 8),
 		targets:    make(map[types.UID]*PodInfo),
 		deleted:    make(map[types.UID]time.Time),
+		capped:     make(map[types.UID]string),
 		matches:    matches,
 		matcherErr: err,
 		pending:    make(map[types.UID]*corev1.Pod),
@@ -178,13 +188,7 @@ func (tr *TargetRegistry) Start(ctx context.Context) error {
 	}
 	watchNamespaces := tr.selection.WatchNamespaces()
 
-	var tweak func(*metav1.ListOptions)
-	if tr.selection.PodSelector != "" {
-		selector := tr.selection.PodSelector
-		tweak = func(o *metav1.ListOptions) {
-			o.LabelSelector = selector
-		}
-	}
+	tweak := targetListOptions(tr.selection)
 
 	handlers := cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(obj interface{}) { tr.enqueueUpsert(obj) },
@@ -195,9 +199,7 @@ func (tr *TargetRegistry) Start(ctx context.Context) error {
 	var syncFns []cache.InformerSynced
 	for _, ns := range watchNamespaces {
 		opts := []informers.SharedInformerOption{informers.WithNamespace(ns)}
-		if tweak != nil {
-			opts = append(opts, informers.WithTweakListOptions(tweak))
-		}
+		opts = append(opts, informers.WithTweakListOptions(tweak))
 		factory := informers.NewSharedInformerFactoryWithOptions(tr.clientset, 0, opts...)
 		podInf := factory.Core().V1().Pods().Informer()
 		if _, err := podInf.AddEventHandler(handlers); err != nil {
@@ -219,6 +221,21 @@ func (tr *TargetRegistry) Start(ctx context.Context) error {
 	tr.emitSnapshot()
 	go tr.resolveWorker(ctx)
 	return nil
+}
+
+// targetListOptions narrows the pod LIST/WATCH to the label selector and, for
+// a per-node tracer, to its node, so the API server never streams pods the
+// tracer could not attach to.
+func targetListOptions(selection TargetSelection) func(*metav1.ListOptions) {
+	labelSelector := selection.PodSelector
+	var fieldSelector string
+	if selection.NodeName != "" {
+		fieldSelector = fields.OneTermEqualSelector("spec.nodeName", selection.NodeName).String()
+	}
+	return func(o *metav1.ListOptions) {
+		o.LabelSelector = labelSelector
+		o.FieldSelector = fieldSelector
+	}
 }
 
 // enqueueUpsert records the pod for the resolution worker. It runs on the
@@ -302,8 +319,30 @@ func (tr *TargetRegistry) upsertPod(ctx context.Context, pod *corev1.Pod) bool {
 		tr.mu.Lock()
 		_, wasTarget := tr.targets[pod.UID]
 		delete(tr.targets, pod.UID)
+		delete(tr.capped, pod.UID)
 		tr.mu.Unlock()
+		if wasTarget {
+			tr.requeueCapped()
+		}
 		return wasTarget
+	}
+
+	tr.mu.Lock()
+	if _, gone := tr.deleted[pod.UID]; gone {
+		tr.mu.Unlock()
+		return false
+	}
+	current := tr.targets[pod.UID]
+	if current == nil && tr.atCapLocked(pod) {
+		tr.mu.Unlock()
+		return false
+	}
+	tr.mu.Unlock()
+
+	if current != nil {
+		if refreshed, ok := refreshResolvedTarget(current, pod, tr.selection.ContainerName); ok {
+			return tr.storeTarget(pod, refreshed)
+		}
 	}
 
 	info, err := resolvePodInfoFromObject(ctx, pod, tr.selection.ContainerName)
@@ -325,25 +364,144 @@ func (tr *TargetRegistry) upsertPod(ctx context.Context, pod *corev1.Pod) bool {
 				zap.String("namespace", pod.Namespace),
 				zap.String("pod", pod.Name),
 				zap.String("stale_container_id", stale.ContainerID))
+			tr.requeueCapped()
 		}
 		return dropped
 	}
+	return tr.storeTarget(pod, info)
+}
 
+// storeTarget records info for pod unless the pod was deleted or the cap
+// filled while it resolved, and reports whether the published set changed:
+// a resolution that yields the target already held does not republish, so
+// the tracer does not re-attach.
+func (tr *TargetRegistry) storeTarget(pod *corev1.Pod, info *PodInfo) bool {
 	tr.mu.Lock()
+	defer tr.mu.Unlock()
 	if _, gone := tr.deleted[pod.UID]; gone {
-		tr.mu.Unlock()
 		return false
 	}
-	if len(tr.targets) >= tr.maxTargets {
-		if _, exists := tr.targets[pod.UID]; !exists {
+	existing, exists := tr.targets[pod.UID]
+	if !exists && tr.atCapLocked(pod) {
+		return false
+	}
+	delete(tr.capped, pod.UID)
+	tr.targets[pod.UID] = info
+	return !exists || !podInfoEqual(existing, info)
+}
+
+// atCapLocked reports whether the target set is full, remembering pod so it
+// is retried when a slot frees. tr.mu must be held.
+func (tr *TargetRegistry) atCapLocked(pod *corev1.Pod) bool {
+	if len(tr.targets) < tr.maxTargets {
+		return false
+	}
+	if _, known := tr.capped[pod.UID]; !known {
+		logger.Warn("Target registry reached max target limit; pod waits for a free slot",
+			zap.Int("max_targets", tr.maxTargets),
+			zap.String("namespace", pod.Namespace),
+			zap.String("pod", pod.Name))
+	}
+	tr.capped[pod.UID] = pod.Namespace + "/" + pod.Name
+	return true
+}
+
+// requeueCapped hands every pod turned away at the cap back to the
+// resolution worker, using its current informer copy, after a target left
+// the set. Pods no longer in any informer store are forgotten.
+func (tr *TargetRegistry) requeueCapped() {
+	tr.mu.Lock()
+	keys := make(map[types.UID]string, len(tr.capped))
+	for uid, key := range tr.capped {
+		keys[uid] = key
+	}
+	tr.mu.Unlock()
+	for uid, key := range keys {
+		pod := tr.cachedPod(key)
+		if pod == nil || pod.UID != uid {
+			tr.mu.Lock()
+			delete(tr.capped, uid)
 			tr.mu.Unlock()
-			logger.Warn("Target registry reached max target limit", zap.Int("max_targets", tr.maxTargets))
+		}
+		if pod != nil {
+			tr.enqueueUpsert(pod)
+		}
+	}
+}
+
+func (tr *TargetRegistry) cachedPod(key string) *corev1.Pod {
+	for _, inf := range tr.podInfs {
+		obj, exists, err := inf.GetStore().GetByKey(key)
+		if err != nil || !exists {
+			continue
+		}
+		if pod, ok := obj.(*corev1.Pod); ok && pod != nil {
+			return pod
+		}
+	}
+	return nil
+}
+
+// refreshResolvedTarget reuses current's resolved containers when the pod
+// still runs exactly those containers and every one has a cgroup, so a
+// status update that changed nothing the tracer attaches to (a readiness
+// flip, a label edit) skips the /proc, cgroup and CRI work.
+func refreshResolvedTarget(current *PodInfo, pod *corev1.Pod, containerName string) (*PodInfo, bool) {
+	statuses := pickContainers(pod, containerName)
+	if len(statuses) == 0 || len(statuses) != len(current.Containers) {
+		return nil, false
+	}
+	running := make(map[string]string, len(statuses))
+	for _, cs := range statuses {
+		id, err := shortContainerID(cs.ContainerID)
+		if err != nil {
+			return nil, false
+		}
+		running[id] = cs.Name
+	}
+	for _, c := range current.Containers {
+		if c.CgroupPath == "" {
+			return nil, false
+		}
+		if name, ok := running[c.ID]; !ok || name != c.Name {
+			return nil, false
+		}
+	}
+	refreshed := *current
+	refreshed.Containers = append([]ContainerTarget(nil), current.Containers...)
+	refreshed.Labels = copyLabels(pod.Labels)
+	refreshed.PodIP = pod.Status.PodIP
+	refreshed.OwnerKind, refreshed.OwnerName = podworkload.Of(pod)
+	return &refreshed, true
+}
+
+func podInfoEqual(a, b *PodInfo) bool {
+	if a.PodName != b.PodName || a.Namespace != b.Namespace ||
+		a.ContainerID != b.ContainerID || a.CgroupPath != b.CgroupPath ||
+		a.ContainerName != b.ContainerName || a.PodIP != b.PodIP ||
+		a.OwnerKind != b.OwnerKind || a.OwnerName != b.OwnerName ||
+		len(a.Containers) != len(b.Containers) || len(a.Labels) != len(b.Labels) {
+		return false
+	}
+	for i := range a.Containers {
+		if a.Containers[i] != b.Containers[i] {
 			return false
 		}
 	}
-	tr.targets[pod.UID] = info
-	tr.mu.Unlock()
+	for k, v := range a.Labels {
+		if other, ok := b.Labels[k]; !ok || other != v {
+			return false
+		}
+	}
 	return true
+}
+
+func copyLabels(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 // podHasContainerID reports whether any of the pod's current container
@@ -381,7 +539,9 @@ func (tr *TargetRegistry) handlePodDelete(obj interface{}) {
 	tr.pendingMu.Unlock()
 	now := time.Now()
 	tr.mu.Lock()
+	_, wasTarget := tr.targets[pod.UID]
 	delete(tr.targets, pod.UID)
+	delete(tr.capped, pod.UID)
 	for uid, at := range tr.deleted {
 		if now.Sub(at) > deletedPodMemory {
 			delete(tr.deleted, uid)
@@ -390,6 +550,9 @@ func (tr *TargetRegistry) handlePodDelete(obj interface{}) {
 	tr.deleted[pod.UID] = now
 	tr.mu.Unlock()
 	tr.emitSnapshot()
+	if wasTarget {
+		tr.requeueCapped()
+	}
 }
 
 func (tr *TargetRegistry) matchesSelection(pod *corev1.Pod) bool {
@@ -444,15 +607,7 @@ func resolvePodInfoFromObject(ctx context.Context, pod *corev1.Pod, containerNam
 			zap.String("pod", pod.Namespace+"/"+pod.Name))
 	}
 
-	labels := make(map[string]string, len(pod.Labels))
-	for k, v := range pod.Labels {
-		labels[k] = v
-	}
-	var ownerKind, ownerName string
-	if len(pod.OwnerReferences) > 0 {
-		ownerKind = pod.OwnerReferences[0].Kind
-		ownerName = pod.OwnerReferences[0].Name
-	}
+	ownerKind, ownerName := podworkload.Of(pod)
 
 	return &PodInfo{
 		PodName:       pod.Name,
@@ -461,7 +616,7 @@ func resolvePodInfoFromObject(ctx context.Context, pod *corev1.Pod, containerNam
 		ContainerID:   targets[0].ID,
 		CgroupPath:    targets[0].CgroupPath,
 		ContainerName: targets[0].Name,
-		Labels:        labels,
+		Labels:        copyLabels(pod.Labels),
 		PodIP:         pod.Status.PodIP,
 		OwnerKind:     ownerKind,
 		OwnerName:     ownerName,

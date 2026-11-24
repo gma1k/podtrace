@@ -123,8 +123,8 @@ func TestInformerCache_Start_WithFakeClientset(t *testing.T) {
 
 	// Verify informers were initialized.
 	ic.mu.RLock()
-	podInfSet := ic.podInf != nil
-	esInfSet := ic.esInf != nil
+	podInfSet := ic.firstPodInformer() != nil
+	esInfSet := ic.firstEndpointSliceInformer() != nil
 	ic.mu.RUnlock()
 
 	if !podInfSet {
@@ -157,7 +157,7 @@ func TestInformerCache_Start_DisabledWithClientset(t *testing.T) {
 	ic.Start(context.Background())
 	// Should not have set informers because Enabled() = false.
 	ic.mu.RLock()
-	podInfSet := ic.podInf != nil
+	podInfSet := ic.firstPodInformer() != nil
 	ic.mu.RUnlock()
 	if podInfSet {
 		t.Error("expected podInf to remain nil when informers disabled")

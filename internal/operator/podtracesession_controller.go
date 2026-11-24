@@ -159,9 +159,13 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 	if len(targets.Nodes) == 0 {
 		reason, message := "NoMatchedPods", "selector matched zero pods"
-		if len(targets.DeniedNamespaces) > 0 {
+		switch {
+		case len(targets.DeniedNamespaces) > 0:
 			reason = "CrossNamespaceNotGranted"
 			message = crossNamespaceDeniedMessage(session.Namespace, targets.DeniedNamespaces)
+		case len(targets.InvalidPodRefs) > 0:
+			reason = "InvalidPodRefs"
+			message = invalidPodRefsMessage(targets.InvalidPodRefs)
 		}
 		if deadline := sessionPendingDeadline(&session); !deadline.IsZero() && r.now().After(deadline) {
 			return ctrl.Result{}, r.failSessionTerminally(ctx, &session, reason+"DeadlineExceeded",
@@ -348,6 +352,9 @@ func (r *PodTraceSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if len(targets.DeniedNamespaces) > 0 {
 		reconciledMessage += "; " + crossNamespaceDeniedMessage(session.Namespace, targets.DeniedNamespaces)
 	}
+	if len(targets.InvalidPodRefs) > 0 {
+		reconciledMessage += "; " + invalidPodRefsMessage(targets.InvalidPodRefs)
+	}
 	r.setCondition(&session, ConditionReconciled, metav1.ConditionTrue, "Reconciled", reconciledMessage)
 	if exporterInvalid != "" {
 		r.setCondition(&session, ConditionDegraded, metav1.ConditionTrue, "ExporterInvalid",
@@ -458,6 +465,7 @@ type sessionTargets struct {
 	PodRefs          []podtracev1alpha1.PodRef
 	DeniedNamespaces []string
 	PodRefNodes      map[string]string
+	InvalidPodRefs   []string
 }
 
 // podRefKey is the PodRefNodes key for a ref, defaulting its namespace to the
@@ -594,6 +602,7 @@ func (r *PodTraceSessionReconciler) resolveSessionTargets(ctx context.Context, s
 		PodRefs:          allowedPodRefs,
 		DeniedNamespaces: deniedNamespaces,
 		PodRefNodes:      podRefNodes,
+		InvalidPodRefs:   invalidPodRefs(s.Spec.PodRefs),
 	}, nil
 }
 

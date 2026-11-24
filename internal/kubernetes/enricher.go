@@ -68,8 +68,15 @@ type ContextEnricher struct {
 }
 
 func NewContextEnricher(clientset kubernetes.Interface, podInfo *PodInfo) *ContextEnricher {
+	return NewScopedContextEnricher(clientset, podInfo, nil)
+}
+
+// NewScopedContextEnricher builds an enricher whose informers fall back to
+// the given namespaces when the identity may not list cluster-wide, as a
+// session Job's ServiceAccount, which may read only its target namespaces.
+func NewScopedContextEnricher(clientset kubernetes.Interface, podInfo *PodInfo, namespaces []string) *ContextEnricher {
 	ttl := time.Duration(getIntEnvOrDefault("PODTRACE_K8S_CACHE_TTL", 300)) * time.Second
-	ic := NewInformerCache(clientset)
+	ic := NewScopedInformerCache(clientset, namespaces)
 	return &ContextEnricher{
 		clientset:       clientset,
 		podCache:        newPodIPCache(maxPodIPCacheEntries),

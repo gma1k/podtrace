@@ -25,6 +25,8 @@ type ServiceResolver struct {
 	mu                sync.RWMutex
 	endpoints         map[string]ServiceInfo
 	endpointsExpireAt time.Time
+	listedAt          time.Time
+	listFailed        bool
 	notFound          map[string]time.Time
 
 	fetchMu sync.Mutex
@@ -95,13 +97,16 @@ func (sr *ServiceResolver) lookupCache(cacheKey string) (*ServiceInfo, bool) {
 	if until, ok := sr.notFound[cacheKey]; ok && now.Before(until) {
 		return nil, true
 	}
+	recent := !sr.listedAt.IsZero() && now.Sub(sr.listedAt) < sr.negativeTTL
+	if recent && (sr.listFailed || now.Before(sr.endpointsExpireAt)) {
+		return nil, true
+	}
 	return nil, false
 }
 
 // fetchServiceByEndpoint lists every Endpoints object page by page and
 // replaces the positive cache with the result, so one cluster-wide listing
-// serves every lookup until it expires. A miss is remembered for the
-// shorter negative TTL, and expired misses are pruned on each refresh.
+// serves every lookup until it expires.
 func (sr *ServiceResolver) fetchServiceByEndpoint(ctx context.Context, ip string, port int) *ServiceInfo {
 	cacheKey := endpointKey(ip, port)
 	next, err := sr.listEndpoints(ctx)
@@ -109,6 +114,8 @@ func (sr *ServiceResolver) fetchServiceByEndpoint(ctx context.Context, ip string
 
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
+	sr.listedAt = now
+	sr.listFailed = err != nil
 	if err == nil {
 		sr.endpoints = next
 		sr.endpointsExpireAt = now.Add(sr.cacheTTL)

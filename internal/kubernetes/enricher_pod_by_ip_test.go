@@ -36,7 +36,7 @@ func TestResolvePodByIP_InformerCacheHit(t *testing.T) {
 	defer ce.Stop()
 
 	ce.informerCache.mu.RLock()
-	inf := ce.informerCache.podInf
+	inf := ce.informerCache.firstPodInformer()
 	ce.informerCache.mu.RUnlock()
 	if inf == nil {
 		t.Skip("informer not initialized")

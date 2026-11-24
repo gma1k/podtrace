@@ -47,6 +47,7 @@ func newCgroupV2Sandbox(t *testing.T, containerID string) string {
 // runningPod returns a pod whose single container is fully populated so that
 // resolvePodInfoFromObject can succeed (valid 64-char hex container ID).
 func runningPod(uid, ns, name, containerName, containerID string) *corev1.Pod {
+	controller := true
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       types.UID(uid),
@@ -54,7 +55,7 @@ func runningPod(uid, ns, name, containerName, containerID string) *corev1.Pod {
 			Name:      name,
 			Labels:    map[string]string{"app": "demo"},
 			OwnerReferences: []metav1.OwnerReference{
-				{Kind: "ReplicaSet", Name: name + "-rs"},
+				{Kind: "ReplicaSet", Name: name + "-rs", Controller: &controller},
 			},
 		},
 		Spec: corev1.PodSpec{
@@ -162,8 +163,8 @@ func TestResolvePodInfoFromObject_MissingOptionalFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if info.OwnerKind != "" || info.OwnerName != "" {
-		t.Errorf("expected empty owner, got %q/%q", info.OwnerKind, info.OwnerName)
+	if info.OwnerKind != "Pod" || info.OwnerName != "bare" {
+		t.Errorf("expected the bare pod as its own workload, got %q/%q", info.OwnerKind, info.OwnerName)
 	}
 	if info.PodIP != "" {
 		t.Errorf("expected empty PodIP, got %q", info.PodIP)

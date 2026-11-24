@@ -47,7 +47,7 @@ spec:
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `selector` | LabelSelector | one of selector/podRefs | Pods labeled to diagnose. |
-| `podRefs` | `[{namespace, name}]` | one of selector/podRefs | Explicit pod list. |
+| `podRefs` | `[{namespace, name}]` | one of selector/podRefs | Explicit pod list. An entry whose name is not a DNS-1123 subdomain, or whose namespace is not a DNS-1123 label, is rejected by the admission webhook; with the webhook off it is skipped and listed on the `Reconciled` condition (reason `InvalidPodRefs` when nothing else matched). |
 | `namespaceSelector` | LabelSelector | optional | Widens `selector` across namespaces. |
 | `containerName` | string | optional | Restrict to one container per pod. |
 | `duration` | Go duration string | required | Wall-clock run time, e.g. `"30s"`, `"5m"`. Webhook rejects `0s` and bounded by `TracerConfig.spec.session.maxDuration`. |
@@ -160,8 +160,10 @@ kubectl delete podtracesession diag-api -n my-app
     exporter config, mounted into Jobs at `/etc/podtrace/exporter/`
   - Companion Secret (same name) when the ExporterConfig has credentials
 - **In the user namespace:**
-  - `Role podtrace-session-report-<sessionUID>` granting `get/update/create`
-    on the specific `reportRef.ConfigMap` or `.Secret`
+  - `Role podtrace-session-report-<sessionUID>` granting read on pods,
+    events and EndpointSlices (the Job enriches peers in its target
+    namespaces with them) and `get/update` on the specific
+    `reportRef.ConfigMap`
   - `RoleBinding podtrace-session-report-<sessionUID>` binding the role
     to the system-NS `podtrace-session` ServiceAccount
 

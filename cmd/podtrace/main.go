@@ -456,6 +456,7 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		AllInNamespace:   allInNamespace,
 		Pods:             pods,
 		ContainerName:    containerName,
+		NodeName:         inClusterNodeName(resolver),
 	}
 
 	if handled, err := maybeSpawnOnNode(hardCtx, ctx.Done(), cmd, resolver, selection); handled {
@@ -616,7 +617,7 @@ func runPodtrace(cmd *cobra.Command, args []string) error {
 		if clientsetProvider, ok := resolver.(kubernetes.ClientsetProvider); ok {
 			clientset := clientsetProvider.GetClientset()
 			if clientset != nil {
-				enricher = kubernetes.NewContextEnricher(clientset, podInfo)
+				enricher = kubernetes.NewScopedContextEnricher(clientset, podInfo, enrichmentNamespaces(selection, targetInfos))
 				enricher.Start(ctx)
 				defer enricher.Stop()
 			}

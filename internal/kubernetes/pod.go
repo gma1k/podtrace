@@ -16,6 +16,7 @@ import (
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/cri"
 	"github.com/gma1k/podtrace/internal/logger"
+	"github.com/gma1k/podtrace/internal/podworkload"
 	"github.com/gma1k/podtrace/internal/procfs"
 	"github.com/gma1k/podtrace/internal/sysfs"
 	"github.com/gma1k/podtrace/internal/validation"
@@ -113,18 +114,8 @@ func (r *PodResolver) ResolvePod(ctx context.Context, podName, namespace, contai
 		return nil, NewCgroupNotFoundError(shortID)
 	}
 
-	labels := make(map[string]string)
-	if pod.Labels != nil {
-		for k, v := range pod.Labels {
-			labels[k] = v
-		}
-	}
-
-	var ownerKind, ownerName string
-	if len(pod.OwnerReferences) > 0 {
-		ownerKind = pod.OwnerReferences[0].Kind
-		ownerName = pod.OwnerReferences[0].Name
-	}
+	labels := copyLabels(pod.Labels)
+	ownerKind, ownerName := podworkload.Of(pod)
 
 	return &PodInfo{
 		PodName:       podName,
