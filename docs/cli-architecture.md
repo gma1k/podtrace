@@ -161,8 +161,19 @@ admin runs once:
 
 ```bash
 kubectl create namespace podtrace-cli
-kubectl label ns/podtrace-cli pod-security.kubernetes.io/enforce=privileged
+kubectl label ns/podtrace-cli pod-security.kubernetes.io/enforce=privileged \
+  app.kubernetes.io/managed-by=podtrace-cli
 ```
+
+The CLI uses an existing `podtrace-cli` namespace only when it carries
+`app.kubernetes.io/managed-by=podtrace-cli`. Whoever creates a namespace
+controls it, so on a cluster with self-service namespaces (Capsule, HNC,
+Rancher projects) a tenant could claim the name first and receive the
+node-privileged spawn pod and its credentials. A namespace a tenancy
+controller marks as a tenant's is refused even with the label. If you may
+not read the namespace, or want to use one that lacks the label, name it
+explicitly with `--spawn-namespace=podtrace-cli` (or
+`PODTRACE_SPAWN_NAMESPACE`), which skips the check.
 
 `--spawn-namespace=<ns>` picks another namespace. Pointing it at the
 target namespace still works, but the CLI warns, because whoever can exec

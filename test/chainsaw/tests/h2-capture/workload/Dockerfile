@@ -1,6 +1,6 @@
 # Non-stripped build so the Go crypto/tls uprobe resolves symbols without the
 # gopclntab path (we're validating decode here, not stripped-binary support).
-FROM golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d AS build
+FROM golang:1.27.4-trixie@sha256:0f82c58710c405cc012da2fbd2b04bde9ced20392a89f66062822d711d7d6b4b AS build
 WORKDIR /src
 COPY go.mod go.sum* ./
 RUN go mod download

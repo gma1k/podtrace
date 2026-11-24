@@ -12,8 +12,11 @@ import (
 
 // ValidatePodRef checks that a podRef names a real pod: the name a DNS-1123
 // subdomain and the namespace, when set, a DNS-1123 label. The CRD schema
-// enforces the same shape; the operator repeats it because a name carrying
-// a ',' or '/' would otherwise be split into extra targets downstream.
+// does not enforce this shape, because tightening a served v1alpha1 schema
+// would reject objects already stored; the admission webhook rejects a bad
+// ref, and the operator skips one and reports it on the session's
+// Reconciled condition, since a name carrying a ',' or '/' would otherwise
+// be split into extra targets downstream.
 func ValidatePodRef(ref PodRef) error {
 	if errs := validation.IsDNS1123Subdomain(ref.Name); len(errs) > 0 {
 		return fmt.Errorf("podRef name %q: %s", ref.Name, strings.Join(errs, "; "))

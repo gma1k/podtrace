@@ -263,8 +263,9 @@ the (grant-filtered) allowlist pushed via the bundle.
 
 For a bounded `PodTraceSession`, the in-Job CLI reads pod metadata via a
 per-session ServiceAccount. When a session targets a foreign namespace,
-the operator provisions a scoped pod-read `Role`+`RoleBinding` **in that
-namespace**, but only after the consent check passes. An ungranted
+the operator provisions a scoped read `Role`+`RoleBinding` (pods, events
+and EndpointSlices) **in that namespace**, but only after the consent
+check passes. An ungranted
 target never receives this RBAC, so the escape leaves no trace in the
 victim namespace.
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -103,6 +104,22 @@ func filterGrantedPodRefs(
 	}
 	sort.Strings(denied)
 	return allowed, denied, nil
+}
+
+// invalidPodRefs describes each podRef that cannot name a pod and is
+// therefore never traced.
+func invalidPodRefs(refs []podtracev1alpha1.PodRef) []string {
+	var out []string
+	for i, ref := range refs {
+		if err := podtracev1alpha1.ValidatePodRef(ref); err != nil {
+			out = append(out, fmt.Sprintf("spec.podRefs[%d]: %v", i, err))
+		}
+	}
+	return out
+}
+
+func invalidPodRefsMessage(invalid []string) string {
+	return "invalid podRef(s) ignored: " + strings.Join(invalid, "; ")
 }
 
 // crossNamespaceDeniedMessage renders the operator-facing explanation

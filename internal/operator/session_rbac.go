@@ -185,6 +185,7 @@ func ensureSessionPodReadRBAC(ctx context.Context, c client.Client, s *podtracev
 			role.Rules = []rbacv1.PolicyRule{
 				{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get", "list", "watch"}},
 				{APIGroups: []string{""}, Resources: []string{"events"}, Verbs: []string{"get", "list", "watch"}},
+				sessionEndpointSliceReadRule(),
 			}
 			if sameNS {
 				return controllerutil.SetControllerReference(s, role, scheme)
@@ -281,6 +282,16 @@ func pruneSessionPodReadRBAC(ctx context.Context, c client.Client, s *podtracev1
 	return nil
 }
 
+// sessionEndpointSliceReadRule lets the in-Job tracer name the Services its
+// pods talk to within the namespaces it targets.
+func sessionEndpointSliceReadRule() rbacv1.PolicyRule {
+	return rbacv1.PolicyRule{
+		APIGroups: []string{"discovery.k8s.io"},
+		Resources: []string{"endpointslices"},
+		Verbs:     []string{"get", "list", "watch"},
+	}
+}
+
 func buildSessionReportRules(ref *podtracev1alpha1.ReportReference) []rbacv1.PolicyRule {
 	rules := []rbacv1.PolicyRule{
 		{
@@ -293,6 +304,7 @@ func buildSessionReportRules(ref *podtracev1alpha1.ReportReference) []rbacv1.Pol
 			Resources: []string{"events"},
 			Verbs:     []string{"get", "list", "watch"},
 		},
+		sessionEndpointSliceReadRule(),
 	}
 	resource, name := reportRefResource(ref)
 	if resource == "" || name == "" || resource == "secrets" {

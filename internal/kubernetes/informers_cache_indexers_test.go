@@ -20,8 +20,8 @@ func TestInformerCache_IndexersAndLookups_Deterministic(t *testing.T) {
 	defer ic.Stop()
 
 	ic.mu.RLock()
-	podInf := ic.podInf
-	esInf := ic.esInf
+	podInf := ic.firstPodInformer()
+	esInf := ic.firstEndpointSliceInformer()
 	ic.mu.RUnlock()
 	if podInf == nil || esInf == nil {
 		t.Skip("informers not initialized")
@@ -87,7 +87,7 @@ func TestGetServiceByEndpoint_NoServiceNameLabel(t *testing.T) {
 	defer ic.Stop()
 
 	ic.mu.RLock()
-	esInf := ic.esInf
+	esInf := ic.firstEndpointSliceInformer()
 	ic.mu.RUnlock()
 	if esInf == nil {
 		t.Skip("endpointslice informer not initialized")

@@ -19,7 +19,7 @@ func TestGetServiceByEndpoint_UnknownEndpointReturnsNil(t *testing.T) {
 	defer ic.Stop()
 
 	ic.mu.RLock()
-	esInf := ic.esInf
+	esInf := ic.firstEndpointSliceInformer()
 	ic.mu.RUnlock()
 	if esInf == nil {
 		t.Skip("endpointslice informer not initialized")
@@ -39,7 +39,7 @@ func TestGetServiceByEndpoint_WhitespaceServiceNameReturnsNil(t *testing.T) {
 	defer ic.Stop()
 
 	ic.mu.RLock()
-	esInf := ic.esInf
+	esInf := ic.firstEndpointSliceInformer()
 	ic.mu.RUnlock()
 	if esInf == nil {
 		t.Skip("endpointslice informer not initialized")

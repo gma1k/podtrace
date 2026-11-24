@@ -15,6 +15,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 	"sort"
@@ -44,7 +45,17 @@ const (
 	PatternChanged      ChangeKind = "pattern changed"
 	BoundTightened      ChangeKind = "bound tightened"
 	ValidationRuleAdded ChangeKind = "validation rule added"
+	NullableRemoved     ChangeKind = "nullable removed"
+	UnknownFieldsPruned ChangeKind = "unknown fields no longer preserved"
+	FormatChanged       ChangeKind = "format changed"
+	ListTypeChanged     ChangeKind = "list type changed"
+	MapTypeChanged      ChangeKind = "map type changed"
+	CompositionChanged  ChangeKind = "schema composition changed"
 )
+
+// compositionKeywords are the schema keywords whose subschemas constrain a
+// value beyond its own properties.
+var compositionKeywords = []string{"allOf", "anyOf", "not", "oneOf"}
 
 // lowerBounds and upperBounds are the numeric schema keywords that reject
 // more values as they rise and as they fall, respectively.
@@ -89,6 +100,13 @@ type field struct {
 	required         []string
 	defaulted        map[string]bool
 	rules            []string
+	nullable         bool
+	preserveUnknown  bool
+	format           string
+	listType         string
+	listMapKeys      []string
+	mapType          string
+	composition      map[string]string
 }
 
 // Compare reports the breaking differences between the old and new revision of
@@ -227,7 +245,53 @@ func tightenedValidation(path string, oldField, newField field) []Change {
 			changes = append(changes, Change{Kind: ValidationRuleAdded, Path: path, Detail: rule})
 		}
 	}
+	return append(changes, changedSemantics(path, oldField, newField)...)
+}
+
+// changedSemantics reports changes that reject or rewrite a stored value
+// without being a validation keyword: null no longer allowed, unknown fields
+// pruned on the next write, a format check, and list/map merge semantics,
+// which server-side apply depends on and which a set or map list also
+// enforces by rejecting duplicates.
+func changedSemantics(path string, oldField, newField field) []Change {
+	var changes []Change
+	if oldField.nullable && !newField.nullable {
+		changes = append(changes, Change{Kind: NullableRemoved, Path: path})
+	}
+	if oldField.preserveUnknown && !newField.preserveUnknown {
+		changes = append(changes, Change{Kind: UnknownFieldsPruned, Path: path})
+	}
+	if newField.format != "" && newField.format != oldField.format {
+		changes = append(changes, Change{Kind: FormatChanged, Path: path, Detail: orUnset(oldField.format) + " -> " + newField.format})
+	}
+	oldList, newList := orDefault(oldField.listType, "atomic"), orDefault(newField.listType, "atomic")
+	switch {
+	case oldList != newList:
+		changes = append(changes, Change{Kind: ListTypeChanged, Path: path, Detail: oldList + " -> " + newList})
+	case newList == "map" && !slices.Equal(oldField.listMapKeys, newField.listMapKeys):
+		changes = append(changes, Change{Kind: ListTypeChanged, Path: path,
+			Detail: "list-map-keys " + strings.Join(oldField.listMapKeys, ",") + " -> " + strings.Join(newField.listMapKeys, ",")})
+	}
+	if oldMap, newMap := orDefault(oldField.mapType, "granular"), orDefault(newField.mapType, "granular"); oldMap != newMap {
+		changes = append(changes, Change{Kind: MapTypeChanged, Path: path, Detail: oldMap + " -> " + newMap})
+	}
+	for _, key := range compositionKeywords {
+		next, has := newField.composition[key]
+		if !has {
+			continue
+		}
+		if prev, had := oldField.composition[key]; !had || prev != next {
+			changes = append(changes, Change{Kind: CompositionChanged, Path: path, Detail: key})
+		}
+	}
 	return changes
+}
+
+func orDefault(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
 }
 
 // boundChange reports whether key moved in the rejecting direction, counting
@@ -346,6 +410,23 @@ func describe(schema map[string]any) field {
 		exclusiveMaximum: schema["exclusiveMaximum"] == true,
 		bounds:           map[string]float64{},
 		defaulted:        map[string]bool{},
+		nullable:         schema["nullable"] == true,
+		preserveUnknown:  schema["x-kubernetes-preserve-unknown-fields"] == true,
+		format:           stringValue(schema, "format"),
+		listType:         stringValue(schema, "x-kubernetes-list-type"),
+		mapType:          stringValue(schema, "x-kubernetes-map-type"),
+		composition:      map[string]string{},
+	}
+	if keys, ok := schema["x-kubernetes-list-map-keys"].([]any); ok {
+		for _, k := range keys {
+			f.listMapKeys = append(f.listMapKeys, fmt.Sprint(k))
+		}
+	}
+	for _, key := range compositionKeywords {
+		if sub, ok := schema[key]; ok {
+			encoded, _ := json.Marshal(sub) // decoded from JSON, so it re-encodes
+			f.composition[key] = string(encoded)
+		}
 	}
 	if values, ok := schema["enum"].([]any); ok {
 		f.enum = make([]string, 0, len(values))
