@@ -111,6 +111,9 @@ func formatResult(res storagemigrate.Result, dryRun bool) string {
 
 	line := fmt.Sprintf("%s: storage version %s, %d object(s), %s %d",
 		res.CRD, res.StorageVersion, res.Objects, verb, count)
+	if res.Deleted > 0 {
+		line += fmt.Sprintf(", %d deleted meanwhile", res.Deleted)
+	}
 	if res.Conflicts > 0 {
 		line += fmt.Sprintf(", %d changed under us (re-run)", res.Conflicts)
 	}

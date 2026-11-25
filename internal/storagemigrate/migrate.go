@@ -21,6 +21,7 @@ type Result struct {
 	StorageVersion string
 	Objects        int
 	Rewritten      int
+	Deleted        int
 	Conflicts      int
 	StoredVersions []string
 	Unpinned       []string
@@ -90,12 +91,15 @@ func Migrate(ctx context.Context, crds CRDClient, dyn dynamic.Interface, crdName
 
 	if !dryRun {
 		for i := range objects {
-			rewritten, err := rewrite(ctx, dyn, gvr, crd.Spec.Scope, &objects[i])
-			switch {
-			case err != nil:
+			outcome, err := rewrite(ctx, dyn, gvr, crd.Spec.Scope, &objects[i])
+			if err != nil {
 				return res, err
+			}
+			switch outcome {
 			case rewritten:
 				res.Rewritten++
+			case deleted:
+				res.Deleted++
 			default:
 				res.Conflicts++
 			}
@@ -153,19 +157,49 @@ func listAll(ctx context.Context, dyn dynamic.Interface, gvr schema.GroupVersion
 	}
 }
 
-func rewrite(ctx context.Context, dyn dynamic.Interface, gvr schema.GroupVersionResource, scope apiextensionsv1.ResourceScope, obj *unstructured.Unstructured) (bool, error) {
-	var err error
+// rewriteOutcome is what became of one object's rewrite.
+type rewriteOutcome int
+
+const (
+	rewritten rewriteOutcome = iota
+	deleted
+	conflicted
+)
+
+// maxRewriteAttempts bounds how often an object that keeps changing between
+// read and write is re-read and written again.
+const maxRewriteAttempts = 3
+
+// rewrite writes obj back unchanged so the API server stores it in the
+// current storage version.
+func rewrite(ctx context.Context, dyn dynamic.Interface, gvr schema.GroupVersionResource, scope apiextensionsv1.ResourceScope, obj *unstructured.Unstructured) (rewriteOutcome, error) {
+	client := resourceClient(dyn, gvr, scope, obj.GetNamespace())
+	current := obj
+	for attempt := 1; ; attempt++ {
+		_, err := client.Update(ctx, current, metav1.UpdateOptions{})
+		switch {
+		case err == nil:
+			return rewritten, nil
+		case apierrors.IsNotFound(err):
+			return deleted, nil
+		case !apierrors.IsConflict(err):
+			return conflicted, fmt.Errorf("rewrite %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
+		case attempt >= maxRewriteAttempts:
+			return conflicted, nil
+		}
+		current, err = client.Get(ctx, obj.GetName(), metav1.GetOptions{})
+		switch {
+		case apierrors.IsNotFound(err):
+			return deleted, nil
+		case err != nil:
+			return conflicted, fmt.Errorf("re-read %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
+		}
+	}
+}
+
+func resourceClient(dyn dynamic.Interface, gvr schema.GroupVersionResource, scope apiextensionsv1.ResourceScope, namespace string) dynamic.ResourceInterface {
 	if scope == apiextensionsv1.NamespaceScoped {
-		_, err = dyn.Resource(gvr).Namespace(obj.GetNamespace()).Update(ctx, obj, metav1.UpdateOptions{})
-	} else {
-		_, err = dyn.Resource(gvr).Update(ctx, obj, metav1.UpdateOptions{})
+		return dyn.Resource(gvr).Namespace(namespace)
 	}
-	switch {
-	case err == nil:
-		return true, nil
-	case apierrors.IsConflict(err), apierrors.IsNotFound(err):
-		return false, nil
-	default:
-		return false, fmt.Errorf("rewrite %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
-	}
+	return dyn.Resource(gvr)
 }

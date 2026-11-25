@@ -36,10 +36,10 @@ podtrace_profiling_auto_triggers_total{pod_ip}
 podtrace_profiling_fetch_errors_total{pod_ip,profile_type}
 podtrace_profiling_goroutines{pod_ip,state}
 podtrace_redis_latency_seconds{command,namespace,process_name}
-podtrace_resource_alert_level{namespace,resource_type}
-podtrace_resource_limit_bytes{namespace,resource_type}
-podtrace_resource_usage_bytes{namespace,resource_type}
-podtrace_resource_utilization_percent{namespace,resource_type}
+podtrace_resource_alert_level{namespace,pod,resource_type}
+podtrace_resource_limit_bytes{namespace,pod,resource_type}
+podtrace_resource_usage_bytes{namespace,pod,resource_type}
+podtrace_resource_utilization_percent{namespace,pod,resource_type}
 podtrace_ring_buffer_drops_total{}
 podtrace_rtt_latest_seconds{namespace,process_name,target_pod,target_service,type}
 podtrace_rtt_seconds{namespace,process_name,target_pod,target_service,type}

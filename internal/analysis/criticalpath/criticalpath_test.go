@@ -418,7 +418,7 @@ func TestEachEndpointSumsItsRequests(t *testing.T) {
 func TestEndpointsPastTheBoundAreFoldedTogether(t *testing.T) {
 	c := New()
 	for id := uint64(1); id <= maxEndpointSummaries+3; id++ {
-		c.Feed(&events.Event{Type: events.EventHTTPReq, CorrelationID: id, Target: fmt.Sprintf("GET /item/%d", id)})
+		c.Feed(&events.Event{Type: events.EventHTTPReq, CorrelationID: id, Target: fmt.Sprintf("GET /item%d/detail", id)})
 		c.Feed(finished(id, 0, 1, 0))
 	}
 	byEndpoint := c.Summary().ByEndpoint

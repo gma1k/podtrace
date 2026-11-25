@@ -465,24 +465,27 @@ The metrics endpoint includes:
 
 **`podtrace_resource_limit_bytes`** (Gauge)
 - Description: Resource limit in bytes (or CPU quota in microseconds)
-- Labels: `namespace`, `resource_type`
+- Labels: `namespace`, `pod`, `resource_type`
 - Updated: When resource limits are read from cgroup files
 
 **`podtrace_resource_usage_bytes`** (Gauge)
-- Description: Current resource usage in bytes (or CPU time in microseconds)
-- Labels: `namespace`, `resource_type`
+- Description: Current resource usage in bytes (or CPU time in microseconds). Memory is the working set: usage less the inactive file cache, as the kubelet reports it
+- Labels: `namespace`, `pod`, `resource_type`
 - Updated: Periodically (every 5 seconds by default)
 
 **`podtrace_resource_utilization_percent`** (Gauge)
 - Description: Resource utilization percentage (usage/limit * 100)
-- Labels: `namespace`, `resource_type`
+- Labels: `namespace`, `pod`, `resource_type`
 - Range: 0-100 (values >100 indicate limit exceeded)
 - Updated: Periodically (every 5 seconds by default)
 
 **`podtrace_resource_alert_level`** (Gauge)
 - Description: Resource alert level: 0=none, 1=warning (80%), 2=critical (90%), 3=emergency (95%)
-- Labels: `namespace`, `resource_type`
-- Updated: When utilization crosses thresholds
+- Labels: `namespace`, `pod`, `resource_type`
+- Updated: Periodically (every 5 seconds by default)
+
+A series is removed when its pod stops being monitored. `pod` is empty
+until podtrace learns which pod owns the cgroup.
 
 ### Resource Limit Query Examples
 

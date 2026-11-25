@@ -47,7 +47,7 @@ static inline void emit_resource_alert(u64 cgroup_id, u32 resource_type, u32 uti
     e->timestamp = bpf_ktime_get_ns();
     e->pid = 0;
     e->type = EVENT_RESOURCE_LIMIT;
-    e->latency_ns = 0;
+    e->latency_ns = limit;
     e->error = (s32)utilization;
     e->bytes = usage;
     e->tcp_state = resource_type;

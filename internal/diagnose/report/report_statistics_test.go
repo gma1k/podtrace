@@ -75,3 +75,15 @@ func TestReleasesWithoutAcquiresAreNotALeak(t *testing.T) {
 		t.Errorf("summary health = %q for releases only", got)
 	}
 }
+
+func TestResourceSectionDoesNotPrintCPUTimeAsBytes(t *testing.T) {
+	got := GenerateResourceSection(&mockDiagnostician{events: []*events.Event{
+		{Type: events.EventResourceLimit, TCPState: 0, Error: 40, Bytes: 19_606_484, Timestamp: 1},
+	}})
+	if !strings.Contains(got, "Max utilization: 40%") {
+		t.Fatalf("CPU utilization missing:\n%s", got)
+	}
+	if strings.Contains(got, "Current usage") {
+		t.Fatalf("CPU time rendered as bytes:\n%s", got)
+	}
+}

@@ -17,6 +17,8 @@ func (failingBPFMap) Put(_, _ interface{}) error    { return errFakeMap }
 func (failingBPFMap) Delete(_ interface{}) error    { return errFakeMap }
 func (failingBPFMap) Lookup(_, _ interface{}) error { return errFakeMap }
 
+func (failingBPFMap) LookupAndDelete(_, _ interface{}) error { return errFakeMap }
+
 func TestReadV1ControllerFile_NoControllers(t *testing.T) {
 	_, err := readV1ControllerFile(nil, "kubepods/pod1", "cpu.cfs_quota_us")
 	if err == nil {

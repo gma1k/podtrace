@@ -1049,6 +1049,8 @@ func GenerateSecuritySection(d Diagnostician) string {
 	return report
 }
 
+const resourceTypeCPU = 0
+
 func GenerateResourceSection(d Diagnostician) string {
 	resourceEvents := d.FilterEvents(events.EventResourceLimit)
 	if len(resourceEvents) == 0 {
@@ -1131,7 +1133,7 @@ func GenerateResourceSection(d Diagnostician) string {
 		report += fmt.Sprintf("    Max utilization: %d%%\n", stats.maxUtil)
 		report += fmt.Sprintf("    Average utilization: %.1f%%\n", stats.avgUtil)
 
-		if stats.lastUsage > 0 {
+		if stats.lastUsage > 0 && resourceType != resourceTypeCPU {
 			report += fmt.Sprintf("    Current usage: %s\n", analyzer.FormatBytes(stats.lastUsage))
 		}
 

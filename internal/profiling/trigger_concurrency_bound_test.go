@@ -29,6 +29,7 @@ func newBlockingPprof(t *testing.T, inFlight, maxSeen *atomic.Int64, release cha
 	b.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/debug/pprof/" {
 			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(pprofIndexPage))
 			return
 		}
 		b.hits.Add(1)

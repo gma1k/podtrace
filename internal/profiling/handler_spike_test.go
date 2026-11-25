@@ -19,6 +19,10 @@ func TestHandler_Run_TriggerChannel(t *testing.T) {
 `
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
+		if r.URL.Path == "/debug/pprof/" {
+			_, _ = w.Write([]byte(pprofIndexPage))
+			return
+		}
 		_, _ = w.Write([]byte(heapText))
 	}))
 	t.Cleanup(srv.Close)
