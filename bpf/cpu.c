@@ -8,6 +8,27 @@
 #define CPU_SAMPLE_WINDOW_NS (1000ULL * 1000ULL * 1000ULL)
 #define MAX_CPU_WINDOW_NS (60ULL * 1000ULL * 1000ULL * 1000ULL)
 #define MAX_SCHED_BLOCK_NS (30ULL * 1000ULL * 1000ULL * 1000ULL)
+#define CPU_QUOTA_MAX_ANCESTORS 4
+
+static __always_inline u64 cpu_quota_owner(u64 cgid)
+{
+	if (bpf_map_lookup_elem(&cgroup_cpu_quota, &cgid))
+		return cgid;
+
+	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+	struct cgroup *cg = BPF_CORE_READ(task, cgroups, dfl_cgrp);
+	for (int i = 0; i < CPU_QUOTA_MAX_ANCESTORS; i++) {
+		if (!cg)
+			return 0;
+		cg = BPF_CORE_READ(cg, self.parent, cgroup);
+		if (!cg)
+			return 0;
+		u64 id = BPF_CORE_READ(cg, kn, id);
+		if (id && bpf_map_lookup_elem(&cgroup_cpu_quota, &id))
+			return id;
+	}
+	return 0;
+}
 
 static __always_inline void cpu_sample_accumulate(void *ctx, u64 on_cpu_ns, u64 now)
 {
@@ -16,10 +37,14 @@ static __always_inline void cpu_sample_accumulate(void *ctx, u64 on_cpu_ns, u64 
 	if (!cgroup_targeted(cgid))
 		return;
 
-	struct cpu_window *w = bpf_map_lookup_elem(&cgroup_cpu_window, &cgid);
+	u64 owner = cpu_quota_owner(cgid);
+	if (!owner)
+		return;
+
+	struct cpu_window *w = bpf_map_lookup_elem(&cgroup_cpu_window, &owner);
 	if (!w) {
 		struct cpu_window init = {.window_start_ns = now, .runtime_ns = on_cpu_ns};
-		bpf_map_update_elem(&cgroup_cpu_window, &cgid, &init, BPF_ANY);
+		bpf_map_update_elem(&cgroup_cpu_window, &owner, &init, BPF_ANY);
 		return;
 	}
 
@@ -32,19 +57,19 @@ static __always_inline void cpu_sample_accumulate(void *ctx, u64 on_cpu_ns, u64 
 	if (elapsed > MAX_CPU_WINDOW_NS) {
 		w->window_start_ns = now;
 		w->runtime_ns = 0;
-		struct resource_key stale = {.cgroup_id = cgid, .resource_type = RESOURCE_CPU};
+		struct resource_key stale = {.cgroup_id = owner, .resource_type = RESOURCE_CPU};
 		bpf_map_delete_elem(&cgroup_alerts, &stale);
 		return;
 	}
 
-	struct cpu_quota *q = bpf_map_lookup_elem(&cgroup_cpu_quota, &cgid);
+	struct cpu_quota *q = bpf_map_lookup_elem(&cgroup_cpu_quota, &owner);
 	if (q && q->quota_us > 0 && elapsed > 0) {
 		u64 numerator = w->runtime_ns * q->period_us * 100ULL;
 		u64 denominator = elapsed * q->quota_us;
 		u32 util = denominator ? (u32)(numerator / denominator) : 0;
 		if (util > 100)
 			util = 100;
-		emit_resource_alert(cgid, RESOURCE_CPU, util, q->quota_us, w->runtime_ns);
+		emit_resource_alert(owner, RESOURCE_CPU, util, q->quota_us, w->runtime_ns);
 	}
 
 	w->window_start_ns = now;

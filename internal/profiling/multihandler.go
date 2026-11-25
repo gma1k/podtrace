@@ -3,6 +3,7 @@ package profiling
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -52,7 +53,7 @@ func (m *MultiHandler) Len() int { return len(m.handlers) }
 // config.ProfilingMaxConcurrent.
 func (m *MultiHandler) Run(ctx context.Context, eventChan <-chan *events.Event) {
 	for _, h := range m.handlers {
-		discoverCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		discoverCtx, cancel := context.WithTimeout(ctx, pprofDiscoveryTimeout)
 		h.profiler.Discover(discoverCtx)
 		cancel()
 	}
@@ -75,12 +76,47 @@ func (m *MultiHandler) Run(ctx context.Context, eventChan <-chan *events.Event) 
 	}
 }
 
-// GenerateSection concatenates each pod's profiling section.
+// GenerateSection renders one profiling section for every pod: the event
+// correlation, which the pods share, is computed and printed once, followed
+// by what each pod's own pprof endpoint served.
 func (m *MultiHandler) GenerateSection(allEvents []*events.Event, duration time.Duration) string {
-	var sb strings.Builder
-	for _, h := range m.handlers {
-		sb.WriteString(h.GenerateSection(allEvents, duration))
+	switch len(m.handlers) {
+	case 0:
+		return ""
+	case 1:
+		return m.handlers[0].GenerateSection(allEvents, duration)
 	}
+
+	shared := correlateEvents(allEvents)
+	perPod := make([]*CorrelatedResult, 0, len(m.handlers))
+	anyMissing := false
+	for _, h := range m.handlers {
+		pod := &CorrelatedResult{}
+		h.attachPprof(pod)
+		perPod = append(perPod, pod)
+		anyMissing = anyMissing || !pod.PprofAvailable
+	}
+
+	var sb strings.Builder
+	sb.WriteString(sectionTitle)
+	for _, pod := range perPod {
+		writePprofEndpoint(&sb, pod)
+	}
+	if anyMissing {
+		writePprofTip(&sb, &CorrelatedResult{})
+	}
+	sb.WriteString("\n")
+	writeEventCorrelation(&sb, shared)
+	for _, pod := range perPod {
+		var profiles strings.Builder
+		writePprofProfiles(&profiles, pod)
+		if profiles.Len() == 0 {
+			continue
+		}
+		fmt.Fprintf(&sb, "  pprof data from pod %s:\n", pod.PodIP)
+		sb.WriteString(profiles.String())
+	}
+	writeMemoryFindings(&sb, shared)
 	return sb.String()
 }
 

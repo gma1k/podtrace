@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -37,6 +38,21 @@ const maxTopFunctions = 20
 // maxPprofRedirects bounds how many same-origin redirects a pprof fetch follows
 // (net/http/pprof answers /debug/pprof with a redirect to /debug/pprof/).
 const maxPprofRedirects = 3
+
+// pprofDiscoveryTimeout bounds one pass over the candidate ports.
+const pprofDiscoveryTimeout = 3 * time.Second
+
+// pprofRediscoveryInterval is how often a fetch retries discovery while no
+// endpoint is known, so a pprof listener that starts after the session does
+// is still found.
+const pprofRediscoveryInterval = 30 * time.Second
+
+// errNoPprofEndpoint is the error a fetch reports while no endpoint is known.
+const errNoPprofEndpoint = "no pprof endpoint discovered"
+
+// maxPprofIndexBytes caps how much of a candidate's index page is read to
+// check that it is a pprof index.
+const maxPprofIndexBytes = 64 * 1024
 
 // ProfileType identifies the kind of profile to collect.
 type ProfileType int
@@ -100,6 +116,10 @@ type PodProfiler struct {
 	// handler goroutines concurrently.
 	foundPort  atomic.Int64
 	httpClient *http.Client
+
+	discoverMu    sync.Mutex
+	lastDiscovery time.Time
+	reportedNone  bool
 }
 
 // NewPodProfiler creates a PodProfiler for the given pod IP and candidate ports.
@@ -167,24 +187,55 @@ func (p *PodProfiler) Discover(ctx context.Context) bool {
 	if p.podIP == "" {
 		return false
 	}
+	p.discoverMu.Lock()
+	defer p.discoverMu.Unlock()
+	return p.discoverLocked(ctx)
+}
 
+// discoveredPort returns the pprof port, retrying discovery at most once per
+// pprofRediscoveryInterval while none is known. 0 means none was found.
+func (p *PodProfiler) discoveredPort(ctx context.Context) int64 {
+	if port := p.foundPort.Load(); port != 0 {
+		return port
+	}
+	if p.podIP == "" {
+		return 0
+	}
+	p.discoverMu.Lock()
+	defer p.discoverMu.Unlock()
+	if !p.lastDiscovery.IsZero() && time.Since(p.lastDiscovery) < pprofRediscoveryInterval {
+		return p.foundPort.Load()
+	}
+	discoverCtx, cancel := context.WithTimeout(ctx, pprofDiscoveryTimeout)
+	defer cancel()
+	p.discoverLocked(discoverCtx)
+	return p.foundPort.Load()
+}
+
+// rediscoveryDue reports whether no endpoint is known and the next fetch
+// would probe for one again.
+func (p *PodProfiler) rediscoveryDue() bool {
+	if p.foundPort.Load() != 0 || p.podIP == "" {
+		return false
+	}
+	p.discoverMu.Lock()
+	defer p.discoverMu.Unlock()
+	return p.lastDiscovery.IsZero() || time.Since(p.lastDiscovery) >= pprofRediscoveryInterval
+}
+
+// discoverLocked probes the candidate ports. Caller holds p.discoverMu.
+func (p *PodProfiler) discoverLocked(ctx context.Context) bool {
+	if p.foundPort.Load() != 0 {
+		return true
+	}
+	p.lastDiscovery = time.Now()
 	probeClient := &http.Client{
 		Timeout:       200 * time.Millisecond,
 		Transport:     p.httpClient.Transport,
 		CheckRedirect: p.httpClient.CheckRedirect,
 	}
 	for _, port := range p.ports {
-		url := p.endpoint(int64(port), "/debug/pprof/")
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		if err != nil {
-			continue
-		}
-		resp, err := probeClient.Do(req)
-		if err != nil {
-			continue
-		}
-		_ = resp.Body.Close()
-		if resp.StatusCode == http.StatusOK {
+		if p.probePprofIndex(ctx, probeClient, port) {
 			p.foundPort.Store(int64(port))
 			logger.Info("Discovered pprof endpoint on target pod",
 				zap.String("pod_ip", p.podIP),
@@ -192,18 +243,50 @@ func (p *PodProfiler) Discover(ctx context.Context) bool {
 			return true
 		}
 	}
-	logger.Info("No pprof endpoint found on target pod — CPU correlation will use BPF stacks only",
-		zap.String("pod_ip", p.podIP),
-		zap.Ints("ports_tried", p.ports))
+	if !p.reportedNone {
+		p.reportedNone = true
+		logger.Info("No pprof endpoint found on target pod — CPU correlation will use BPF stacks only; retrying periodically",
+			zap.String("pod_ip", p.podIP),
+			zap.Ints("ports_tried", p.ports))
+	}
 	return false
+}
+
+// probePprofIndex reports whether port serves a net/http/pprof index. A 200
+// alone is not enough: an application that answers every path with a page
+// would otherwise pin a port whose profiles never parse.
+func (p *PodProfiler) probePprofIndex(ctx context.Context, client *http.Client, port int) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.endpoint(int64(port), "/debug/pprof/"), nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxPprofIndexBytes))
+	if err != nil {
+		return false
+	}
+	return isPprofIndex(body)
+}
+
+// isPprofIndex reports whether body is the index net/http/pprof serves, which
+// links every profile it offers by name.
+func isPprofIndex(body []byte) bool {
+	return bytes.Contains(body, []byte("goroutine")) && bytes.Contains(body, []byte("heap"))
 }
 
 // FetchHeap fetches the heap profile in text mode (?debug=1) and parses
 // top allocating functions.
 func (p *PodProfiler) FetchHeap(ctx context.Context) *ProfileResult {
-	port := p.foundPort.Load()
+	port := p.discoveredPort(ctx)
 	if port == 0 {
-		return &ProfileResult{Type: ProfileHeap, Available: false, Error: "no pprof endpoint discovered"}
+		return &ProfileResult{Type: ProfileHeap, Available: false, Error: errNoPprofEndpoint}
 	}
 	url := p.endpoint(port, "/debug/pprof/heap?debug=1")
 	text, raw, err := p.fetchText(ctx, url)
@@ -224,9 +307,9 @@ func (p *PodProfiler) FetchHeap(ctx context.Context) *ProfileResult {
 // FetchGoroutine fetches the goroutine profile in full text mode (?debug=2)
 // and counts total and blocked goroutines.
 func (p *PodProfiler) FetchGoroutine(ctx context.Context) *ProfileResult {
-	port := p.foundPort.Load()
+	port := p.discoveredPort(ctx)
 	if port == 0 {
-		return &ProfileResult{Type: ProfileGoroutine, Available: false, Error: "no pprof endpoint discovered"}
+		return &ProfileResult{Type: ProfileGoroutine, Available: false, Error: errNoPprofEndpoint}
 	}
 	url := p.endpoint(port, "/debug/pprof/goroutine?debug=2")
 	text, raw, err := p.fetchText(ctx, url)
@@ -249,9 +332,9 @@ func (p *PodProfiler) FetchGoroutine(ctx context.Context) *ProfileResult {
 // into the functions with the most flat CPU time. The binary body is dropped
 // once parsed so a stored result does not pin up to maxCPUProfileBytes.
 func (p *PodProfiler) FetchCPUProfile(ctx context.Context, duration time.Duration) *ProfileResult {
-	port := p.foundPort.Load()
+	port := p.discoveredPort(ctx)
 	if port == 0 {
-		return &ProfileResult{Type: ProfileCPU, Available: false, Error: "no pprof endpoint discovered"}
+		return &ProfileResult{Type: ProfileCPU, Available: false, Error: errNoPprofEndpoint}
 	}
 	secs := int(duration.Seconds())
 	if secs < 1 {
@@ -304,6 +387,9 @@ func (p *PodProfiler) FetchCPUProfile(ctx context.Context, duration time.Duratio
 func parseCPUProfile(raw []byte) ([]CPUFunctionSample, error) {
 	plain, err := inflateProfile(raw, maxDecompressedCPUProfileBytes)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkProfileDecodeBudget(plain); err != nil {
 		return nil, err
 	}
 	prof, err := profile.ParseData(plain)
@@ -499,18 +585,6 @@ func parseHeapText(text string) []FunctionSample {
 // A "blocked" goroutine is in state: chan receive, chan send, select,
 // semacquire, IO wait, sleep, syscall, etc.
 func parseGoroutineText(text string) (total, blocked int) {
-	blockedStates := map[string]bool{
-		"chan receive":           true,
-		"chan send":              true,
-		"select":                 true,
-		"semacquire":             true,
-		"IO wait":                true,
-		"sleep":                  true,
-		"syscall":                true,
-		"sync.Mutex":             true,
-		"sync.RWMutex":           true,
-		"timer goroutine (idle)": true,
-	}
 	scanner := bufio.NewScanner(strings.NewReader(text))
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -529,9 +603,34 @@ func parseGoroutineText(text string) (total, blocked int) {
 		if comma := strings.Index(state, ","); comma > 0 {
 			state = strings.TrimSpace(state[:comma])
 		}
-		if blockedStates[state] {
+		if isBlockedWaitReason(state) {
 			blocked++
 		}
 	}
 	return total, blocked
+}
+
+// blockedWaitReasons are the goroutine states, as the Go runtime prints them,
+// of a goroutine waiting on something other than the CPU. Go 1.20 replaced
+// "semacquire" for sync primitives with the primitive's own name, such as
+// "sync.Mutex.Lock" and "sync.Cond.Wait"; every "sync." reason is matched by
+// prefix so the ones a later Go adds count too.
+var blockedWaitReasons = map[string]bool{
+	"chan receive":            true,
+	"chan receive (nil chan)": true,
+	"chan send":               true,
+	"chan send (nil chan)":    true,
+	"select":                  true,
+	"select (no cases)":       true,
+	"semacquire":              true,
+	"IO wait":                 true,
+	"sleep":                   true,
+	"syscall":                 true,
+	"GC assist wait":          true,
+	"wait for GC cycle":       true,
+	"timer goroutine (idle)":  true,
+}
+
+func isBlockedWaitReason(state string) bool {
+	return blockedWaitReasons[state] || strings.HasPrefix(state, "sync.")
 }

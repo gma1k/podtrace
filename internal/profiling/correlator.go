@@ -131,14 +131,9 @@ func Correlate(
 		result.SlowEvents = result.SlowEvents[:maxCorrelatedSlowEvents]
 	}
 
-	type window struct{ start, end time.Time }
 	slowWindows := make([]window, 0, len(result.SlowEvents))
 	for _, e := range result.SlowEvents {
-		eventWall := clock.BPFTimestampToWall(e.Timestamp)
-		slowWindows = append(slowWindows, window{
-			start: eventWall.Add(-50 * time.Millisecond),
-			end:   eventWall.Add(time.Duration(safeInt64(e.LatencyNS)) + 50*time.Millisecond),
-		})
+		slowWindows = append(slowWindows, slowEventWindow(e))
 	}
 
 	pidStats := map[uint32]*ProcessCPU{}
@@ -322,6 +317,24 @@ func isSlowEventType(t events.EventType) bool {
 	}
 }
 
+// slowWindowMargin widens a slow operation's window on both sides, so the
+// samples just before it started and just after it returned count too.
+const slowWindowMargin = 50 * time.Millisecond
+
+type window struct{ start, end time.Time }
+
+// slowEventWindow is the wall-clock span a slow operation ran over. An
+// event's timestamp is taken when the operation returns, so it ran from
+// timestamp minus latency up to the timestamp.
+func slowEventWindow(e *events.Event) window {
+	end := clock.BPFTimestampToWall(e.Timestamp)
+	start := end.Add(-time.Duration(safeInt64(e.LatencyNS)))
+	return window{
+		start: start.Add(-slowWindowMargin),
+		end:   end.Add(slowWindowMargin),
+	}
+}
+
 // GenerateSection produces the "Performance Profiling Correlation" report section
 // from a CorrelatedResult. It is called by Handler.GenerateSection.
 func GenerateSection(cr *CorrelatedResult, duration time.Duration) string {
@@ -330,25 +343,50 @@ func GenerateSection(cr *CorrelatedResult, duration time.Duration) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("Performance Profiling Correlation:\n")
-
-	if cr.PprofAvailable {
-		fmt.Fprintf(&sb, "  pprof endpoint: available (pod %s)\n", cr.PodIP)
-	} else {
-		sb.WriteString("  pprof endpoint: not found on target pod\n")
-		sb.WriteString("    Tip: add  import _ \"net/http/pprof\"  to your Go binary and\n")
-		sb.WriteString("    expose a /debug/pprof/ HTTP listener to enable heap / goroutine data.\n")
-	}
+	sb.WriteString(sectionTitle)
+	writePprofEndpoint(&sb, cr)
+	writePprofTip(&sb, cr)
 	sb.WriteString("\n")
+	writeEventCorrelation(&sb, cr)
+	writePprofProfiles(&sb, cr)
+	writeMemoryFindings(&sb, cr)
+	return sb.String()
+}
 
+const sectionTitle = "Performance Profiling Correlation:\n"
+
+// writePprofEndpoint states whether the pod serves pprof.
+func writePprofEndpoint(sb *strings.Builder, cr *CorrelatedResult) {
+	if cr.PprofAvailable {
+		fmt.Fprintf(sb, "  pprof endpoint: available (pod %s)\n", cr.PodIP)
+		return
+	}
+	if cr.PodIP == "" {
+		sb.WriteString("  pprof endpoint: not found on target pod\n")
+		return
+	}
+	fmt.Fprintf(sb, "  pprof endpoint: not found on target pod (pod %s)\n", cr.PodIP)
+}
+
+func writePprofTip(sb *strings.Builder, cr *CorrelatedResult) {
+	if cr.PprofAvailable {
+		return
+	}
+	sb.WriteString("    Tip: add  import _ \"net/http/pprof\"  to your Go binary and\n")
+	sb.WriteString("    expose a /debug/pprof/ HTTP listener to enable heap / goroutine data.\n")
+}
+
+// writeEventCorrelation renders what the kernel events show: the slow
+// operations, scheduling activity and the frames on CPU around them.
+func writeEventCorrelation(sb *strings.Builder, cr *CorrelatedResult) {
 	if len(cr.SlowEvents) > 0 {
-		fmt.Fprintf(&sb, "  Slow events (> threshold) count: %d\n", len(cr.SlowEvents))
+		fmt.Fprintf(sb, "  Slow events (> threshold) count: %d\n", len(cr.SlowEvents))
 		sb.WriteString("  Top slow events:\n")
 		for i, e := range cr.SlowEvents {
 			if i >= 5 {
 				break
 			}
-			fmt.Fprintf(&sb, "    %s  PID=%-6d  %-12s  latency=%v  target=%s\n",
+			fmt.Fprintf(sb, "    %s  PID=%-6d  %-12s  latency=%v  target=%s\n",
 				e.TypeString(),
 				e.PID,
 				sanitize.Terminal(e.ProcessName),
@@ -360,10 +398,10 @@ func GenerateSection(cr *CorrelatedResult, duration time.Duration) string {
 
 	if len(cr.CPUHotProcesses) > 0 {
 		sb.WriteString("  CPU Scheduling Activity (from BPF sched_switch):\n")
-		fmt.Fprintf(&sb, "    %-8s  %-16s  %-10s  %s\n",
+		fmt.Fprintf(sb, "    %-8s  %-16s  %-10s  %s\n",
 			"PID", "Process", "Switches", "Avg Block Time")
 		for _, ps := range cr.CPUHotProcesses {
-			fmt.Fprintf(&sb, "    %-8d  %-16s  %-10d  %v\n",
+			fmt.Fprintf(sb, "    %-8d  %-16s  %-10d  %v\n",
 				ps.PID, sanitize.Terminal(truncate(ps.Name, 15)), ps.SchedCount,
 				time.Duration(int64(ps.AvgBlockNS)).Round(time.Microsecond))
 		}
@@ -376,21 +414,25 @@ func GenerateSection(cr *CorrelatedResult, duration time.Duration) string {
 			if i >= 8 {
 				break
 			}
-			fmt.Fprintf(&sb, "    %-5d  %s\n", f.Count, sanitize.Terminal(f.Frame))
+			fmt.Fprintf(sb, "    %-5d  %s\n", f.Count, sanitize.Terminal(f.Frame))
 		}
 		sb.WriteString("  Frames are resolved where the process was still running; any that\n")
 		sb.WriteString("  remain as raw addresses belong to a process that had already exited.\n")
 	}
 	if cr.SchedulerFrames > 0 {
-		fmt.Fprintf(&sb, "  %d Go scheduler frame hits (runtime.schedule, runtime.park_m, ...) hidden.\n",
+		fmt.Fprintf(sb, "  %d Go scheduler frame hits (runtime.schedule, runtime.park_m, ...) hidden.\n",
 			cr.SchedulerFrames)
 	}
 	if len(cr.HotFrames) > 0 || cr.SchedulerFrames > 0 {
 		sb.WriteString("\n")
 	}
 
+}
+
+// writePprofProfiles renders what the pod's own pprof endpoint served.
+func writePprofProfiles(sb *strings.Builder, cr *CorrelatedResult) {
 	if cr.GoroutineProfile != nil && cr.GoroutineProfile.Available {
-		fmt.Fprintf(&sb, "  Goroutines: %d total, %d blocked\n",
+		fmt.Fprintf(sb, "  Goroutines: %d total, %d blocked\n",
 			cr.GoroutineProfile.GoroutineCount,
 			cr.GoroutineProfile.BlockedCount)
 		if cr.GoroutineProfile.BlockedCount > 50 {
@@ -405,24 +447,28 @@ func GenerateSection(cr *CorrelatedResult, duration time.Duration) string {
 			if i >= 8 {
 				break
 			}
-			fmt.Fprintf(&sb, "    %-10s  count=%-6d  %s\n",
+			fmt.Fprintf(sb, "    %-10s  count=%-6d  %s\n",
 				formatBytes(f.Bytes), f.Count, sanitize.Terminal(f.Function))
 		}
 		sb.WriteString("\n")
 	}
 
 	if cr.CPUProfile != nil && cr.CPUProfile.Available && len(cr.CPUProfile.TopCPUFunctions) > 0 {
-		fmt.Fprintf(&sb, "  Top CPU functions (from %v pprof CPU profile, flat time):\n", cr.CPUProfile.Duration)
+		fmt.Fprintf(sb, "  Top CPU functions (from %v pprof CPU profile, flat time):\n", cr.CPUProfile.Duration)
 		for i, f := range cr.CPUProfile.TopCPUFunctions {
 			if i >= 8 {
 				break
 			}
-			fmt.Fprintf(&sb, "    %-10v  samples=%-6d  %s\n",
+			fmt.Fprintf(sb, "    %-10v  samples=%-6d  %s\n",
 				f.CPUTime.Round(time.Millisecond), f.Samples, sanitize.Terminal(f.Function))
 		}
 		sb.WriteString("\n")
 	}
 
+}
+
+// writeMemoryFindings renders the page faults and OOM kills the kernel saw.
+func writeMemoryFindings(sb *strings.Builder, cr *CorrelatedResult) {
 	if len(cr.PageFaultCounts) > 0 {
 		type kv struct {
 			pid   uint32
@@ -433,25 +479,23 @@ func GenerateSection(cr *CorrelatedResult, duration time.Duration) string {
 			faults = append(faults, kv{pid, cnt})
 		}
 		sort.Slice(faults, func(i, j int) bool { return faults[i].count > faults[j].count })
-		fmt.Fprintf(&sb, "  Page faults observed: %d distinct PIDs\n", len(faults))
+		fmt.Fprintf(sb, "  Page faults observed: %d distinct PIDs\n", len(faults))
 		for i, f := range faults {
 			if i >= 5 {
 				break
 			}
-			fmt.Fprintf(&sb, "    PID %-6d  faults=%d\n", f.pid, f.count)
+			fmt.Fprintf(sb, "    PID %-6d  faults=%d\n", f.pid, f.count)
 		}
 		sb.WriteString("\n")
 	}
 
 	if len(cr.OOMEvents) > 0 {
-		fmt.Fprintf(&sb, "  OOM Kill events: %d\n", len(cr.OOMEvents))
+		fmt.Fprintf(sb, "  OOM Kill events: %d\n", len(cr.OOMEvents))
 		for _, e := range cr.OOMEvents {
-			fmt.Fprintf(&sb, "    task=%s  mem=%s\n", sanitize.Terminal(e.Target), formatBytes(safeInt64(e.Bytes)))
+			fmt.Fprintf(sb, "    task=%s  mem=%s\n", sanitize.Terminal(e.Target), formatBytes(safeInt64(e.Bytes)))
 		}
 		sb.WriteString("\n")
 	}
-
-	return sb.String()
 }
 
 // truncate delegates to events.TruncateString, the shared rune-safe and

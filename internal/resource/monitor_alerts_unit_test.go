@@ -74,6 +74,13 @@ func (f *fakeBPFMap) Lookup(key, valueOut interface{}) error {
 	return nil
 }
 
+func (f *fakeBPFMap) LookupAndDelete(key, valueOut interface{}) error {
+	if err := f.Lookup(key, valueOut); err != nil {
+		return err
+	}
+	return f.Delete(key)
+}
+
 func (f *fakeBPFMap) get(key resourceMapKey) (interface{}, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -160,6 +167,9 @@ func newMonitorWithFakeMaps(t *testing.T, limitsMap, alertsMap *fakeBPFMap, even
 	cgroupPath := filepath.Join(tmpDir, "cg")
 	if err := os.MkdirAll(cgroupPath, 0o755); err != nil {
 		t.Fatalf("mkdir cgroup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "cgroup.controllers"), []byte("cpu memory io"), 0o644); err != nil {
+		t.Fatalf("write cgroup.controllers: %v", err)
 	}
 	rm, err := NewResourceMonitor(cgroupPath, nil, nil, eventChan, "test-ns")
 	if err != nil {
@@ -262,7 +272,7 @@ func TestCheckAlerts_AlertLevels(t *testing.T) {
 		wantEvent     bool
 		wantManagerOn bool
 	}{
-		{name: "no breach", usage: 10, limit: 100, wantLevel: AlertNone, wantEntry: false, wantEvent: false, wantManagerOn: false},
+		{name: "no breach", usage: 10, limit: 100, wantLevel: AlertNone, wantEntry: false, wantEvent: true, wantManagerOn: false},
 		{name: "warning", usage: 85, limit: 100, wantLevel: AlertWarning, wantEntry: true, wantEvent: true, wantManagerOn: true},
 		{name: "critical", usage: 92, limit: 100, wantLevel: AlertCritical, wantEntry: true, wantEvent: true, wantManagerOn: true},
 		{name: "emergency", usage: 99, limit: 100, wantLevel: AlertEmergency, wantEntry: true, wantEvent: true, wantManagerOn: true},

@@ -133,7 +133,7 @@ func TestSetPodIdentityIsSafeWhileAlerting(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < 200; i++ {
 			_, _ = rm.alertSubject()
-			_ = rm.metricsNamespace()
+			_, _ = rm.metricsSubject()
 		}
 	}()
 	wg.Wait()

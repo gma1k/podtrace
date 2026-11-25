@@ -46,6 +46,7 @@ func TestDiscover_LiveServer(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/debug/pprof/") {
 			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(pprofIndexPage))
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)

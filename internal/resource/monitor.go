@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -93,6 +94,8 @@ type ResourceMonitor struct {
 	namespace  string
 	podName    string
 
+	metricsExported atomic.Bool
+
 	cpuQuotaMicros  uint64
 	cpuPeriodMicros uint64
 	previousSamples map[uint32]resourceSample
@@ -137,7 +140,7 @@ var knownResourceTypes = []uint32{ResourceCPU, ResourceMemory, ResourceIO}
 const unlimitedMemoryThreshold = uint64(1) << 62
 
 type bpfAlertReadMap interface {
-	Lookup(key, valueOut interface{}) error
+	LookupAndDelete(key, valueOut interface{}) error
 }
 
 func NewResourceMonitor(cgroupPath string, limitsMap, alertsMap *ebpf.Map, eventChan chan<- *events.Event, namespace string) (*ResourceMonitor, error) {
@@ -180,9 +183,13 @@ func NewResourceMonitor(cgroupPath string, limitsMap, alertsMap *ebpf.Map, event
 // alerts name the pod (and can become trigger Events) instead of the cgroup.
 func (rm *ResourceMonitor) SetPodIdentity(podName, namespace string) {
 	rm.identityMu.Lock()
-	defer rm.identityMu.Unlock()
+	previousPod, previousNamespace := rm.podName, rm.namespace
 	rm.podName = podName
 	rm.namespace = namespace
+	rm.identityMu.Unlock()
+	if rm.metricsExported.Load() && (previousPod != podName || previousNamespace != namespace) {
+		metricsexporter.DeleteResourceMetrics(previousNamespace, previousPod)
+	}
 }
 
 // alertSubject returns the PodName/Namespace an alert carries. Without a
@@ -198,10 +205,11 @@ func (rm *ResourceMonitor) alertSubject() (podName, namespace string) {
 	return rm.cgroupPath, ""
 }
 
-func (rm *ResourceMonitor) metricsNamespace() string {
+// metricsSubject is the namespace and pod the legacy resource gauges carry.
+func (rm *ResourceMonitor) metricsSubject() (namespace, podName string) {
 	rm.identityMu.RLock()
 	defer rm.identityMu.RUnlock()
-	return rm.namespace
+	return rm.namespace, rm.podName
 }
 
 func (rm *ResourceMonitor) Start(ctx context.Context) {
@@ -210,12 +218,14 @@ func (rm *ResourceMonitor) Start(ctx context.Context) {
 }
 
 // Stop ends the monitor loop and removes every entry the monitor wrote to
-// the shared BPF maps. The maps are plain hashes shared by all monitors, so
-// entries left behind by departed cgroups would fill them under pod churn.
+// the shared BPF maps.
 func (rm *ResourceMonitor) Stop() {
 	close(rm.stopCh)
 	rm.wg.Wait()
 	rm.releaseBPFEntries()
+	if rm.metricsExported.Load() {
+		metricsexporter.DeleteResourceMetrics(rm.metricsSubject())
+	}
 }
 
 // releaseBPFEntries deletes the CPU quota first so the in-kernel sampler
@@ -507,9 +517,9 @@ func (rm *ResourceMonitor) updateUsageV2() error {
 
 	memCurrent, err := readCgroupFile(filepath.Join(rm.cgroupPath, "memory.current"))
 	if err == nil {
-		usage := parseMemoryMax(memCurrent)
 		if limit, ok := rm.limits[ResourceMemory]; ok {
-			limit.UsageBytes = usage
+			memStat, _ := readCgroupFile(filepath.Join(rm.cgroupPath, "memory.stat"))
+			limit.UsageBytes = workingSetBytes(parseMemoryMax(memCurrent), memStat, "inactive_file")
 			limit.LastUpdateNS = uint64(time.Now().UnixNano())
 		}
 	}
@@ -540,9 +550,9 @@ func (rm *ResourceMonitor) updateUsageV1() error {
 
 	memUsage, err := readV1ControllerFile(cgroupV1MemoryDirs, subpath, "memory.usage_in_bytes")
 	if err == nil {
-		usage := parseMemoryMax(memUsage)
 		if limit, ok := rm.limits[ResourceMemory]; ok {
-			limit.UsageBytes = usage
+			memStat, _ := readV1ControllerFile(cgroupV1MemoryDirs, subpath, "memory.stat")
+			limit.UsageBytes = workingSetBytes(parseMemoryMax(memUsage), memStat, "total_inactive_file")
 			limit.LastUpdateNS = uint64(time.Now().UnixNano())
 		}
 	}
@@ -554,6 +564,39 @@ func (rm *ResourceMonitor) updateUsageV1() error {
 	}
 
 	return rm.syncToBPF()
+}
+
+// workingSetBytes is a cgroup's memory usage less its inactive file cache,
+// the figure the kubelet reports as working set and evicts on. memory.current
+// and memory.usage_in_bytes count every page of page cache, which the kernel
+// reclaims before it OOM-kills, so a pod that only reads files would sit near
+// its limit and raise memory alerts and saturation it is not under.
+// inactiveKey names the inactive file counter in memoryStat:
+// "inactive_file" on cgroup v2, the hierarchical "total_inactive_file" on v1.
+// When memory.stat cannot be read, usage is returned unchanged.
+func workingSetBytes(usage uint64, memoryStat, inactiveKey string) uint64 {
+	inactive, ok := parseMemoryStatField(memoryStat, inactiveKey)
+	if !ok {
+		return usage
+	}
+	if inactive >= usage {
+		return 0
+	}
+	return usage - inactive
+}
+
+// parseMemoryStatField returns one "key value" row of memory.stat.
+func parseMemoryStatField(memoryStat, key string) (uint64, bool) {
+	scanner := bufio.NewScanner(strings.NewReader(memoryStat))
+	for scanner.Scan() {
+		name, value, found := strings.Cut(scanner.Text(), " ")
+		if !found || name != key {
+			continue
+		}
+		n, err := strconv.ParseUint(strings.TrimSpace(value), 10, 64)
+		return n, err == nil
+	}
+	return 0, false
 }
 
 // recordIOSample stores the cumulative per-channel byte counters and derives
@@ -711,27 +754,22 @@ func (rm *ResourceMonitor) checkAlerts() {
 			continue
 		}
 
-		if resourceType == ResourceCPU && rm.cpuSamplerOn && rm.cpuQuotaInBPF {
-			continue
-		}
-
 		utilization, ok := rm.utilizationPercent(resourceType, limit)
 		if !ok {
 			continue
 		}
 		utilizationUint32 := safeconv.Uint64ToUint32(utilization)
 
-		var alertLevel uint32
-		switch {
-		case utilizationUint32 >= safeconv.IntToUint32(config.AlertEmergPct):
-			alertLevel = AlertEmergency
-		case utilizationUint32 >= safeconv.IntToUint32(config.AlertCritPct):
-			alertLevel = AlertCritical
-		case utilizationUint32 >= safeconv.IntToUint32(config.AlertWarnPct):
-			alertLevel = AlertWarning
-		default:
-			alertLevel = AlertNone
+		// The in-kernel sampler owns CPU alerting, but it only reports when
+		// a one-second window closes, which a pod that has gone idle never
+		// does. Reporting the measured utilization every tick is what lets
+		// the saturation gauge and inspection fall back after a spike.
+		if resourceType == ResourceCPU && rm.cpuSamplerOn && rm.cpuQuotaInBPF {
+			rm.sendResourceEvent(resourceType, resourceTypeLabels[resourceType], limit, utilization, alertLevelFor(utilizationUint32))
+			continue
 		}
+
+		alertLevel := alertLevelFor(utilizationUint32)
 
 		key := resourceMapKey{CgroupID: rm.cgroupInode, ResourceType: resourceType}
 		if alertLevel > 0 {
@@ -750,14 +788,19 @@ func (rm *ResourceMonitor) checkAlerts() {
 		}
 
 		utilizationPercent := float64(utilizationUint32)
+		metricsNamespace, metricsPod := rm.metricsSubject()
 		metricsexporter.ExportResourceMetrics(
 			resourceTypeLabel,
-			rm.metricsNamespace(),
+			metricsNamespace,
+			metricsPod,
 			limit.LimitBytes,
 			limit.UsageBytes,
 			utilizationPercent,
 			alertLevel,
 		)
+		rm.metricsExported.Store(true)
+
+		rm.sendResourceEvent(resourceType, resourceTypeLabel, limit, utilization, alertLevel)
 
 		if alertLevel > AlertNone {
 			manager := alerting.GetGlobalManager()
@@ -794,31 +837,53 @@ func (rm *ResourceMonitor) checkAlerts() {
 				}
 				manager.SendAlert(alert)
 			}
-			if rm.eventChan != nil {
-				event := &events.Event{
-					Type:        events.EventResourceLimit,
-					PID:         0,
-					CgroupID:    rm.cgroupInode,
-					ProcessName: "cgroup",
-					LatencyNS:   limit.LimitBytes,
-					Error:       safeconv.Uint64ToInt32(utilization),
-					Bytes:       limit.UsageBytes,
-					TCPState:    resourceType,
-					Target:      rm.cgroupPath,
-					Timestamp:   uint64(time.Now().UnixNano()),
-				}
-				select {
-				case rm.eventChan <- event:
-					logger.Debug("Resource limit event sent",
-						zap.String("resource_type", resourceTypeLabel),
-						zap.Uint32("utilization", utilizationUint32),
-						zap.Uint32("alert_level", alertLevel))
-				default:
-					logger.Warn("Failed to send resource limit event, channel full",
-						zap.String("resource_type", resourceTypeLabel),
-						zap.Uint32("utilization", utilizationUint32))
-				}
-			}
+		}
+	}
+}
+
+// alertLevelFor maps a utilization percentage onto the configured thresholds.
+func alertLevelFor(utilization uint32) uint32 {
+	switch {
+	case utilization >= safeconv.IntToUint32(config.AlertEmergPct):
+		return AlertEmergency
+	case utilization >= safeconv.IntToUint32(config.AlertCritPct):
+		return AlertCritical
+	case utilization >= safeconv.IntToUint32(config.AlertWarnPct):
+		return AlertWarning
+	default:
+		return AlertNone
+	}
+}
+
+// sendResourceEvent reports one resource's utilization on every tick, below
+// the warning threshold as well.
+func (rm *ResourceMonitor) sendResourceEvent(resourceType uint32, resourceTypeLabel string, limit *ResourceLimit, utilization uint64, alertLevel uint32) {
+	if rm.eventChan == nil {
+		return
+	}
+	event := &events.Event{
+		Type:        events.EventResourceLimit,
+		PID:         0,
+		CgroupID:    rm.cgroupInode,
+		ProcessName: "cgroup",
+		LatencyNS:   limit.LimitBytes,
+		Error:       safeconv.Uint64ToInt32(utilization),
+		Bytes:       limit.UsageBytes,
+		TCPState:    resourceType,
+		Target:      rm.cgroupPath,
+		Timestamp:   uint64(time.Now().UnixNano()),
+	}
+	select {
+	case rm.eventChan <- event:
+		logger.Debug("Resource limit event sent",
+			zap.String("resource_type", resourceTypeLabel),
+			zap.Uint64("utilization", utilization),
+			zap.Uint32("alert_level", alertLevel))
+	default:
+		if alertLevel > AlertNone {
+			logger.Warn("Failed to send resource limit event, channel full",
+				zap.String("resource_type", resourceTypeLabel),
+				zap.Uint64("utilization", utilization))
 		}
 	}
 }
@@ -852,18 +917,7 @@ func getCgroupInode(cgroupPath string) (uint64, error) {
 }
 
 // isCgroupV2 reports whether the cgroup hierarchy backing cgroupPath is the
-// unified v2 hierarchy. A cgroup.controllers file exists only under v2 — never
-// inside a v1 controller hierarchy — so its presence at the mount root
-// (config.CgroupBasePath) is the authoritative signal, matching the check the
-// tracer and CLI use. The per-path check is a fallback for callers whose base
-// is itself a unified-hierarchy node. When neither is present the node is v1.
-//
-// The previous implementation probed for cpu/ and memory/ SUBDIRECTORIES of
-// the pod path and returned an error otherwise. That never matched a real v1
-// node — there the controllers are separate sibling hierarchies ABOVE the pod
-// path (/sys/fs/cgroup/cpu,cpuacct/..., /sys/fs/cgroup/memory/...), not
-// subdirectories of it — so v1 always fell through to "cannot determine
-// version" and resource monitoring silently did nothing.
+// unified v2 hierarchy.
 func isCgroupV2(cgroupPath string) bool {
 	if _, err := os.Stat(filepath.Join(config.CgroupBasePath, "cgroup.controllers")); err == nil {
 		return true

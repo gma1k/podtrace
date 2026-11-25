@@ -326,6 +326,7 @@ func TestExportResourceMetrics(t *testing.T) {
 			ExportResourceMetrics(
 				tt.resourceType,
 				tt.namespace,
+				"pod-a",
 				tt.limitBytes,
 				tt.usageBytes,
 				tt.utilizationPercent,

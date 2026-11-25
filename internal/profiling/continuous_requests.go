@@ -1,6 +1,7 @@
 package profiling
 
 import (
+	"container/heap"
 	"math"
 	"sort"
 
@@ -35,12 +36,15 @@ const (
 )
 
 // RequestProfile is where one workload's slowest requests spent their CPU.
+// DisplacedSamples are CPU samples of requests a window did not keep because
+// it already held maxSampledRequestsPerWorkload slower ones.
 type RequestProfile struct {
 	Quantile              float64      `json:"quantile"`
 	ThresholdMilliseconds float64      `json:"thresholdMilliseconds"`
 	Requests              int          `json:"requests"`
 	SampledRequests       int          `json:"sampledRequests"`
 	Samples               int          `json:"samples"`
+	DisplacedSamples      int          `json:"displacedSamples,omitempty"`
 	Frames                []FrameCount `json:"frames"`
 }
 
@@ -64,6 +68,7 @@ type completion struct {
 }
 
 type sampledRequest struct {
+	key       requestKey
 	latencyNS uint64
 	stacks    map[stackKey]int
 }
@@ -75,6 +80,13 @@ type requestWindow struct {
 	stride   int
 	finished int
 	sampled  map[requestKey]*sampledRequest
+	// slowest orders sampled by latency, fastest first, so that once the
+	// window keeps as many requests as it may, a slower one replaces the
+	// fastest kept instead of being turned away.
+	slowest sampledHeap
+	// displacedSamples counts the CPU samples of requests the window let go
+	// of, or never kept, because it already held that many slower ones.
+	displacedSamples int
 }
 
 func (p *ContinuousProfiler) requestWindowLocked(key WorkloadKey) *requestWindow {
@@ -84,6 +96,23 @@ func (p *ContinuousProfiler) requestWindowLocked(key WorkloadKey) *requestWindow
 		p.cur.requests[key] = rw
 	}
 	return rw
+}
+
+// sampledHeap is a min-heap of sampled requests by latency.
+type sampledHeap []*sampledRequest
+
+func (h sampledHeap) Len() int           { return len(h) }
+func (h sampledHeap) Less(i, j int) bool { return h[i].latencyNS < h[j].latencyNS }
+func (h sampledHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *sampledHeap) Push(x any)        { *h = append(*h, x.(*sampledRequest)) }
+
+func (h *sampledHeap) Pop() any {
+	old := *h
+	n := len(old)
+	sr := old[n-1]
+	old[n-1] = nil
+	*h = old[:n-1]
+	return sr
 }
 
 func addBounded(into map[stackKey]int, stack stackKey, n int) {
@@ -100,6 +129,8 @@ func (p *ContinuousProfiler) attributeLocked(key WorkloadKey, rk requestKey, sta
 	if done, ok := p.finished[rk]; ok {
 		if sr := p.sampledLocked(done.workload, rk, done.latencyNS); sr != nil {
 			addBounded(sr.stacks, stack, n)
+		} else {
+			p.requestWindowLocked(done.workload).displacedSamples += n
 		}
 		return
 	}
@@ -116,7 +147,11 @@ func (p *ContinuousProfiler) attributeLocked(key WorkloadKey, rk requestKey, sta
 }
 
 // sampledLocked returns the current window's record of a finished request,
-// creating it, or nil when the workload already keeps as many as it may.
+// creating it. A window keeps the maxSampledRequestsPerWorkload slowest
+// requests: when it is full, a request slower than the fastest kept replaces
+// it, and any other is not kept and nil is returned. Only the slowest
+// requests reach a slow-request profile, so keeping the first ones to finish
+// lost every slow request after the first seconds of a busy window.
 func (p *ContinuousProfiler) sampledLocked(key WorkloadKey, rk requestKey, latencyNS uint64) *sampledRequest {
 	rw := p.requestWindowLocked(key)
 	sr, ok := rw.sampled[rk]
@@ -124,10 +159,18 @@ func (p *ContinuousProfiler) sampledLocked(key WorkloadKey, rk requestKey, laten
 		return sr
 	}
 	if len(rw.sampled) >= maxSampledRequestsPerWorkload {
-		return nil
+		if len(rw.slowest) == 0 || latencyNS <= rw.slowest[0].latencyNS {
+			return nil
+		}
+		fastest := heap.Pop(&rw.slowest).(*sampledRequest)
+		delete(rw.sampled, fastest.key)
+		for _, c := range fastest.stacks {
+			rw.displacedSamples += c
+		}
 	}
-	sr = &sampledRequest{latencyNS: latencyNS, stacks: map[stackKey]int{}}
+	sr = &sampledRequest{key: rk, latencyNS: latencyNS, stacks: map[stackKey]int{}}
 	rw.sampled[rk] = sr
+	heap.Push(&rw.slowest, sr)
 	return sr
 }
 
@@ -171,6 +214,9 @@ func (p *ContinuousProfiler) completeLocked(key WorkloadKey, rk requestKey, late
 	delete(p.pending, rk)
 	sr := p.sampledLocked(key, rk, latencyNS)
 	if sr == nil {
+		for _, c := range pr.stacks {
+			rw.displacedSamples += c
+		}
 		return
 	}
 	for s, c := range pr.stacks {
@@ -211,6 +257,7 @@ type slowRequests struct {
 	finished  int
 	sampled   int
 	samples   int
+	displaced int
 	stacks    map[stackKey]int
 }
 
@@ -222,6 +269,7 @@ func (s *slowRequests) profile(names *frameNames) *RequestProfile {
 		Requests:              s.finished,
 		SampledRequests:       s.sampled,
 		Samples:               s.samples,
+		DisplacedSamples:      s.displaced,
 		Frames:                frames,
 	}
 }
@@ -232,6 +280,7 @@ func (p *ContinuousProfiler) slowRequestsLocked() map[WorkloadKey]*slowRequests 
 	type merged struct {
 		latencies []uint64
 		finished  int
+		displaced int
 		sampled   map[requestKey]*sampledRequest
 	}
 	all := map[WorkloadKey]*merged{}
@@ -244,6 +293,7 @@ func (p *ContinuousProfiler) slowRequestsLocked() map[WorkloadKey]*slowRequests 
 			}
 			m.latencies = append(m.latencies, rw.latencies...)
 			m.finished += rw.finished
+			m.displaced += rw.displacedSamples
 			for rk, sr := range rw.sampled {
 				into, ok := m.sampled[rk]
 				if !ok {
@@ -265,6 +315,7 @@ func (p *ContinuousProfiler) slowRequestsLocked() map[WorkloadKey]*slowRequests 
 		s := &slowRequests{
 			threshold: quantile(m.latencies, slowRequestQuantile),
 			finished:  m.finished,
+			displaced: m.displaced,
 			stacks:    map[stackKey]int{},
 		}
 		for _, sr := range m.sampled {

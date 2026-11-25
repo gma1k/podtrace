@@ -37,6 +37,8 @@ type Handler struct {
 	queuedMu    sync.Mutex
 	queued      map[ProfileType]bool
 	podIP       string
+
+	missedEndpoint atomic.Bool
 }
 
 type triggerReq struct {
@@ -96,7 +98,7 @@ func clampProfileDuration(d time.Duration) time.Duration {
 // Run consumes eventChan, watching for latency spikes that auto-trigger a
 // heap + goroutine profile fetch. It also services on-demand trigger requests.
 func (h *Handler) Run(ctx context.Context, eventChan <-chan *events.Event) {
-	discoverCtx, discoverCancel := context.WithTimeout(ctx, 3*time.Second)
+	discoverCtx, discoverCancel := context.WithTimeout(ctx, pprofDiscoveryTimeout)
 	h.profiler.Discover(discoverCtx)
 	discoverCancel()
 	h.startWorkers(ctx)
@@ -172,8 +174,8 @@ func (h *Handler) checkSpike(ctx context.Context, e *events.Event) {
 	if e.LatencyNS < triggerNS {
 		return
 	}
-	// Only trigger once.
-	if !h.triggered.CompareAndSwap(false, true) {
+	// Only trigger once, unless that profile found no endpoint to fetch from.
+	if !h.triggered.CompareAndSwap(false, true) && !h.retryMissedProfile() {
 		return
 	}
 	metricsexporter.RecordProfilingAutoTrigger(h.podIP)
@@ -186,6 +188,24 @@ func (h *Handler) checkSpike(ctx context.Context, e *events.Event) {
 		if h.enqueue(ptype, 0) == triggerRejected {
 			logger.Warn("Profiling queue full; auto-triggered profile not queued",
 				zap.String("type", ptype.String()), zap.String("pod_ip", h.podIP))
+		}
+	}
+}
+
+// retryMissedProfile re-arms the auto-trigger after a profile that found no
+// pprof endpoint, at most once per rediscovery interval.
+func (h *Handler) retryMissedProfile() bool {
+	if !h.profiler.rediscoveryDue() {
+		return false
+	}
+	return h.missedEndpoint.CompareAndSwap(true, false)
+}
+
+// noteMissedEndpoint records a fetch that failed for want of an endpoint.
+func (h *Handler) noteMissedEndpoint(results ...*ProfileResult) {
+	for _, r := range results {
+		if r != nil && r.Error == errNoPprofEndpoint {
+			h.missedEndpoint.Store(true)
 		}
 	}
 }
@@ -229,6 +249,8 @@ func (h *Handler) doProfile(ctx context.Context, ptype ProfileType, duration tim
 		h.mu.Unlock()
 		return
 	}
+
+	h.noteMissedEndpoint(heap, goroutine)
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -280,34 +302,43 @@ func (h *Handler) GetResult() *CorrelatedResult {
 // GenerateSection correlates allEvents with the stored profiling data and
 // returns a formatted report section string.
 func (h *Handler) GenerateSection(allEvents []*events.Event, duration time.Duration) string {
-	h.mu.RLock()
-	storedHeap := h.result
-	h.mu.RUnlock()
+	cr := correlateEvents(allEvents)
+	h.attachPprof(cr)
+	return GenerateSection(cr, duration)
+}
 
-	var heap, goroutine, cpu *ProfileResult
-	if storedHeap != nil {
-		heap = storedHeap.HeapProfile
-		goroutine = storedHeap.GoroutineProfile
-		cpu = storedHeap.CPUProfile
-	}
-
+// correlateEvents runs the event-only half of the correlation, which depends
+// on nothing pod specific and so is computed once however many pods are
+// profiled.
+func correlateEvents(allEvents []*events.Event) *CorrelatedResult {
 	ctx, cancel := context.WithTimeout(context.Background(), symbolizeBudget)
 	defer cancel()
-
-	cr := Correlate(ctx, allEvents, heap, goroutine,
+	return Correlate(ctx, allEvents, nil, nil,
 		config.ProfilingAutoTriggerMS, stacktrace.NewResolver())
+}
+
+// attachPprof adds this pod's stored pprof results to cr.
+func (h *Handler) attachPprof(cr *CorrelatedResult) {
+	h.mu.RLock()
+	stored := h.result
+	h.mu.RUnlock()
+
 	cr.PodIP = h.podIP
-	if cpu != nil && cpu.Available {
-		cr.CPUProfile = cpu
-		cr.PprofAvailable = true
+	cr.HeapProfile, cr.GoroutineProfile, cr.CPUProfile = nil, nil, nil
+	cr.PprofAvailable = h.profiler.foundPort.Load() != 0
+	if stored == nil {
+		return
 	}
-
-	// Merge pprof availability from profiler discovery.
-	if h.profiler.foundPort.Load() != 0 {
-		cr.PprofAvailable = true
+	for _, p := range []*ProfileResult{stored.HeapProfile, stored.GoroutineProfile, stored.CPUProfile} {
+		if p != nil && p.Available {
+			cr.PprofAvailable = true
+		}
 	}
-
-	return GenerateSection(cr, duration)
+	cr.HeapProfile = stored.HeapProfile
+	cr.GoroutineProfile = stored.GoroutineProfile
+	if stored.CPUProfile != nil && stored.CPUProfile.Available {
+		cr.CPUProfile = stored.CPUProfile
+	}
 }
 
 // --- HTTP handlers (implements tracer.ProfilingController) ---

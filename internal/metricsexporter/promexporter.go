@@ -264,7 +264,7 @@ var (
 			Name: "podtrace_resource_limit_bytes",
 			Help: "Resource limit in bytes (or CPU quota in microseconds).",
 		},
-		[]string{"resource_type", "namespace"},
+		[]string{"resource_type", "namespace", "pod"},
 	)
 
 	resourceUsageBytesGauge = prometheus.NewGaugeVec(
@@ -272,7 +272,7 @@ var (
 			Name: "podtrace_resource_usage_bytes",
 			Help: "Current resource usage in bytes (or CPU time in microseconds).",
 		},
-		[]string{"resource_type", "namespace"},
+		[]string{"resource_type", "namespace", "pod"},
 	)
 
 	resourceUtilizationPercentGauge = prometheus.NewGaugeVec(
@@ -280,7 +280,7 @@ var (
 			Name: "podtrace_resource_utilization_percent",
 			Help: "Resource utilization percentage (usage/limit * 100).",
 		},
-		[]string{"resource_type", "namespace"},
+		[]string{"resource_type", "namespace", "pod"},
 	)
 
 	resourceAlertLevelGauge = prometheus.NewGaugeVec(
@@ -288,7 +288,7 @@ var (
 			Name: "podtrace_resource_alert_level",
 			Help: "Resource alert level: 0=none, 1=warning (80%), 2=critical (90%), 3=emergency (95%).",
 		},
-		[]string{"resource_type", "namespace"},
+		[]string{"resource_type", "namespace", "pod"},
 	)
 
 	poolAcquiresCounter = prometheus.NewCounterVec(
@@ -630,7 +630,7 @@ func HandleEventWithContext(e *events.Event, k8sContext map[string]interface{}) 
 		ExportTLSMetricWithContext(e, namespace)
 
 	case events.EventResourceLimit:
-		ExportResourceLimitMetricWithContext(e, namespace)
+		exportResourceLimit(e, namespace, sourcePodOf(e, k8sContext))
 
 	case events.EventPoolAcquire:
 		ExportPoolAcquireMetricWithContext(e, namespace)
@@ -1036,6 +1036,22 @@ func ExportResourceLimitMetric(e *events.Event) {
 }
 
 func ExportResourceLimitMetricWithContext(e *events.Event, namespace string) {
+	exportResourceLimit(e, namespace, sourcePodOf(e, nil))
+}
+
+// sourcePodOf names the pod an event happened in: the enrichment context's
+// source pod, else the pod the event's own metadata names.
+func sourcePodOf(e *events.Event, k8sContext map[string]interface{}) string {
+	if pod := getLabel(k8sContext, "source_pod", ""); pod != "" {
+		return pod
+	}
+	if e != nil && e.K8s != nil {
+		return e.K8s.PodName
+	}
+	return ""
+}
+
+func exportResourceLimit(e *events.Event, namespace, podName string) {
 	if e == nil {
 		return
 	}
@@ -1066,9 +1082,10 @@ func ExportResourceLimitMetricWithContext(e *events.Event, namespace string) {
 	}
 
 	// Set metrics
-	resourceLimitBytesGauge.WithLabelValues(resourceTypeLabel, namespace).Set(limitBytes)
-	resourceUsageBytesGauge.WithLabelValues(resourceTypeLabel, namespace).Set(usageBytes)
-	resourceUtilizationPercentGauge.WithLabelValues(resourceTypeLabel, namespace).Set(utilization)
+	pod := podCardinality.bound(podName)
+	resourceLimitBytesGauge.WithLabelValues(resourceTypeLabel, namespace, pod).Set(limitBytes)
+	resourceUsageBytesGauge.WithLabelValues(resourceTypeLabel, namespace, pod).Set(usageBytes)
+	resourceUtilizationPercentGauge.WithLabelValues(resourceTypeLabel, namespace, pod).Set(utilization)
 
 	// Determine alert level
 	var alertLevel float64
@@ -1081,16 +1098,31 @@ func ExportResourceLimitMetricWithContext(e *events.Event, namespace string) {
 	} else {
 		alertLevel = 0 // None
 	}
-	resourceAlertLevelGauge.WithLabelValues(resourceTypeLabel, namespace).Set(alertLevel)
+	resourceAlertLevelGauge.WithLabelValues(resourceTypeLabel, namespace, pod).Set(alertLevel)
 }
 
 // ExportResourceMetrics exports metrics directly from ResourceMonitor
 // This allows periodic updates even when no events are emitted
-func ExportResourceMetrics(resourceType string, namespace string, limitBytes, usageBytes uint64, utilizationPercent float64, alertLevel uint32) {
-	resourceLimitBytesGauge.WithLabelValues(resourceType, namespace).Set(float64(limitBytes))
-	resourceUsageBytesGauge.WithLabelValues(resourceType, namespace).Set(float64(usageBytes))
-	resourceUtilizationPercentGauge.WithLabelValues(resourceType, namespace).Set(utilizationPercent)
-	resourceAlertLevelGauge.WithLabelValues(resourceType, namespace).Set(float64(alertLevel))
+func ExportResourceMetrics(resourceType, namespace, podName string, limitBytes, usageBytes uint64, utilizationPercent float64, alertLevel uint32) {
+	pod := podCardinality.bound(podName)
+	resourceLimitBytesGauge.WithLabelValues(resourceType, namespace, pod).Set(float64(limitBytes))
+	resourceUsageBytesGauge.WithLabelValues(resourceType, namespace, pod).Set(float64(usageBytes))
+	resourceUtilizationPercentGauge.WithLabelValues(resourceType, namespace, pod).Set(utilizationPercent)
+	resourceAlertLevelGauge.WithLabelValues(resourceType, namespace, pod).Set(float64(alertLevel))
+}
+
+// DeleteResourceMetrics removes one pod's resource gauges, so a pod that is
+// no longer monitored stops reporting its last reading.
+func DeleteResourceMetrics(namespace, podName string) {
+	labels := prometheus.Labels{"namespace": namespace, "pod": podCardinality.bound(podName)}
+	for _, g := range []*prometheus.GaugeVec{
+		resourceLimitBytesGauge,
+		resourceUsageBytesGauge,
+		resourceUtilizationPercentGauge,
+		resourceAlertLevelGauge,
+	} {
+		g.DeletePartialMatch(labels)
+	}
 }
 
 // boundProcessName caps process_name label cardinality.

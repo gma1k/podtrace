@@ -71,6 +71,7 @@ func TestDiscoverFollowsSameOriginRedirect(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(pprofIndexPage))
 	}))
 	t.Cleanup(pod.Close)
 

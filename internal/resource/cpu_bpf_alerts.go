@@ -41,6 +41,10 @@ func (rm *ResourceMonitor) syncCPUQuota() error {
 	if quotaMap == nil {
 		return nil
 	}
+	if !isCgroupV2(rm.cgroupPath) {
+		rm.setCPUQuotaInBPF(false)
+		return nil
+	}
 	if quota == 0 || period == 0 {
 		rm.setCPUQuotaInBPF(false)
 		if err := quotaMap.Delete(inode); err != nil && !isBenignMapDeleteError(err) {
@@ -65,6 +69,8 @@ func (rm *ResourceMonitor) setCPUQuotaInBPF(inBPF bool) {
 	rm.mu.Unlock()
 }
 
+// checkBPFCPUAlerts raises the CPU alert level the in-kernel sampler wrote,
+// consuming it.
 func (rm *ResourceMonitor) checkBPFCPUAlerts() {
 	rm.mu.RLock()
 	alertsMap := rm.cpuAlertsReadMap
@@ -80,7 +86,7 @@ func (rm *ResourceMonitor) checkBPFCPUAlerts() {
 
 	key := resourceMapKey{CgroupID: inode, ResourceType: ResourceCPU}
 	var level uint32
-	if err := alertsMap.Lookup(key, &level); err != nil {
+	if err := alertsMap.LookupAndDelete(key, &level); err != nil {
 		if !isBenignMapDeleteError(err) {
 			logger.Debug("Failed to read CPU alert from BPF map", zap.Error(err))
 		}

@@ -326,7 +326,7 @@ func (c *Collector) finish(e *events.Event) {
 	if e.K8s != nil {
 		r.Namespace, r.Pod = e.K8s.Namespace, e.K8s.PodName
 	}
-	c.addToEndpoint(endpoint, r.Latency, shares)
+	c.addToEndpoint(endpointTemplate(endpoint), r.Latency, shares)
 	c.keepIfSlow(r)
 }
 
