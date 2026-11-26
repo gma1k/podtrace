@@ -44,6 +44,7 @@ func TestAnExplicitHTTPEndpointReachesItsCollectorLikeTheAgent(t *testing.T) {
 }
 
 func TestPayloadAllowsCleartext(t *testing.T) {
+	tenant := map[string]string{"X-Scope-OrgID": "t"}
 	cases := []struct {
 		name string
 		p    bundle.Payload
@@ -56,6 +57,10 @@ func TestPayloadAllowsCleartext(t *testing.T) {
 		{"splunk schemeless", bundle.Payload{Type: bundle.TypeSplunk, Endpoint: "ingest.example.com"}, false},
 		{"datadog http", bundle.Payload{Type: bundle.TypeDataDog, Endpoint: "http://datadog-agent:4318"}, true},
 		{"jaeger schemeless", bundle.Payload{Type: bundle.TypeJaeger, Endpoint: "jaeger:14268"}, true},
+		{"jaeger schemeless with headers", bundle.Payload{Type: bundle.TypeJaeger, Endpoint: "jaeger:4318", Headers: tenant}, false},
+		{"jaeger schemeless with secret headers", bundle.Payload{Type: bundle.TypeJaeger, Endpoint: "jaeger:4318", SecretHeaders: tenant}, false},
+		{"jaeger schemeless with headers insecure", bundle.Payload{Type: bundle.TypeJaeger, Endpoint: "jaeger:4318", Insecure: true, Headers: tenant}, true},
+		{"jaeger http with headers", bundle.Payload{Type: bundle.TypeJaeger, Endpoint: "http://jaeger:4318", Headers: tenant}, true},
 		{"jaeger https", bundle.Payload{Type: bundle.TypeJaeger, Endpoint: "https://jaeger:4318"}, false},
 		{"zipkin schemeless", bundle.Payload{Type: bundle.TypeZipkin, Endpoint: "zipkin:9411"}, true},
 		{"zipkin https", bundle.Payload{Type: bundle.TypeZipkin, Endpoint: "https://zipkin:9411"}, false},
@@ -82,6 +87,34 @@ func TestASchemelessJaegerOrZipkinSessionStillExportsWithoutTheJobEnv(t *testing
 	mustApplyPayload(t, &bundle.Payload{Type: bundle.TypeZipkin, Endpoint: "zipkin.observability:9411"})
 	if _, err := exporter.NewZipkinExporter(config.ZipkinEndpoint, 1); err != nil {
 		t.Fatalf("zipkin: %v", err)
+	}
+}
+
+func TestASchemelessJaegerBundleWithHeadersSendsThemOverTLS(t *testing.T) {
+	defer resetTracingConfig()
+	t.Setenv("PODTRACE_OTLP_INSECURE", "")
+	mustApplyPayload(t, &bundle.Payload{Type: bundle.TypeJaeger, Endpoint: "jaeger-collector.observability:4318",
+		Headers: map[string]string{"X-Scope-OrgID": "tenant-a"}})
+
+	if config.OTLPInsecure {
+		t.Fatal("a scheme-less Jaeger bundle carrying headers opted into cleartext")
+	}
+	if config.JaegerEndpoint != "https://jaeger-collector.observability:4318" {
+		t.Fatalf("JaegerEndpoint = %q, want https", config.JaegerEndpoint)
+	}
+	exp, err := exporter.NewJaegerExporter(config.JaegerEndpoint, 1)
+	if err != nil {
+		t.Fatalf("jaeger: %v", err)
+	}
+	_ = exp.Shutdown(t.Context())
+}
+
+func TestASchemelessJaegerBundleWithoutHeadersKeepsCleartext(t *testing.T) {
+	defer resetTracingConfig()
+	mustApplyPayload(t, &bundle.Payload{Type: bundle.TypeJaeger, Endpoint: "jaeger-collector.observability:14268"})
+
+	if !config.OTLPInsecure || config.JaegerEndpoint != "jaeger-collector.observability:14268" {
+		t.Fatalf("OTLPInsecure=%v JaegerEndpoint=%q, want cleartext http", config.OTLPInsecure, config.JaegerEndpoint)
 	}
 }
 

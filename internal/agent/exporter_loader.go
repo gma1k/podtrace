@@ -11,6 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/gma1k/podtrace/internal/operator"
+	"github.com/gma1k/podtrace/internal/otlpresponse"
 	"github.com/gma1k/podtrace/pkg/exporter/bundle"
 	"github.com/gma1k/podtrace/pkg/tracer"
 )
@@ -70,6 +71,7 @@ const (
 	ExporterErrEndpointMissing = "endpoint_missing"
 	ExporterErrTLSInvalid      = "tls_invalid"
 	ExporterErrAuthMissing     = "auth_missing"
+	ExporterErrRejected        = "rejected"
 )
 
 // ClassifyExporterError maps a BuildExporter error to one of the
@@ -77,6 +79,9 @@ const (
 func ClassifyExporterError(err error) string {
 	if err == nil {
 		return ""
+	}
+	if _, ok := otlpresponse.RejectedSpans(err); ok {
+		return ExporterErrRejected
 	}
 	msg := strings.ToLower(err.Error())
 	switch {

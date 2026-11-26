@@ -30,13 +30,13 @@ func TestCollectSessionExportsCopiesEveryExporter(t *testing.T) {
 	withSessionExportStatus(t, func() []tracing.ExporterStatus {
 		return []tracing.ExporterStatus{
 			{Exporter: "otlp", FailedBatches: 8, LastError: "dial tcp: lookup recv: no such host"},
-			{Exporter: "zipkin", SucceededBatches: 3},
+			{Exporter: "zipkin", SucceededBatches: 3, RejectedSpans: 2},
 		}
 	})
 	got := collectSessionExports()
 	want := []SessionExportStatus{
 		{Exporter: "otlp", Failed: 8, LastError: "dial tcp: lookup recv: no such host"},
-		{Exporter: "zipkin", Succeeded: 3},
+		{Exporter: "zipkin", Succeeded: 3, RejectedSpans: 2},
 	}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("collectSessionExports = %+v, want %+v", got, want)

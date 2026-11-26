@@ -35,7 +35,7 @@ env:
   IMAGE: ghcr.io/gma1k/podtrace
   CHART_PATH: deploy/charts/podtrace
   CHART_REPO: ghcr.io/gma1k/charts
-  COSIGN_VERSION: v3.1.5
+  COSIGN_VERSION: v3.1.6
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:

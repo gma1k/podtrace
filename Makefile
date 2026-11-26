@@ -326,7 +326,7 @@ operator-tools:
 generate: operator-tools
 	$(CONTROLLER_GEN) object:headerFile=$(BOILERPLATE) paths=./api/v1alpha1/...
 
-CLIENT_GEN_VERSION ?= v0.37.2
+CLIENT_GEN_VERSION ?= v0.37.3
 CLIENT_GEN ?= $(shell go env GOPATH 2>/dev/null)/bin/client-gen
 APPLYCONFIGURATION_GEN ?= $(shell go env GOPATH 2>/dev/null)/bin/applyconfiguration-gen
 

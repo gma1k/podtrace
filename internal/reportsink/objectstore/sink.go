@@ -71,6 +71,7 @@ type destination struct {
 //	"s3://bucket/path/report.txt" ⇒ bucket="bucket", path="path/report.txt", prefix=false
 //	"s3://bucket/"                ⇒ bucket="bucket", path="",     prefix=true
 //	"azblob://acct/container/k"   ⇒ bucket="container", path="k", prefix=false
+//	"azblob://acct/container"     ⇒ bucket="container", path="",  prefix=true
 func parseURI(raw string) (destination, error) {
 	if raw == "" {
 		return destination{}, errors.New("empty URI")
@@ -103,6 +104,9 @@ func parseURI(raw string) (destination, error) {
 		d.bucket = parts[0]
 		if len(parts) == 2 {
 			d.path = parts[1]
+		}
+		if d.path == "" {
+			d.prefix = true
 		}
 	default:
 		return destination{}, fmt.Errorf("unsupported URI scheme %q (want %s, %s, or %s)",

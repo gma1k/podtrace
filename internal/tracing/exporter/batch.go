@@ -4,17 +4,30 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 // maxBatchBytes bounds one request body of the JSON exporters, so an
 // export is a few sized POSTs instead of one request per trace or span.
 const maxBatchBytes = 512 * 1024
 
-// encodedElement is one JSON element of a request body and the number of
-// the trace's spans it carries.
+// encodedElement is one element of a request body and the number of the
+// trace's spans it carries: a JSON element (body), or an OTLP span
+// (snapshot) whose encoded size is estimated in size.
 type encodedElement struct {
-	body  []byte
-	spans int
+	body     []byte
+	snapshot sdktrace.ReadOnlySpan
+	size     int
+	spans    int
+}
+
+// bytes returns the element's share of a request body.
+func (e encodedElement) bytes() int {
+	if e.body != nil {
+		return len(e.body)
+	}
+	return e.size
 }
 
 // encodedTrace is one trace already serialised for a backend, its elements
@@ -37,16 +50,19 @@ var (
 // collectorDownAfter is how many requests carrying a single trace the
 // collector must refuse with a 5xx, before it has accepted anything in this
 // export, to be judged down rather than choking on particular traces. Until
-// then a 5xx batch is bisected; once any request succeeded the collector is
-// known to work and a 5xx never stops the export.
+// then a 5xx batch is bisected.
 const collectorDownAfter = 3
 
 // maxIsolationPosts caps the requests one export spends bisecting failed
 // batches; isolating one bad trace among n costs about 2*log2(n). Past it,
-// failed batches are resolved one trace per request, as every trace was
-// sent before batching, so many bad traces never cost a good trace its
-// delivery.
+// failed batches are resolved one trace per request, so many bad traces
+// never cost a good trace its delivery.
 const maxIsolationPosts = 64
+
+// collectorFailingAfter is how many requests carrying a single trace the
+// collector must refuse with a 5xx since it last accepted a request for the
+// export to stop and offer the rest again next time.
+const collectorFailingAfter = 8
 
 // batchShare is the part of one trace a request body carries.
 type batchShare struct {
@@ -57,40 +73,37 @@ type batchShare struct {
 
 // batchSender delivers the batches of one export.
 type batchSender struct {
-	ctx            context.Context
-	outcome        *exportOutcome
-	frame          bodyFrame
-	post           func(context.Context, []byte) error
-	answered       bool
-	singleRefusals int
-	isolationPosts int
-	stopped        bool
+	ctx                   context.Context
+	outcome               *exportOutcome
+	post                  func(context.Context, []batchShare) error
+	answered              bool
+	singleRefusals        int
+	refusalsSinceDelivery int
+	isolationPosts        int
+	stopped               bool
 }
 
 // sendTraceBatches packs the elements of every trace into request bodies of
 // at most maxBytes (an element larger than that travels alone) and posts
 // them in order.
-//
-// A permanent failure drops only its own batch. A 5xx answer is isolated:
-// the batch is split in halves until the traces the collector refuses are
-// found, so every other trace is still delivered and only the refused ones
-// are offered again. The export stops, offering every trace not yet
-// delivered again, when the collector does not answer (transport error,
-// deadline), answers 408 or 429, or is judged down (collectorDownAfter): a
-// failing collector costs about 2*log2(n) requests, not one per trace.
-//
-// A trace split across batches records how many of its leading spans were
-// settled (delivered or permanently refused); once a part of it is offered
-// again, its later parts are not sent, so the settled spans stay a prefix.
 func sendTraceBatches(ctx context.Context, outcome *exportOutcome, traces []encodedTrace, maxBytes int, frame bodyFrame,
 	post func(context.Context, []byte) error) {
-	s := &batchSender{ctx: ctx, outcome: outcome, frame: frame, post: post}
+	sendTraceShares(ctx, outcome, traces, maxBytes, frame, func(ctx context.Context, shares []batchShare) error {
+		return post(ctx, frame.body(shares))
+	})
+}
+
+// sendTraceShares is sendTraceBatches for a backend that builds the request
+// itself from the shares of a batch.
+func sendTraceShares(ctx context.Context, outcome *exportOutcome, traces []encodedTrace, maxBytes int, frame bodyFrame,
+	post func(context.Context, []batchShare) error) {
+	s := &batchSender{ctx: ctx, outcome: outcome, post: post}
 	var shares []batchShare
 	size := 0
 
 	for i, t := range traces {
 		for _, e := range t.elements {
-			added := len(frame.separator) + len(e.body)
+			added := len(frame.separator) + e.bytes()
 			if len(shares) > 0 && size+added+len(frame.close) > maxBytes {
 				s.deliver(shares)
 				shares, size = nil, 0
@@ -100,7 +113,7 @@ func sendTraceBatches(ctx context.Context, outcome *exportOutcome, traces []enco
 				}
 			}
 			if len(shares) == 0 {
-				size = len(frame.open) + len(e.body)
+				size = len(frame.open) + e.bytes()
 			} else {
 				size += added
 			}
@@ -135,24 +148,26 @@ func (s *batchSender) deliver(shares []batchShare) {
 }
 
 // attempt posts shares once. A delivered or permanently refused batch is
-// settled; the error of a transient failure is returned for the caller to
-// resolve.
+// settled; the error of a transient failure, or of a batch too large that
+// can still be split, is returned for the caller to resolve.
 func (s *batchSender) attempt(shares []batchShare) error {
-	err := s.post(s.ctx, s.body(shares))
+	err := s.post(s.ctx, shares)
 	switch {
 	case err == nil:
 		s.answered = true
+		s.refusalsSinceDelivery = 0
 		s.settle(shares)
 		return nil
+	case isTooLarge(err) && len(shares) > 1:
+		s.answered = true
 	case isPermanent(err):
 		s.answered = true
 		s.outcome.record(fmt.Errorf("batch of %d traces: %w", len(shares), err))
 		s.settle(shares)
 		return nil
 	case isServerError(err):
-		if !s.answered && len(shares) == 1 {
-			s.singleRefusals++
-			s.stopped = s.singleRefusals >= collectorDownAfter
+		if len(shares) == 1 {
+			s.noteSingleRefusal()
 		}
 	default:
 		s.stopped = true
@@ -160,13 +175,22 @@ func (s *batchSender) attempt(shares []batchShare) error {
 	return err
 }
 
-// resolve handles a batch that failed transiently: a 5xx answer is split in
+// noteSingleRefusal counts a 5xx answer to a request carrying one trace and
+// stops the export once the collector looks down rather than refusing
+// particular traces.
+func (s *batchSender) noteSingleRefusal() {
+	if !s.answered {
+		s.singleRefusals++
+	}
+	s.refusalsSinceDelivery++
+	s.stopped = s.singleRefusals >= collectorDownAfter || s.refusalsSinceDelivery >= collectorFailingAfter
+}
+
+// resolve handles a batch that failed: a 5xx or 413 answer is split in
 // halves, both halves are posted, and each half that fails again is
-// resolved in turn, until single traces remain. Past the isolation budget
-// the rest is sent one trace per request. Whatever stays unresolved is
-// offered again on the next export.
+// resolved in turn, until single traces remain.
 func (s *batchSender) resolve(shares []batchShare, err error) {
-	if s.stopped || !isServerError(err) || len(shares) == 1 {
+	if s.stopped || !isSplittable(err) || len(shares) == 1 {
 		s.outcome.record(fmt.Errorf("batch of %d traces: %w", len(shares), err), shareTraceIDs(shares)...)
 		return
 	}
@@ -209,20 +233,20 @@ func (s *batchSender) onePerRequest(shares []batchShare) {
 	}
 }
 
-func (s *batchSender) body(shares []batchShare) []byte {
+func (f bodyFrame) body(shares []batchShare) []byte {
 	var b bytes.Buffer
-	b.WriteString(s.frame.open)
+	b.WriteString(f.open)
 	first := true
 	for _, sh := range shares {
 		for _, e := range sh.elements {
 			if !first {
-				b.WriteString(s.frame.separator)
+				b.WriteString(f.separator)
 			}
 			first = false
 			b.Write(e.body)
 		}
 	}
-	b.WriteString(s.frame.close)
+	b.WriteString(f.close)
 	return b.Bytes()
 }
 

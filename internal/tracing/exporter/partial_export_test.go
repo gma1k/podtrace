@@ -99,7 +99,7 @@ func TestOTLPRetriesEveryShippedTraceWhenTheCollectorFails(t *testing.T) {
 }
 
 func TestZipkinRetriesOnlyTheTraceThatFailedTransiently(t *testing.T) {
-	srv, _ := failingFor(badTraceID, http.StatusServiceUnavailable)
+	srv, _ := failingFor(badTraceID, http.StatusInternalServerError)
 	t.Cleanup(srv.Close)
 	exp, err := NewZipkinExporter(srv.URL, 1.0)
 	if err != nil {
@@ -133,7 +133,7 @@ func TestDataDogDoesNotRetryATraceTheAgentRejects(t *testing.T) {
 }
 
 func TestSplunkRetriesOnlyTheTraceThatFailedTransiently(t *testing.T) {
-	srv, _ := failingFor(badTraceID, http.StatusBadGateway)
+	srv, _ := failingFor(badTraceID, http.StatusInternalServerError)
 	t.Cleanup(srv.Close)
 	exp, err := NewSplunkExporter(srv.URL, "", 1.0)
 	if err != nil {

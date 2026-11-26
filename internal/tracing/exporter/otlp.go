@@ -19,6 +19,7 @@ import (
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/diagnose/tracker"
 	"github.com/gma1k/podtrace/internal/events"
+	"github.com/gma1k/podtrace/internal/otlpresponse"
 	"github.com/gma1k/podtrace/internal/safeconv"
 	"github.com/gma1k/podtrace/internal/sanitize"
 	"github.com/gma1k/podtrace/internal/spanattributes"
@@ -116,6 +117,7 @@ func newOTLPHTTPSpanExporter(ctx context.Context, endpoint string) (sdktrace.Spa
 	if err != nil {
 		return nil, "", err
 	}
+	httpClient.Transport = recordOTLPResponse(httpClient.Transport)
 
 	opts := []otlptracehttp.Option{
 		otlptracehttp.WithEndpointURL(endpointURL),
@@ -144,43 +146,96 @@ func (e *OTLPExporter) ExportTraces(traces []*tracker.Trace) error {
 	return e.ExportTracesContext(context.Background(), traces)
 }
 
-// ExportTracesContext ships the sampled traces in one OTLP request; ctx
-// bounds it.
+// ExportTracesContext ships the sampled traces in OTLP requests of about
+// otlpMaxBatchBytes each, so a backlog never outgrows the collector's (or
+// its ingress's) body limit.
 func (e *OTLPExporter) ExportTracesContext(ctx context.Context, traces []*tracker.Trace) error {
 	if !e.enabled || len(traces) == 0 {
 		return nil
 	}
 
 	var outcome exportOutcome
-	var snapshots []sdktrace.ReadOnlySpan
-	var shipped []string
+	var encoded []encodedTrace
 	for _, t := range traces {
 		if !e.shouldSample(t) {
 			continue
 		}
 
-		contributed := false
+		et := encodedTrace{traceID: t.TraceID}
 		for _, span := range t.Spans {
 			snapshot, err := e.spanSnapshot(span)
 			if err != nil {
 				outcome.record(permanent(fmt.Errorf("trace %s span %s: %w", t.TraceID, span.SpanID, err)))
 				continue
 			}
-			snapshots = append(snapshots, snapshot)
-			contributed = true
+			et.elements = append(et.elements, encodedElement{snapshot: snapshot, size: otlpSpanBytes(snapshot), spans: 1})
 		}
-		if contributed {
-			shipped = append(shipped, t.TraceID)
-		}
-	}
-
-	if len(snapshots) > 0 {
-		if err := e.exporter.ExportSpans(ctx, snapshots); err != nil {
-			outcome.record(fmt.Errorf("export %d spans: %w", len(snapshots), err), shipped...)
+		if len(et.elements) > 0 {
+			encoded = append(encoded, et)
 		}
 	}
 
+	sendTraceShares(ctx, &outcome, encoded, otlpMaxBatchBytes, bodyFrame{}, func(ctx context.Context, shares []batchShare) error {
+		return e.exportShares(ctx, &outcome, shares)
+	})
 	return outcome.err()
+}
+
+// otlpMaxBatchBytes bounds the estimated encoded size of one OTLP request,
+// well under the 1 MiB default body limit of common ingresses.
+const otlpMaxBatchBytes = maxBatchBytes
+
+// exportShares sends the spans of one batch.
+func (e *OTLPExporter) exportShares(ctx context.Context, outcome *exportOutcome, shares []batchShare) error {
+	var spans []sdktrace.ReadOnlySpan
+	for _, sh := range shares {
+		for _, el := range sh.elements {
+			spans = append(spans, el.snapshot)
+		}
+	}
+	response := &otlpResponse{}
+	err := e.exporter.ExportSpans(withOTLPResponse(ctx, response), spans)
+	if err == nil {
+		return nil
+	}
+	if rejected, ok := otlpresponse.RejectedSpans(err); ok {
+		outcome.reject(min(rejected, int64(len(spans))), err)
+		return nil
+	}
+	return classifyOTLPError(err, response.statusCode())
+}
+
+// classifyOTLPError gives an OTLP export failure the classification the
+// batch sender acts on: the HTTP status the collector answered with when
+// there was one, or the gRPC status.
+func classifyOTLPError(err error, httpStatus int) error {
+	if isPermanent(err) {
+		return err
+	}
+	if httpStatus != 0 {
+		return statusErrorDetail(httpStatus, err)
+	}
+	return classifyGRPCError(err)
+}
+
+// otlpSpanBytes estimates the encoded size of a span in an OTLP request.
+func otlpSpanBytes(span sdktrace.ReadOnlySpan) int {
+	const spanOverhead, eventOverhead = 96, 24
+	n := spanOverhead + len(span.Name())
+	n += attributesBytes(span.Attributes())
+	for _, event := range span.Events() {
+		n += eventOverhead + len(event.Name) + attributesBytes(event.Attributes)
+	}
+	return n
+}
+
+func attributesBytes(attrs []attribute.KeyValue) int {
+	const attributeOverhead = 8
+	n := 0
+	for _, kv := range attrs {
+		n += attributeOverhead + len(kv.Key) + len(kv.Value.String())
+	}
+	return n
 }
 
 func (e *OTLPExporter) shouldSample(t *tracker.Trace) bool {
@@ -188,10 +243,7 @@ func (e *OTLPExporter) shouldSample(t *tracker.Trace) bool {
 }
 
 // spanSnapshot converts a tracker span into a ReadOnlySpan that carries the
-// ORIGINAL trace, span, and parent IDs. The previous implementation replayed
-// spans through the SDK tracer, which mints a fresh span ID for every span
-// and demotes the original ID to its parent — every OTLP backend then showed
-// a broken parent/child structure with phantom intermediate spans.
+// ORIGINAL trace, span, and parent IDs.
 func (e *OTLPExporter) spanSnapshot(span *tracker.Span) (sdktrace.ReadOnlySpan, error) {
 	span.UpdateDuration()
 

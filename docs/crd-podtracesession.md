@@ -112,8 +112,10 @@ can introspect a finished session without scraping pod logs:
 delivered: `True Delivered`, `False ExportPartiallyFailed` (some batches
 failed), or `False ExporterUnreachable` (no batch reached the backend; the
 session is then also `Degraded=True ExporterUnreachable`). The message
-names each exporter, its batch counts and its last error. A session that
-produced no spans has no `Exported` condition.
+names each exporter, its batch counts and its last error. A collector that
+accepts a batch but rejects some of its spans (an OTLP partial success)
+still counts as delivered; the message adds how many spans it rejected.
+A session that produced no spans has no `Exported` condition.
 
 ## Lifecycle
 

@@ -50,7 +50,8 @@ azblob://<storage-account>/<container>/<key-or-prefix>
 ```
 
 A **trailing slash** means "prefix mode" — the uploader picks the
-object filename:
+object filename. So does a URI that names only the bucket or container
+(`s3://b`, `azblob://account/container`), since it names no object:
 
 | URI | Resolves to (example) |
 |---|---|
