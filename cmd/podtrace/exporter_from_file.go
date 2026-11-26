@@ -146,8 +146,8 @@ func otlpEndpointWithScheme(endpoint string, insecure bool) string {
 
 // payloadAllowsCleartext reports whether the ExporterConfig behind a bundle
 // asked for cleartext to its endpoint: insecure set, an explicit http://
-// endpoint, or a Jaeger or Zipkin endpoint without a scheme, which those
-// exporters have always reached over http.
+// endpoint, or an endpoint without a scheme that bundle.SchemelessCleartext
+// reaches over http, the rule the agent follows too.
 func payloadAllowsCleartext(p *bundle.Payload) bool {
 	if p.Insecure {
 		return true
@@ -156,9 +156,8 @@ func payloadAllowsCleartext(p *bundle.Payload) bool {
 	if strings.HasPrefix(endpoint, "http://") {
 		return true
 	}
-	switch p.Type {
-	case bundle.TypeJaeger, bundle.TypeZipkin:
-		return !strings.Contains(endpoint, "://")
+	if !strings.Contains(endpoint, "://") {
+		return p.SchemelessCleartext()
 	}
 	return false
 }
@@ -200,6 +199,9 @@ func applyPayloadToConfig(p *bundle.Payload) error {
 		config.OTLPInsecure = cleartext
 	case bundle.TypeJaeger:
 		config.JaegerEndpoint = p.Endpoint
+		if !cleartext {
+			config.JaegerEndpoint = otlpEndpointWithScheme(p.Endpoint, false)
+		}
 		config.OTLPInsecure = cleartext
 	case bundle.TypeZipkin:
 		config.ZipkinEndpoint = p.Endpoint

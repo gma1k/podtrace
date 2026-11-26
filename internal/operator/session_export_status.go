@@ -22,6 +22,7 @@ const (
 type exportTally struct {
 	succeeded int64
 	failed    int64
+	rejected  int64
 	lastError string
 }
 
@@ -46,6 +47,7 @@ func applySessionExportConditions(s *podtracev1alpha1.PodTraceSession, summaryBy
 			}
 			t.succeeded += e.Succeeded
 			t.failed += e.Failed
+			t.rejected += e.RejectedSpans
 			if e.LastError != "" {
 				t.lastError = e.LastError
 			}
@@ -70,6 +72,8 @@ func applySessionExportConditions(s *podtracev1alpha1.PodTraceSession, summaryBy
 			unreachable = append(unreachable, fmt.Sprintf("%s: none of %d export batches delivered; last error: %s", name, total, t.lastError))
 		case t.failed > 0:
 			partial = append(partial, fmt.Sprintf("%s: %d of %d export batches failed; last error: %s", name, t.failed, total, t.lastError))
+		case t.rejected > 0:
+			delivered = append(delivered, fmt.Sprintf("%s: %d export batches delivered; the collector rejected %d spans", name, t.succeeded, t.rejected))
 		default:
 			delivered = append(delivered, fmt.Sprintf("%s: %d export batches delivered", name, t.succeeded))
 		}

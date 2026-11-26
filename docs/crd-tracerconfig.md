@@ -151,8 +151,10 @@ spec:
 
   Whether an exporter may use cleartext comes from its ExporterConfig, not
   from here: `otlp.insecure: true`, an explicit `http://` endpoint, or a
-  Jaeger or Zipkin endpoint without a scheme. Session Jobs and the agent
-  follow the same rule.
+  Jaeger or Zipkin endpoint without a scheme. A Jaeger exporter that sends
+  headers uses TLS for an endpoint without a scheme, so the headers never
+  cross the wire in cleartext. Session Jobs and the agent follow the same
+  rule.
 
 ### Defaults: everything on unless you say otherwise
 

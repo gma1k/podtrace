@@ -52,6 +52,7 @@ type ExporterStatus struct {
 	Exporter         string
 	SucceededBatches int64
 	FailedBatches    int64
+	RejectedSpans    int64
 	LastError        string
 }
 
@@ -212,10 +213,29 @@ func (m *Manager) exportLoop(ctx context.Context) {
 		case <-m.stopCh:
 			return
 		case <-ticker.C:
-			m.exportTraces(ctx, false)
+			m.exportTick(ctx)
 		}
 	}
 }
+
+// exportTick runs one periodic export under a deadline, so a collector
+// that answers slowly cannot hold the export (and every other exporter
+// waiting on exportMu) for many intervals.
+func (m *Manager) exportTick(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, m.exportTickTimeout())
+	defer cancel()
+	m.exportTraces(ctx, false)
+}
+
+// exportTickTimeout leaves room for a few requests at the exporter timeout,
+// and never less than one export interval.
+func (m *Manager) exportTickTimeout() time.Duration {
+	return max(exportTickRequests*config.TracingExporterTimeout, m.exportInterval)
+}
+
+// exportTickRequests is how many request timeouts one periodic export may
+// take.
+const exportTickRequests = 3
 
 func (m *Manager) cleanupLoop(ctx context.Context) {
 	defer m.wg.Done()
@@ -309,7 +329,15 @@ func (m *Manager) exportTo(ctx context.Context, target exporterTarget, force boo
 		return
 	}
 	err := target.export(ctx, traces)
-	m.recordExport(target.name, err)
+	rejected := exporter.RejectedSpans(err)
+	var onlyRejected *exporter.RejectedSpansError
+	if errors.As(err, &onlyRejected) {
+		logger.Warn("Collector accepted the export but rejected some spans",
+			zap.String("exporter", target.name), zap.Int64("rejected_spans", rejected),
+			zap.String("error", alerting.RedactURLsInText(onlyRejected.Error())))
+		err = nil
+	}
+	m.recordExport(target.name, err, rejected)
 	if err != nil {
 		m.reportExporterFailure(target, err)
 	}
@@ -372,8 +400,9 @@ func (m *Manager) reportExporterFailure(target exporterTarget, err error) {
 	})
 }
 
-// recordExport tallies one export batch for the exporter's status.
-func (m *Manager) recordExport(name string, err error) {
+// recordExport tallies one export batch for the exporter's status, and the
+// spans the collector accepted the batch but rejected.
+func (m *Manager) recordExport(name string, err error, rejected int64) {
 	m.statsMu.Lock()
 	defer m.statsMu.Unlock()
 	if m.stats == nil {
@@ -384,6 +413,7 @@ func (m *Manager) recordExport(name string, err error) {
 		st = &ExporterStatus{Exporter: name}
 		m.stats[name] = st
 	}
+	st.RejectedSpans += rejected
 	if err == nil {
 		st.SucceededBatches++
 		return

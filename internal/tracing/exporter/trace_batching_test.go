@@ -195,7 +195,7 @@ func TestSendTraceBatchesSettlesThePrefixOfASplitTrace(t *testing.T) {
 	sendTraceBatches(context.Background(), &outcome, traces, 100, jsonArrayFrame, func(context.Context, []byte) error {
 		posts++
 		if posts == 2 {
-			return statusError(http.StatusServiceUnavailable)
+			return statusError(http.StatusInternalServerError)
 		}
 		return nil
 	})

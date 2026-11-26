@@ -48,3 +48,44 @@ func TestProtocolSurvivesTheYAMLRoundTrip(t *testing.T) {
 		t.Errorf("protocol lost across the session bundle YAML: %+v", back)
 	}
 }
+
+func TestSendsHeaders(t *testing.T) {
+	cases := map[string]struct {
+		p    *Payload
+		want bool
+	}{
+		"nil":             {nil, false},
+		"none":            {&Payload{Type: TypeJaeger, Credential: []byte("k")}, false},
+		"literal":         {&Payload{Headers: map[string]string{"a": "b"}}, true},
+		"secret":          {&Payload{SecretHeaders: map[string]string{"a": "b"}}, true},
+		"credential name": {&Payload{HeaderName: "Authorization"}, true},
+	}
+	for name, tc := range cases {
+		if got := tc.p.SendsHeaders(); got != tc.want {
+			t.Errorf("%s: SendsHeaders = %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
+func TestSchemelessCleartext(t *testing.T) {
+	tenant := map[string]string{"X-Scope-OrgID": "t"}
+	cases := map[string]struct {
+		p    *Payload
+		want bool
+	}{
+		"nil":                     {nil, false},
+		"otlp":                    {&Payload{Type: TypeOTLP}, false},
+		"otlp insecure":           {&Payload{Type: TypeOTLP, Insecure: true}, true},
+		"splunk":                  {&Payload{Type: TypeSplunk}, false},
+		"datadog":                 {&Payload{Type: TypeDataDog}, false},
+		"zipkin":                  {&Payload{Type: TypeZipkin}, true},
+		"jaeger":                  {&Payload{Type: TypeJaeger}, true},
+		"jaeger with headers":     {&Payload{Type: TypeJaeger, Headers: tenant}, false},
+		"jaeger headers insecure": {&Payload{Type: TypeJaeger, Headers: tenant, Insecure: true}, true},
+	}
+	for name, tc := range cases {
+		if got := tc.p.SchemelessCleartext(); got != tc.want {
+			t.Errorf("%s: SchemelessCleartext = %v, want %v", name, got, tc.want)
+		}
+	}
+}

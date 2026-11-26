@@ -219,7 +219,7 @@ func TestThreeRefusedSingleTracesBeforeAnySuccessStopTheExport(t *testing.T) {
 	var outcome exportOutcome
 	sendTraceBatches(context.Background(), &outcome, traces, 100, jsonArrayFrame, func(context.Context, []byte) error {
 		posts++
-		return statusError(http.StatusBadGateway)
+		return statusError(http.StatusInternalServerError)
 	})
 
 	if posts != collectorDownAfter {
@@ -241,8 +241,8 @@ func TestOnePerRequestFallbackStopsWhenTheCollectorStopsAnswering(t *testing.T) 
 	}
 	var outcome exportOutcome
 	posts := 0
-	s := &batchSender{ctx: context.Background(), outcome: &outcome, frame: jsonArrayFrame, answered: true,
-		isolationPosts: maxIsolationPosts, post: func(context.Context, []byte) error {
+	s := &batchSender{ctx: context.Background(), outcome: &outcome, answered: true,
+		isolationPosts: maxIsolationPosts, post: func(context.Context, []batchShare) error {
 			posts++
 			if posts == 1 {
 				return nil
@@ -405,11 +405,14 @@ func TestExportersReportTheStatusCodeOfTheIsolatedFailure(t *testing.T) {
 func TestIsServerError(t *testing.T) {
 	cases := map[error]bool{
 		statusError(http.StatusInternalServerError): true,
-		statusError(http.StatusServiceUnavailable):  true,
+		statusError(http.StatusServiceUnavailable):  false,
+		statusError(http.StatusGatewayTimeout):      false,
+		statusError(http.StatusNotImplemented):      true,
 		statusError(http.StatusTooManyRequests):     false,
 		statusError(http.StatusBadRequest):          false,
 		context.DeadlineExceeded:                    false,
-		fmt.Errorf("wrapped: %w", statusError(502)): true,
+		fmt.Errorf("wrapped: %w", statusError(502)): false,
+		fmt.Errorf("wrapped: %w", statusError(500)): true,
 	}
 	for err, want := range cases {
 		if got := isServerError(err); got != want {

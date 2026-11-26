@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -12,11 +14,17 @@ import (
 )
 
 func main() {
-	db, err := sql.Open("sqlite3", ":memory:")
+	dbDir, err := os.MkdirTemp("", "pool-test-")
+	if err != nil {
+		log.Fatalf("Failed to create database directory: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(dbDir) }()
+
+	db, err := sql.Open("sqlite3", "file:"+filepath.Join(dbDir, "pool-test.db")+"?_busy_timeout=5000&_journal_mode=WAL")
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	maxOpenConns := 5
 	maxIdleConns := 2
@@ -95,7 +103,7 @@ func main() {
 					fmt.Printf("  Connection %d: Failed to acquire (pool exhausted): %v\n", id, err)
 					return
 				}
-				defer conn.Close()
+				defer func() { _ = conn.Close() }()
 
 				mu.Lock()
 				acquireCount++

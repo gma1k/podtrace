@@ -81,6 +81,22 @@ func TestExportConditionDeliveredIsTrue(t *testing.T) {
 	}
 }
 
+func TestExportConditionDeliveredNamesTheSpansTheCollectorRejected(t *testing.T) {
+	s := reconciledSession()
+	applySessionExportConditions(s, map[string]sessionSummaryJSON{
+		"node-a": {Exports: []sessionExportJSON{{Exporter: "otlp", Succeeded: 2, RejectedSpans: 3}}},
+		"node-b": {Exports: []sessionExportJSON{{Exporter: "otlp", Succeeded: 1, RejectedSpans: 4}}},
+	})
+
+	exported := condition(s, ConditionExported)
+	if exported == nil || exported.Status != metav1.ConditionTrue || exported.Reason != ReasonExportDelivered {
+		t.Fatalf("Exported = %+v, want True/%s: rejected spans were still delivered requests", exported, ReasonExportDelivered)
+	}
+	if exported.Message != "otlp: 3 export batches delivered; the collector rejected 7 spans" {
+		t.Fatalf("unexpected message %q", exported.Message)
+	}
+}
+
 func TestExportConditionSumsNodesSoOneDeliveringNodeIsPartial(t *testing.T) {
 	s := reconciledSession()
 	applySessionExportConditions(s, map[string]sessionSummaryJSON{

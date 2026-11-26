@@ -8,6 +8,7 @@ func TestIsPrefixURI(t *testing.T) {
 		"s3://bucket":                    true,
 		"gs://bucket/":                   true,
 		"azblob://acct/container/":       true,
+		"azblob://acct/container":        true,
 		"s3://bucket/reports/fixed.txt":  false,
 		"azblob://acct/container/report": false,
 		"":                               false,
@@ -30,6 +31,7 @@ func TestPerNodeURI(t *testing.T) {
 		{"azblob://acct/container/dir/report", "node-a", "azblob://acct/container/dir/report-node-a"},
 		{"s3://bucket/reports/.report", "node-a", "s3://bucket/reports/.report-node-a"},
 		{"s3://bucket/reports/", "node-a", "s3://bucket/reports/"},
+		{"azblob://acct/container", "node-a", "azblob://acct/container"},
 		{"s3://bucket/reports/fixed.txt", "", "s3://bucket/reports/fixed.txt"},
 		{"configmap/ns/name", "node-a", "configmap/ns/name"},
 		{"ftp://bucket/fixed.txt", "node-a", "ftp://bucket/fixed.txt"},
@@ -55,5 +57,15 @@ func TestPerNodeURIResolvesToDistinctKeys(t *testing.T) {
 	}
 	if a.resolveKey("ignored") == b.resolveKey("ignored") {
 		t.Fatalf("two nodes resolve to the same key %q", a.resolveKey("ignored"))
+	}
+}
+
+func TestAnAzureContainerURIResolvesToTheKeyHint(t *testing.T) {
+	d, err := parseURI("azblob://acct/reports")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := d.resolveKey("sess-1.txt"); got != "sess-1.txt" {
+		t.Fatalf("resolveKey = %q, want the hint: an empty blob name can never be uploaded", got)
 	}
 }

@@ -70,10 +70,11 @@ type SessionSummary struct {
 // so the operator can tell a session whose spans never left the node from
 // one that delivered them.
 type SessionExportStatus struct {
-	Exporter  string `json:"exporter"`
-	Succeeded int64  `json:"succeeded,omitempty"`
-	Failed    int64  `json:"failed,omitempty"`
-	LastError string `json:"lastError,omitempty"`
+	Exporter      string `json:"exporter"`
+	Succeeded     int64  `json:"succeeded,omitempty"`
+	Failed        int64  `json:"failed,omitempty"`
+	RejectedSpans int64  `json:"rejectedSpans,omitempty"`
+	LastError     string `json:"lastError,omitempty"`
 }
 
 const maxExportErrorBytes = 300
@@ -109,10 +110,11 @@ func collectSessionExports() []SessionExportStatus {
 			lastError = strings.ToValidUTF8(lastError[:maxExportErrorBytes], "") + "..."
 		}
 		out = append(out, SessionExportStatus{
-			Exporter:  st.Exporter,
-			Succeeded: st.SucceededBatches,
-			Failed:    st.FailedBatches,
-			LastError: lastError,
+			Exporter:      st.Exporter,
+			Succeeded:     st.SucceededBatches,
+			Failed:        st.FailedBatches,
+			RejectedSpans: st.RejectedSpans,
+			LastError:     lastError,
 		})
 	}
 	return out

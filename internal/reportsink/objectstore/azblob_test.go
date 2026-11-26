@@ -68,6 +68,47 @@ func TestAzureSink_SharedKeyUpload(t *testing.T) {
 	}
 }
 
+func TestAzureSink_ContainerURIUploadsUnderTheKeyHint(t *testing.T) {
+	var (
+		mu      sync.Mutex
+		gotPath string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotPath = r.URL.Path
+		mu.Unlock()
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	const fakeKey = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+	sink, err := New(context.Background(), Config{
+		URI: "azblob://devstoreaccount1/reports",
+		Credentials: map[string][]byte{
+			azureSecretKeyAccountKey: []byte(fakeKey),
+			azureSecretKeyEndpoint:   []byte(srv.URL + "/devstoreaccount1"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = sink.Close() })
+
+	resolved, err := sink.Upload(context.Background(), "sess-1.txt", "text/plain", strings.NewReader("hello report"))
+	if err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	if want := "azblob://devstoreaccount1/reports/sess-1.txt"; resolved != want {
+		t.Errorf("resolvedURI = %q, want %q", resolved, want)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.HasSuffix(gotPath, "/devstoreaccount1/reports/sess-1.txt") {
+		t.Errorf("path = %q, want the blob named by the key hint in the reports container", gotPath)
+	}
+}
+
 func TestAzureSink_EmptyKeyRejected(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusCreated)

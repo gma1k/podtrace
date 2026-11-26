@@ -56,6 +56,31 @@ func (p *Payload) UsesGRPC() bool {
 	return p != nil && p.Type == TypeOTLP && p.Protocol == ProtocolGRPC
 }
 
+// SendsHeaders reports whether the exporter attaches headers to its
+// requests; any of them may carry a credential.
+func (p *Payload) SendsHeaders() bool {
+	return p != nil && (len(p.Headers) > 0 || len(p.SecretHeaders) > 0 || p.HeaderName != "")
+}
+
+// SchemelessCleartext reports whether an endpoint written without a scheme
+// is reached over cleartext http rather than TLS. Session Jobs and the
+// agent both follow it.
+func (p *Payload) SchemelessCleartext() bool {
+	if p == nil {
+		return false
+	}
+	if p.Insecure {
+		return true
+	}
+	switch p.Type {
+	case TypeJaeger:
+		return !p.SendsHeaders()
+	case TypeZipkin:
+		return true
+	}
+	return false
+}
+
 // FilterCategory enumerates the event categories an operator may push into
 // the bundle.
 type FilterCategory string

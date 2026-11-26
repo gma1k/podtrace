@@ -98,7 +98,10 @@ spec:
 
 Agent mode ships to Jaeger's **OTLP/HTTP receiver** (port 4318 by
 default), not the legacy Thrift `/api/traces` endpoint. Jaeger 1.35+
-ships an OTLP receiver out of the box. No credentials.
+ships an OTLP receiver out of the box. No credentials. An endpoint without
+a scheme is reached over plain `http`, by the agent and by session Jobs
+alike; write `https://jaeger-collector.observability:4318` for a receiver
+that serves TLS.
 
 ### Zipkin
 
@@ -296,7 +299,7 @@ status:
 
 - It does **not** probe the exporter endpoint. Probing here would flap on transient backend issues and cause false alerts across every CR that references the EC. Delivery is reported where it happens instead:
   - A `PodTraceSession` gets an `Exported` condition once its Jobs finish (`Delivered`, `ExportPartiallyFailed` or `ExporterUnreachable`, with the last error). When no batch reached the backend, the session is also marked `Degraded=True ExporterUnreachable`.
-  - A `PodTrace` reports an exporter it cannot build as `nodeStatus[].reason: ExporterBuildFailed`. Once built, an exporter whose batches fail to reach the backend (an unreachable host, a rejected credential) is reported as `nodeStatus[].reason: ExporterDeliveryFailed`, with the exporter, the number of failed batches, how long it has been failing and the last error. That node row stays `ready: true`, because the node is still capturing, but the PodTrace becomes `Degraded=True ExporterDeliveryFailed`. The reason clears on the next delivered batch.
+  - A `PodTrace` reports an exporter it cannot build as `nodeStatus[].reason: ExporterBuildFailed`. Once built, an exporter whose batches fail to reach the backend (an unreachable host, a rejected credential) is reported as `nodeStatus[].reason: ExporterDeliveryFailed`, with the exporter, the number of failed batches, how long it has been failing and the last error. That node row stays `ready: true`, because the node is still capturing, but the PodTrace becomes `Degraded=True ExporterDeliveryFailed`. The reason clears on the next delivered batch. A batch the collector accepts while rejecting some spans (an OTLP partial success) is delivered: it does not set `ExporterDeliveryFailed`, and the rejected spans are counted on `podtrace_agent_export_delivery_dropped_total{reason="rejected"}`.
 - It does **not** validate credential *contents* against the remote service (e.g. it never tries the Splunk token against Splunk). The agent learns about credential rejections on first export.
 - It does **not** mutate the spec. Missing Secrets must be fixed by the user; the controller surfaces the condition and waits.
 

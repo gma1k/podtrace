@@ -40,7 +40,7 @@ func recordingServer(t *testing.T, failFor string) (*httptest.Server, *postLog) 
 		log.bodies = append(log.bodies, string(body))
 		log.mu.Unlock()
 		if failFor != "" && strings.Contains(string(body), failFor) {
-			w.WriteHeader(http.StatusServiceUnavailable)
+			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusOK)

@@ -20,6 +20,7 @@ import (
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/events"
 	"github.com/gma1k/podtrace/internal/logger"
+	"github.com/gma1k/podtrace/internal/otlpresponse"
 	"github.com/gma1k/podtrace/internal/safeconv"
 	"github.com/gma1k/podtrace/internal/sanitize"
 	"github.com/gma1k/podtrace/internal/spanattributes"
@@ -445,8 +446,9 @@ type deliveryObservingExporter struct {
 	delivery *deliveryHealth
 	now      func() time.Time
 
-	mu      sync.Mutex
-	failing bool
+	mu        sync.Mutex
+	failing   bool
+	rejecting bool
 
 	aborted atomic.Bool
 }
@@ -477,7 +479,13 @@ func (e *deliveryObservingExporter) ExportSpans(ctx context.Context, spans []sdk
 		e.metrics.ObserveExportDelivery(e.cr, len(spans), err)
 		return err
 	}
-	e.metrics.ObserveExportDelivery(e.cr, len(spans), err)
+	rejectedAny := false
+	if rejected, ok := otlpresponse.RejectedSpans(err); ok {
+		rejectedAny = e.observePartialSuccess(len(spans), rejected, err)
+		err = nil
+	} else {
+		e.metrics.ObserveExportDelivery(e.cr, len(spans), err)
+	}
 	if err != nil {
 		e.delivery.fail(e.cr, e, e.name, err, e.clock())
 		e.mu.Lock()
@@ -502,12 +510,39 @@ func (e *deliveryObservingExporter) ExportSpans(ctx context.Context, spans []sdk
 	e.mu.Lock()
 	recovered := e.failing
 	e.failing = false
+	if !rejectedAny {
+		e.rejecting = false
+	}
 	e.mu.Unlock()
 	if recovered {
 		logger.Info("exporter delivery recovered",
 			zap.String("cr", e.cr.String()), zap.String("exporter", e.name))
 	}
 	return nil
+}
+
+// observePartialSuccess counts a batch the collector accepted while
+// rejecting some of its spans: the rest were delivered, and resending the
+// rejected ones would only get them rejected again.
+func (e *deliveryObservingExporter) observePartialSuccess(spans int, rejected int64, err error) bool {
+	dropped := int(min(rejected, int64(spans)))
+	e.metrics.ObserveExportDelivery(e.cr, spans-dropped, nil)
+	e.metrics.ObserveExportDelivery(e.cr, dropped, err)
+	if dropped == 0 {
+		return false
+	}
+	e.mu.Lock()
+	firstRejection := !e.rejecting
+	e.rejecting = true
+	e.mu.Unlock()
+	if firstRejection {
+		logger.Warn("collector accepted the export but rejected some spans",
+			zap.String("cr", e.cr.String()),
+			zap.String("exporter", e.name),
+			zap.Int("spans_rejected", dropped),
+			zap.String("error", deliveryErrorText(err)))
+	}
+	return true
 }
 
 func (e *deliveryObservingExporter) clock() time.Time {

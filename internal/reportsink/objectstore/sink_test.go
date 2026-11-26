@@ -24,6 +24,7 @@ func TestParseURI(t *testing.T) {
 		{"Azure-prefix", "azblob://acct/container/prefix/", "azblob", "container", "prefix", true, ""},
 		{"Azure-exact-key", "azblob://acct/container/prefix/a.txt", "azblob", "container", "prefix/a.txt", false, ""},
 		{"Azure-container-root", "azblob://acct/container/", "azblob", "container", "", true, ""},
+		{"Azure-container-no-trailing-slash", "azblob://acct/container", "azblob", "container", "", true, ""},
 		{"empty", "", "", "", "", false, "empty URI"},
 		{"no-scheme", "bucket/key", "", "", "", false, "must include scheme"},
 		{"unknown-scheme", "ftp://bucket/key", "", "", "", false, "unsupported URI scheme"},
