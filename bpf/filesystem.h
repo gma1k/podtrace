@@ -38,7 +38,7 @@ struct {
 } fs_task_inflight SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_LRU_PERCPU_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, struct agg_key);
 	__type(value, struct agg_value);
 	__uint(max_entries, 16384);
@@ -114,7 +114,7 @@ static __always_inline int fs_count(u32 type, u64 latency_ns, u64 bytes, s32 err
 static __always_inline void fs_emit(void *ctx, struct event *e, int recorded)
 {
 	e->agg_recorded = (u8)recorded;
-	if (recorded && agg_mode() == AGG_MODE_BYPASS)
+	if (recorded && agg_mode_absorbs(e))
 		return;
 	capture_user_stack(ctx, e->pid, (u32)bpf_get_current_pid_tgid(), e);
 	emit_event(e);

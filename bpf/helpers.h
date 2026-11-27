@@ -100,16 +100,14 @@ static inline struct tcp_peer *lookup_tcp_peer(u32 prefer_pair) {
 	struct tcp_peer *p = fresh_tcp_peer(&k, now);
 	if (p)
 		return p;
-	if (prefer_pair == PAIR_UDP_SENDMSG || prefer_pair == PAIR_UDP_RECVMSG)
+	if (prefer_pair == PAIR_UDP_SENDMSG || prefer_pair == PAIR_UDP_RECVMSG ||
+	    prefer_pair == PAIR_UDPV6_SENDMSG)
 		return NULL;
 	k.pair = (prefer_pair == PAIR_TCP_SENDMSG) ? PAIR_TCP_RECVMSG : PAIR_TCP_SENDMSG;
 	return fresh_tcp_peer(&k, now);
 }
 
-static inline void fill_event_peer_pref(struct event *e, u32 prefer_pair) {
-	struct tcp_peer *p = lookup_tcp_peer(prefer_pair);
-	if (!p)
-		return;
+static __always_inline void event_set_peer(struct event *e, const struct tcp_peer *p) {
 	e->peer_family = (u8)p->family;
 	e->peer_sport = p->sport;
 	e->peer_dport = p->dport;
@@ -119,17 +117,21 @@ static inline void fill_event_peer_pref(struct event *e, u32 prefer_pair) {
 	__builtin_memcpy(e->peer_daddr6, p->daddr6, 16);
 }
 
+static inline void fill_event_peer_exact(struct event *e, u32 pair) {
+	struct pair_key k = make_pair_key(pair);
+	struct tcp_peer *p = fresh_tcp_peer(&k, bpf_ktime_get_ns());
+	if (p)
+		event_set_peer(e, p);
+}
+
+static inline void fill_event_peer_pref(struct event *e, u32 prefer_pair) {
+	struct tcp_peer *p = lookup_tcp_peer(prefer_pair);
+	if (p)
+		event_set_peer(e, p);
+}
+
 static inline void fill_event_peer(struct event *e) {
-	struct tcp_peer *p = lookup_tcp_peer(PAIR_TCP_SENDMSG);
-	if (!p)
-		return;
-	e->peer_family = (u8)p->family;
-	e->peer_sport = p->sport;
-	e->peer_dport = p->dport;
-	e->peer_saddr = p->saddr;
-	e->peer_daddr = p->daddr;
-	__builtin_memcpy(e->peer_saddr6, p->saddr6, 16);
-	__builtin_memcpy(e->peer_daddr6, p->daddr6, 16);
+	fill_event_peer_pref(e, PAIR_TCP_SENDMSG);
 }
 
 static inline void fill_h2_record_peer(struct h2_hdr_record *rec, u32 dir) {
@@ -195,6 +197,14 @@ static inline void format_ip_port(u32 ip, u16 port, char *buf) {
 	buf[idx < MAX_STRING_LEN ? idx : max_idx] = '\0';
 }
 
+static __always_inline int ipv6_is_v4_mapped(const u8 *a)
+{
+	u8 zeros = 0;
+	for (int i = 0; i < 10; i++)
+		zeros |= a[i];
+	return zeros == 0 && a[10] == 0xff && a[11] == 0xff;
+}
+
 static inline void format_ipv6_port(const u8 *ipv6, u16 port, char *buf) {
 	u16 p = port;
 	u32 idx = 0;
@@ -247,19 +257,6 @@ static __always_inline int event_buf_intact(struct event *e) {
 		return 1;
 	((struct event_slot *)e)->races += 1;
 	return 0;
-}
-
-static __always_inline struct event *event_buf_slot_untracked(u32 slot) {
-	struct event_slot *s = bpf_map_lookup_elem(&event_buf, &slot);
-	if (!s)
-		return NULL;
-	s->owner = 0;
-	__builtin_memset(&s->e, 0, sizeof(s->e));
-	return &s->e;
-}
-
-static __always_inline long emit_event_untracked(struct event *e) {
-	return bpf_ringbuf_output(&events, e, sizeof(*e), 0);
 }
 
 static __always_inline long emit_event(struct event *e) {

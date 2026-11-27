@@ -14,6 +14,8 @@ func TestNodeWideEntryProbesGateOnTargetCgroup(t *testing.T) {
 		{"network.c", "kprobe_tcp_recvmsg"},
 		{"network.c", "kprobe_udp_sendmsg"},
 		{"network.c", "kprobe_udp_recvmsg"},
+		{"network.c", "kprobe_udpv6_sendmsg"},
+		{"network.c", "kprobe_udpv6_recvmsg"},
 		{"cpu.c", "uprobe_pthread_mutex_lock"},
 		{"network.c", "hostent_enter"},
 		{"network.c", "uprobe_getaddrinfo"},

@@ -159,7 +159,7 @@ func TestKernelTheReadersCarryLiveHTTP2Traffic(t *testing.T) {
 		for drained := false; !drained; {
 			select {
 			case ev := <-ch:
-				if ev.Type == events.EventHTTPResp && ev.TCPState == 2 {
+				if ev.Type == events.EventHTTPResp && ev.HTTPTransport() == 2 {
 					sawH2 = true
 				}
 			default:

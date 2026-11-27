@@ -1,6 +1,7 @@
 package probes
 
 import (
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"go.uber.org/zap"
+	"golang.org/x/sys/unix"
 
 	"github.com/gma1k/podtrace/internal/config"
 	"github.com/gma1k/podtrace/internal/ebpf/safeelf"
@@ -133,6 +135,12 @@ func AttachUSDTProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 			opts.RefCtrOffset = 0
 			l, err = exe.uprobeWithHooks(prog, opts, hooks)
 		}
+		if usdtSpecMapFull(err) {
+			logger.Warn("usdt_probes map is full; the remaining USDT probes of this binary are not attached. "+
+				"Raise PODTRACE_BPF_HASH_MAP_SIZE to trace more probe sites on this node",
+				zap.Uint32("pid", pid), zap.Int("attached", len(links)))
+			break
+		}
 		if err != nil {
 			logger.Debug("usdt uprobe not attached",
 				zap.Uint32("pid", pid), zap.String("probe", p.Provider+":"+p.Name), zap.Error(err))
@@ -144,6 +152,12 @@ func AttachUSDTProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 			zap.Uint64("offset", addr), zap.Bool("semaphore", opts.RefCtrOffset != 0))
 	}
 	return links
+}
+
+// usdtSpecMapFull reports whether an attach failed because usdt_probes holds
+// as many specs as it can.
+func usdtSpecMapFull(err error) bool {
+	return errors.Is(err, unix.E2BIG)
 }
 
 // usdtSpecTable counts the uprobe sites using each usdt_probes entry, so an

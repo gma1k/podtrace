@@ -98,3 +98,28 @@ func TestKernelSetModeSurfacesAWriteFailure(t *testing.T) {
 			"while the agent believed aggregation was running")
 	}
 }
+
+func TestKernelDrainReadsAndClearsASharedMap(t *testing.T) {
+	if err := rlimit.RemoveMemlock(); err != nil {
+		t.Skipf("cannot raise memlock: %v", err)
+	}
+	metrics, err := ebpf.NewMap(&ebpf.MapSpec{Type: ebpf.LRUHash, KeySize: 40, ValueSize: 24, MaxEntries: 64})
+	if err != nil {
+		t.Skipf("cannot create the metrics map (needs privileges): %v", err)
+	}
+	t.Cleanup(func() { _ = metrics.Close() })
+	key := Key{CgroupID: 77, EventType: 3, Bucket: 12}
+	if err := metrics.Put(&key, Value{Count: 5, SumNS: 900, Bytes: 64}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	rows, err := Drain(metrics)
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Value != (Value{Count: 5, SumNS: 900, Bytes: 64}) {
+		t.Fatalf("drained %+v, want the one row as written", rows)
+	}
+	if again, err := Drain(metrics); err != nil || len(again) != 0 {
+		t.Errorf("second drain = %+v, %v; want the row gone", again, err)
+	}
+}

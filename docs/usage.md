@@ -173,7 +173,7 @@ The diagnose report includes:
 
 ### Process and Syscall Activity
 - Process execution tracking (execve events)
-- Process/thread creation (fork/clone events)
+- Process creation (fork/clone events; new threads are not reported)
 - File descriptor operations (open/openat and close)
 - File descriptor leak detection (opens vs closes)
 - Top opened files

@@ -15,6 +15,7 @@ func returnSpec() *ebpf.CollectionSpec {
 	targets := map[string]string{
 		"fexit_tcp_recvmsg": "tcp_recvmsg", "fexit_tcp_sendmsg": "tcp_sendmsg",
 		"fexit_udp_recvmsg": "udp_recvmsg", "fexit_udp_sendmsg": "udp_sendmsg",
+		"fexit_udpv6_recvmsg": "udpv6_recvmsg", "fexit_udpv6_sendmsg": "udpv6_sendmsg",
 		"fexit_http_tcp_recvmsg": "tcp_recvmsg", "fexit_h2_tcp_recvmsg": "tcp_recvmsg",
 		"fexit_h2_tcp_sendmsg": "tcp_sendmsg", "fexit_unix_stream_recvmsg": "unix_stream_recvmsg",
 		"fexit_do_futex": "do_futex",
@@ -42,7 +43,7 @@ func fexitLeft(spec *ebpf.CollectionSpec) []string {
 	return out
 }
 
-var allReturnTargets = []string{"tcp_recvmsg", "tcp_sendmsg", "udp_recvmsg", "udp_sendmsg", "unix_stream_recvmsg", "do_futex"}
+var allReturnTargets = []string{"tcp_recvmsg", "tcp_sendmsg", "udp_recvmsg", "udp_sendmsg", "udpv6_recvmsg", "udpv6_sendmsg", "unix_stream_recvmsg", "do_futex"}
 
 func TestTheFexitReturnsAreKeptWhereTheKernelCanLoadThem(t *testing.T) {
 	withKernel(t, true, kernelWith(t, allReturnTargets...), nil)
@@ -84,7 +85,7 @@ func TestTheFexitReturnsAreDroppedWhereTheKernelCannotLoadThem(t *testing.T) {
 }
 
 func TestOnlyTheReturnWhoseFunctionIsMissingIsDropped(t *testing.T) {
-	withKernel(t, true, kernelWith(t, "tcp_recvmsg", "tcp_sendmsg", "udp_recvmsg", "udp_sendmsg", "unix_stream_recvmsg"), nil)
+	withKernel(t, true, kernelWith(t, "tcp_recvmsg", "tcp_sendmsg", "udp_recvmsg", "udp_sendmsg", "udpv6_recvmsg", "udpv6_sendmsg", "unix_stream_recvmsg"), nil)
 	withFuncRet(t, true)
 	spec := returnSpec()
 	pruneReturnTracingIfUnsupported(spec, false)

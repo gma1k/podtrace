@@ -5,14 +5,21 @@
 #include "events.h"
 #include "helpers.h"
 
+static __always_inline void forget_stashed_peer(struct pair_key *key)
+{
+	bpf_map_delete_elem(&tcp_target, key);
+	bpf_map_delete_elem(&tcp_peer_stash, key);
+}
+
 static __noinline void stash_tcp_peer(struct pt_regs *ctx, u32 pair)
 {
+	struct pair_key key = make_pair_key(pair);
 	struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
 	if (!sk)
-		return;
+		goto forget;
 	u16 dport_be = BPF_CORE_READ(sk, __sk_common.skc_dport);
 	if (dport_be == 0)
-		return;
+		goto forget;
 	u16 family = BPF_CORE_READ(sk, __sk_common.skc_family);
 	char buf[MAX_STRING_LEN] = {};
 	struct tcp_peer peer = {};
@@ -22,7 +29,7 @@ static __noinline void stash_tcp_peer(struct pt_regs *ctx, u32 pair)
 	if (family == AF_INET) {
 		u32 daddr_be = BPF_CORE_READ(sk, __sk_common.skc_daddr);
 		if (daddr_be == 0)
-			return;
+			goto forget;
 		peer.daddr = __builtin_bswap32(daddr_be);
 		peer.saddr = __builtin_bswap32(BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr));
 		format_ip_port(peer.daddr, peer.dport, buf);
@@ -31,13 +38,15 @@ static __noinline void stash_tcp_peer(struct pt_regs *ctx, u32 pair)
 		BPF_CORE_READ_INTO(&peer.saddr6, sk, __sk_common.skc_v6_rcv_saddr.in6_u.u6_addr8);
 		format_ipv6_port(peer.daddr6, peer.dport, buf);
 	} else {
-		return;
+		goto forget;
 	}
 	peer.stash_ns = bpf_ktime_get_ns();
 	peer.sk = (u64)sk;
-	struct pair_key key = make_pair_key(pair);
 	bpf_map_update_elem(&tcp_target, &key, buf, BPF_ANY);
 	bpf_map_update_elem(&tcp_peer_stash, &key, &peer, BPF_ANY);
+	return;
+forget:
+	forget_stashed_peer(&key);
 }
 
 static __always_inline void stash_sk_owner(struct pt_regs *ctx)
@@ -145,9 +154,9 @@ static __noinline int peer_from_connected_sock(struct sock *sk, struct tcp_peer 
 	return 0;
 }
 
-static __noinline void stash_udp_peer(struct pt_regs *ctx)
+static __noinline void stash_udp_peer(struct pt_regs *ctx, u32 pair)
 {
-	struct pair_key key = make_pair_key(PAIR_UDP_SENDMSG);
+	struct pair_key key = make_pair_key(pair);
 	struct tcp_peer peer = {};
 
 	struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
@@ -158,8 +167,10 @@ static __noinline void stash_udp_peer(struct pt_regs *ctx)
 	}
 
 	struct msghdr *msg = (struct msghdr *)PT_REGS_PARM2(ctx);
-	if (!peer_from_msghdr(msg, &peer))
+	if (!peer_from_msghdr(msg, &peer)) {
+		bpf_map_delete_elem(&tcp_peer_stash, &key);
 		return;
+	}
 	peer.sport = sk ? BPF_CORE_READ(sk, __sk_common.skc_num) : 0;
 	peer.stash_ns = bpf_ktime_get_ns();
 	bpf_map_update_elem(&tcp_peer_stash, &key, &peer, BPF_ANY);
@@ -229,6 +240,9 @@ static __noinline void stash_udp_recv_peer(void)
 SEC("kprobe/tcp_v4_connect")
 int kprobe_tcp_connect(struct pt_regs *ctx) {
 	if (!cgroup_allows(bpf_get_current_cgroup_id()))
+		return 0;
+	struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
+	if (sk && BPF_CORE_READ(sk, __sk_common.skc_family) == AF_INET6)
 		return 0;
 	struct pair_key key = make_pair_key(PAIR_TCP_CONNECT_V4);
 	record_start_time(&key);
@@ -309,12 +323,21 @@ int kretprobe_tcp_v6_connect(struct pt_regs *ctx) {
 	struct connect_addr *ca = bpf_map_lookup_elem(&connect_addrs, &key);
 	if (ca && ca->family == AF_INET6) {
 		u16 port = __builtin_bswap16(ca->port_be);
-		format_ipv6_port(ca->addr6, port, e->target);
-		struct dns_v6key k6 = { .cgroup_id = bpf_get_current_cgroup_id() };
-		__builtin_memcpy(k6.addr, ca->addr6, 16);
-		char *resolved = bpf_map_lookup_elem(&dns_resolved6, &k6);
+		struct dns_resolved_name *resolved = NULL;
+		if (ipv6_is_v4_mapped(ca->addr6)) {
+			u32 addr_be = 0;
+			__builtin_memcpy(&addr_be, &ca->addr6[12], sizeof(addr_be));
+			format_ip_port(__builtin_bswap32(addr_be), port, e->target);
+			struct dns_resolved_key rk = { .cgroup_id = bpf_get_current_cgroup_id(), .ip = addr_be };
+			resolved = bpf_map_lookup_elem(&dns_resolved, &rk);
+		} else {
+			format_ipv6_port(ca->addr6, port, e->target);
+			struct dns_v6key k6 = { .cgroup_id = bpf_get_current_cgroup_id() };
+			__builtin_memcpy(k6.addr, ca->addr6, 16);
+			resolved = bpf_map_lookup_elem(&dns_resolved6, &k6);
+		}
 		if (resolved) {
-			__builtin_memcpy(e->details, resolved, MAX_STRING_LEN);
+			__builtin_memcpy(e->details, resolved->name, MAX_STRING_LEN);
 		}
 	}
 	if (!agg_absorbed(e, 0)) {
@@ -360,9 +383,9 @@ int kretprobe_tcp_connect(struct pt_regs *ctx) {
 		u32 ip = __builtin_bswap32(ca->addr_be);
 		format_ip_port(ip, port, e->target);
 		struct dns_resolved_key rk = { .cgroup_id = bpf_get_current_cgroup_id(), .ip = ca->addr_be };
-		char *resolved = bpf_map_lookup_elem(&dns_resolved, &rk);
+		struct dns_resolved_name *resolved = bpf_map_lookup_elem(&dns_resolved, &rk);
 		if (resolved) {
-			__builtin_memcpy(e->details, resolved, MAX_STRING_LEN);
+			__builtin_memcpy(e->details, resolved->name, MAX_STRING_LEN);
 		}
 	}
 	if (!agg_absorbed(e, 0)) {
@@ -435,7 +458,7 @@ static __always_inline int tcp_sendmsg_return(void *ctx, long rc)
 		}
 	}
 	bpf_map_delete_elem(&tcp_target, &key);
-	fill_event_peer_pref(e, PAIR_TCP_SENDMSG);
+	fill_event_peer_exact(e, PAIR_TCP_SENDMSG);
 	if (!agg_absorbed(e, 0)) {
 		capture_user_stack(ctx, pid, tid, e);
 		emit_event(e);
@@ -536,7 +559,7 @@ static __always_inline int tcp_recvmsg_return(void *ctx, long rc)
 		}
 	}
 	bpf_map_delete_elem(&tcp_target, &key);
-	fill_event_peer_pref(e, PAIR_TCP_RECVMSG);
+	fill_event_peer_exact(e, PAIR_TCP_RECVMSG);
 	if (!agg_absorbed(e, 0)) {
 		capture_user_stack(ctx, pid, tid, e);
 		emit_event(e);
@@ -1000,22 +1023,45 @@ int tracepoint_net_dev_xmit(void *ctx) {
 	return 0;
 }
 
+static __always_inline int udp_send_enter(struct pt_regs *ctx, u32 pair)
+{
+	struct pair_key key = make_pair_key(pair);
+	u64 ts = bpf_ktime_get_ns();
+	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
+	stash_udp_peer(ctx, pair);
+	return 0;
+}
+
+static __always_inline int udp_send_nested_in_udpv6(struct pt_regs *ctx)
+{
+	struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
+	if (!sk || BPF_CORE_READ(sk, __sk_common.skc_family) != AF_INET6)
+		return 0;
+	struct pair_key outer = make_pair_key(PAIR_UDPV6_SENDMSG);
+	return bpf_map_lookup_elem(&start_times, &outer) != NULL;
+}
+
 SEC("kprobe/udp_sendmsg")
 int kprobe_udp_sendmsg(struct pt_regs *ctx) {
 	if (!cgroup_allows(bpf_get_current_cgroup_id()))
 		return 0;
-	struct pair_key key = make_pair_key(PAIR_UDP_SENDMSG);
-	u64 ts = bpf_ktime_get_ns();
-	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
-	stash_udp_peer(ctx);
-	return 0;
+	if (udp_send_nested_in_udpv6(ctx))
+		return 0;
+	return udp_send_enter(ctx, PAIR_UDP_SENDMSG);
 }
 
-static __always_inline int udp_sendmsg_return(void *ctx, long rc)
+SEC("kprobe/udpv6_sendmsg")
+int kprobe_udpv6_sendmsg(struct pt_regs *ctx) {
+	if (!cgroup_allows(bpf_get_current_cgroup_id()))
+		return 0;
+	return udp_send_enter(ctx, PAIR_UDPV6_SENDMSG);
+}
+
+static __always_inline int udp_sendmsg_return(void *ctx, long rc, u32 pair)
 {
 	u32 pid = agent_ns_tgid();
 	u32 tid = (u32)bpf_get_current_pid_tgid();
-	struct pair_key key = make_pair_key(PAIR_UDP_SENDMSG);
+	struct pair_key key = make_pair_key(pair);
 	u64 *start_ts = bpf_map_lookup_elem(&start_times, &key);
 	
 	if (!start_ts) {
@@ -1043,7 +1089,7 @@ static __always_inline int udp_sendmsg_return(void *ctx, long rc)
 	e->tcp_state = 0;
 	e->target[0] = '\0';
 	
-	fill_event_peer_pref(e, PAIR_UDP_SENDMSG);
+	fill_event_peer_exact(e, pair);
 	if (!agg_absorbed(e, 0)) {
 		capture_user_stack(ctx, pid, tid, e);
 		emit_event(e);
@@ -1056,7 +1102,7 @@ SEC("kretprobe/udp_sendmsg")
 int kretprobe_udp_sendmsg(struct pt_regs *ctx)
 {
 	long rc = PT_REGS_RC(ctx);
-	return udp_sendmsg_return(ctx, rc);
+	return udp_sendmsg_return(ctx, rc, PAIR_UDP_SENDMSG);
 }
 
 SEC("fexit/udp_sendmsg")
@@ -1064,13 +1110,26 @@ int fexit_udp_sendmsg(u64 *ctx)
 {
 	u64 rc = 0;
 	bpf_get_func_ret(ctx, &rc);
-	return udp_sendmsg_return(ctx, (long)rc);
+	return udp_sendmsg_return(ctx, (long)rc, PAIR_UDP_SENDMSG);
 }
 
-SEC("kprobe/udp_recvmsg")
-int kprobe_udp_recvmsg(struct pt_regs *ctx) {
-	if (!cgroup_allows(bpf_get_current_cgroup_id()))
-		return 0;
+SEC("kretprobe/udpv6_sendmsg")
+int kretprobe_udpv6_sendmsg(struct pt_regs *ctx)
+{
+	long rc = PT_REGS_RC(ctx);
+	return udp_sendmsg_return(ctx, rc, PAIR_UDPV6_SENDMSG);
+}
+
+SEC("fexit/udpv6_sendmsg")
+int fexit_udpv6_sendmsg(u64 *ctx)
+{
+	u64 rc = 0;
+	bpf_get_func_ret(ctx, &rc);
+	return udp_sendmsg_return(ctx, (long)rc, PAIR_UDPV6_SENDMSG);
+}
+
+static __always_inline int udp_recv_enter(struct pt_regs *ctx)
+{
 	struct pair_key key = make_pair_key(PAIR_UDP_RECVMSG);
 	u64 ts = bpf_ktime_get_ns();
 	bpf_map_update_elem(&start_times, &key, &ts, BPF_ANY);
@@ -1079,12 +1138,30 @@ int kprobe_udp_recvmsg(struct pt_regs *ctx) {
 	if (peer_from_connected_sock((struct sock *)PT_REGS_PARM1(ctx), &peer)) {
 		peer.stash_ns = bpf_ktime_get_ns();
 		bpf_map_update_elem(&tcp_peer_stash, &key, &peer, BPF_ANY);
+	} else {
+		bpf_map_delete_elem(&tcp_peer_stash, &key);
 	}
 
 	u64 msg = (u64)PT_REGS_PARM2(ctx);
 	if (msg)
 		bpf_map_update_elem(&udp_recv_msghdr, &key, &msg, BPF_ANY);
+	else
+		bpf_map_delete_elem(&udp_recv_msghdr, &key);
 	return 0;
+}
+
+SEC("kprobe/udp_recvmsg")
+int kprobe_udp_recvmsg(struct pt_regs *ctx) {
+	if (!cgroup_allows(bpf_get_current_cgroup_id()))
+		return 0;
+	return udp_recv_enter(ctx);
+}
+
+SEC("kprobe/udpv6_recvmsg")
+int kprobe_udpv6_recvmsg(struct pt_regs *ctx) {
+	if (!cgroup_allows(bpf_get_current_cgroup_id()))
+		return 0;
+	return udp_recv_enter(ctx);
 }
 
 static __always_inline int udp_recvmsg_return(void *ctx, long rc)
@@ -1122,7 +1199,7 @@ static __always_inline int udp_recvmsg_return(void *ctx, long rc)
 	e->target[0] = '\0';
 	
 	stash_udp_recv_peer();
-	fill_event_peer_pref(e, PAIR_UDP_RECVMSG);
+	fill_event_peer_exact(e, PAIR_UDP_RECVMSG);
 	if (!agg_absorbed(e, 0)) {
 		capture_user_stack(ctx, pid, tid, e);
 		emit_event(e);
@@ -1140,6 +1217,21 @@ int kretprobe_udp_recvmsg(struct pt_regs *ctx)
 
 SEC("fexit/udp_recvmsg")
 int fexit_udp_recvmsg(u64 *ctx)
+{
+	u64 rc = 0;
+	bpf_get_func_ret(ctx, &rc);
+	return udp_recvmsg_return(ctx, (long)rc);
+}
+
+SEC("kretprobe/udpv6_recvmsg")
+int kretprobe_udpv6_recvmsg(struct pt_regs *ctx)
+{
+	long rc = PT_REGS_RC(ctx);
+	return udp_recvmsg_return(ctx, rc);
+}
+
+SEC("fexit/udpv6_recvmsg")
+int fexit_udpv6_recvmsg(u64 *ctx)
 {
 	u64 rc = 0;
 	bpf_get_func_ret(ctx, &rc);

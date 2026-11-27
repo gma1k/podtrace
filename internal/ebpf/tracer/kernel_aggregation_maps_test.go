@@ -12,7 +12,7 @@ import (
 func kernelAggMaps(t *testing.T, names ...string) *ebpf.Collection {
 	t.Helper()
 	specs := map[string]*ebpf.MapSpec{
-		kernelagg.MapName:        {Type: ebpf.LRUCPUHash, KeySize: 40, ValueSize: 24, MaxEntries: 16},
+		kernelagg.MapName:        {Type: ebpf.LRUHash, KeySize: 40, ValueSize: 24, MaxEntries: 16},
 		kernelagg.EnabledMapName: {Type: ebpf.Array, KeySize: 4, ValueSize: 4, MaxEntries: 1},
 		kernelagg.ConfigMapName:  {Type: ebpf.Array, KeySize: 4, ValueSize: 8, MaxEntries: 1},
 		kernelagg.StatsMapName:   {Type: ebpf.PerCPUArray, KeySize: 4, ValueSize: 8, MaxEntries: 2},
@@ -90,9 +90,7 @@ func TestADrainStartsANewBudgetIntervalAndTracksPressure(t *testing.T) {
 	if err := coll.Maps[kernelagg.StatsMapName].Put(uint32(1), collapsed); err != nil {
 		t.Fatal(err)
 	}
-	row := make([]kernelagg.Value, nCPU)
-	row[0] = kernelagg.Value{Count: 1}
-	if err := coll.Maps[kernelagg.MapName].Put(kernelagg.Key{CgroupID: 9}, row); err != nil {
+	if err := coll.Maps[kernelagg.MapName].Put(kernelagg.Key{CgroupID: 9}, kernelagg.Value{Count: 1}); err != nil {
 		t.Fatal(err)
 	}
 	tr := &Tracer{collection: coll}

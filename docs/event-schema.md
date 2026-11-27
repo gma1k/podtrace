@@ -165,7 +165,7 @@ Used in the `TCPState` field of `EventTCPState` records.
 | Event type | Target content |
 |------------|----------------|
 | DNS        | Hostname being resolved |
-| Connect    | `ip:port` or `[ipv6]:port` of remote |
+| Connect    | `ip:port` or `[ipv6]:port` of remote; the kernel writes IPv6 unbracketed and the parser rewrites it to this form, an IPv4-mapped address as plain IPv4 |
 | TCPSend/Recv | empty (connection tracked via socket map) |
 | Write/Read/Fsync | File path basename (or empty if BTF unavailable) |
 | Unlink     | Path of deleted file |
@@ -191,7 +191,10 @@ The `Bytes` field is overloaded depending on event type:
 ### Error field
 
 `Error` is the negated errno value reported by the kernel function. For
-example, `EAGAIN` (errno 11) appears as `-11`. `0` means success.
+example, `EAGAIN` (errno 11) appears as `-11`. `0` means success. The
+kernel-internal `-ERESTART*` codes (512-516), which a blocking call returns
+when a signal or the process exit interrupts it, are never counted as errors,
+whether the event is counted in userspace or aggregated in the kernel.
 
 `EVENT_LOCK_CONTENTION` follows the same convention for both of its sources:
 the `pthread_mutex_lock` return is negated to match a `futex` return. A

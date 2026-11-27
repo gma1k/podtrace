@@ -31,7 +31,7 @@ struct agg_value {
 };
 
 struct {
-	__uint(type, BPF_MAP_TYPE_LRU_PERCPU_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, struct agg_key);
 	__type(value, struct agg_value);
 	__uint(max_entries, 65536);
@@ -256,10 +256,11 @@ static __always_inline int agg_record_in(void *map, u64 cgroup_id, u8 event_type
 		}
 	}
 
-	val->count += 1;
-	if (bucketed)
-		val->sum_ns += latency_ns;
-	val->bytes += bytes;
+	__sync_fetch_and_add(&val->count, 1);
+	if (bucketed && latency_ns)
+		__sync_fetch_and_add(&val->sum_ns, latency_ns);
+	if (bytes)
+		__sync_fetch_and_add(&val->bytes, bytes);
 	return 1;
 }
 
@@ -276,6 +277,11 @@ static __always_inline int agg_record(u64 cgroup_id, u8 event_type, u8 variant,
 #define AGG_VARIANT(proto, status_class, is_error) \
 	((u8)(((proto) & 0x7) | (((status_class) & 0x7) << 3) | (((is_error) & 0x1) << 6)))
 
+static __always_inline int errno_is_kernel_restart(s32 err)
+{
+	return err <= -ERESTARTSYS && err >= -ERESTART_RESTARTBLOCK;
+}
+
 static __noinline int agg_from_event(struct event *e, s32 status_num)
 {
 	u8 variant = 0;
@@ -290,7 +296,7 @@ static __noinline int agg_from_event(struct event *e, s32 status_num)
 
 	if (status_num >= 100 && status_num <= 599)
 		status_class = (u32)(status_num / 100);
-	if (e->error != 0)
+	if (e->error != 0 && !errno_is_kernel_restart(e->error))
 		is_error = 1;
 
 	switch (e->type) {
@@ -397,6 +403,16 @@ static __always_inline int agg_l7_detail_wanted(const struct event *e)
 
 static __always_inline int event_buf_intact(struct event *e);
 
+static __always_inline int agg_mode_absorbs(const struct event *e)
+{
+	u32 mode = agg_mode();
+	if (mode == AGG_MODE_BYPASS)
+		return 1;
+	if (mode == AGG_MODE_BYPASS_EXCEPT_L7)
+		return !agg_l7_detail_wanted(e);
+	return 0;
+}
+
 static __always_inline int agg_absorbed_checked(struct event *e, s32 status_num, int tracked)
 {
 	if (tracked && !event_buf_intact(e)) {
@@ -408,12 +424,7 @@ static __always_inline int agg_absorbed_checked(struct event *e, s32 status_num,
 	e->agg_recorded = (u8)recorded;
 	if (!recorded)
 		return 0;
-	u32 mode = agg_mode();
-	if (mode == AGG_MODE_BYPASS)
-		return 1;
-	if (mode == AGG_MODE_BYPASS_EXCEPT_L7)
-		return !agg_l7_detail_wanted(e);
-	return 0;
+	return agg_mode_absorbs(e);
 }
 
 static __always_inline int agg_absorbed(struct event *e, s32 status_num)
