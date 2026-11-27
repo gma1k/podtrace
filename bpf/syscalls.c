@@ -51,6 +51,8 @@ int raw_tracepoint_sched_process_fork(struct bpf_raw_tracepoint_args *ctx) {
 	struct task_struct *child = (struct task_struct *)ctx->args[1];
 	if (!child)
 		return 0;
+	if (BPF_CORE_READ(child, pid) != BPF_CORE_READ(child, tgid))
+		return 0;
 	u32 pid = task_ns_tgid(child, (u32)BPF_CORE_READ(child, tgid));
 	if (pid == 0)
 		return 0;

@@ -116,8 +116,7 @@ type Tracer struct {
 	h3Parked                      []h3ParkedTxn
 	quicReader                    recordReader
 	dnsPayloadReader              *ringbuf.Reader
-	dnsResolvedMap                *ebpf.Map
-	dnsResolved6Map               *ebpf.Map
+	dnsNames                      *dnsNameCache
 	filter                        *filter.CgroupFilter
 	containerID                   string
 	containerIDMu                 sync.Mutex
@@ -952,14 +951,13 @@ func NewTracer(tracerOpts ...Option) (*Tracer, error) {
 	}
 
 	var dnspayrd *ringbuf.Reader
-	var dnsResolvedMap, dnsResolved6Map *ebpf.Map
+	var dnsNames *dnsNameCache
 	if config.DNSPayloadEnabled {
 		if m := coll.Maps["dns_payload_events"]; m != nil {
 			if r, derr := ringbuf.NewReader(m); derr == nil {
 				dnspayrd = r
 				setDNSPayloadFlag(coll, true)
-				dnsResolvedMap = coll.Maps["dns_resolved"]
-				dnsResolved6Map = coll.Maps["dns_resolved6"]
+				dnsNames = newDNSNameCache(coll)
 			} else {
 				logger.Warn("DNS payload decode disabled: ringbuf reader unavailable", zap.Error(derr))
 			}
@@ -985,8 +983,7 @@ func NewTracer(tracerOpts ...Option) (*Tracer, error) {
 		h3SectionStash:                h3stash,
 		quicReader:                    asRecordReader(quicrd),
 		dnsPayloadReader:              dnspayrd,
-		dnsResolvedMap:                dnsResolvedMap,
-		dnsResolved6Map:               dnsResolved6Map,
+		dnsNames:                      dnsNames,
 		filter:                        filter.NewCgroupFilter(),
 		processNameCache:              processCache,
 		attributionTable:              attribution.New(0, 0),
@@ -2185,31 +2182,25 @@ func dnsResolvedKeyV6(cgroupID uint64, ip6 net.IP) [24]byte {
 }
 
 func (t *Tracer) populateDNSResolved(rec dns.Record) {
-	name := dnsResolvedValue(rec.Msg.QName)
+	if t.dnsNames == nil {
+		return
+	}
 	for _, a := range rec.Msg.Answers {
 		switch a.Type {
 		case dns.TypeA:
-			if t.dnsResolvedMap == nil {
-				continue
-			}
 			if ip4 := net.ParseIP(a.IP).To4(); ip4 != nil {
-				key := dnsResolvedKeyV4(rec.CgroupID, ip4)
-				_ = t.dnsResolvedMap.Update(key[:], name[:], ebpf.UpdateAny)
+				t.dnsNames.rememberV4(rec.CgroupID, ip4, rec.Msg.QName)
 			}
 		case dns.TypeAAAA:
-			if t.dnsResolved6Map == nil {
-				continue
-			}
 			if ip6 := net.ParseIP(a.IP).To16(); ip6 != nil {
-				key := dnsResolvedKeyV6(rec.CgroupID, ip6)
-				_ = t.dnsResolved6Map.Update(key[:], name[:], ebpf.UpdateAny)
+				t.dnsNames.rememberV6(rec.CgroupID, ip6, rec.Msg.QName)
 			}
 		}
 	}
 }
 
 // dnsResolvedValue renders a query name into the fixed-width, NUL-terminated
-// buffer the BPF dns_resolved maps store as their value (char[MAX_STRING_LEN]).
+// name field of the BPF dns_resolved maps' value (struct dns_resolved_name).
 func dnsResolvedValue(name string) [dnsResolvedNameLen]byte {
 	var buf [dnsResolvedNameLen]byte
 	// Reserve the final byte for the NUL terminator.

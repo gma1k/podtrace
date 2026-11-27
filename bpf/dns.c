@@ -208,6 +208,98 @@ static __always_inline void dns_drop_inc(void) {
 		(*c)++;
 }
 
+static __always_inline int dns_inflight_admits(u64 cgroup_id) {
+	s32 *live = bpf_map_lookup_elem(&dns_inflight_cgroup, &cgroup_id);
+	return !live || *live < DNS_INFLIGHT_CGROUP_BUDGET;
+}
+
+static __always_inline void dns_inflight_count(u64 cgroup_id, s32 delta) {
+	s32 *live = bpf_map_lookup_elem(&dns_inflight_cgroup, &cgroup_id);
+	if (!live && delta > 0) {
+		if (bpf_map_update_elem(&dns_inflight_cgroup, &cgroup_id, &delta, BPF_NOEXIST) == 0)
+			return;
+		live = bpf_map_lookup_elem(&dns_inflight_cgroup, &cgroup_id);
+	}
+	if (live)
+		__sync_fetch_and_add(live, delta);
+}
+
+static __always_inline void dns_inflight_forget(struct dns_flow_key *key) {
+	if (bpf_map_delete_elem(&dns_inflight, key) == 0)
+		dns_inflight_count(key->cgroup_id, -1);
+}
+
+static __always_inline u32 dns_name_next_slot(u64 cgroup_id, u32 family) {
+	struct dns_name_cursor_key ck = { .cgroup_id = cgroup_id, .family = family, .writer = DNS_NAME_WRITER_KERNEL };
+	u32 *next = bpf_map_lookup_elem(&dns_name_cursor, &ck);
+	if (!next) {
+		u32 zero = 0;
+		bpf_map_update_elem(&dns_name_cursor, &ck, &zero, BPF_NOEXIST);
+		next = bpf_map_lookup_elem(&dns_name_cursor, &ck);
+		if (!next)
+			return DNS_NAME_NO_SLOT;
+	}
+	u32 slot = *next & (DNS_RESOLVED_CGROUP_BUDGET - 1);
+	__sync_fetch_and_add(next, 1);
+	return slot;
+}
+
+static __always_inline struct dns_resolved_name *dns_name_value(const char *name, u32 slot) {
+	u32 zero = 0;
+	struct dns_resolved_name *v = bpf_map_lookup_elem(&dns_name_scratch, &zero);
+	if (!v)
+		return NULL;
+	__builtin_memcpy(v->name, name, MAX_STRING_LEN);
+	v->slot = slot;
+	v->_pad = 0;
+	return v;
+}
+
+static __always_inline void dns_remember_v4(u64 cgroup_id, u32 ip, const char *name) {
+	u32 slot = dns_name_next_slot(cgroup_id, AF_INET);
+	if (slot != DNS_NAME_NO_SLOT) {
+		struct dns_name_slot_key sk = { .cgroup_id = cgroup_id, .slot = slot, .family = AF_INET };
+		struct dns_name_addr *old = bpf_map_lookup_elem(&dns_name_slots, &sk);
+		if (old) {
+			struct dns_resolved_key ok = { .cgroup_id = cgroup_id };
+			__builtin_memcpy(&ok.ip, old->addr, sizeof(ok.ip));
+			struct dns_resolved_name *held = bpf_map_lookup_elem(&dns_resolved, &ok);
+			if (held && held->slot == slot)
+				bpf_map_delete_elem(&dns_resolved, &ok);
+		}
+		struct dns_name_addr addr = {};
+		__builtin_memcpy(addr.addr, &ip, sizeof(ip));
+		bpf_map_update_elem(&dns_name_slots, &sk, &addr, BPF_ANY);
+	}
+	struct dns_resolved_name *v = dns_name_value(name, slot);
+	if (!v)
+		return;
+	struct dns_resolved_key rk = { .cgroup_id = cgroup_id, .ip = ip };
+	bpf_map_update_elem(&dns_resolved, &rk, v, BPF_ANY);
+}
+
+static __always_inline void dns_remember_v6(struct dns_v6key *k6, const char *name) {
+	u32 slot = dns_name_next_slot(k6->cgroup_id, AF_INET6);
+	if (slot != DNS_NAME_NO_SLOT) {
+		struct dns_name_slot_key sk = { .cgroup_id = k6->cgroup_id, .slot = slot, .family = AF_INET6 };
+		struct dns_name_addr *old = bpf_map_lookup_elem(&dns_name_slots, &sk);
+		if (old) {
+			struct dns_v6key ok = { .cgroup_id = k6->cgroup_id };
+			__builtin_memcpy(ok.addr, old->addr, sizeof(ok.addr));
+			struct dns_resolved_name *held = bpf_map_lookup_elem(&dns_resolved6, &ok);
+			if (held && held->slot == slot)
+				bpf_map_delete_elem(&dns_resolved6, &ok);
+		}
+		struct dns_name_addr addr = {};
+		__builtin_memcpy(addr.addr, k6->addr, sizeof(addr.addr));
+		bpf_map_update_elem(&dns_name_slots, &sk, &addr, BPF_ANY);
+	}
+	struct dns_resolved_name *v = dns_name_value(name, slot);
+	if (!v)
+		return;
+	bpf_map_update_elem(&dns_resolved6, k6, v, BPF_ANY);
+}
+
 static __always_inline int encrypted_dns_first_seen(struct __sk_buff *skb, u8 is_v6,
 						    __u16 dport, __u16 sport) {
 	struct encrypted_dns_flow k = {};
@@ -387,8 +479,15 @@ static __always_inline int dns_egress_run(struct __sk_buff *skb, int task_pid) {
 	if (bpf_skb_load_bytes(skb, qend, &qtype, sizeof(qtype)) == 0)
 		q.qtype = bpf_ntohs(qtype);
 
-	if (bpf_map_update_elem(&dns_inflight, &key, &q, BPF_ANY) < 0)
+	if (!dns_inflight_admits(key.cgroup_id)) {
 		dns_drop_inc();
+	} else {
+		long err = bpf_map_update_elem(&dns_inflight, &key, &q, BPF_NOEXIST);
+		if (err == 0)
+			dns_inflight_count(key.cgroup_id, 1);
+		else if (err != -EEXIST)
+			dns_drop_inc();
+	}
 
 	struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
 	if (!e)
@@ -474,7 +573,86 @@ static __noinline void emit_dns_payload(struct __sk_buff *skb, int dns_off,
 		return;
 	}
 	scr->rec.payload_len = (u16)avail;
-	bpf_ringbuf_output(&dns_payload_events, scr, sizeof(scr->rec) + avail, 0);
+	if (bpf_ringbuf_output(&dns_payload_events, scr, sizeof(scr->rec) + avail, 0) < 0)
+		dns_drop_inc();
+}
+
+struct dns_answer_detail {
+	u32 ip;
+	int off;
+	u16 ancount;
+	u8 kind;
+};
+
+static __always_inline void dns_fill_answer_event(struct event *e, struct dns_query_state *q,
+						  struct dns_flow_key *key, __u16 flagsh, u64 now) {
+	__builtin_memset(e, 0, sizeof(*e));
+	e->timestamp = now;
+	e->pid = q->pid;
+	e->type = EVENT_DNS;
+	e->cgroup_id = key->cgroup_id;
+	e->latency_ns = e->timestamp - q->ts_ns;
+	e->error = flagsh & 0x000f;
+	e->tcp_state = q->qtype;
+	e->dns_server_ip = q->server_ip;
+	e->dns_transport = q->transport;
+	__builtin_memcpy(e->dns_server_ip6, q->server_ip6, 16);
+	__builtin_memcpy(e->comm, q->comm, COMM_LEN);
+	__builtin_memcpy(e->target, q->name, MAX_STRING_LEN);
+}
+
+static __always_inline void dns_walk_answers(struct __sk_buff *skb, int dns_off, u64 cgroup_id,
+					     const char *name, struct dns_answer_detail *d) {
+	__u16 ancount = 0;
+	if (bpf_skb_load_bytes(skb, dns_off + 6, &ancount, sizeof(ancount)) == 0)
+		ancount = bpf_ntohs(ancount);
+	d->ancount = ancount;
+
+	int qname_end = dns_skip_name(skb, dns_off + 12);
+	int aoff = qname_end + 4;
+	int wrote_detail = 0;
+
+	for (int a = 0; a < MAX_ANSWERS; a++) {
+		if (a >= ancount || qname_end < 0)
+			break;
+		aoff = dns_skip_name(skb, aoff);
+		if (aoff < 0)
+			break;
+		aoff &= DNS_OFF_MASK;
+		__u16 atype = 0, rdlen = 0;
+		if (bpf_skb_load_bytes(skb, aoff, &atype, sizeof(atype)) < 0)
+			break;
+		atype = bpf_ntohs(atype);
+		if (bpf_skb_load_bytes(skb, (aoff + 8) & DNS_OFF_MASK, &rdlen, sizeof(rdlen)) < 0)
+			break;
+		rdlen = bpf_ntohs(rdlen);
+		int rdata = (aoff + 10) & DNS_OFF_MASK;
+
+		if (atype == DNS_TYPE_A) {
+			__u32 ip = 0;
+			if (bpf_skb_load_bytes(skb, rdata, &ip, sizeof(ip)) == 0) {
+				dns_remember_v4(cgroup_id, ip, name);
+				d->kind = DNS_TYPE_A;
+				d->ip = ip;
+				wrote_detail = 1;
+			}
+		} else if (atype == DNS_TYPE_AAAA) {
+			struct dns_v6key k6 = { .cgroup_id = cgroup_id };
+			if (bpf_skb_load_bytes(skb, rdata, k6.addr, sizeof(k6.addr)) == 0) {
+				dns_remember_v6(&k6, name);
+				if (!wrote_detail) {
+					d->kind = DNS_TYPE_AAAA;
+					d->off = rdata;
+					wrote_detail = 1;
+				}
+			}
+		} else if (atype == DNS_TYPE_CNAME && !wrote_detail) {
+			d->kind = DNS_TYPE_CNAME;
+			d->off = rdata;
+			wrote_detail = 1;
+		}
+		aoff = (rdata + (rdlen & DNS_OFF_MASK)) & DNS_OFF_MASK;
+	}
 }
 
 SEC("cgroup_skb/ingress")
@@ -515,32 +693,19 @@ int dns_ingress(struct __sk_buff *skb) {
 	if (!dns_response_matches_query(skb, q, is_v6, dport))
 		return 1;
 
-	struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
-	if (!e) {
-		dns_drop_inc();
-		bpf_map_delete_elem(&dns_inflight, &key);
-		return 1;
-	}
-	__builtin_memset(e, 0, sizeof(*e));
-	e->timestamp = bpf_ktime_get_ns();
-	e->pid = q->pid;
-	e->type = EVENT_DNS;
-	e->cgroup_id = key.cgroup_id;
-	e->latency_ns = e->timestamp - q->ts_ns;
-	e->error = flagsh & 0x000f;
-	e->tcp_state = q->qtype;
-	e->dns_server_ip = q->server_ip;
-	e->dns_transport = q->transport;
-	__builtin_memcpy(e->dns_server_ip6, q->server_ip6, 16);
-	__builtin_memcpy(e->comm, q->comm, COMM_LEN);
-	__builtin_memcpy(e->target, q->name, MAX_STRING_LEN);
-
+	u64 now = bpf_ktime_get_ns();
 	u32 pz = 0;
 	u32 *payload_on = bpf_map_lookup_elem(&dns_payload_enabled, &pz);
 	if (payload_on && *payload_on) {
-		u64 latency = e->latency_ns;
-		int recorded = agg_from_event(e, 0);
-		bpf_ringbuf_discard(e, 0);
+		u64 latency = now - q->ts_ns;
+		int recorded = 0;
+		struct event *pe = bpf_ringbuf_reserve(&events, sizeof(*pe), 0);
+		if (pe) {
+			dns_fill_answer_event(pe, q, &key, flagsh, now);
+			latency = pe->latency_ns;
+			recorded = agg_from_event(pe, 0);
+			bpf_ringbuf_discard(pe, 0);
+		}
 		struct dns_payload_meta meta = {
 			.cgroup_id = key.cgroup_id,
 			.latency_ns = latency,
@@ -550,79 +715,35 @@ int dns_ingress(struct __sk_buff *skb) {
 			.agg_recorded = (u8)recorded,
 		};
 		emit_dns_payload(skb, dns_off, q, &meta);
-		bpf_map_delete_elem(&dns_inflight, &key);
+		dns_inflight_forget(&key);
 		return 1;
 	}
 
-	__u16 ancount = 0;
-	if (bpf_skb_load_bytes(skb, dns_off + 6, &ancount, sizeof(ancount)) == 0)
-		ancount = bpf_ntohs(ancount);
-	e->bytes = ancount;
-
-	int qname_end = dns_skip_name(skb, dns_off + 12);
-	int aoff = qname_end + 4;
-	int wrote_detail = 0;
-	__u32 detail_ip = 0;
-	int detail_off = 0;
-	__u8 detail_kind = 0;
-
-	for (int a = 0; a < MAX_ANSWERS; a++) {
-		if (a >= ancount || qname_end < 0)
-			break;
-		aoff = dns_skip_name(skb, aoff);
-		if (aoff < 0)
-			break;
-		aoff &= DNS_OFF_MASK;
-		__u16 atype = 0, rdlen = 0;
-		if (bpf_skb_load_bytes(skb, aoff, &atype, sizeof(atype)) < 0)
-			break;
-		atype = bpf_ntohs(atype);
-		if (bpf_skb_load_bytes(skb, (aoff + 8) & DNS_OFF_MASK, &rdlen, sizeof(rdlen)) < 0)
-			break;
-		rdlen = bpf_ntohs(rdlen);
-		int rdata = (aoff + 10) & DNS_OFF_MASK;
-
-		if (atype == DNS_TYPE_A) {
-			__u32 ip = 0;
-			if (bpf_skb_load_bytes(skb, rdata, &ip, sizeof(ip)) == 0) {
-				struct dns_resolved_key rk = { .cgroup_id = key.cgroup_id, .ip = ip };
-				bpf_map_update_elem(&dns_resolved, &rk, q->name, BPF_ANY);
-				detail_kind = DNS_TYPE_A;
-				detail_ip = ip;
-				wrote_detail = 1;
-			}
-		} else if (atype == DNS_TYPE_AAAA) {
-			struct dns_v6key k6 = { .cgroup_id = key.cgroup_id };
-			if (bpf_skb_load_bytes(skb, rdata, k6.addr, sizeof(k6.addr)) == 0) {
-				bpf_map_update_elem(&dns_resolved6, &k6, q->name, BPF_ANY);
-				if (!wrote_detail) {
-					detail_kind = DNS_TYPE_AAAA;
-					detail_off = rdata;
-					wrote_detail = 1;
-				}
-			}
-		} else if (atype == DNS_TYPE_CNAME && !wrote_detail) {
-			detail_kind = DNS_TYPE_CNAME;
-			detail_off = rdata;
-			wrote_detail = 1;
-		}
-		aoff = (rdata + (rdlen & DNS_OFF_MASK)) & DNS_OFF_MASK;
+	struct dns_answer_detail d = {};
+	dns_walk_answers(skb, dns_off, key.cgroup_id, q->name, &d);
+	struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+	if (!e) {
+		dns_drop_inc();
+		dns_inflight_forget(&key);
+		return 1;
 	}
+	dns_fill_answer_event(e, q, &key, flagsh, now);
+	e->bytes = d.ancount;
 
-	if (detail_kind == DNS_TYPE_A) {
-		format_ip_port(__builtin_bswap32(detail_ip), 0, e->details);
-	} else if (detail_kind == DNS_TYPE_AAAA) {
+	if (d.kind == DNS_TYPE_A) {
+		format_ip_port(__builtin_bswap32(d.ip), 0, e->details);
+	} else if (d.kind == DNS_TYPE_AAAA) {
 		__u8 addr6[16] = {};
-		if (bpf_skb_load_bytes(skb, detail_off & DNS_OFF_MASK, addr6, sizeof(addr6)) == 0)
+		if (bpf_skb_load_bytes(skb, d.off & DNS_OFF_MASK, addr6, sizeof(addr6)) == 0)
 			format_ipv6_port(addr6, 0, e->details);
-	} else if (detail_kind == DNS_TYPE_CNAME) {
-		parse_name_compressed(skb, dns_off, detail_off & DNS_OFF_MASK, e->details);
+	} else if (d.kind == DNS_TYPE_CNAME) {
+		parse_name_compressed(skb, dns_off, d.off & DNS_OFF_MASK, e->details);
 	}
 
 	if (agg_absorbed_untracked(e, 0))
 		bpf_ringbuf_discard(e, 0);
 	else
 		bpf_ringbuf_submit(e, 0);
-	bpf_map_delete_elem(&dns_inflight, &key);
+	dns_inflight_forget(&key);
 	return 1;
 }

@@ -19,6 +19,8 @@ var returnTracing = map[string]string{
 	"kretprobe_tcp_sendmsg":         "fexit_tcp_sendmsg",
 	"kretprobe_udp_recvmsg":         "fexit_udp_recvmsg",
 	"kretprobe_udp_sendmsg":         "fexit_udp_sendmsg",
+	"kretprobe_udpv6_recvmsg":       "fexit_udpv6_recvmsg",
+	"kretprobe_udpv6_sendmsg":       "fexit_udpv6_sendmsg",
 	"kretprobe_http_tcp_recvmsg":    "fexit_http_tcp_recvmsg",
 	"kretprobe_h2_tcp_recvmsg":      "fexit_h2_tcp_recvmsg",
 	"kretprobe_h2_tcp_sendmsg":      "fexit_h2_tcp_sendmsg",

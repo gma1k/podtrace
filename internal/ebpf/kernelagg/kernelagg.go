@@ -278,8 +278,26 @@ func DrainCounted(m *ebpf.Map) ([]Row, int, error) {
 		return nil, 0, errors.New("kernelagg: metrics map is nil")
 	}
 	iter := m.Iterate()
-	t := &mapTaker{m: m}
-	return drainRowsCounted(iter.Next, iter.Err, t.take)
+	t := &mapTaker{m: m, shared: !perCPUMap(m.Type())}
+	next := func(key, _ any) bool {
+		if t.shared {
+			var v Value
+			return iter.Next(key, &v)
+		}
+		var v []Value
+		return iter.Next(key, &v)
+	}
+	return drainRowsCounted(next, iter.Err, t.take)
+}
+
+// perCPUMap reports whether each row of a map of this type holds one value
+// per CPU.
+func perCPUMap(t ebpf.MapType) bool {
+	switch t {
+	case ebpf.PerCPUHash, ebpf.LRUCPUHash, ebpf.PerCPUArray:
+		return true
+	}
+	return false
 }
 
 // rowMap is the part of *ebpf.Map a drain uses.
@@ -289,25 +307,40 @@ type rowMap interface {
 	Delete(key any) error
 }
 
-// mapTaker removes one row at a time, atomically where the kernel can.
+// mapTaker removes one row at a time, atomically where the kernel can. A
+// shared map holds one value per row, the others one value per CPU.
 type mapTaker struct {
 	m        rowMap
 	separate bool
+	shared   bool
 }
 
 func (t *mapTaker) take(k *Key) (Value, error) {
-	var perCPU []Value
+	var (
+		perCPU []Value
+		one    Value
+		out    any = &perCPU
+	)
+	if t.shared {
+		out = &one
+	}
+	total := func() Value {
+		if t.shared {
+			return one
+		}
+		return SumPerCPU(perCPU)
+	}
 	if !t.separate {
-		err := t.m.LookupAndDelete(k, &perCPU)
+		err := t.m.LookupAndDelete(k, out)
 		if err == nil || errors.Is(err, ebpf.ErrKeyNotExist) {
-			return SumPerCPU(perCPU), nil
+			return total(), nil
 		}
 		if !errors.Is(err, ebpf.ErrNotSupported) && !errors.Is(err, unix.EINVAL) {
 			return Value{}, err
 		}
 		t.separate = true
 	}
-	if err := t.m.Lookup(k, &perCPU); err != nil {
+	if err := t.m.Lookup(k, out); err != nil {
 		if errors.Is(err, ebpf.ErrKeyNotExist) {
 			return Value{}, nil
 		}
@@ -316,7 +349,7 @@ func (t *mapTaker) take(k *Key) (Value, error) {
 	if err := t.m.Delete(k); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
 		return Value{}, err
 	}
-	return SumPerCPU(perCPU), nil
+	return total(), nil
 }
 
 // drainRows holds the drain logic, separated from the map I/O so it can be

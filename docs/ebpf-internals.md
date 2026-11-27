@@ -118,7 +118,7 @@ enum event_type {
     EVENT_NET_DEV_ERROR,  // Network device error events
     EVENT_DB_QUERY,       // Database query events
     EVENT_EXEC,           // Process execution (execve)
-    EVENT_FORK,           // Process/thread creation
+    EVENT_FORK,           // Process creation (not new threads)
     EVENT_OPEN,           // File open operations
     EVENT_CLOSE           // File close operations
 };
@@ -156,8 +156,16 @@ Kprobes attach to kernel functions:
   - Entry: Record start time
   - Return: Calculate RTT/latency
 
+- `udp_sendmsg` / `udp_recvmsg` and `udpv6_sendmsg` / `udpv6_recvmsg`: the
+  IPv6 pair covers AF_INET6 sockets, including dual-stack sockets talking to
+  IPv4 peers. `udpv6_sendmsg` hands a v4-mapped destination to `udp_sendmsg`;
+  that nested call is skipped, so the send is reported once. Likewise
+  `tcp_v6_connect` calls `tcp_v4_connect` for a v4-mapped peer, and only the
+  IPv6 probe reports it, formatted as the IPv4 address.
+
 **Return probes on functions a task waits in:** `tcp_recvmsg`,
-`tcp_sendmsg`, `udp_recvmsg`, `udp_sendmsg`, `unix_stream_recvmsg` and
+`tcp_sendmsg`, `udp_recvmsg`, `udp_sendmsg`, `udpv6_recvmsg`,
+`udpv6_sendmsg`, `unix_stream_recvmsg` and
 `do_futex` return through fexit where the kernel can load it (5.17+ with
 BTF: it needs `bpf_get_func_ret`), and through a kretprobe otherwise; the
 agent logs each one that falls back, and why. A kretprobe keeps one instance per task inside the
@@ -211,11 +219,33 @@ Uprobes attach to user-space functions:
   over UDP or TCP, read from the packets
   - Egress: a query waits in `dns_inflight` under its cgroup and id; a
     retransmission under the same id keeps the first send as the start and
-    moves only `last_ns`
+    moves only `last_ns`. Each cgroup may hold at most 4096 queries in
+    flight (`dns_inflight_cgroup`), and the map holds four times that, so a
+    pod spraying queries at a dead resolver cannot evict another pod's
+    pending lookups; queries past the budget count in
+    `podtrace_dns_drops_total`. The timeout sweep rewrites each cgroup's
+    count from what it finds in the map
   - Ingress: the answer pairs with its query, and its rcode becomes the
     answer class in the aggregation variant (NOERROR, NXDOMAIN, SERVFAIL,
     REFUSED, other), with the error bit for every class but NOERROR and
     NXDOMAIN
+  - Hostnames: each A/AAAA answer stores the query name under the cgroup
+    and address (`dns_resolved`, `dns_resolved6`), so a later connect to
+    that address shows the name. Each cgroup remembers up to 8192 names per
+    address family in a ring of slots (`dns_name_slots`, counted in
+    `dns_name_cursor`): a new name takes the cgroup's next slot and replaces
+    the name that slot held before, unless that name was written again
+    since. A pod resolving thousands of names therefore only replaces its
+    own oldest names, never another pod's. The maps hold four times the
+    per-cgroup budget, and their LRU only steps in past that, or for cgroups
+    that are gone. Two CPUs answering for the same cgroup at the same instant
+    can share a slot, which leaves one of the two names to the LRU. The
+    names are stored even when the event ring is full and the answer's
+    event is dropped. With full DNS answers on, the decoder stores every
+    address of the answer through its own ring of slots in the same maps,
+    and an answer whose event found the ring full still goes out as a
+    payload record, marked as not counted in the kernel so userspace
+    counts it
   - A query still unanswered five seconds after `last_ns` is swept from
     userspace into a `timeout` lookup
 - Each `EVENT_DNS` carries its source in `dns_transport`: UDP, TCP, an
@@ -455,6 +485,16 @@ widened it held only an IPv4 address, and every IPv6 peer collapsed to "no
 peer", dropping its service-map edge whenever kernel aggregation was on. RTT
 rows deliberately carry no peer: `network_rtt_seconds` has no peer label, so
 a peer in the key would only multiply map entries.
+
+### Aggregation maps are shared, not per CPU
+
+`agg_metrics` (65536 rows) and `fs_fast_ops` (16384 rows) are one shared
+`LRU_HASH` each, and probes add to a row with atomic adds. A per-CPU value
+would preallocate every row once per *possible* CPU, charged to the agent's
+memory cgroup: about 1.9 MiB per CPU, or 240 MiB on a 128-CPU node, before
+the agent traced anything. Shared, both maps take under 2 MiB on any node
+and keep their full row count on large nodes, and a drain reads each row
+once instead of once per CPU.
 
 ### Event scratch slots are claimed, not just borrowed
 

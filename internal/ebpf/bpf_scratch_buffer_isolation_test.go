@@ -13,7 +13,6 @@ func TestInterruptContextProgramsFillTheirOwnEventScratch(t *testing.T) {
 		{"network.c", "tracepoint_inet_sock_set_state", "EVENT_BUF_SOFTIRQ", "event_buf_slot(", "emit_event(e)"},
 		{"network.c", "tracepoint_tcp_retransmit_skb", "EVENT_BUF_SOFTIRQ", "event_buf_slot(", "emit_event(e)"},
 		{"network.c", "tracepoint_net_dev_xmit", "EVENT_BUF_SOFTIRQ", "event_buf_slot(", "emit_event(e)"},
-		{"sockops.c", "sockops_rtt", "EVENT_BUF_SOCKOPS", "event_buf_slot_untracked(", "emit_event_untracked(e)"},
 	}
 	for _, tc := range cases {
 		body := functionBody(t, bpfSource(t, tc.file), tc.function)
@@ -34,11 +33,30 @@ func TestInterruptContextProgramsFillTheirOwnEventScratch(t *testing.T) {
 	}
 }
 
+func TestSockOpsBuildsItsRecordInTheRingBufferNotAScratchSlot(t *testing.T) {
+	body := functionBody(t, bpfSource(t, "sockops.c"), "sockops_rtt")
+	for _, want := range []string{
+		"bpf_ringbuf_reserve(&events, sizeof(*e), 0)",
+		"__builtin_memset(e, 0, sizeof(*e));",
+		"if (agg_absorbed_untracked(e, 0))\n\t\tbpf_ringbuf_discard(e, 0);\n\telse\n\t\tbpf_ringbuf_submit(e, 0);",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("sockops_rtt lacks %q", want)
+		}
+	}
+	for _, scratch := range []string{"event_buf", "EVENT_BUF_"} {
+		if strings.Contains(body, scratch) {
+			t.Errorf("sockops_rtt uses %s; an RTT callback from softirq can interrupt one from "+
+				"backlog processing on the same CPU and refill a shared scratch slot mid-record", scratch)
+		}
+	}
+}
+
 func TestSockOpsUsesNoTaskHelpers(t *testing.T) {
 	body := functionBody(t, bpfSource(t, "sockops.c"), "sockops_rtt")
 	helpers := bpfSource(t, "helpers.h")
-	paths := body + functionBody(t, helpers, "event_buf_slot_untracked") +
-		functionBody(t, helpers, "emit_event_untracked")
+	paths := body + functionBody(t, helpers, "format_ipv6_port") +
+		functionBody(t, helpers, "format_ip_port")
 	for _, helper := range []string{
 		"bpf_get_current_pid_tgid", "bpf_get_current_comm", "bpf_get_current_task",
 		"bpf_get_current_cgroup_id", "bpf_probe_read_kernel", "get_event_buf",
@@ -53,14 +71,14 @@ func TestSockOpsUsesNoTaskHelpers(t *testing.T) {
 
 func TestEventScratchMapsHoldOneSlotPerContext(t *testing.T) {
 	text := bpfSource(t, "maps.h")
-	slots := regexp.MustCompile(`#define EVENT_BUF_(TASK|SOFTIRQ|SOCKOPS|SLOTS)\s+(\d+)`).FindAllStringSubmatch(bpfSource(t, "events.h"), -1)
+	slots := regexp.MustCompile(`#define EVENT_BUF_(TASK|SOFTIRQ|SLOTS)\s+(\d+)`).FindAllStringSubmatch(bpfSource(t, "events.h"), -1)
 	values := map[string]int{}
 	for _, m := range slots {
 		v, _ := strconv.Atoi(m[2])
 		values[m[1]] = v
 	}
 	seen := map[int]string{}
-	for _, name := range []string{"TASK", "SOFTIRQ", "SOCKOPS"} {
+	for _, name := range []string{"TASK", "SOFTIRQ"} {
 		v, ok := values[name]
 		if !ok {
 			t.Fatalf("EVENT_BUF_%s is not defined in events.h", name)

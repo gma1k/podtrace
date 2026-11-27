@@ -12,7 +12,7 @@ import (
 const (
 	eventSlotMapName    = "event_buf"
 	eventSlotRaceReason = "event_slot_race"
-	eventSlotCount      = 3
+	eventSlotCount      = 2
 )
 
 type eventSlotMap interface {

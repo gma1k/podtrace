@@ -280,6 +280,9 @@ struct podtrace_sockaddr_alg {
 #define IPPROTO_TCP 6
 #define EAGAIN 11
 #define ENOENT 2
+#define EEXIST 17
+#define ERESTARTSYS 512
+#define ERESTART_RESTARTBLOCK 516
 #define HEX_ADDR_LEN 16
 #define COMM_LEN 16
 

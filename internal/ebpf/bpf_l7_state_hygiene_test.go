@@ -23,9 +23,17 @@ func TestRecreatedFrameStateOfAKnownConnectionResyncs(t *testing.T) {
 	if !strings.Contains(body, "u8 was_known = known != NULL;") {
 		t.Fatal("h2_walk_prepare must remember whether the connection was already known before inserting it")
 	}
-	recreate := regexp.MustCompile(`if \(!fs\) \{[^}]*if \(was_known\)\s*h2_mark_desync\(fs, conn, dir\);`)
+	recreate := regexp.MustCompile(`if \(!fs\) \{[^}]*if \(was_known\)\s*h2_join_direction\(fs, conn, dir\);`)
 	if !recreate.MatchString(body) {
 		t.Fatal("frame state evicted from a known connection must restart desynced; parsing mid-frame bytes as a header emits garbage HEADERS")
+	}
+}
+
+func TestADirectionThatNeverEmittedJoinsWithoutAFakeGap(t *testing.T) {
+	join := functionBody(t, bpfSource(t, "h2.c"), "h2_join_direction")
+	lost := regexp.MustCompile(`if \(bpf_map_lookup_elem\(&h2_seq, &k\)\)\s*h2_mark_desync\(fs, conn, dir\);\s*else\s*fs->desync = 1;`)
+	if !lost.MatchString(join) {
+		t.Fatal("only a direction that already emitted records may consume a seq when it rejoins; the first packet of the other direction of a new connection must resync without one, or userspace holds it 2s behind a gap that lost nothing and resets its HPACK window")
 	}
 }
 

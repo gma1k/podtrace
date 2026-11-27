@@ -50,6 +50,7 @@ enum probe_pair {
 	PAIR_KAFKA_POLL,
 	PAIR_GETHOSTBYNAME,
 	PAIR_FS_SYSCALL,
+	PAIR_UDPV6_SENDMSG,
 };
 
 struct pair_key {
@@ -129,7 +130,7 @@ struct usdt_probe {
 };
 
 struct {
-	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 4096);
 	__type(key, u64);
 	__type(value, struct usdt_probe);
@@ -155,23 +156,43 @@ struct dns_query_state {
 	u64 last_ns;
 };
 
+#define DNS_INFLIGHT_CGROUP_BUDGET 4096
+
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
-	__uint(max_entries, 4096);
+	__uint(max_entries, 4 * DNS_INFLIGHT_CGROUP_BUDGET);
 	__type(key, struct dns_flow_key);
 	__type(value, struct dns_query_state);
 } dns_inflight SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 4096);
+	__type(key, u64);
+	__type(value, s32);
+} dns_inflight_cgroup SEC(".maps");
 
 struct dns_resolved_key {
 	u64 cgroup_id;
 	u32 ip;
 	u32 _pad;
 };
+#define DNS_RESOLVED_CGROUP_BUDGET 8192
+#define DNS_NAME_NO_SLOT 0xffffffffU
+#define DNS_NAME_WRITER_KERNEL 0
+#define DNS_NAME_WRITER_USER 1
+
+struct dns_resolved_name {
+	char name[MAX_STRING_LEN];
+	u32 slot;
+	u32 _pad;
+};
+
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
-	__uint(max_entries, 8192);
+	__uint(max_entries, 4 * DNS_RESOLVED_CGROUP_BUDGET);
 	__type(key, struct dns_resolved_key);
-	__type(value, char[MAX_STRING_LEN]);
+	__type(value, struct dns_resolved_name);
 } dns_resolved SEC(".maps");
 
 struct dns_v6key {
@@ -181,10 +202,47 @@ struct dns_v6key {
 
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
-	__uint(max_entries, 8192);
+	__uint(max_entries, 4 * DNS_RESOLVED_CGROUP_BUDGET);
 	__type(key, struct dns_v6key);
-	__type(value, char[MAX_STRING_LEN]);
+	__type(value, struct dns_resolved_name);
 } dns_resolved6 SEC(".maps");
+
+struct dns_name_slot_key {
+	u64 cgroup_id;
+	u32 slot;
+	u32 family;
+};
+
+struct dns_name_addr {
+	u8 addr[16];
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 8 * DNS_RESOLVED_CGROUP_BUDGET);
+	__type(key, struct dns_name_slot_key);
+	__type(value, struct dns_name_addr);
+} dns_name_slots SEC(".maps");
+
+struct dns_name_cursor_key {
+	u64 cgroup_id;
+	u32 family;
+	u32 writer;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 16384);
+	__type(key, struct dns_name_cursor_key);
+	__type(value, u32);
+} dns_name_cursor SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, u32);
+	__type(value, struct dns_resolved_name);
+} dns_name_scratch SEC(".maps");
 
 #define DNS_PAYLOAD_MAX 512
 

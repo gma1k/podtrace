@@ -36,7 +36,7 @@ func (f *fakeEventSlots) LookupBytes(key interface{}) ([]byte, error) {
 func TestReadEventSlotRacesSumsEveryCPUAndSlot(t *testing.T) {
 	got, err := readEventSlotRaces(&fakeEventSlots{
 		valueSize: 448,
-		races:     map[uint32][]uint64{0: {3, 0}, 1: {0, 4}, 2: {1, 0}},
+		races:     map[uint32][]uint64{0: {3, 1}, 1: {0, 4}},
 	})
 	if err != nil {
 		t.Fatal(err)

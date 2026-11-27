@@ -50,7 +50,7 @@ Once the operator is installed, the agent on every node measures every pod, with
 
 ```text
 KERNEL     eBPF probes ──┬──► ringbuf ─────────── one event at a time ──────────────┐
-                         └──► LRU per-CPU map ─── aggregated in the kernel ─────┐   │
+                         └──► shared LRU map ──── aggregated in the kernel ─────┐   │
                                                                                 │   │
 AGENT      tracer engine ◄──────────────────────────────────────────────────────┼───┘
 (per node)    │                                                                 │

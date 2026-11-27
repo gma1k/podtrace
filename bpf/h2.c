@@ -120,6 +120,15 @@ static __always_inline void h2_mark_desync(struct h2_frame_state *fs, u64 conn, 
 	fs->sliced = 0;
 }
 
+static __always_inline void h2_join_direction(struct h2_frame_state *fs, u64 conn, u32 dir)
+{
+	struct h2_seq_key k = { .conn_id = conn, .dir = dir, ._pad = 0 };
+	if (bpf_map_lookup_elem(&h2_seq, &k))
+		h2_mark_desync(fs, conn, dir);
+	else
+		fs->desync = 1;
+}
+
 static __always_inline void h2_desync(u64 conn, u32 dir)
 {
 	struct h2_seq_key fk = { .conn_id = conn, .dir = dir };
@@ -308,7 +317,7 @@ static __noinline int h2_walk_prepare(void *base, u64 avail, u64 conn, u32 dir)
 		if (!fs)
 			return -1;
 		if (was_known)
-			h2_mark_desync(fs, conn, dir);
+			h2_join_direction(fs, conn, dir);
 	}
 
 	struct h2_hdr_scratch *s = h2_hdr_scratch_lookup();

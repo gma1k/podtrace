@@ -39,8 +39,9 @@ type dnsQueryState struct {
 }
 
 const (
-	dnsTimeoutThresholdNS = 5 * uint64(time.Second)
-	dnsTimeoutSweepEvery  = 2 * time.Second
+	dnsTimeoutThresholdNS   = 5 * uint64(time.Second)
+	dnsTimeoutSweepEvery    = 2 * time.Second
+	dnsInflightCountMapName = "dns_inflight_cgroup"
 )
 
 func monotonicNowNS() uint64 {
@@ -107,12 +108,34 @@ func (t *Tracer) sweepDNSTimeouts(ctx context.Context, eventChan chan<- *events.
 		return
 	}
 
+	live, complete := t.sweepDNSInflight(ctx, eventChan, m.Iterate(), m, now)
+	if complete {
+		t.syncDNSInflightCounts(live)
+	}
+}
+
+// dnsMapIterator is the part of a BPF map iterator the sweeper walks.
+type dnsMapIterator interface {
+	Next(key, value any) bool
+	Err() error
+}
+
+// dnsMapDeleter is the part of the dns_inflight map the sweeper deletes from.
+type dnsMapDeleter interface {
+	Delete(key any) error
+}
+
+// sweepDNSInflight emits a timeout for every in-flight query that has waited
+// too long, deletes those entries, and counts the queries each cgroup still
+// has in flight.
+func (t *Tracer) sweepDNSInflight(ctx context.Context, eventChan chan<- *events.Event, iter dnsMapIterator, m dnsMapDeleter, now uint64) (map[uint64]int32, bool) {
 	var key, staleKey dnsFlowKey
 	var val dnsQueryState
 	var stale []dnsFlowKey
+	live := map[uint64]int32{}
 
-	iter := m.Iterate()
 	for iter.Next(&key, &val) {
+		live[key.CgroupID]++
 		if val.TsNS == 0 || now <= val.LastNS || now-val.LastNS <= dnsTimeoutThresholdNS {
 			continue
 		}
@@ -125,14 +148,71 @@ func (t *Tracer) sweepDNSTimeouts(ctx context.Context, eventChan chan<- *events.
 			continue
 		}
 		if !t.offerDNSTimeout(ctx, eventChan, ev) {
-			return
+			return nil, false
 		}
 	}
-	if err := iter.Err(); err != nil {
-		logger.Debug("dns_inflight iterate error", zap.Error(err))
+	iterErr := iter.Err()
+	if iterErr != nil {
+		logger.Debug("dns_inflight iterate error", zap.Error(iterErr))
 	}
 	for i := range stale {
-		_ = m.Delete(&stale[i])
+		if err := m.Delete(&stale[i]); err == nil {
+			live[stale[i].CgroupID]--
+		}
+	}
+	return live, iterErr == nil
+}
+
+// dnsInflightCountMap is the part of the dns_inflight_cgroup map the
+// sweeper rewrites.
+type dnsInflightCountMap interface {
+	Put(key, value any) error
+	Delete(key any) error
+}
+
+// syncDNSInflightCounts rewrites each cgroup's count of in-flight queries
+// from the walk the sweep just did. The probes keep the count as they add
+// and answer queries, but the entries the sweep removes and the ones the
+// map evicts are invisible to them, so without this the count would only
+// grow and eventually refuse every new query of that cgroup.
+func (t *Tracer) syncDNSInflightCounts(live map[uint64]int32) {
+	m := t.collection.Maps[dnsInflightCountMapName]
+	if m == nil {
+		return
+	}
+	syncDNSInflightCountsFrom(m.Iterate(), m, live)
+}
+
+// syncDNSInflightCountsFrom rewrites the counts from live, removing the
+// cgroups iter lists that have nothing in flight any more. A failed walk
+// writes nothing, since it may have missed cgroups whose stale counts would
+// then stay.
+func syncDNSInflightCountsFrom(iter dnsMapIterator, m dnsInflightCountMap, live map[uint64]int32) {
+	var cgroup uint64
+	var count int32
+	var known []uint64
+	for iter.Next(&cgroup, &count) {
+		known = append(known, cgroup)
+	}
+	if err := iter.Err(); err != nil {
+		logger.Debug("dns_inflight_cgroup iterate error", zap.Error(err))
+		return
+	}
+	writeDNSInflightCounts(m, known, live)
+}
+
+// writeDNSInflightCounts stores every positive count in live and removes
+// the cgroups in known that no longer have a query in flight.
+func writeDNSInflightCounts(m dnsInflightCountMap, known []uint64, live map[uint64]int32) {
+	for _, cgroup := range known {
+		if live[cgroup] <= 0 {
+			_ = m.Delete(cgroup)
+		}
+	}
+	for cgroup, count := range live {
+		if count > 0 {
+			_ = m.Put(cgroup, count)
+		}
 	}
 }
 

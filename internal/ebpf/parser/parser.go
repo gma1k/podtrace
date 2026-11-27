@@ -34,7 +34,7 @@ func decodeTarget(eventType uint32, raw []byte) string {
 		}
 		return oldName + ">" + newName
 	}
-	return string(bytes.TrimRight(raw, "\x00"))
+	return canonicalIPv6Target(string(bytes.TrimRight(raw, "\x00")))
 }
 
 type rawEvent struct {

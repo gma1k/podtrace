@@ -100,25 +100,21 @@ int sockops_rtt(struct bpf_sock_ops *skops)
 		return 0;
 	}
 
-	struct event *e = event_buf_slot_untracked(EVENT_BUF_SOCKOPS);
+	struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
 	if (!e) {
 		return 0;
 	}
-
+	__builtin_memset(e, 0, sizeof(*e));
 	e->timestamp = bpf_ktime_get_ns();
 	e->cgroup_id = cgid;
-	e->pid = 0;
-	__builtin_memset(e->comm, 0, sizeof(e->comm));
 	e->type = EVENT_TCP_RTT;
 	e->latency_ns = (u64)srtt_us * 125;
-	e->error = 0;
-	e->bytes = 0;
-	e->tcp_state = 0;
-	e->details[0] = '\0';
 
 	rtt_fill_target(skops, e);
 
-	if (!agg_absorbed_untracked(e, 0))
-		emit_event_untracked(e);
+	if (agg_absorbed_untracked(e, 0))
+		bpf_ringbuf_discard(e, 0);
+	else
+		bpf_ringbuf_submit(e, 0);
 	return 0;
 }
