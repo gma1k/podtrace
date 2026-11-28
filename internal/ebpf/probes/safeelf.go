@@ -18,7 +18,6 @@ func openELFCapped(path string) (*elf.File, error) { return safeelf.Open(path) }
 
 func sectionDataCapped(sec *elf.Section) ([]byte, error) { return safeelf.SectionData(sec) }
 
-
 func safeDebugName(name string) bool { return safeelf.SafeDebugName(name) }
 
 // recoverParse keeps its own recover here rather than delegating: recover()

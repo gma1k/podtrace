@@ -82,8 +82,8 @@ func TestGoVersionStoredInline(t *testing.T) {
 
 func TestGoVersionStoredBehindPointers(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		order   interface {
+		name  string
+		order interface {
 			binary.ByteOrder
 			binary.AppendByteOrder
 		}

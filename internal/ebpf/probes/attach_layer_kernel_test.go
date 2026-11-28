@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/cilium/ebpf"
-
 )
 
 func TestKernelThePoolLayoutLivesWithThePoolWaitEntrySite(t *testing.T) {
