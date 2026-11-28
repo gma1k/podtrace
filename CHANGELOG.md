@@ -9,6 +9,20 @@ under the rules described in [STABILITY.md](STABILITY.md).
 Going forward, releases are managed by [release-please](https://github.com/googleapis/release-please)
 based on [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.15.6](https://github.com/gma1k/podtrace/compare/v0.15.5...v0.15.6) (2026-11-28)
+
+
+### Bug Fixes
+
+* bound attach-layer parsing and cover every process of a binary ([#602](https://github.com/gma1k/podtrace/issues/602)) ([280bd17](https://github.com/gma1k/podtrace/commit/280bd173499a7060d168d1e6717a93c502769108))
+* **ci:** pin scorecard-action to v2.5.0 and update codeql-action, cosign-installer, cosign and grafana ([#598](https://github.com/gma1k/podtrace/issues/598)) ([e9af15d](https://github.com/gma1k/podtrace/commit/e9af15d4ef6df9c5630558e7ebc3ad24796d6458))
+* feed semconv metrics in bypass mode and fix sql and alert keys ([#596](https://github.com/gma1k/podtrace/issues/596)) ([e48818a](https://github.com/gma1k/podtrace/commit/e48818ae0e923f729feee2f4f5c5ed729b873433))
+* harden bpf dual-stack tracing, map budgets and h2 capture ([#601](https://github.com/gma1k/podtrace/issues/601)) ([5f1dc6c](https://github.com/gma1k/podtrace/commit/5f1dc6c35109edbf9419ec564eab2113d1cf25ea))
+* harden profiling, resource monitoring and storage migration ([#599](https://github.com/gma1k/podtrace/issues/599)) ([739919e](https://github.com/gma1k/podtrace/commit/739919e2936d01ffbdbc4d52821dd55e93009863))
+* harden trace export delivery and report sinks, and bump deps ([#600](https://github.com/gma1k/podtrace/issues/600)) ([57541cf](https://github.com/gma1k/podtrace/commit/57541cf67358a20847d9a2c6e88a485a795d27ba))
+* scope session targets to their node and harden k8s helpers ([#597](https://github.com/gma1k/podtrace/issues/597)) ([1987537](https://github.com/gma1k/podtrace/commit/1987537077cce62c56e81e5d1ccfacb18d4f9bc4))
+* support otlp grpc and harden agent exporters and attribution ([#594](https://github.com/gma1k/podtrace/issues/594)) ([f39a7bc](https://github.com/gma1k/podtrace/commit/f39a7bc26bddb2a2f035dbef94babadc0f5e52ca))
+
 ## [0.15.5](https://github.com/gma1k/podtrace/compare/v0.15.4...v0.15.5) (2026-11-21)
 
 
