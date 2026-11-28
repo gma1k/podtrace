@@ -84,6 +84,17 @@ func fileTableCount(data []byte, order binary.ByteOrder, magic uint32, ptrSize, 
 	return uint64(order.Uint32(data[fileOff:])), true
 }
 
+// IsGo12PCLNTab reports whether data starts with the header of a Go 1.2 or
+// later .gopclntab, the layouts whose function table debug/gosym reads from
+// the section itself.
+func IsGo12PCLNTab(data []byte) bool {
+	if len(data) < 16 || data[4] != 0 || data[5] != 0 || (data[6] != 1 && data[6] != 2 && data[6] != 4) ||
+		(data[7] != 4 && data[7] != 8) {
+		return false
+	}
+	return knownPCLNMagic(binary.LittleEndian.Uint32(data)) || knownPCLNMagic(binary.BigEndian.Uint32(data))
+}
+
 func knownPCLNMagic(m uint32) bool {
 	switch m {
 	case Go12PCLNTabMagic, Go116PCLNTabMagic, Go118PCLNTabMagic, Go120PCLNTabMagic:

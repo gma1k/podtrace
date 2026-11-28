@@ -111,7 +111,7 @@ func TestGRPCGoPairsAreKeyedByConnection(t *testing.T) {
 		t.Fatal("grpc_pair_key_build keys pairs by the OS thread's last 4-tuple, which belongs to another connection under Go's M:N scheduler")
 	}
 	conn := functionBody(t, text, "grpc_go_conn")
-	for _, want := range []string{"bpf_map_lookup_elem(&grpc_go_offsets, &tgid)", "process_scoped_id(framer)"} {
+	for _, want := range []string{"bpf_map_lookup_elem(&grpc_go_offsets, &cookie)", "process_scoped_id(framer)"} {
 		if !strings.Contains(conn, want) {
 			t.Errorf("grpc_go_conn lacks %q", want)
 		}
@@ -124,7 +124,7 @@ func TestGRPCGoPairsAreKeyedByConnection(t *testing.T) {
 		"uprobe_grpc_go_server_headers": "GRPC_GO_RECV_SERVER",
 		"uprobe_grpc_go_client_headers": "GRPC_GO_RECV_CLIENT",
 	} {
-		if !strings.Contains(functionBody(t, text, fn), "grpc_go_conn(GRPC_GO_RECV(ctx), "+kind+")") {
+		if !strings.Contains(functionBody(t, text, fn), "grpc_go_conn(ctx, GRPC_GO_RECV(ctx), "+kind+")") {
 			t.Errorf("%s does not derive its conn from its receiver's framer", fn)
 		}
 	}

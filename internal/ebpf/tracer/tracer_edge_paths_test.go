@@ -30,7 +30,7 @@ func TestAContainerWhoseBinariesAllVanishedStillGetsOnePID(t *testing.T) {
 
 func TestAnUnknownGroupAttachesNoContainerUprobes(t *testing.T) {
 	tr := &Tracer{collection: &ebpf.Collection{}}
-	if ls := tr.attachContainerGroupUprobes(probes.ProbeGroup("no-such-group"), "c1", []uint32{1}, nil); ls != nil {
+	if ls := tr.attachContainerGroupUprobes(probes.ProbeGroup("no-such-group"), "c1", []uint32{1}, nil, nil); ls != nil {
 		t.Errorf("an unknown group attached %d links", len(ls))
 	}
 }
@@ -146,7 +146,7 @@ func TestASecondProcessOfTheSameBinaryAddsNoBinaryProbes(t *testing.T) {
 	tr := &Tracer{collection: &ebpf.Collection{}}
 	af := probes.NewAttachedFiles()
 	self := uint32(os.Getpid())
-	if ls := tr.attachContainerGroupUprobes(probes.GroupTLS, "c1", []uint32{self, self}, af); len(ls) != 0 {
+	if ls := tr.attachContainerGroupUprobes(probes.GroupTLS, "c1", []uint32{self, self}, af, nil); len(ls) != 0 {
 		t.Errorf("an empty collection attached %d links", len(ls))
 	}
 	if af.Claim("exe:"+string(probes.GroupTLS), fmt.Sprintf("/proc/%d/exe", self)) {

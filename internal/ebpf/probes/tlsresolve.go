@@ -209,6 +209,44 @@ func attachSSLByOffset(coll *ebpf.Collection, exe uprobeTarget, pid uint32, off 
 	return links
 }
 
+// AttachProcessScopedProbes attaches, for another process of a binary whose
+// probes are already attached, the uprobes that cover only the process they
+// are attached for.
+func AttachProcessScopedProbes(coll *ebpf.Collection, pid uint32) []link.Link {
+	if pid == 0 || coll == nil || !hasDebugFile(pid) {
+		return nil
+	}
+	var links []link.Link
+	links = append(links, attachStrippedExecutableTLS(coll, pid)...)
+	links = append(links, attachRustlsProbes(coll, pid, true)...)
+	links = append(links, attachQuicheRustProbes(coll, pid, true)...)
+	return links
+}
+
+// hasDebugFile reports whether pid's executable has a separate debug file in
+// its rootfs, the only source of process-scoped uprobes. Most do not, and this
+// is far cheaper than walking their symbol tables.
+func hasDebugFile(pid uint32) (found bool) {
+	defer recoverParse("hasDebugFile")
+	path := filepath.Join(config.ProcBasePath, fmt.Sprintf("%d", pid), "exe")
+	file, _, err := openAttachTarget(path)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = file.Close() }()
+	f, err := openELFCapped(safeelf.PinnedPath(file, path))
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	dbg, _ := openDebugInfo(f, pid)
+	if dbg == nil {
+		return false
+	}
+	_ = dbg.Close()
+	return true
+}
+
 // untrustedOffsetOptions places a uprobe at an offset that came from a file
 // the traced pod controls, filtered to pid: the kernel then writes the
 // breakpoint only into that process's memory, never into another process

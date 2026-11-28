@@ -64,7 +64,14 @@ func (s rustSymbolSource) offsets(vaddrs []uint64, fromDebugFile bool) []*link.U
 // (outbound) and <rustls::conn::Reader as io::Read>::read (inbound), capturing
 // HTTP/1.x, HTTP/2 and gRPC L7 over rustls TLS before encryption / after
 // decryption.
-func AttachRustlsProbes(coll *ebpf.Collection, pid uint32) (links []link.Link) {
+func AttachRustlsProbes(coll *ebpf.Collection, pid uint32) []link.Link {
+	return attachRustlsProbes(coll, pid, false)
+}
+
+// attachRustlsProbes attaches the rustls uprobes for pid. With processScoped
+// it attaches only those at offsets from a debug file, which cover pid alone,
+// for another process of a binary whose probes are already attached.
+func attachRustlsProbes(coll *ebpf.Collection, pid uint32, processScoped bool) (links []link.Link) {
 	defer recoverParse("AttachRustlsProbes")
 	if pid == 0 {
 		return links
@@ -95,6 +102,9 @@ func AttachRustlsProbes(coll *ebpf.Collection, pid uint32) (links []link.Link) {
 	writeVaddrs := findSymbolsContaining(f, 1, rustlsWriteSymbolPattern...)
 	readVaddrs := findSymbolsContaining(f, 1, rustlsReadSymbolPattern...)
 	fromDebugFile := false
+	if processScoped && (len(writeVaddrs) > 0 || len(readVaddrs) > 0) {
+		return links
+	}
 	if len(writeVaddrs) == 0 && len(readVaddrs) == 0 {
 		if dbg, from := openDebugInfo(f, pid); dbg != nil {
 			defer func() { _ = dbg.Close() }()

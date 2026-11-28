@@ -13,14 +13,16 @@ import (
 )
 
 type testSection struct {
-	name    string
-	typ     uint32
-	flags   uint64
-	addr    uint64
-	data    []byte
-	link    uint32
-	entsize uint64
-	load    bool
+	name     string
+	typ      uint32
+	flags    uint64
+	addr     uint64
+	data     []byte
+	link     uint32
+	info     uint32
+	entsize  uint64
+	load     bool
+	declared uint64
 }
 
 const (
@@ -100,10 +102,16 @@ func writeTestELF(t *testing.T, path string, sections []testSection) {
 		le.PutUint64(h[8:], s.flags)
 		le.PutUint64(h[16:], s.addr)
 		le.PutUint64(h[24:], offs[i])
-		le.PutUint64(h[32:], uint64(len(s.data)))
+		size := uint64(len(s.data))
+		if s.declared != 0 {
+			size = s.declared
+		}
+		le.PutUint64(h[32:], size)
 		le.PutUint32(h[40:], s.link)
 		if s.typ == shtSymtab {
 			le.PutUint32(h[44:], 1)
+		} else {
+			le.PutUint32(h[44:], s.info)
 		}
 		le.PutUint64(h[48:], 1)
 		le.PutUint64(h[56:], s.entsize)

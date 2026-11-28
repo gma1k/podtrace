@@ -12,47 +12,36 @@ import (
 
 	"github.com/cilium/ebpf"
 
-	"github.com/gma1k/podtrace/internal/config"
 )
 
-func TestKernelStalePoolOffsetsAreDeletedWhenResolutionFails(t *testing.T) {
-	uprobeProgram(t)
+func TestKernelThePoolLayoutLivesWithThePoolWaitEntrySite(t *testing.T) {
+	prog := uprobeProgram(t)
+	plain, _ := poolFixtures(t)
+	realReturnSites(t, plain, "main.main")
 	type poolValue struct{ NumOpen, MaxOpen, FreeConn uint32 }
 	m := hashMap(t, poolValue{})
-	const pid = uint32(70001)
-	if err := m.Put(pid, poolValue{1, 2, 3}); err != nil {
-		t.Fatal(err)
+	coll := &ebpf.Collection{
+		Programs: map[string]*ebpf.Program{"uprobe_go_db_conn": prog, "uprobe_go_db_conn_ret": prog},
+		Maps:     map[string]*ebpf.Map{"pool_offsets": m},
 	}
-	publishPoolOffsets(&ebpf.Collection{Maps: map[string]*ebpf.Map{"pool_offsets": m}}, filepath.Join(t.TempDir(), "missing"), pid)
+	links := attachGoAcquireProbes(coll, plain, 70001)
+	if len(links) < 2 {
+		t.Fatalf("attached %d links, want the entry and its returns", len(links))
+	}
+	want, ok := resolvePoolFieldOffsets(plain, 0)
+	if !ok {
+		t.Fatal("fixture offsets did not resolve")
+	}
+	cookie := cookieOf(t, plain)
 	var got poolValue
-	if err := m.Lookup(pid, &got); !errors.Is(err, ebpf.ErrKeyNotExist) {
-		t.Errorf("a reused pid kept the previous process's offsets %+v (err %v)", got, err)
+	if err := m.Lookup(&cookie, &got); err != nil || got != poolValue(want) {
+		t.Fatalf("pool_offsets[%x] = %+v, %v; want %+v", cookie, got, err, want)
 	}
-}
-
-func TestKernelStaleHTTP3PeerPathsAreDeletedWhenUnresolved(t *testing.T) {
-	uprobeProgram(t)
-	m := hashMap(t, h3PeerPaths{})
-	const pid = uint32(70002)
-	base := t.TempDir()
-	orig := config.ProcBasePath
-	config.ProcBasePath = base
-	t.Cleanup(func() { config.ProcBasePath = orig })
-	writeTestELF(t, filepath.Join(base, fmt.Sprint(pid), "exe"), []testSection{
-		{name: ".text", typ: shtProgbits, flags: shfAlloc | shfExec, addr: testTextVA, data: make([]byte, 16), load: true},
-	})
-	stale := h3PeerPaths{}
-	stale.Server.NSteps = 3
-	if err := m.Put(pid, stale); err != nil {
-		t.Fatal(err)
-	}
-	coll := &ebpf.Collection{Programs: map[string]*ebpf.Program{}, Maps: map[string]*ebpf.Map{"h3_peer_paths_map": m}}
-	for _, l := range AttachGoHTTP3Probes(coll, pid) {
+	for _, l := range links {
 		_ = l.Close()
 	}
-	var got h3PeerPaths
-	if err := m.Lookup(pid, &got); !errors.Is(err, ebpf.ErrKeyNotExist) {
-		t.Errorf("a reused pid kept the previous process's peer paths %+v (err %v)", got, err)
+	if err := m.Lookup(&cookie, &got); !errors.Is(err, ebpf.ErrKeyNotExist) {
+		t.Fatalf("pool_offsets[%x] = %+v, %v after the site closed; want it deleted", cookie, got, err)
 	}
 }
 

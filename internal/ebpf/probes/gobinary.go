@@ -184,6 +184,10 @@ func loadGoBinary(path string) (*goBinary, bool) {
 	return bin, true
 }
 
+// parseGoBinary reads the function table from .gopclntab alone. Go 1.2 and
+// later keep every function there, and .gosymtab has been empty since Go 1.3,
+// so it is not read: debug/gosym allocates per symbol a .gosymtab claims, and
+// an all-zero region decodes as one symbol every three bytes.
 func parseGoBinary(path string) (*goBinary, bool) {
 	f, err := openELFCapped(path)
 	if err != nil {
@@ -197,11 +201,10 @@ func parseGoBinary(path string) (*goBinary, bool) {
 		return nil, false
 	}
 	pclnData, err := sectionDataCapped(pcln)
-	if err != nil || !safeelf.GoPCLNTabWithinCap(pclnData) {
+	if err != nil || !safeelf.IsGo12PCLNTab(pclnData) || !safeelf.GoPCLNTabWithinCap(pclnData) {
 		return nil, false
 	}
-	symtabData, _ := sectionDataCapped(f.Section(".gosymtab"))
-	tbl, err := gosym.NewTable(symtabData, gosym.NewLineTable(pclnData, text.Addr))
+	tbl, err := gosym.NewTable(nil, gosym.NewLineTable(pclnData, text.Addr))
 	if err != nil {
 		return nil, false
 	}

@@ -14,6 +14,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/gma1k/podtrace/internal/config"
+	"github.com/gma1k/podtrace/internal/containerid"
 	"github.com/gma1k/podtrace/internal/cri"
 	"github.com/gma1k/podtrace/internal/logger"
 	"github.com/gma1k/podtrace/internal/podworkload"
@@ -54,9 +55,7 @@ func NamespaceFromContext() (string, bool) {
 
 // NamespaceFromKubeconfig resolves the current context's namespace from an
 // explicit kubeconfig path, falling back to the default loading rules when
-// the path is empty. Callers that build their client from a --kubeconfig
-// flag must resolve the namespace from the SAME file, or the namespace and
-// the cluster can come from two different kubeconfigs.
+// the path is empty.
 func NamespaceFromKubeconfig(path string) (string, bool) {
 	return ClusterAccess{Kubeconfig: path}.Namespace()
 }
@@ -485,15 +484,15 @@ func isConmonCgroup(name string) bool {
 
 // cgroupLineNamesContainer reports whether a /proc/<pid>/cgroup path is the
 // container's own cgroup: it carries the ID and is not conmon's.
-func cgroupLineNamesContainer(cgroupPath, containerID, shortID string) bool {
-	if !strings.Contains(cgroupPath, containerID) && !strings.Contains(cgroupPath, shortID) {
+func cgroupLineNamesContainer(cgroupPath, containerID string) bool {
+	if !containerid.InPath(cgroupPath, containerID) {
 		return false
 	}
 	return !isConmonCgroup(filepath.Base(cgroupPath))
 }
 
 // walkCgroupForContainer scans basePath for containerID's cgroup directory.
-func walkCgroupForContainer(basePath, containerID, shortID string) (string, bool) {
+func walkCgroupForContainer(basePath, containerID string) (string, bool) {
 	base := filepath.Clean(basePath)
 	found := ""
 	_ = filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
@@ -504,7 +503,7 @@ func walkCgroupForContainer(basePath, containerID, shortID string) (string, bool
 		if isConmonCgroup(name) {
 			return filepath.SkipDir
 		}
-		if strings.Contains(path, containerID) || strings.Contains(path, shortID) {
+		if containerid.InPath(path, containerID) {
 			if _, err := os.Stat(filepath.Join(path, "cgroup.procs")); err == nil {
 				found = path
 				return filepath.SkipAll
@@ -540,16 +539,11 @@ func findCgroupPathV2(containerID string) (string, error) {
 	}
 	basePaths = append(basePaths, roots...)
 
-	shortID := containerID
-	if len(containerID) >= 12 {
-		shortID = containerID[:12]
-	}
-
 	for _, basePath := range basePaths {
 		if _, err := os.Stat(basePath); os.IsNotExist(err) {
 			continue
 		}
-		if p, ok := walkCgroupForContainer(basePath, containerID, shortID); ok {
+		if p, ok := walkCgroupForContainer(basePath, containerID); ok {
 			return p, nil
 		}
 	}
@@ -575,10 +569,6 @@ func findCgroupPathV1(containerID string) (string, error) {
 	}
 
 	var errFound = errors.New("podtrace: cgroup found")
-	shortID := containerID
-	if len(containerID) >= 12 {
-		shortID = containerID[:12]
-	}
 
 	for _, basePath := range paths {
 		if _, err := os.Stat(basePath); os.IsNotExist(err) {
@@ -597,7 +587,7 @@ func findCgroupPathV1(containerID string) (string, error) {
 			if isConmonCgroup(filepath.Base(path)) {
 				return filepath.SkipDir
 			}
-			if strings.Contains(path, containerID) || strings.Contains(path, shortID) {
+			if containerid.InPath(path, containerID) {
 				if _, err := os.Stat(filepath.Join(path, "cgroup.procs")); err == nil {
 					foundPath = path
 					found = true
@@ -650,10 +640,6 @@ func cgroupV1Controllers(field string) []string {
 
 func findCgroupPathFromProc(containerID string) (string, error) {
 	procPath := config.ProcBasePath
-	shortID := containerID
-	if len(containerID) >= 12 {
-		shortID = containerID[:12]
-	}
 
 	entries, err := os.ReadDir(procPath)
 	if err != nil {
@@ -678,7 +664,7 @@ func findCgroupPathFromProc(containerID string) (string, error) {
 		}
 
 		cgroupContent := string(data)
-		if !strings.Contains(cgroupContent, containerID) && !strings.Contains(cgroupContent, shortID) {
+		if !containerid.InPath(cgroupContent, containerID) {
 			continue
 		}
 
@@ -691,7 +677,7 @@ func findCgroupPathFromProc(containerID string) (string, error) {
 
 			if strings.HasPrefix(line, "0::") {
 				cgroupPath := strings.TrimPrefix(line, "0::")
-				if cgroupLineNamesContainer(cgroupPath, containerID, shortID) {
+				if cgroupLineNamesContainer(cgroupPath, containerID) {
 					for _, root := range cgroupRootCandidates() {
 						fullPath := filepath.Join(root, strings.TrimPrefix(cgroupPath, "/"))
 						if statCgroupDirHasProcs(fullPath) {
@@ -704,7 +690,7 @@ func findCgroupPathFromProc(containerID string) (string, error) {
 				parts := strings.SplitN(line, ":", 3)
 				if len(parts) == 3 {
 					cgroupPath := parts[2]
-					if cgroupLineNamesContainer(cgroupPath, containerID, shortID) {
+					if cgroupLineNamesContainer(cgroupPath, containerID) {
 						trimmed := strings.TrimPrefix(cgroupPath, "/")
 						for _, ctrl := range cgroupV1Controllers(parts[1]) {
 							fullPath := filepath.Join(config.CgroupBasePath, ctrl, trimmed)

@@ -842,9 +842,9 @@ struct grpc_go_field_offsets {
 	u32 _pad;
 };
 struct {
-	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 1024);
-	__type(key, u32);
+	__type(key, u64);
 	__type(value, struct grpc_go_field_offsets);
 } grpc_go_offsets SEC(".maps");
 struct grpc_pair_val {
@@ -902,9 +902,9 @@ struct pool_field_offsets {
 };
 
 struct {
-	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 1024);
-	__type(key, u32);
+	__type(key, u64);
 	__type(value, struct pool_field_offsets);
 } pool_offsets SEC(".maps");
 
@@ -956,16 +956,16 @@ struct {
 } h3_req_stash SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 4096);
-	__type(key, u32);
+	__type(key, u64);
 	__type(value, struct h3_field_offsets);
 } h3_offsets SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 4096);
-	__type(key, u32);
+	__type(key, u64);
 	__type(value, struct h3_peer_paths);
 } h3_peer_paths_map SEC(".maps");
 

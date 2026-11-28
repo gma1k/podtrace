@@ -32,6 +32,11 @@ func TestKernelAForkCarriesTheChildsPidAndName(t *testing.T) {
 	}
 	time.Sleep(2 * time.Second)
 
+	comm, err := os.ReadFile("/proc/self/comm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	self := strings.TrimSpace(string(comm))
 	byPID := map[uint32]*events.Event{}
 	for _, ev := range log.events() {
 		byPID[ev.PID] = ev
@@ -43,7 +48,7 @@ func TestKernelAForkCarriesTheChildsPidAndName(t *testing.T) {
 			continue
 		}
 		seen++
-		if ev.Target != "tracer.test" {
+		if ev.Target != self {
 			t.Errorf("fork of pid %d names %q, want the forking program's name", pid, ev.Target)
 		}
 	}

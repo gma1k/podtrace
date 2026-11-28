@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"math"
 	"strings"
+
+	"github.com/gma1k/podtrace/internal/ebpf/safeelf"
 )
 
 // h3PeerStep / h3PeerPath / h3PeerPaths mirror the structs of the same name in
@@ -59,28 +61,80 @@ var sendConnImplTypes = []string{"github.com/quic-go/quic-go.sconn"}
 
 // resolveH3PeerPaths builds the client and server peer walks for a target
 // binary.
-func resolveH3PeerPaths(exePath string, pid uint32, clientRootType string) (paths h3PeerPaths, resolved bool) {
-	defer recoverParse("resolveH3PeerPaths")
-	d, closeFn, ok := openDWARF(exePath, pid)
-	if !ok {
+func resolveH3PeerPaths(exePath string, pid uint32, clientRootType string) (h3PeerPaths, bool) {
+	res := openH3Layouts(exePath, pid)
+	defer res.close()
+	return res.peerPaths(clientRootType)
+}
+
+// h3LayoutResolver resolves every HTTP/3 layout of one binary from a single
+// read of its DWARF.
+type h3LayoutResolver struct {
+	exePath string
+	d       *dwarf.Data
+	idx     map[string]dwarf.Offset
+	closeFn func()
+
+	serverDone bool
+	server     h3PeerPath
+	serverOK   bool
+}
+
+// openH3Layouts reads the binary's DWARF, if it has any readable within the
+// caps. Close releases it.
+func openH3Layouts(exePath string, pid uint32) *h3LayoutResolver {
+	res := &h3LayoutResolver{exePath: exePath}
+	if d, closeFn, ok := openDWARF(exePath, pid); ok {
+		res.d, res.closeFn = d, closeFn
+	}
+	return res
+}
+
+func (r *h3LayoutResolver) close() {
+	if r.closeFn != nil {
+		r.closeFn()
+		r.closeFn = nil
+	}
+	r.d, r.idx = nil, nil
+}
+
+// fieldOffsets returns the net/http field offsets, from DWARF when the binary
+// has it and otherwise for its Go version.
+func (r *h3LayoutResolver) fieldOffsets() (h3FieldOffsets, string) {
+	if r.d != nil {
+		if off, ok := h3OffsetsFromData(r.d); ok {
+			return off, "dwarf"
+		}
+	}
+	return h3OffsetsForGoVersion(r.exePath)
+}
+
+// peerPaths builds the peer walks with the client one rooted at
+// clientRootType, or none when it is empty.
+func (r *h3LayoutResolver) peerPaths(clientRootType string) (paths h3PeerPaths, resolved bool) {
+	defer recoverParse("h3PeerPaths")
+	if r.d == nil {
 		return h3PeerPaths{}, false
 	}
-	defer closeFn()
-
-	idx := indexDWARFStructs(d)
-
+	if r.idx == nil {
+		r.idx = indexDWARFStructs(r.d)
+	}
 	if clientRootType != "" {
 		clientPrefix := []string{"conn"}
 		if strings.HasSuffix(clientRootType, ".SingleDestinationRoundTripper") {
 			clientPrefix = []string{"Connection"}
 		}
-		if p, ok := buildH3PeerPath(d, idx, clientRootType, clientPrefix); ok {
+		if p, ok := buildH3PeerPath(r.d, r.idx, clientRootType, clientPrefix); ok {
 			paths.Client = p
 			resolved = true
 		}
 	}
-	if p, ok := buildH3PeerPath(d, idx, h3ServerRootType, []string{"conn"}); ok {
-		paths.Server = p
+	if !r.serverDone {
+		r.server, r.serverOK = buildH3PeerPath(r.d, r.idx, h3ServerRootType, []string{"conn"})
+		r.serverDone = true
+	}
+	if r.serverOK {
+		paths.Server = r.server
 		resolved = true
 	}
 	return paths, resolved
@@ -94,16 +148,12 @@ func openDWARF(exePath string, pid uint32) (data *dwarf.Data, cleanup func(), ok
 	if err != nil {
 		return nil, nil, false
 	}
-	if dwarfWithinCap(target) {
-		if d, err := target.DWARF(); err == nil {
-			return d, func() { _ = target.Close() }, true
-		}
+	if d, err := safeelf.DWARF(target); err == nil {
+		return d, func() { _ = target.Close() }, true
 	}
 	if dbg, _ := openDebugInfo(target, pid); dbg != nil && dbg != target {
-		if dwarfWithinCap(dbg) {
-			if d, err := dbg.DWARF(); err == nil {
-				return d, func() { _ = dbg.Close(); _ = target.Close() }, true
-			}
+		if d, err := safeelf.DWARF(dbg); err == nil {
+			return d, func() { _ = dbg.Close(); _ = target.Close() }, true
 		}
 		_ = dbg.Close()
 	}
@@ -169,6 +219,33 @@ func dwarfEntry(d *dwarf.Data, off dwarf.Offset) *dwarf.Entry {
 	return ent
 }
 
+// maxDIEDepth bounds how deeply skipChildren descends below an entry. Go
+// emits no member with children; C and C++ nest a handful of levels.
+const maxDIEDepth = 64
+
+// skipChildren moves r past the children of the entry it just returned, as
+// dwarf.Reader.SkipChildren does, but in a loop: SkipChildren recurses once
+// per nesting level, so a hostile chain of nested entries overflows the
+// agent's stack, which recover cannot catch. It fails past maxDIEDepth or at
+// the end of the data.
+func skipChildren(r *dwarf.Reader) bool {
+	for depth := 1; depth > 0; {
+		ent, err := r.Next()
+		if err != nil || ent == nil {
+			return false
+		}
+		switch {
+		case ent.Tag == 0:
+			depth--
+		case ent.Children:
+			if depth++; depth > maxDIEDepth {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // readStruct reads the struct definition at off and its direct members.
 func readStruct(d *dwarf.Data, off dwarf.Offset) *dwarfStruct {
 	r := d.Reader()
@@ -190,8 +267,8 @@ func readStruct(d *dwarf.Data, off dwarf.Offset) *dwarfStruct {
 		if kid.Tag == 0 {
 			return st
 		}
-		if kid.Children {
-			r.SkipChildren()
+		if kid.Children && !skipChildren(r) {
+			return nil
 		}
 		if kid.Tag != dwarf.TagMember {
 			continue

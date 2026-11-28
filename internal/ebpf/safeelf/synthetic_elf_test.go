@@ -44,12 +44,19 @@ type rawSection struct {
 	typ      elf.SectionType
 	flags    elf.SectionFlag
 	link     uint32
+	info     uint32
 	entsize  uint64
 	data     []byte
 	declared uint64
+	addr     uint64
+	load     bool
 }
 
 func buildELF(class elf.Class, secs []rawSection) []byte {
+	return buildELFOfType(class, elf.ET_EXEC, secs)
+}
+
+func buildELFOfType(class elf.Class, fileType elf.Type, secs []rawSection) []byte {
 	le := binary.LittleEndian
 	is64 := class == elf.ELFCLASS64
 	ehsize, shentsize := 52, 40
@@ -66,7 +73,13 @@ func buildELF(class elf.Class, secs []rawSection) []byte {
 	shstr = append(shstr, ".shstrtab\x00"...)
 	all := append(append([]rawSection{}, secs...), rawSection{typ: elf.SHT_STRTAB, data: shstr})
 
-	buf := make([]byte, ehsize)
+	loads := 0
+	for _, s := range all {
+		if s.load {
+			loads++
+		}
+	}
+	buf := make([]byte, ehsize+56*loads)
 	offs := make([]uint64, len(all))
 	for i, s := range all {
 		for len(buf)%8 != 0 {
@@ -83,7 +96,7 @@ func buildELF(class elf.Class, secs []rawSection) []byte {
 	buf = append(buf, make([]byte, shnum*shentsize)...)
 
 	copy(buf, []byte{0x7f, 'E', 'L', 'F', byte(class), 1, 1})
-	le.PutUint16(buf[16:], uint16(elf.ET_EXEC))
+	le.PutUint16(buf[16:], uint16(fileType))
 	le.PutUint32(buf[20:], 1)
 	if is64 {
 		le.PutUint16(buf[18:], uint16(elf.EM_X86_64))
@@ -92,6 +105,11 @@ func buildELF(class elf.Class, secs []rawSection) []byte {
 		le.PutUint16(buf[58:], u16(shentsize))
 		le.PutUint16(buf[60:], u16(shnum))
 		le.PutUint16(buf[62:], u16(shnum-1))
+		if loads > 0 {
+			le.PutUint64(buf[32:], uint64(ehsize))
+			le.PutUint16(buf[54:], 56)
+			le.PutUint16(buf[56:], u16(loads))
+		}
 	} else {
 		le.PutUint16(buf[18:], uint16(elf.EM_386))
 		le.PutUint32(buf[32:], u32(shoff))
@@ -105,14 +123,27 @@ func buildELF(class elf.Class, secs []rawSection) []byte {
 		if s.declared != 0 {
 			size = s.declared
 		}
+		if s.load {
+			ph := buf[ehsize+56*loadIndex(all, i):]
+			le.PutUint32(ph[0:], uint32(elf.PT_LOAD))
+			le.PutUint32(ph[4:], uint32(elf.PF_R))
+			le.PutUint64(ph[8:], offs[i])
+			le.PutUint64(ph[16:], s.addr)
+			le.PutUint64(ph[24:], s.addr)
+			le.PutUint64(ph[32:], size)
+			le.PutUint64(ph[40:], size)
+			le.PutUint64(ph[48:], 1)
+		}
 		h := buf[offset(shoff)+(i+1)*shentsize:]
 		le.PutUint32(h[0:], names[i])
 		le.PutUint32(h[4:], uint32(s.typ))
 		if is64 {
 			le.PutUint64(h[8:], uint64(s.flags))
+			le.PutUint64(h[16:], s.addr)
 			le.PutUint64(h[24:], offs[i])
 			le.PutUint64(h[32:], size)
 			le.PutUint32(h[40:], s.link)
+			le.PutUint32(h[44:], s.info)
 			le.PutUint64(h[48:], 1)
 			le.PutUint64(h[56:], s.entsize)
 		} else {
@@ -120,11 +151,22 @@ func buildELF(class elf.Class, secs []rawSection) []byte {
 			le.PutUint32(h[16:], u32(offs[i]))
 			le.PutUint32(h[20:], u32(size))
 			le.PutUint32(h[24:], s.link)
+			le.PutUint32(h[28:], s.info)
 			le.PutUint32(h[32:], 1)
 			le.PutUint32(h[36:], u32(s.entsize))
 		}
 	}
 	return buf
+}
+
+func loadIndex(all []rawSection, i int) int {
+	n := 0
+	for _, s := range all[:i] {
+		if s.load {
+			n++
+		}
+	}
+	return n
 }
 
 func parseELF(t *testing.T, class elf.Class, secs []rawSection) *elf.File {

@@ -69,28 +69,23 @@ func resolveGRPCGoFieldOffsets(exePath string, pid uint32) (result grpcGoFieldOf
 	return grpcGoOffsetsFromDWARF(d, indexDWARFStructs(d), grpcTransportPackage)
 }
 
-// publishGRPCGoOffsets hands the framer offsets to BPF, keyed by tgid. A
-// process without them has any entry left by an earlier process with the same
-// pid removed, so it never reads another binary's layout.
-func publishGRPCGoOffsets(coll *ebpf.Collection, exePath string, pid uint32) {
-	m := coll.Maps["grpc_go_offsets"]
-	if m == nil || pid == 0 {
-		return
+// grpcGoLayout resolves the framer offsets for the gRPC uprobe sites of exe.
+// Without them the BPF side pairs on the thread's last TCP 4-tuple.
+func grpcGoLayout(coll *ebpf.Collection, exe *executable, exePath string, pid uint32) *siteLayout {
+	m := layoutMapOf(coll, "grpc_go_offsets")
+	if m == nil {
+		return nil
 	}
 	off, ok := resolveGRPCGoFieldOffsets(exePath, pid)
 	if !ok {
-		_ = m.Delete(pid)
 		logger.Debug("Go gRPC: no DWARF framer offsets, pairing falls back to the TCP tuple",
 			zap.Uint32("pid", pid))
-		return
+		return nil
 	}
-	if err := m.Update(pid, off, ebpf.UpdateAny); err != nil {
-		logger.Debug("Go gRPC: could not publish framer offsets", zap.Uint32("pid", pid), zap.Error(err))
-		return
-	}
-	logger.Debug("Go gRPC: framer offsets published",
+	logger.Debug("Go gRPC: framer offsets resolved",
 		zap.Uint32("pid", pid),
 		zap.Uint32("loopy", off.LoopyFramer),
 		zap.Uint32("server", off.ServerFramer),
 		zap.Uint32("client", off.ClientFramer))
+	return newSiteLayout(exe, layoutEntry{m: m, value: off})
 }

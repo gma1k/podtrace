@@ -3,9 +3,11 @@ package probes
 import (
 	"strings"
 	"testing"
+
+	"github.com/gma1k/podtrace/internal/ebpf/safeelf"
 )
 
-func TestDWARFWithinCapRealBinary(t *testing.T) {
+func TestDWARFLoadsFromARealBinary(t *testing.T) {
 	bin := goFixtureBinary(t)
 	f, err := openELFCapped(bin)
 	if err != nil {
@@ -23,18 +25,18 @@ func TestDWARFWithinCapRealBinary(t *testing.T) {
 	if !hasDebug {
 		t.Skip("fixture binary was built without DWARF")
 	}
-	if !dwarfWithinCap(f) {
-		t.Error("a normal Go binary's DWARF must be within cap")
+	if _, err := safeelf.DWARF(f); err != nil {
+		t.Errorf("a normal Go binary's DWARF must load within the caps: %v", err)
 	}
 }
 
-func TestDWARFWithinCapEmpty(t *testing.T) {
+func TestDWARFOfAnELFWithoutDebugSectionsIsAnError(t *testing.T) {
 	f, err := emptyELF()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !dwarfWithinCap(f) {
-		t.Error("an ELF with no debug sections is trivially within cap")
+	if _, err := safeelf.DWARF(f); err == nil {
+		t.Error("an ELF with no debug sections yielded DWARF")
 	}
 }
 

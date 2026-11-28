@@ -2,7 +2,6 @@ package probes
 
 import (
 	"debug/dwarf"
-	"fmt"
 
 	"go.uber.org/zap"
 
@@ -44,30 +43,11 @@ func resolvePoolFieldOffsets(exePath string, pid uint32) (poolFieldOffsets, bool
 // binary's DWARF, or from a separate build-id debug-info file.
 func poolOffsetsFromDWARF(exePath string, pid uint32) (result poolFieldOffsets, ok bool) {
 	defer recoverParse("poolOffsetsFromDWARF")
-
-	target, err := openELFCapped(exePath)
-	if err != nil {
+	d, closeFn, found := openDWARF(exePath, pid)
+	if !found {
 		return poolFieldOffsets{}, false
 	}
-	defer func() { _ = target.Close() }()
-
-	var d *dwarf.Data
-	if dwarfWithinCap(target) {
-		d, err = target.DWARF()
-	} else {
-		err = fmt.Errorf("dwarf sections exceed cap")
-	}
-	if err != nil {
-		if dbg, _ := openDebugInfo(target, pid); dbg != nil && dbg != target {
-			defer func() { _ = dbg.Close() }()
-			if dwarfWithinCap(dbg) {
-				d, err = dbg.DWARF()
-			}
-		}
-		if err != nil || d == nil {
-			return poolFieldOffsets{}, false
-		}
-	}
+	defer closeFn()
 
 	var off poolFieldOffsets
 	foundNumOpen, foundMaxOpen, foundFreeConn := false, false, false
