@@ -85,42 +85,71 @@ func TestSymbolTablesOfARealELFAreWithinCap(t *testing.T) {
 	}
 }
 
-func TestDWARFWithinCap_OverCapIsRejected(t *testing.T) {
+func sectionsWithinCap(f *elf.File) bool {
+	_, err := dwarfReaderSectionSizes(f)
+	return err == nil
+}
+
+func TestDWARFSections_OverCapIsRejected(t *testing.T) {
 	f := &elf.File{Sections: []*elf.Section{
 		{SectionHeader: elf.SectionHeader{Name: ".debug_info", Size: MaxDWARFTotalSize + 1}},
 	}}
-	if DWARFWithinCap(f) {
-		t.Fatal("DWARFWithinCap must be false when combined DWARF exceeds MaxDWARFTotalSize")
+	if sectionsWithinCap(f) {
+		t.Fatal("a .debug_info over MaxDWARFTotalSize passed")
 	}
 }
 
-func TestDWARFWithinCap_CompressedPrefixCounts(t *testing.T) {
+func TestDWARFSections_CompressedPrefixCounts(t *testing.T) {
 	f := &elf.File{Sections: []*elf.Section{
 		{SectionHeader: elf.SectionHeader{Name: ".zdebug_info", Size: MaxDWARFTotalSize/2 + 1}},
-		{SectionHeader: elf.SectionHeader{Name: ".zdebug_line", Size: MaxDWARFTotalSize/2 + 1}},
+		{SectionHeader: elf.SectionHeader{Name: ".zdebug_str", Size: MaxDWARFTotalSize/2 + 1}},
 	}}
-	if DWARFWithinCap(f) {
-		t.Fatal("DWARFWithinCap must sum .zdebug_* sections toward the cap")
+	if sectionsWithinCap(f) {
+		t.Fatal(".zdebug_* sections must sum toward the cap")
 	}
 }
 
-func TestDWARFWithinCap_SmallSectionsWithinCap(t *testing.T) {
+func TestDWARFSections_SmallSectionsWithinCap(t *testing.T) {
 	f := &elf.File{Sections: []*elf.Section{
 		{SectionHeader: elf.SectionHeader{Name: ".text", Size: 4096}},
 		{SectionHeader: elf.SectionHeader{Name: ".debug_info", Size: 128}},
-		{SectionHeader: elf.SectionHeader{Name: ".debug_line", Size: 64}},
+		{SectionHeader: elf.SectionHeader{Name: ".debug_str", Size: 64}},
 	}}
-	if !DWARFWithinCap(f) {
-		t.Fatal("DWARFWithinCap must be true for small debug sections")
+	picked, err := dwarfReaderSectionSizes(f)
+	if err != nil || len(picked) != 2 {
+		t.Fatalf("dwarfReaderSectionSizes = (%d sections, %v), want the two debug sections", len(picked), err)
 	}
 }
 
-func TestDWARFWithinCap_NoDebugSections(t *testing.T) {
+func TestDWARFSections_NoDebugSections(t *testing.T) {
 	f := &elf.File{Sections: []*elf.Section{
 		{SectionHeader: elf.SectionHeader{Name: ".text", Size: 4096}},
 	}}
-	if !DWARFWithinCap(f) {
-		t.Fatal("DWARFWithinCap must be true when there are no debug sections")
+	picked, err := dwarfReaderSectionSizes(f)
+	if err != nil || len(picked) != 0 {
+		t.Fatalf("dwarfReaderSectionSizes = (%d sections, %v), want none", len(picked), err)
+	}
+}
+
+func TestDWARFSections_UnreadSectionsDoNotCount(t *testing.T) {
+	f := &elf.File{Sections: []*elf.Section{
+		{SectionHeader: elf.SectionHeader{Name: ".debug_line", Size: MaxDWARFTotalSize}},
+		{SectionHeader: elf.SectionHeader{Name: ".debug_loclists", Size: MaxDWARFTotalSize}},
+		{SectionHeader: elf.SectionHeader{Name: ".debug_info", Size: 128}},
+	}}
+	if !sectionsWithinCap(f) {
+		t.Fatal("line tables and location lists are never read, so they must not count toward the cap")
+	}
+}
+
+func TestDWARFSections_OnlyTheFirstOfADuplicateNameIsRead(t *testing.T) {
+	f := &elf.File{Sections: []*elf.Section{
+		{SectionHeader: elf.SectionHeader{Name: ".debug_info", Size: 128}},
+		{SectionHeader: elf.SectionHeader{Name: ".debug_info", Size: MaxDWARFTotalSize}},
+	}}
+	picked, err := dwarfReaderSectionSizes(f)
+	if err != nil || len(picked) != 1 || picked[0].size != 128 {
+		t.Fatalf("dwarfReaderSectionSizes = (%+v, %v), want only the first .debug_info", picked, err)
 	}
 }
 
@@ -172,32 +201,38 @@ func zdebugHeader(declared uint64) []byte {
 	return header
 }
 
-func TestDWARFWithinCap_ZdebugDeclaredSizeCounts(t *testing.T) {
+func TestDWARFSections_ZdebugDeclaredSizeCounts(t *testing.T) {
 	f := &elf.File{Sections: []*elf.Section{
 		{SectionHeader: elf.SectionHeader{Name: ".zdebug_info", Size: 600 << 10}, ReaderAt: bytes.NewReader(zdebugHeader(MaxDWARFTotalSize + 1))},
 	}}
-	if DWARFWithinCap(f) {
-		t.Fatal("DWARFWithinCap must count the uncompressed size a .zdebug_* ZLIB header declares")
+	if sectionsWithinCap(f) {
+		t.Fatal("the uncompressed size a .zdebug_* ZLIB header declares must count")
 	}
 }
 
-func TestDWARFWithinCap_ZdebugDeclaredSizesSumWithoutOverflow(t *testing.T) {
+func TestDWARFSections_ZdebugDeclaredSizesSumWithoutOverflow(t *testing.T) {
 	f := &elf.File{Sections: []*elf.Section{
-		{SectionHeader: elf.SectionHeader{Name: ".debug_line", Size: 64}},
+		{SectionHeader: elf.SectionHeader{Name: ".debug_str", Size: 64}},
 		{SectionHeader: elf.SectionHeader{Name: ".zdebug_info", Size: 32}, ReaderAt: bytes.NewReader(zdebugHeader(^uint64(0)))},
 	}}
-	if DWARFWithinCap(f) {
+	if sectionsWithinCap(f) {
 		t.Fatal("a declared size that wraps the running total must not pass")
 	}
 }
 
-func TestDWARFWithinCap_SmallZdebugAndUnheaderedSectionsPass(t *testing.T) {
+func TestDWARFSections_SmallZdebugAndUnheaderedSectionsPass(t *testing.T) {
 	f := &elf.File{Sections: []*elf.Section{
 		{SectionHeader: elf.SectionHeader{Name: ".zdebug_info", Size: 32}, ReaderAt: bytes.NewReader(zdebugHeader(4096))},
-		{SectionHeader: elf.SectionHeader{Name: ".zdebug_line", Size: 5}, ReaderAt: bytes.NewReader([]byte("plain"))},
+		{SectionHeader: elf.SectionHeader{Name: ".zdebug_abbrev", Size: 5}, ReaderAt: bytes.NewReader([]byte("plain"))},
 		{SectionHeader: elf.SectionHeader{Name: ".zdebug_str", Type: elf.SHT_NOBITS, Size: 8}},
 	}}
-	if !DWARFWithinCap(f) {
-		t.Fatal("small .zdebug_* sections must stay within the cap")
+	picked, err := dwarfReaderSectionSizes(f)
+	if err != nil || len(picked) != 3 {
+		t.Fatalf("dwarfReaderSectionSizes = (%d sections, %v), want all three", len(picked), err)
+	}
+	for i, want := range []uint64{4096, 5, 8} {
+		if picked[i].size != want {
+			t.Errorf("%s size = %d, want %d", picked[i].section.Name, picked[i].size, want)
+		}
 	}
 }

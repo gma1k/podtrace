@@ -2055,7 +2055,7 @@ func attachGoHandshakeProbes(coll *ebpf.Collection, exe uprobeTarget, exePath st
 				zap.String("symbol", sym), zap.Uint32("pid", pid))
 			continue
 		}
-		links = append(links, attachEntryAfterReturns(exe, entryProg, retProg, entryOff, retOffs)...)
+		links = append(links, attachEntryAfterReturns(exe, entryProg, retProg, entryOff, retOffs, nil)...)
 	}
 	if len(links) > 0 {
 		logger.Debug("Go TLS handshake uprobes attached", zap.Uint32("pid", pid), zap.Int("links", len(links)))
@@ -2083,15 +2083,22 @@ func AttachGoGRPCProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 		{"uprobe_grpc_go_server_headers", "google.golang.org/grpc/internal/transport.(*http2Server).operateHeaders"},
 		{"uprobe_grpc_go_client_headers", "google.golang.org/grpc/internal/transport.(*http2Client).operateHeaders"},
 	}
+	var layout *siteLayout
+	for _, t := range targets {
+		if _, ok := goSymbolFileOffset(parsed, t.sym); ok {
+			layout = grpcGoLayout(coll, exe, parsed, pid)
+			break
+		}
+	}
 	for _, t := range targets {
 		prog := coll.Programs[t.prog]
 		if prog == nil {
 			continue
 		}
-		l, err := exe.Uprobe(t.sym, prog, nil)
+		l, err := uprobeAt(exe, t.sym, prog, 0, layout)
 		if err != nil {
 			if off, ok := goSymbolFileOffset(parsed, t.sym); ok {
-				l, err = exe.Uprobe("", prog, &link.UprobeOptions{Address: off})
+				l, err = uprobeAt(exe, "", prog, off, layout)
 			}
 		}
 		if err != nil {
@@ -2101,9 +2108,6 @@ func AttachGoGRPCProbes(coll *ebpf.Collection, pid uint32) []link.Link {
 		}
 		links = append(links, l)
 		logger.Debug("Go gRPC uprobe attached", zap.String("symbol", t.sym), zap.Uint32("pid", pid))
-	}
-	if len(links) > 0 {
-		publishGRPCGoOffsets(coll, parsed, pid)
 	}
 	return links
 }
@@ -2125,7 +2129,7 @@ func attachGoTLSReadProbes(coll *ebpf.Collection, exe uprobeTarget, exePath stri
 			zap.Uint32("pid", pid))
 		return links
 	}
-	links = attachEntryAfterReturns(exe, entryProg, retProg, entryOff, retOffs)
+	links = attachEntryAfterReturns(exe, entryProg, retProg, entryOff, retOffs, nil)
 	if len(links) == 0 {
 		logger.Debug("Go TLS Read uprobes not attached", zap.Uint32("pid", pid))
 		return nil
@@ -2135,29 +2139,25 @@ func attachGoTLSReadProbes(coll *ebpf.Collection, exe uprobeTarget, exePath stri
 	return links
 }
 
-// publishPoolOffsets resolves database/sql.DB's field offsets for one target
-// and hands them to BPF, keyed by tgid.
-func publishPoolOffsets(coll *ebpf.Collection, exePath string, pid uint32) {
-	m := coll.Maps["pool_offsets"]
-	if m == nil || pid == 0 {
-		return
+// poolLayout resolves database/sql.DB's field offsets for the pool wait
+// probe's sites. Without them the BPF side emits no pool stats at all, which
+// is the intended behaviour for a binary that shipped no DWARF.
+func poolLayout(coll *ebpf.Collection, exe *executable, pid uint32) *siteLayout {
+	m := layoutMapOf(coll, "pool_offsets")
+	if m == nil {
+		return nil
 	}
-	off, ok := resolvePoolFieldOffsets(exePath, pid)
+	off, ok := resolvePoolFieldOffsets(exe.Path(), pid)
 	if !ok {
-		_ = m.Delete(pid)
-		return
+		return nil
 	}
-	value := struct{ NumOpen, MaxOpen, FreeConn uint32 }{NumOpen: off.NumOpen, MaxOpen: off.MaxOpen, FreeConn: off.FreeConn}
-	if err := m.Update(pid, value, ebpf.UpdateAny); err != nil {
-		logger.Debug("Pool utilization: could not publish field offsets",
-			zap.Uint32("pid", pid), zap.Error(err))
-		return
-	}
-	logger.Debug("Pool utilization: field offsets published",
+	logger.Debug("Pool utilization: field offsets resolved",
 		zap.Uint32("pid", pid),
 		zap.Uint32("num_open", off.NumOpen),
 		zap.Uint32("max_open", off.MaxOpen),
 		zap.Uint32("free_conn", off.FreeConn))
+	value := struct{ NumOpen, MaxOpen, FreeConn uint32 }{NumOpen: off.NumOpen, MaxOpen: off.MaxOpen, FreeConn: off.FreeConn}
+	return newSiteLayout(exe, layoutEntry{m: m, value: value})
 }
 
 // attachGoAcquireProbes attaches the entry + return uprobes on
@@ -2188,17 +2188,12 @@ func attachGoAcquireProbes(coll *ebpf.Collection, exePath string, pid uint32) []
 		return links
 	}
 
-	el, err := exe.Uprobe("", entryProg, &link.UprobeOptions{Address: entryOff})
+	el, err := uprobeAt(exe, "", entryProg, entryOff, poolLayout(coll, exe, pid))
 	if err != nil {
 		logger.Debug("Go pool wait entry uprobe not attached", zap.Error(err))
 		return links
 	}
 	links = append(links, el)
-
-	// Publish the DB field offsets before the probe can fire. Without an
-	// entry the BPF side emits no pool stats at all, which is the intended
-	// behaviour for a binary that shipped no DWARF.
-	publishPoolOffsets(coll, exe.Path(), pid)
 
 	attached := 0
 	for _, ro := range retOffs {
@@ -2242,20 +2237,23 @@ func AttachGoHTTP3Probes(coll *ebpf.Collection, pid uint32) []link.Link {
 	defer func() { _ = exe.Close() }()
 	parsed := exe.Path()
 
-	if m := coll.Maps["h3_offsets"]; m != nil {
-		off, src := resolveH3FieldOffsets(parsed, pid)
-		tgid := pid
-		if err := m.Update(&tgid, &off, ebpf.UpdateAny); err != nil {
-			logger.Debug("HTTP/3 offsets: map update failed", zap.Uint32("pid", pid), zap.Error(err))
-		} else {
-			logger.Debug("HTTP/3 field offsets resolved",
-				zap.Uint32("pid", pid), zap.String("source", src),
-				zap.Uint32("method", off.Method), zap.Uint32("url", off.URL),
-				zap.Uint32("path", off.Path), zap.Uint32("status", off.Status))
+	res := openH3Layouts(parsed, pid)
+	defer res.close()
+	offsets, src := res.fieldOffsets()
+	logger.Debug("HTTP/3 field offsets resolved",
+		zap.Uint32("pid", pid), zap.String("source", src),
+		zap.Uint32("method", offsets.Method), zap.Uint32("url", offsets.URL),
+		zap.Uint32("path", offsets.Path), zap.Uint32("status", offsets.Status))
+	offsetsMap, peerMap := layoutMapOf(coll, "h3_offsets"), layoutMapOf(coll, "h3_peer_paths_map")
+	layoutFor := func(clientRootType string) *siteLayout {
+		entries := []layoutEntry{{m: offsetsMap, value: offsets}}
+		if paths, ok := res.peerPaths(clientRootType); ok {
+			entries = append(entries, layoutEntry{m: peerMap, value: paths})
 		}
+		return newSiteLayout(exe, entries...)
 	}
 
-	clientRootType := ""
+	var layout *siteLayout
 	for _, cand := range []struct{ sym, rootType string }{
 		{"github.com/quic-go/quic-go/http3.(*ClientConn).RoundTrip",
 			"github.com/quic-go/quic-go/http3.ClientConn"},
@@ -2263,38 +2261,22 @@ func AttachGoHTTP3Probes(coll *ebpf.Collection, pid uint32) []link.Link {
 			"github.com/quic-go/quic-go/http3.SingleDestinationRoundTripper"},
 		{"github.com/quic-go/quic-go/http3.(*Transport).RoundTrip", ""},
 	} {
+		candidate := layoutFor(cand.rootType)
 		ls := attachGoEntryReturnProbes(coll, exe, parsed, pid, cand.sym,
-			"uprobe_h3_roundtrip", "uprobe_h3_roundtrip_ret")
+			"uprobe_h3_roundtrip", "uprobe_h3_roundtrip_ret", candidate)
 		if len(ls) > 0 {
 			links = append(links, ls...)
-			clientRootType = cand.rootType
+			layout = candidate
 			break
 		}
 	}
-
-	if m := coll.Maps["h3_peer_paths_map"]; m != nil {
-		if paths, ok := resolveH3PeerPaths(parsed, pid, clientRootType); ok {
-			tgid := pid
-			if err := m.Update(&tgid, &paths, ebpf.UpdateAny); err != nil {
-				logger.Debug("HTTP/3 peer paths: map update failed",
-					zap.Uint32("pid", pid), zap.Error(err))
-			} else {
-				logger.Debug("HTTP/3 peer paths resolved",
-					zap.Uint32("pid", pid),
-					zap.Uint8("client_steps", paths.Client.NSteps),
-					zap.Uint8("server_steps", paths.Server.NSteps))
-			}
-		} else {
-			tgid := pid
-			_ = m.Delete(&tgid)
-			logger.Debug("HTTP/3 peer paths unresolved (no DWARF or unsupported quic-go layout)",
-				zap.Uint32("pid", pid))
-		}
+	if layout == nil {
+		layout = layoutFor("")
 	}
 
 	links = append(links, attachGoReturnProbes(coll, exe, parsed, pid,
 		"github.com/quic-go/quic-go/http3.requestFromHeaders",
-		"uprobe_h3_req_from_headers_ret")...)
+		"uprobe_h3_req_from_headers_ret", layout)...)
 
 	for _, sym := range []string{
 		"github.com/quic-go/quic-go/http3.(*RawServerConn).handleRequestStream",
@@ -2302,14 +2284,14 @@ func AttachGoHTTP3Probes(coll *ebpf.Collection, pid uint32) []link.Link {
 		"github.com/quic-go/quic-go/http3.(*connection).handleRequestStream",
 	} {
 		if ls := attachGoReturnProbes(coll, exe, parsed, pid, sym,
-			"uprobe_h3_handle_request_ret"); len(ls) > 0 {
+			"uprobe_h3_handle_request_ret", nil); len(ls) > 0 {
 			links = append(links, ls...)
 			break
 		}
 	}
 	if prog := coll.Programs["uprobe_h3_write_header"]; prog != nil {
 		const sym = "github.com/quic-go/quic-go/http3.(*responseWriter).WriteHeader"
-		if l, ok := attachGoUprobeBySymbol(exe, parsed, sym, prog); ok {
+		if l, ok := attachGoUprobeBySymbol(exe, parsed, sym, prog, layout); ok {
 			links = append(links, l)
 			logger.Debug("Go HTTP/3 WriteHeader uprobe attached", zap.Uint32("pid", pid))
 		}
@@ -2317,14 +2299,14 @@ func AttachGoHTTP3Probes(coll *ebpf.Collection, pid uint32) []link.Link {
 
 	if prog := coll.Programs["uprobe_h3_qpack_write_field"]; prog != nil {
 		const sym = "github.com/quic-go/qpack.(*Encoder).WriteField"
-		if l, ok := attachGoUprobeBySymbol(exe, parsed, sym, prog); ok {
+		if l, ok := attachGoUprobeBySymbol(exe, parsed, sym, prog, nil); ok {
 			links = append(links, l)
 			logger.Debug("Go HTTP/3 WriteField (traceparent) uprobe attached", zap.Uint32("pid", pid))
 		}
 	}
 	links = append(links, attachGoEntryReturnProbes(coll, exe, parsed, pid,
 		"github.com/quic-go/quic-go/http3.parseHeaders",
-		"uprobe_h3_parse_headers", "uprobe_h3_parse_headers_ret")...)
+		"uprobe_h3_parse_headers", "uprobe_h3_parse_headers_ret", nil)...)
 
 	return links
 }
@@ -2430,14 +2412,14 @@ func attachCLibraryH3Probes(coll *ebpf.Collection, pid uint32, af *AttachedFiles
 
 // attachGoUprobeBySymbol attaches an entry uprobe, falling back to a gopclntab
 // file-offset attach when the symbol is absent from the dynamic symbol table.
-func attachGoUprobeBySymbol(exe *executable, exePath, sym string, prog *ebpf.Program) (link.Link, bool) {
-	l, err := exe.Uprobe(sym, prog, nil)
+func attachGoUprobeBySymbol(exe *executable, exePath, sym string, prog *ebpf.Program, layout *siteLayout) (link.Link, bool) {
+	l, err := uprobeAt(exe, sym, prog, 0, layout)
 	if err != nil {
 		off, ok := goSymbolFileOffset(exePath, sym)
 		if !ok {
 			return nil, false
 		}
-		l, err = exe.Uprobe("", prog, &link.UprobeOptions{Address: off})
+		l, err = uprobeAt(exe, "", prog, off, layout)
 		if err != nil {
 			return nil, false
 		}
@@ -2448,7 +2430,7 @@ func attachGoUprobeBySymbol(exe *executable, exePath, sym string, prog *ebpf.Pro
 // attachGoEntryReturnProbes attaches an entry uprobe on a Go function plus a
 // uprobe at each of its return sites.
 func attachGoEntryReturnProbes(coll *ebpf.Collection, exe uprobeTarget, exePath string, pid uint32,
-	sym, entryProgName, retProgName string) []link.Link {
+	sym, entryProgName, retProgName string, layout *siteLayout) []link.Link {
 	var links []link.Link
 	entryProg := coll.Programs[entryProgName]
 	retProg := coll.Programs[retProgName]
@@ -2461,7 +2443,7 @@ func attachGoEntryReturnProbes(coll *ebpf.Collection, exe uprobeTarget, exePath 
 			zap.String("symbol", sym), zap.Uint32("pid", pid))
 		return links
 	}
-	links = attachEntryAfterReturns(exe, entryProg, retProg, entryOff, retOffs)
+	links = attachEntryAfterReturns(exe, entryProg, retProg, entryOff, retOffs, layout)
 	if len(links) == 0 {
 		logger.Debug("Go entry+return uprobes not attached", zap.String("symbol", sym), zap.Uint32("pid", pid))
 		return nil
@@ -2473,19 +2455,19 @@ func attachGoEntryReturnProbes(coll *ebpf.Collection, exe uprobeTarget, exePath 
 
 // attachEntryAfterReturns attaches a uprobe at every return site first and
 // the entry uprobe only once at least one of them is in place, so an entry
-// never stashes state that no return will clear. It returns the return links
-// followed by the entry, or nothing.
-func attachEntryAfterReturns(exe uprobeTarget, entryProg, retProg *ebpf.Program, entryOff uint64, retOffs []uint64) []link.Link {
+// never stashes state that no return will clear.
+func attachEntryAfterReturns(exe uprobeTarget, entryProg, retProg *ebpf.Program, entryOff uint64, retOffs []uint64,
+	layout *siteLayout) []link.Link {
 	var rets []link.Link
 	for _, ro := range retOffs {
-		if rl, err := exe.Uprobe("", retProg, &link.UprobeOptions{Address: ro}); err == nil {
+		if rl, err := uprobeAt(exe, "", retProg, ro, layout); err == nil {
 			rets = append(rets, rl)
 		}
 	}
 	if len(rets) == 0 {
 		return nil
 	}
-	el, err := exe.Uprobe("", entryProg, &link.UprobeOptions{Address: entryOff})
+	el, err := uprobeAt(exe, "", entryProg, entryOff, layout)
 	if err != nil {
 		for _, l := range rets {
 			_ = l.Close()
@@ -2498,20 +2480,20 @@ func attachEntryAfterReturns(exe uprobeTarget, entryProg, retProg *ebpf.Program,
 // attachGoReturnProbes attaches a uprobe at each return site of a Go function
 // (no entry probe). Used when only the function's result is needed.
 func attachGoReturnProbes(coll *ebpf.Collection, exe *executable, exePath string, pid uint32,
-	sym, retProgName string) []link.Link {
+	sym, retProgName string, layout *siteLayout) []link.Link {
 	var links []link.Link
 	retProg := coll.Programs[retProgName]
 	if retProg == nil {
 		return links
 	}
-	_, retOffs, ok := goFuncReturnOffsets(exePath, sym)
+	_, retOffs, ok := goFuncReturns(exePath, sym)
 	if !ok {
 		logger.Debug("Go HTTP/3: no return sites resolved",
 			zap.String("symbol", sym), zap.Uint32("pid", pid))
 		return links
 	}
 	for _, ro := range retOffs {
-		if rl, err := exe.Uprobe("", retProg, &link.UprobeOptions{Address: ro}); err == nil {
+		if rl, err := uprobeAt(exe, "", retProg, ro, layout); err == nil {
 			links = append(links, rl)
 		}
 	}

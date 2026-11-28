@@ -1,9 +1,7 @@
 package probes
 
 import (
-	"debug/buildinfo"
 	"debug/dwarf"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -38,40 +36,26 @@ const maxStructFieldOffset = 1 << 20
 // preferring DWARF (exact for any Go version) and falling back to the
 // version-keyed defaults for stripped binaries.
 func resolveH3FieldOffsets(exePath string, pid uint32) (h3FieldOffsets, string) {
-	if off, ok := h3OffsetsFromDWARF(exePath, pid); ok {
-		return off, "dwarf"
-	}
-	return h3OffsetsForGoVersion(exePath)
+	res := openH3Layouts(exePath, pid)
+	defer res.close()
+	return res.fieldOffsets()
 }
 
 // h3OffsetsFromDWARF reads the four field offsets from the binary's DWARF (or a
 // build-id debug-info file).
-func h3OffsetsFromDWARF(exePath string, pid uint32) (result h3FieldOffsets, ok bool) {
-	defer recoverParse("h3OffsetsFromDWARF")
-	target, err := openELFCapped(exePath)
-	if err != nil {
+func h3OffsetsFromDWARF(exePath string, pid uint32) (h3FieldOffsets, bool) {
+	d, closeFn, found := openDWARF(exePath, pid)
+	if !found {
 		return h3FieldOffsets{}, false
 	}
-	defer func() { _ = target.Close() }()
+	defer closeFn()
+	return h3OffsetsFromData(d)
+}
 
-	var d *dwarf.Data
-	if dwarfWithinCap(target) {
-		d, err = target.DWARF()
-	} else {
-		err = fmt.Errorf("dwarf sections exceed cap")
-	}
-	if err != nil {
-		if dbg, _ := openDebugInfo(target, pid); dbg != nil && dbg != target {
-			defer func() { _ = dbg.Close() }()
-			if dwarfWithinCap(dbg) {
-				d, err = dbg.DWARF()
-			}
-		}
-		if err != nil || d == nil {
-			return h3FieldOffsets{}, false
-		}
-	}
-
+// h3OffsetsFromData reads the four field offsets from d. Every definition of
+// a struct must agree.
+func h3OffsetsFromData(d *dwarf.Data) (result h3FieldOffsets, ok bool) {
+	defer recoverParse("h3OffsetsFromData")
 	type want struct {
 		dst   *uint32
 		found bool
@@ -145,31 +129,27 @@ func h3OffsetsFromDWARF(exePath string, pid uint32) (result h3FieldOffsets, ok b
 // across the supported range) and logs when the binary's Go version is outside
 // the verified window.
 func h3OffsetsForGoVersion(exePath string) (h3FieldOffsets, string) {
-	bi, ok := readGoBuildInfo(exePath)
+	version, ok := readGoVersion(exePath)
 	if !ok {
 		return h3DefaultOffsets, "default"
 	}
-	if minor, ok := goMinorVersion(bi.GoVersion); ok && (minor < h3GoMinMinor || minor > h3GoMaxMinor) {
+	if minor, ok := goMinorVersion(version); ok && (minor < h3GoMinMinor || minor > h3GoMaxMinor) {
 		logger.Debug("HTTP/3 offsets: Go version outside verified range, using best-known offsets",
-			zap.String("go_version", bi.GoVersion))
+			zap.String("go_version", version))
 	}
-	return h3DefaultOffsets, "version:" + bi.GoVersion
+	return h3DefaultOffsets, "version:" + version
 }
 
-// readGoBuildInfo reads a Go executable's build information from a regular
-// file within the ELF size cap.
-func readGoBuildInfo(exePath string) (info *buildinfo.BuildInfo, ok bool) {
-	defer recoverParse("readGoBuildInfo")
-	f, _, err := safeelf.OpenRegular(exePath)
+// readGoVersion reads the Go toolchain version from an executable's build
+// information, a regular file within the ELF size cap.
+func readGoVersion(exePath string) (version string, ok bool) {
+	defer recoverParse("readGoVersion")
+	f, err := openELFCapped(exePath)
 	if err != nil {
-		return nil, false
+		return "", false
 	}
 	defer func() { _ = f.Close() }()
-	bi, err := buildinfo.Read(f)
-	if err != nil {
-		return nil, false
-	}
-	return bi, true
+	return safeelf.GoVersion(f)
 }
 
 // goMinorVersion parses the minor version from a "go1.23.4" string.

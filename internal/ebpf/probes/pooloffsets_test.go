@@ -196,29 +196,31 @@ func TestPoolOffsetsRejectANonELFFile(t *testing.T) {
 	}
 }
 
-func TestPublishPoolOffsetsIsInertWithoutAMapOrATarget(t *testing.T) {
-	plain, _ := poolFixtures(t)
-
-	for name, call := range map[string]func(){
-		"collection carries no maps": func() {
-			publishPoolOffsets(&ebpf.Collection{}, plain, 42)
-		},
-		"pool_offsets was not loaded": func() {
-			publishPoolOffsets(&ebpf.Collection{Maps: map[string]*ebpf.Map{}}, plain, 42)
-		},
-		"target is host-wide": func() {
-			publishPoolOffsets(&ebpf.Collection{}, plain, 0)
-		},
+func TestThePoolLayoutNeedsTheOffsetsMapAndOffsets(t *testing.T) {
+	plain, stripped := poolFixtures(t)
+	for name, tc := range map[string]struct {
+		coll *ebpf.Collection
+		bin  string
+	}{
+		"collection carries no maps":  {&ebpf.Collection{}, plain},
+		"pool_offsets was not loaded": {&ebpf.Collection{Maps: map[string]*ebpf.Map{}}, plain},
 	} {
-		t.Run(name, func(t *testing.T) {
-			defer func() {
-				if r := recover(); r != nil {
-					t.Fatalf("publishPoolOffsets panicked: %v.\n\nAn agent running a BPF "+
-						"object built before this map existed would take the whole probe "+
-						"attach down with it.", r)
-				}
-			}()
-			call()
-		})
+		exe, err := openExecutable(tc.bin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if l := poolLayout(tc.coll, exe, 42); l != nil {
+			t.Errorf("%s: poolLayout = %+v, want none", name, l)
+		}
+		_ = exe.Close()
+	}
+	m := withLayoutMaps(t, "pool_offsets")
+	exe, err := openExecutable(stripped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = exe.Close() }()
+	if l := poolLayout(&ebpf.Collection{}, exe, 42); l != nil || len(m["pool_offsets"].values) != 0 {
+		t.Errorf("poolLayout = %+v for a binary without DWARF, want none", l)
 	}
 }

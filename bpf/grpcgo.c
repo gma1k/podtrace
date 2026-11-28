@@ -129,10 +129,10 @@ static __always_inline u64 grpc_go_conn_from_tuple(void)
 	return process_scoped_id(h);
 }
 
-static __always_inline u64 grpc_go_conn(u64 recv, u32 kind)
+static __always_inline u64 grpc_go_conn(struct pt_regs *ctx, u64 recv, u32 kind)
 {
-	u32 tgid = agent_ns_tgid();
-	struct grpc_go_field_offsets *o = bpf_map_lookup_elem(&grpc_go_offsets, &tgid);
+	u64 cookie = bpf_get_attach_cookie(ctx);
+	struct grpc_go_field_offsets *o = bpf_map_lookup_elem(&grpc_go_offsets, &cookie);
 	if (!o || !recv)
 		return grpc_go_conn_from_tuple();
 	u32 off = kind == GRPC_GO_RECV_LOOPY ? o->loopy_framer :
@@ -259,7 +259,7 @@ int uprobe_grpc_go_write_header(struct pt_regs *ctx)
 	if (!http_should_trace())
 		return 0;
 	grpc_go_process(ctx, GRPC_GO_HF_PTR(ctx), GRPC_GO_HF_LEN(ctx), GRPC_GO_WH_STREAM(ctx), 0,
-			grpc_go_conn(GRPC_GO_RECV(ctx), GRPC_GO_RECV_LOOPY));
+			grpc_go_conn(ctx, GRPC_GO_RECV(ctx), GRPC_GO_RECV_LOOPY));
 	return 0;
 }
 
@@ -269,7 +269,7 @@ int uprobe_grpc_go_server_headers(struct pt_regs *ctx)
 	if (!http_should_trace())
 		return 0;
 	grpc_go_process_frame(ctx, GRPC_GO_SRV_FRAME(ctx), 1,
-			      grpc_go_conn(GRPC_GO_RECV(ctx), GRPC_GO_RECV_SERVER));
+			      grpc_go_conn(ctx, GRPC_GO_RECV(ctx), GRPC_GO_RECV_SERVER));
 	return 0;
 }
 
@@ -279,7 +279,7 @@ int uprobe_grpc_go_client_headers(struct pt_regs *ctx)
 	if (!http_should_trace())
 		return 0;
 	grpc_go_process_frame(ctx, GRPC_GO_CLI_FRAME(ctx), 1,
-			      grpc_go_conn(GRPC_GO_RECV(ctx), GRPC_GO_RECV_CLIENT));
+			      grpc_go_conn(ctx, GRPC_GO_RECV(ctx), GRPC_GO_RECV_CLIENT));
 	return 0;
 }
 

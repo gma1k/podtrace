@@ -62,10 +62,10 @@ func TestGoEntryProbesFollowTheirReturnSites(t *testing.T) {
 	if got := attachGoTLSReadProbes(coll, &scriptedTarget{entryProg: coll.Programs["uprobe_go_tls_read"], failRets: true}, "/bin", 1); got != nil {
 		t.Errorf("TLS Read kept %d links with no return site", len(got))
 	}
-	if got := attachGoEntryReturnProbes(coll, &scriptedTarget{entryProg: coll.Programs["e"]}, "/bin", 1, "f", "e", "r"); len(got) != 3 {
+	if got := attachGoEntryReturnProbes(coll, &scriptedTarget{entryProg: coll.Programs["e"]}, "/bin", 1, "f", "e", "r", nil); len(got) != 3 {
 		t.Errorf("entry+return probes = %d links, want 3", len(got))
 	}
-	if got := attachGoEntryReturnProbes(coll, &scriptedTarget{entryProg: coll.Programs["e"], failRets: true}, "/bin", 1, "f", "e", "r"); got != nil {
+	if got := attachGoEntryReturnProbes(coll, &scriptedTarget{entryProg: coll.Programs["e"], failRets: true}, "/bin", 1, "f", "e", "r", nil); got != nil {
 		t.Errorf("entry+return kept %d links with no return site", len(got))
 	}
 	withResolvedGoReturns(t, 0, nil, false)

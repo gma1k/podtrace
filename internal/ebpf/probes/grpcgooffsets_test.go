@@ -98,6 +98,14 @@ func TestGRPCGoFramerOffsetsAbsentWithoutGRPCOrABinary(t *testing.T) {
 	}
 }
 
-func TestGRPCGoOffsetsNeedTheOffsetsMap(t *testing.T) {
-	publishGRPCGoOffsets(&ebpf.Collection{Maps: map[string]*ebpf.Map{}}, grpcFixtureBinary(t), 1)
+func TestGRPCGoLayoutNeedsTheOffsetsMap(t *testing.T) {
+	bin := grpcFixtureBinary(t)
+	exe, err := openExecutable(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = exe.Close() }()
+	if l := grpcGoLayout(&ebpf.Collection{Maps: map[string]*ebpf.Map{}}, exe, bin, 1); l != nil {
+		t.Fatalf("grpcGoLayout = %+v without a grpc_go_offsets map", l)
+	}
 }

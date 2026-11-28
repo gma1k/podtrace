@@ -19,7 +19,14 @@ const maxQuicheRustAttachments = 4
 
 // AttachQuicheRustProbes attaches a uprobe on
 // quiche::h3::Connection::send_request in a statically-linked Rust binary.
-func AttachQuicheRustProbes(coll *ebpf.Collection, pid uint32) (links []link.Link) {
+func AttachQuicheRustProbes(coll *ebpf.Collection, pid uint32) []link.Link {
+	return attachQuicheRustProbes(coll, pid, false)
+}
+
+// attachQuicheRustProbes attaches the quiche crate uprobe for pid. With
+// processScoped it attaches only one at an offset from a debug file, which
+// covers pid alone.
+func attachQuicheRustProbes(coll *ebpf.Collection, pid uint32, processScoped bool) (links []link.Link) {
 	defer recoverParse("AttachQuicheRustProbes")
 	if pid == 0 || runtime.GOARCH != "amd64" {
 		return links
@@ -45,6 +52,9 @@ func AttachQuicheRustProbes(coll *ebpf.Collection, pid uint32) (links []link.Lin
 
 	vaddrs := findSymbolsContaining(f, maxQuicheRustAttachments, quicheRustSendRequestPattern...)
 	fromDebugFile := false
+	if processScoped && len(vaddrs) > 0 {
+		return links
+	}
 	if len(vaddrs) == 0 {
 		if dbg, src := openDebugInfo(f, pid); dbg != nil {
 			defer func() { _ = dbg.Close() }()

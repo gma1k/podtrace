@@ -191,17 +191,17 @@ static __always_inline int h3_walk_peer(u64 base, const struct h3_peer_path *p,
 	return 1;
 }
 
-static __always_inline struct h3_peer_paths *h3_peer_path_lookup(void)
+static __always_inline struct h3_peer_paths *h3_peer_path_lookup(struct pt_regs *ctx)
 {
-	u32 tgid = agent_ns_tgid();
-	return bpf_map_lookup_elem(&h3_peer_paths_map, &tgid);
+	u64 cookie = bpf_get_attach_cookie(ctx);
+	return bpf_map_lookup_elem(&h3_peer_paths_map, &cookie);
 }
 
 
-static __always_inline struct h3_field_offsets h3_field_offs(void)
+static __always_inline struct h3_field_offsets h3_field_offs(struct pt_regs *ctx)
 {
-	u32 tgid = agent_ns_tgid();
-	struct h3_field_offsets *o = bpf_map_lookup_elem(&h3_offsets, &tgid);
+	u64 cookie = bpf_get_attach_cookie(ctx);
+	struct h3_field_offsets *o = bpf_map_lookup_elem(&h3_offsets, &cookie);
 	if (o)
 		return *o;
 	struct h3_field_offsets def = {
@@ -218,12 +218,12 @@ static __always_inline u64 h3_stash_key(u64 goroutine, u8 is_client)
 	return goroutine ^ (is_client ? (1ULL << 63) : 0);
 }
 
-static __always_inline u64 h3_stash_request(u64 goroutine, u64 req, u64 recv,
-					    u8 is_client)
+static __always_inline u64 h3_stash_request(struct pt_regs *ctx, u64 goroutine, u64 req,
+					    u64 recv, u8 is_client)
 {
 	if (!req)
 		return 0;
-	struct h3_field_offsets off = h3_field_offs();
+	struct h3_field_offsets off = h3_field_offs(ctx);
 	struct h3_req_inflight in = {};
 	in.start_ts = request_id_now();
 	in.method_len = (u8)read_go_str(req, off.method, in.method, H3_TXN_METHOD_MAX);
@@ -233,7 +233,7 @@ static __always_inline u64 h3_stash_request(u64 goroutine, u64 req, u64 recv,
 		in.path_len = (u16)read_go_str(url, off.path, in.path, H3_TXN_PATH_MAX);
 
 	if (recv) {
-		struct h3_peer_paths *pp = h3_peer_path_lookup();
+		struct h3_peer_paths *pp = h3_peer_path_lookup(ctx);
 		if (pp) {
 			struct h3_peer peer = {};
 			if (h3_walk_peer(recv, &pp->client, &peer)) {
@@ -315,7 +315,7 @@ int uprobe_h3_roundtrip(struct pt_regs *ctx)
 {
 	if (!http_should_trace())
 		return 0;
-	h3_stash_request(process_scoped_id(GO_GOROUTINE(ctx)), GO_REG1(ctx), GO_REG0(ctx), 1);
+	h3_stash_request(ctx, process_scoped_id(GO_GOROUTINE(ctx)), GO_REG1(ctx), GO_REG0(ctx), 1);
 	return 0;
 }
 
@@ -325,7 +325,7 @@ int uprobe_h3_roundtrip_ret(struct pt_regs *ctx)
 	u64 resp = GO_REG0(ctx);
 	u16 status = 0;
 	if (resp) {
-		struct h3_field_offsets off = h3_field_offs();
+		struct h3_field_offsets off = h3_field_offs(ctx);
 		u64 sc = 0;
 		if (bpf_probe_read_user(&sc, sizeof(sc), (void *)(resp + off.status)) == 0)
 			status = (u16)sc;
@@ -340,7 +340,7 @@ int uprobe_h3_req_from_headers_ret(struct pt_regs *ctx)
 	if (!http_should_trace())
 		return 0;
 	u64 goroutine = GO_GOROUTINE(ctx);
-	u64 start = h3_stash_request(process_scoped_id(goroutine), GO_REG0(ctx), 0, 0);
+	u64 start = h3_stash_request(ctx, process_scoped_id(goroutine), GO_REG0(ctx), 0, 0);
 	if (start)
 		oncpu_begin_goroutine(goroutine, ONCPU_GO_H3, start);
 	return 0;
@@ -354,7 +354,7 @@ int uprobe_h3_write_header(struct pt_regs *ctx)
 		return 0;
 	struct h3_peer peer = {};
 	struct h3_peer *pp = NULL;
-	struct h3_peer_paths *paths = h3_peer_path_lookup();
+	struct h3_peer_paths *paths = h3_peer_path_lookup(ctx);
 	if (paths && h3_walk_peer(GO_REG0(ctx), &paths->server, &peer))
 		pp = &peer;
 	h3_emit_txn(process_scoped_id(GO_GOROUTINE(ctx)), status, 0, pp, 0);

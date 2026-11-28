@@ -26,8 +26,9 @@
 static __always_inline void emit_pool_stats(struct pt_regs *ctx, u64 now)
 {
 	u32 tgid = agent_ns_tgid();
+	u64 cookie = bpf_get_attach_cookie(ctx);
 
-	struct pool_field_offsets *off = bpf_map_lookup_elem(&pool_offsets, &tgid);
+	struct pool_field_offsets *off = bpf_map_lookup_elem(&pool_offsets, &cookie);
 	if (!off)
 		return;
 

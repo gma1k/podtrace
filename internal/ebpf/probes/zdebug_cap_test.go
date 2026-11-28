@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/gma1k/podtrace/internal/ebpf/safeelf"
 )
 
 func zdebugSection(t *testing.T, payload []byte, declared uint64) []byte {
@@ -56,7 +58,7 @@ func TestAZlibBombDeclaredInADebugSectionIsRefusedBeforeInflating(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer func() { _ = f.Close() }()
-	if dwarfWithinCap(f) {
+	if _, err := safeelf.DWARF(f); err == nil {
 		t.Fatalf("a .zdebug_info declaring %d MiB passed the DWARF cap", declared>>20)
 	}
 

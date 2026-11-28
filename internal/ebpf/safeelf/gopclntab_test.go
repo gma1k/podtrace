@@ -108,3 +108,35 @@ func TestTheTestBinaryPclntabIsWithinCap(t *testing.T) {
 		t.Error("a real Go binary's pclntab was rejected")
 	}
 }
+
+func TestIsGo12PCLNTabAcceptsEveryGo12Layout(t *testing.T) {
+	for _, magic := range []uint32{Go12PCLNTabMagic, Go116PCLNTabMagic, Go118PCLNTabMagic, Go120PCLNTabMagic} {
+		for _, order := range []binary.ByteOrder{binary.LittleEndian, binary.BigEndian} {
+			for _, ptrSize := range []byte{4, 8} {
+				if data := pclnHeaderWithFileTable(order, magic, ptrSize, 1, 1, 128); !IsGo12PCLNTab(data) {
+					t.Errorf("magic %#x %v ptr %d was rejected", magic, order, ptrSize)
+				}
+			}
+		}
+	}
+}
+
+func TestIsGo12PCLNTabRejectsOtherHeaders(t *testing.T) {
+	valid := func() []byte { return pclnHeaderWithFileTable(binary.LittleEndian, Go120PCLNTabMagic, 8, 1, 1, 128) }
+	padded, quantum, pointer, unknown := valid(), valid(), valid(), valid()
+	padded[4] = 1
+	quantum[6] = 3
+	pointer[7] = 2
+	binary.LittleEndian.PutUint32(unknown, 0x12345678)
+	for name, data := range map[string][]byte{
+		"too short":     valid()[:15],
+		"nonzero pad":   padded,
+		"pc quantum 3":  quantum,
+		"pointer 2":     pointer,
+		"unknown magic": unknown,
+	} {
+		if IsGo12PCLNTab(data) {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}

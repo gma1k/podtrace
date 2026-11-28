@@ -84,15 +84,15 @@ func TestAnExecutableKeepsTheCheckedFileOpenUntilClosed(t *testing.T) {
 }
 
 func TestGoBuildInfoIsReadOnlyFromARegularFile(t *testing.T) {
-	if _, ok := readGoBuildInfo(os.Args[0]); !ok {
+	if _, ok := readGoVersion(os.Args[0]); !ok {
 		t.Error("no build info read from the Go test binary")
 	}
 	fifo := filepath.Join(t.TempDir(), "server")
 	if err := syscall.Mkfifo(fifo, 0o644); err != nil {
 		t.Skipf("mkfifo: %v", err)
 	}
-	finishesQuickly(t, "readGoBuildInfo", func() {
-		if _, ok := readGoBuildInfo(fifo); ok {
+	finishesQuickly(t, "readGoVersion", func() {
+		if _, ok := readGoVersion(fifo); ok {
 			t.Error("read build info from a FIFO")
 		}
 	})
